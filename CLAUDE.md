@@ -15,7 +15,9 @@ Built to **Marcy's 15 basic rules for programming applications** (memory
   model's graphics memory). GPU readout only while a job runs AND the window is shown.
   Never run GPU work while Marcy's Sonata plays (`pgrep -fai 'mount_sonata|Sonata.AppImage'`).
 - **One theme (rule 2):** colors only from `src/styles/tokens.css`; gate `.hooks/check_theme_colors.mjs`.
-- **Loop pass (rule 7):** `// loop: VERDICT — reason` on every loop/timer; gate `tools/list_loops.mjs --check`.
+- **Loop pass (rule 7):** `// loop: VERDICT — reason` on every loop, iterator chain, timer, wait, thread and
+  main-process sync call (app, engine-rs, tools); a wait without a deadline says `[bounded: …]`. Gate
+  `tools/list_loops.mjs --check`; the pass: docs/LOOP_PASS_2026-10.md, docs/EFFICIENCY_PASS_2026-10.md.
 - **Isolated test copies (rule 12):** `tools/isolated.sh` (own HOME, private D-Bus, Xvfb,
   basic password store, 4 GB cap) + `tools/drive.mjs` (CDP steps + screenshots). Never the user's screen.
 - **Memory caps:** every test/build/run under `systemd-run --user --scope -p MemoryMax=…`.
