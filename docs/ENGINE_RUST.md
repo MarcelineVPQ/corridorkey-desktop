@@ -19,6 +19,8 @@ engine-rs/
     runtime.rs         ORT environment, CUDA / TensorRT / CPU providers, model files, sessions
     tensorrt.rs        TensorRT shape ranges, profiles, cache folders
     pipeline.rs        run_inference + hann_stage1_stream (normal and staged low-VRAM paths)
+    ahead.rs           work done ahead on its own thread (network inputs while the card runs)
+    outputs.rs         the render thread: render + hand-off to the writers, frame counts back
     render.rs          alpha / fg / checker / cutout, video (uint16) and EXR (float) paths
     writers.rs         ffmpeg writers (x264 yuv444p10le CRF 12; ProRes 4444 cutout) and EXR sequences
     job.rs, settings.rs  run options (ck_engine.py's defaults), <clip>_settings.txt
@@ -48,6 +50,10 @@ existing default name is used: `<piece>_fp16.onnx`, `<piece>_op23fp16.onnx`, `<p
 `rvm`, `stage1`, `stage2` (the ONNX spike's exports, `scripts/onnx_spike` on the CorridorKey2.0 clone's
 `spike/onnx` branch). Precision: fp16 on the GPU, fp32 on the CPU; `CK_ENGINE_PRECISION` overrides.
 
+Use the **`2.0.0-onnx.2`** set (`onnx/stage2` branch, `scripts/onnx_spike/speed_patches.py`): stage 1 and
+stage 2 with three exact graph rewrites (window pads, depatchify ConvTranspose, grouped 7×7 convs), same
+inputs and outputs as `2.0.0-onnx.1`. The engine runs both sets; the speed numbers below are onnx.2.
+
 ## Build and run
 
 ```
@@ -64,9 +70,15 @@ corridorkey-engine --models DIR [--ort libonnxruntime.so] [--device auto|cuda|cp
   `tensorrt_libs` next to the ORT library it is given (`electron/main/engine.ts`, `rustEngineEnv`).
 - `--device cpu` runs ONNX Runtime's CPU provider (tests). Without a usable GPU, jobs fail with `no-gpu`,
   as with the PyTorch engine.
-- Knobs: `CK_ENGINE_VRAM_BUDGET_GB` (default `vram_budget_gb`), `CK_ENGINE_ARENA_SHRINK`,
-  `CK_ENGINE_CUDNN_SEARCH`, `CK_ENGINE_CUDNN_MAX_WORKSPACE`, `CK_ENGINE_PROFILE=<dir>` (ORT per-node
-  profile), `CK_ENGINE_THREADS`; TensorRT: `CK_ENGINE_TRT_CACHE`, `CK_ENGINE_TRT_PRECISION` (fp16 | bf16),
+- Session settings (measured, "Speed" below): graph optimisation `ORT_ENABLE_ALL` (the `ort` crate's `Level3`
+  is only `ORT_ENABLE_LAYOUT`); cuDNN convolution search heuristic; attention on ORT's own flash kernels
+  (the engine sets `ORT_ENABLE_CUDNN_FLASH_ATTENTION=0` unless the environment sets it); arena shrinkage only
+  while stage 1 and stage 2 are loaded together.
+- Knobs: `CK_ENGINE_VRAM_BUDGET_GB` (default `vram_budget_gb`), `CK_ENGINE_ARENA_SHRINK` (all | 0 | a list of
+  networks; default: only when stage 1 and 2 share the card), `CK_ENGINE_CUDNN_SEARCH` (heuristic |
+  exhaustive | default), `CK_ENGINE_CUDNN_MAX_WORKSPACE`, `CK_ENGINE_GRAPH_OPT` (all | layout | extended),
+  `CK_ENGINE_PROFILE=<dir>` (ORT per-node profile; on CUDA it times kernel launches, not GPU work),
+  `CK_ENGINE_THREADS`; TensorRT: `CK_ENGINE_TRT_CACHE`, `CK_ENGINE_TRT_PRECISION` (fp16 | bf16),
   `CK_ENGINE_TRT_EXCLUDE`.
 
 ## The app
@@ -80,8 +92,12 @@ checkout (`electron/main/settings.ts` `chooseEngine`). The Engine page says whic
 `vram_budget_gb` (run option) caps the job: the automatic window's budget is min(free + own, budget), and
 each CUDA session's arena limit is the budget minus the CUDA context (measured after the first session),
 the other networks' weights (size on disk) and a 0.5 GiB reserve (measured: without it the process peaked
-0.17-0.22 GiB over a 12 GiB budget). Arenas give their working memory back after every run (without that,
-stage 2's arena can't fit its buffers next to the others: measured `oom`).
+0.17-0.22 GiB over a 12 GiB budget). While stage 1 and stage 2 are both loaded (normal mode) their arenas give
+their working memory back after every run, so their peaks don't add up; in the low-VRAM phases a network has
+the card to itself and keeps its arena (a shrunk arena allocates again on the next run: with the onnx.1
+models stage 2 took 159 ms per call that way, and without shrinking its ConvTranspose asked for 5.77 GB and
+failed `oom`; the onnx.2 ConvTranspose rewrite removed that request). The window table below was measured
+with onnx.1 and every arena shrinking.
 
 The automatic window still comes from the upstream PyTorch table, as ported. ONNX Runtime needs more:
 on CUDA fp16 at 1280×1152 a 16-frame window doesn't fit 12 GB, where the table picks 48/24 low-VRAM. So an
@@ -131,30 +147,111 @@ MAE 3.41e-4, max 6.25e-2, 3.08 % > 1/255; PyTorch bf16 5.00e-4, 2.23e-1, 3.57 %.
 
 ## Against the PyTorch engine (`tools/engine_bench.mjs`, 12 GB budget, alpha+fg, auto, no hint)
 
-| clip | PyTorch: window · steady fps · total · VRAM · RAM | Rust CUDA fp16: window · steady fps · total · VRAM · RAM |
-|---|---|---|
-| godiva_close 960×720, 349 f | 80/40 low · 20.04 · 68.4 s · 9.37 · 9.93 GB | 20/10 low · 12.33 · 93.0 s · 8.44 · 4.62 GB |
-| locked_backdrop 1280×1080, 80 f | 48/24 low · 8.30 · 40.3 s · 11.97 · 9.40 GB | 12/6 low · 4.94 · 58.1 s · 8.92 · 5.92 GB |
-| metal_glasses, 139 f | 48/24 low · 9.27 · 44.7 s · 11.97 · 10.12 GB | 12/6 low · 4.20 · 79.5 s · 8.86 · 5.94 GB |
-| smoke, 250 f | 48/24 low · 8.99 · 76.5 s · 11.97 · 11.16 GB | 12/6 low · 5.13 · 120.8 s · 8.86 · 5.85 GB |
-| walking_sitting, 314 f | 48/24 low · 9.11 · 94.2 s · 11.97 · 11.95 GB | 12/6 low · 5.32 · 129.0 s · 8.86 · 5.84 GB |
-| with_motion_blur, 50 f | 80/40 low · 9.82 · 19.0 s · 12.03 · 8.74 GB | 10/5 low · 5.39 · 30.7 s · 9.42 · 5.16 GB |
+RTX 5080, the six clips in `~/Videos/corridorkey-tests`, one engine process per clip, the same options for
+both engines. Rust: CUDA fp16, the `2.0.0-onnx.2` models, two full runs on 2026-10-21 (both shown where they
+differ). Total = spawn to exit. Steady fps = the engine's own `frames` replies after the first window; with
+a low-VRAM window (every clip here, both engines) that is the stage-2 phase's rate, so the total is the fairer
+comparison. VRAM / RAM = peak of the process tree (nvidia-smi / `/proc` every 250 ms).
 
-The Rust totals include the halving retries (80 → 40 → 20 → 12/10). The mattes differ mostly because of
-the window: PyTorch against itself at 80/40 vs 20/10 (godiva) gives alpha MAE 2.15e-2, the same size as
-Rust vs PyTorch at their auto windows (2.21e-2). At the same window (PyTorch run at the Rust windows):
-godiva_close alpha MAE 2.03e-3 (16.8 % > 1/255, 2.5 % > 4/255), locked_backdrop 5.40e-4. At the same
-window the speed is about half: locked_backdrop 12/6 low 4.94 vs 9.40 fps, 4/2 low 5.35 vs 9.90 fps.
+| clip | PyTorch: window · total · steady fps · VRAM · RAM | Rust before (onnx.1): total · fps · VRAM · RAM | Rust now: total · fps · VRAM · RAM |
+|---|---|---|---|
+| godiva_close 960×720, 349 f | 80/40 low · 68.4 s · 20.04 · 9.37 · 9.93 GB | 54.9 s · 21.53 · 5.92 · 5.74 GB | **39.7 / 42.7 s** · 32.4 / 33.3 · 8.88 · 7.63 GB |
+| locked_backdrop 1280×1080, 80 f | 48/24 low · 40.3 s · 8.30 · 11.97 · 9.40 GB | 36.9 s · 5.70 · 8.84 · 6.88 GB | **20.6 / 21.9 s** · 16.7 · 7.92 · 7.67 GB |
+| metal_glasses, 139 f | 48/24 low · 44.7 s · 9.27 · 11.97 · 10.12 GB | 55.5 s · 5.74 · 8.84 · 6.60 GB | **30.0 / 29.9 s** · 16.6 · 7.93 · 7.95 GB |
+| smoke, 250 f | 48/24 low · 76.5 s · 8.99 · 11.97 · 11.16 GB | 96.8 s · 5.60 · 8.85 · 6.79 GB | **51.8 / 51.7 s** · 16.6 · 7.92 · 8.46 GB |
+| walking_sitting, 314 f | 48/24 low · 94.2 s · 9.11 · 11.97 · 11.95 GB | 116.2 s · 5.92 · 8.84 · 6.72 GB | **63.2 / 63.1 s** · 16.6 · 7.92 · 8.61 GB |
+| with_motion_blur, 50 f | 80/40 low · 19.0 s · 9.82 · 12.03 · 8.74 GB | 22.7 s · 5.87 · 8.90 · 6.08 GB | **12.4 / 12.3 s** · 17.0 · 8.89 · 5.13 GB |
+
+Both engines chose the same windows. The Rust engine now takes 0.51-0.68× PyTorch's time per job
+(walking_sitting 4.98 frames/s over the whole job against 3.33), with 3.1-4.1 GB less peak VRAM on the
+1280×1080 clips and less RAM on every clip. Against before, RAM grew by up to 1.9 GB (one stage-1 window
+prepared ahead, the render queue; with_motion_blur 0.95 GB less), and godiva's VRAM from 5.92 to 8.88 GB
+(the low-VRAM phases keep their arenas; still under the 12 GB budget).
+"Before" is the previous run of the same tool on the onnx.1 set (2026-10-21,
+`ck-bench/rust-prod`); a rerun of locked_backdrop before any change measured 37.4 s.
+
+Matte agreement (`tools/matte_compare.py`, alpha and fg videos against PyTorch's from the run above):
+
+| clip | alpha MAE vs PyTorch: before → now | alpha max: before → now | % > 1/255: before → now | fg PSNR all / subject: before → now | now vs before: alpha MAE, % > 1/255 |
+|---|---|---|---|---|---|
+| godiva_close | 1.57e-3 → 1.56e-3 | 0.111 → 0.115 | 14.86 → 14.79 | 45.6 / 44.2 → 45.6 / 44.2 dB | 9.61e-4, 7.40 |
+| locked_backdrop | 6.12e-4 → 6.12e-4 | 0.068 → 0.064 | 3.93 → 3.93 | 49.0 / 47.5 → 49.0 / 47.5 dB | 3.99e-4, 3.49 |
+| metal_glasses | 6.87e-4 → 6.86e-4 | 0.084 → 0.105 | 5.73 → 5.71 | 45.5 / 42.1 → 45.3 / 41.8 dB | 4.99e-4, 4.20 |
+| smoke | 9.35e-4 → 9.36e-4 | 0.147 → 0.164 | 7.76 → 7.77 | 45.3 / 43.2 → 45.3 / 43.2 dB | 5.02e-4, 3.94 |
+| walking_sitting | 2.70e-4 → 2.71e-4 | 0.333 → 0.341 | 1.80 → 1.80 | 52.0 / 43.1 → 52.0 / 43.1 dB | 1.81e-4, 1.46 |
+| with_motion_blur | 2.97e-4 → 3.01e-4 | 0.081 → 0.082 | 2.13 → 2.18 | 50.5 / 44.8 → 50.9 / 45.2 dB | 2.22e-4, 1.77 |
+
+Agreement with PyTorch is unchanged to the third digit. Now against before is the size of fp16 summation-order
+changes (attention kernels, the rewritten convolutions) plus x264 at CRF 12 on both sides; the models' own
+fp16 error against fp32 is unchanged (CorridorKey2.0 `docs/ONNX_SPIKE.md`, "Speed rewrites"). The CPU fp32
+end-to-end check (`tools/e2e_cpu.sh`, onnx.2 set) passes: alpha MAE 2.48e-7 against PyTorch fp32, low-VRAM
+identical to normal mode.
 
 Install size (`du`): PyTorch venv 7.55 GB + weights/vfms 5.08 GB = 12.63 GB; Rust binary 2.9 MB +
 ORT CUDA libraries 2.49 GB + fp16 opset-23 models 3.30 GB = 5.79 GB (TensorRT libraries +4.52 GB).
 
-## Where the time goes (ORT profile, 1280×1152, window 8/4)
+## Speed (2026-10-21): where the time went and what changed
 
-Per frame: stage 2 186 ms (kernels 61 ms; one ConvTranspose `node_convolution` 40 ms and a 5.77 GB working
-buffer that the shrinking arena allocates again every run, ~145 ms), stage 1 ~51 ms (Conv + ConvTranspose
-83 % of its kernel time). Host work (decode, prep, render, conversions) is under 10 % after the prefetch
-thread and parallel prep/render. cuDNN search and workspace settings made no measurable difference.
+**GPU time per network** (CUPTI kernel timeline around ORT CUDA runs, fp16, 1280×1152, steady runs, one
+session per process; ORT's own per-node profile on CUDA times only kernel launches):
+
+| network, one call | onnx.1 | onnx.2 | per output frame at window 48/24 |
+|---|---|---|---|
+| stage 2, B=1 | 73.5 ms | 53.4 ms | 53 ms |
+| stage 1, T=24 | 1158 ms (48 ms per frame) | 915 ms (38 ms per frame; 907 ms with ORT's flash attention) | ~2 × 38-48 ms (each frame is in two windows; T=48 costs more per frame than T=24) |
+| C-RADIO, N=4 | 17.0 ms | same | 4.3 ms |
+| MoGe, N=4 | 4.2 ms | same | 1.1 ms |
+| RVM, one step | 1.4 ms | same | 1.4 ms |
+
+The onnx.1 stage-2 time went to ORT's generic N-d Pad kernel (15.2 ms, the Swin window pads), cuDNN's
+grouped 7×7 conv (7.7 ms) and MatMul (20 ms, compute-bound); stage 1's the same way (Pad 181 ms, grouped convs
+105 ms at T=24). The ConvTranspose itself was 1.2 ms. The onnx.2 rewrites are in the CorridorKey2.0 clone's
+`docs/ONNX_SPIKE.md` ("Speed rewrites"). What is left in stage 1 at T=24: attention 213 ms, MatMul 153 ms,
+convolutions 91 ms, and 1701 small element-wise / data-movement nodes 364 ms (none over 2 ms).
+
+**In the engine** (locked_backdrop, 80 frames, 48/24 low-VRAM; the engine's `timing` log line):
+
+| | before | now |
+|---|---|---|
+| stage 2 | 12.7 s run (159 ms per call: a shrunk arena allocated its buffers again every call) | 4.6 s (58 ms) |
+| stage 1 | 9.1 s run (3 windows of 48) | 7.0 s |
+| C-RADIO + MoGe + RVM | 1.3 s | 1.1 s |
+| phases rvm / foundations / stage 1 / stage 2 | 1.1 / 2.1 / 13.5 / 15.4 s | 1.0 / 1.7 / 10.0 / 5.7 s |
+| before the first phase | ~3 s (all five networks loaded, then unloaded for low-VRAM) | 0.1 s |
+| total (bench) | 37.4 s | 20.6-21.9 s |
+
+What changed in the engine, each measured on its own:
+- **Arenas**: shrink only while stage 1 and stage 2 share the card (normal mode). In the low-VRAM phases a
+  network keeps its arena. Together with the onnx.2 models: stage 2 159 → 64 ms per call (one run each;
+  in Python a shrinking stage-2 session took 297-397 ms on some runs after a shrink, 74-76 ms otherwise).
+- **Graph optimisation `ORT_ENABLE_ALL`** instead of the `ort` crate's `Level3` (= `ORT_ENABLE_LAYOUT`):
+  locked_backdrop 29.6 → 27.8 s (one run each).
+- **Attention on ORT's flash kernels** (`ORT_ENABLE_CUDNN_FLASH_ATTENTION=0`): with cuDNN's, every switch
+  between two sessions cost 250-400 ms of host time on the next run (reproduced in Python with stage 1 and
+  stage 2 sessions alternating: stage 2 54 → 257-381 ms on the first call after a stage-1 window; stage 1 at T=1
+  ~420 ms). Normal mode switches every window: with_motion_blur at a manual 8/4 window 28.0 → 15.6 s (13.1 s
+  with `CK_ENGINE_ARENA_SHRINK=0`, peak VRAM 5.13 → 6.88 GB). Low-VRAM: locked_backdrop 21.3-22.0 → 20.6-20.7 s.
+- **cuDNN search heuristic**: same stage 1 / stage 2 run times as exhaustive, no first-call outliers: RVM's
+  first call took 0.2-3.0 s over 7 exhaustive runs and 0.4 s in each of 3 heuristic runs (locked_backdrop
+  21.8-22.1 s). In Python both modes gave ~0.30 s, so the outliers are not fully explained.
+- **Host work off the card's path**: render and hand-off to the writers on a render thread (`outputs.rs`; the
+  frame counts still come from the writers); RVM's small frames, the foundations' resized inputs, each stage-1
+  window's frames / hint video / features (one window ahead) and the low-VRAM stage 2's inputs made on their
+  own threads (`ahead.rs`); stage 1 loads while the first window is prepared; carry hints only for the frames
+  the next window uses, in parallel; blend and state file in parallel. Per locked_backdrop job: stage-1 host
+  time 2.3 → 0.8 s; the stage-2 phase beyond its `run` time 2.8 → 1.1 s.
+- **No early load**: an automatic window no longer loads all five networks before the probe (setup 3.3 → 0.1 s).
+
+Tried and not kept (measured): NHWC (`prefer_nhwc`) doubles stage 2 (147.8 ms); stage 2 batched B=2 / B=4
+is slower per frame (59 / 66 ms); `cudnn_conv_use_max_workspace=0` and the search modes don't change kernel
+time; capping rayon's threads doesn't change normal mode. Not done: IOBinding / pinned buffers. Stage 2's
+inputs come from the host (decode, the blend on the CPU), so they cross PCIe once per call either way
+(~15 MB in, ~12 MB out per frame in fp16); its copies take ~5.5 ms of CUDA API time per call (CUPTI), which
+pinned buffers could shorten.
+
+Where walking_sitting's 62.4 s go now (engine log): stage 1 29.5 s run, stage 2 17.6 s, C-RADIO / MoGe / RVM
+2.8 s, session loads 3.4 s, stage-1 host inputs 3.3 s, float16 conversions 3.2 s; then the encoders finish
+(0.5 s after the last frame).
 
 ## TensorRT (opt-in, `tensorrt: true`)
 
@@ -170,13 +267,14 @@ attempts at an 8 GB cap were killed. Stopped there.
 
 ## What's left
 
-1. **Stage 2 speed and memory** (model side): the ConvTranspose `node_convolution` and its 5.77 GB buffer
-   at 1280×1152; profile it in the export, then remeasure (`CK_ENGINE_PROFILE`).
+1. **More speed**: stage 1 is now half of a job's time (walking_sitting 29.5 of 62.4 s); its remaining GPU time is
+   attention, MatMul and ~1700 small element-wise nodes (fusing those needs TensorRT or custom fused ops).
+   Stage 2's host↔device copies (~5.5 ms per frame) could use pinned buffers. Session loads in low-VRAM mode
+   (3.4 s per job) and the stage-1 window wait (3.3 s on walking_sitting) remain.
 2. **An ONNX Runtime VRAM table** for the automatic window (the measured points above, more sizes, peaks
    read inside the engine rather than sampled), replacing halve-on-oom as the normal path.
 3. **TensorRT**: exports TensorRT can parse (opset-18 attention or strongly typed, MoGe's antialiased resize),
    then builds under a host-memory guard; FP8 only if it passes the matte test.
 4. **Packaging**: the GPU build plus ORT's CUDA libraries and the models in the AppImage, the driver check.
-5. Low-VRAM mode reloads sessions per phase (seconds per job); a TensorRT job whose window is halved keeps
-   its original range.
+5. A TensorRT job whose window is halved keeps its original range.
 6. EXIF orientation of JPEG frames (cv2 applies it, this engine doesn't); grayscale EXR frames.
