@@ -100,11 +100,12 @@ export function toggleFlags(flags: { pinned: boolean; locked: boolean }, which: 
 
 /**
  * A rail item pressed: the page you're on toggles its settings panel (the one
- * way to show or hide it, every page alike); another page is opened. A task
- * dot leads to its section: the page opens there with the panel shown.
+ * way to show or hide it, every page alike); another page opens with its panel
+ * shown (shown is the default). A task dot leads to its section: the page opens
+ * there with the panel shown.
  */
-export function railPress(pressed: PageId, active: PageId, panelShown: boolean, target: string | null): { page: PageId; panel: "show" | "hide" | "keep"; section: string | null } {
+export function railPress(pressed: PageId, active: PageId, panelShown: boolean, target: string | null): { page: PageId; panel: "show" | "hide"; section: string | null } {
   if (target) return { page: pressed, panel: "show", section: target };
   if (pressed === active) return { page: active, panel: panelShown ? "hide" : "show", section: null };
-  return { page: pressed, panel: "keep", section: null };
+  return { page: pressed, panel: "show", section: null };
 }

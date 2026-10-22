@@ -16,7 +16,8 @@ import { AboutPage } from "./pages/AboutPage";
 export function App() {
   const [state, setState] = useState<AppState | null>(null);
   const [page, setPage] = usePref<PageId>("ck.page", "queue");
-  const [panels, setPanels] = usePref<Partial<Record<PageId, boolean>>>("ck.panels", {});
+  // Panels start shown (Marcy 2026-10-22: shown is the default); a hide lasts until the page is opened again.
+  const [panels, setPanels] = useState<Partial<Record<PageId, boolean>>>({});
   const [focus, setFocus] = useState<{ page: PageId; section: string; n: number } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);

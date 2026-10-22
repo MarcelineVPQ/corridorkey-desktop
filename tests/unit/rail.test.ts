@@ -38,7 +38,7 @@ describe("rail model (the house rail)", () => {
   it("the page you're on toggles its panel; a task dot leads to its section", () => {
     expect(railPress("queue", "queue", true, null)).toEqual({ page: "queue", panel: "hide", section: null });
     expect(railPress("queue", "queue", false, null)).toEqual({ page: "queue", panel: "show", section: null });
-    expect(railPress("engine", "queue", true, null)).toEqual({ page: "engine", panel: "keep", section: null });
+    expect(railPress("engine", "queue", true, null)).toEqual({ page: "engine", panel: "show", section: null });
     expect(railPress("engine", "engine", true, "folder")).toEqual({ page: "engine", panel: "show", section: "folder" });
   });
 });

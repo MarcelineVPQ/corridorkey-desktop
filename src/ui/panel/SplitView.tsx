@@ -1,7 +1,7 @@
 // A page: its main view (readouts, MainBlocks) and its settings panel beside
 // it (the DS5 SplitView). The panel is shown or hidden only by the rail item of
-// the page you're on (no show button on the page, no hide button in the panel),
-// remembered per page. Narrow windows: the panel opens as a drawer over the
+// the page you're on (no show button on the page, no hide button in the panel);
+// opening a page shows it. Narrow windows: the panel opens as a drawer over the
 // page, the same rail item or Escape closes it.
 import { useEffect, type ReactNode } from "react";
 import { useGlass } from "../glass/useGlass";
