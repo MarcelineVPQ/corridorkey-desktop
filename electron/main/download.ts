@@ -27,6 +27,7 @@ export async function downloadVerified(
   abort?: AbortSignal,
   stallMs: number = STALL_TIMEOUT_MS,
 ): Promise<void> {
+  // loop: NOT-WORTH — removes one partial download before an update download (a local unlink)
   rmSync(path, { force: true });
   const connect = AbortSignal.timeout(CONNECT_TIMEOUT_MS);
   const response = await fetchFn(want.url, { signal: abort ? AbortSignal.any([abort, connect]) : connect }).catch((cause: unknown) => {
@@ -55,6 +56,7 @@ export async function downloadVerified(
     for (;;) {
       let timer: ReturnType<typeof setTimeout> | undefined;
       // lifetime: OK — cleared in .finally() after every read
+      // loop: SERIAL-REQUIRED — the stall timer: one per read, rejects after a minute without data
       const stall = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error("the download stopped (no data for a minute)")), stallMs)));
       const { done, value } = await Promise.race([reader.read(), failed, stall]).finally(() => clearTimeout(timer));
       if (done) break;
@@ -71,14 +73,17 @@ export async function downloadVerified(
     // error: NOT-WORTH — cleanup while the real error is rethrown below; a failed cancel adds nothing
     void reader.cancel().catch(() => undefined);
     file.destroy();
+    // loop: NOT-WORTH — removes a failed download (a local unlink)
     rmSync(path, { force: true });
     throw abort?.aborted ? new Error("the download was stopped") : cause;
   }
   if (got !== want.size) {
+    // loop: NOT-WORTH — removes a failed download (a local unlink)
     rmSync(path, { force: true });
     throw new Error(`update refused: the download is ${got} bytes, the signed feed says ${want.size}`);
   }
   if (hash.digest("hex") !== want.sha512) {
+    // loop: NOT-WORTH — removes a failed download (a local unlink)
     rmSync(path, { force: true });
     throw new Error("update refused: the download's SHA-512 doesn't match the signed feed");
   }

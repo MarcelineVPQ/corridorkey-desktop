@@ -57,6 +57,7 @@ export function engineEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
  * ONNX Runtime's library and of the CUDA / cuDNN / TensorRT libraries a pip-wheel layout keeps next to
  * it (site-packages/onnxruntime/capi → site-packages/nvidia/<x>/lib, site-packages/tensorrt_libs).
  */
+// loop: NOT-WORTH — a few stats + one readdir per engine spawn (the CUDA library folders)
 export function rustEngineEnv(env: NodeJS.ProcessEnv, ort: string | null, exists: (p: string) => boolean = existsSync, list: (p: string) => string[] = (p) => readdirSync(p)): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = { ...env };
   // loop: NOT-WORTH — three names, once per engine spawn
@@ -74,6 +75,7 @@ export function rustEngineEnv(env: NodeJS.ProcessEnv, ort: string | null, exists
     if (exists(join(site, "tensorrt_libs"))) dirs.push(join(site, "tensorrt_libs"));
     out.CK_ENGINE_ORT = ort;
   }
+  // loop: NOT-WORTH — a user's extra library folders, once per engine spawn
   if (env.CK_ENGINE_LD_LIBRARY_PATH) dirs.push(...env.CK_ENGINE_LD_LIBRARY_PATH.split(":").filter(Boolean));
   if (dirs.length) out.LD_LIBRARY_PATH = dirs.join(":");
   return out;
@@ -122,6 +124,7 @@ export class EngineProcess {
       this.onExit(code, signal, [...this.stderr]);
     });
     return new Promise<EngineReply>((resolve, reject) => {
+      // loop: SERIAL-REQUIRED — the ping deadline (PING_TIMEOUT_MS), once per engine start
       const timer = setTimeout(() => {
         this.fail(new Error(`engine did not answer within ${PING_TIMEOUT_MS / 1000} s`));
         this.kill();
@@ -154,6 +157,7 @@ export class EngineProcess {
     this.send({ cmd: "quit" });
     const child = this.child;
     // lifetime: OK — one timer per quit, a no-op once the child is gone
+    // loop: SERIAL-REQUIRED — the quit grace (QUIT_GRACE_MS), then kill; once per engine stop
     setTimeout(() => {
       if (this.child === child) this.kill();
     }, QUIT_GRACE_MS).unref();

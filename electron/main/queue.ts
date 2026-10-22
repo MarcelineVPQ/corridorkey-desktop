@@ -80,13 +80,16 @@ export class Queue {
   }
 
   remove(id: string): void {
+    // loop: NOT-WORTH — the queue's jobs, once per user action
     const job = this.jobs.find((j) => j.id === id);
     if (!job || job.status === "running") return;
+    // loop: NOT-WORTH — the queue's jobs, once per user action
     this.jobs = this.jobs.filter((j) => j.id !== id);
     this.deps.changed();
   }
 
   retry(id: string): void {
+    // loop: NOT-WORTH — the queue's jobs, once per user action
     const job = this.jobs.find((j) => j.id === id);
     if (!job || (job.status !== "failed" && job.status !== "cancelled")) return;
     Object.assign(job, {
@@ -109,6 +112,7 @@ export class Queue {
   }
 
   setOptions(id: string, options: JobOptions): void {
+    // loop: NOT-WORTH — the queue's jobs, once per user action
     const job = this.jobs.find((j) => j.id === id);
     if (!job || job.status !== "waiting") return;
     job.options = options;
@@ -189,6 +193,7 @@ export class Queue {
   private async next(): Promise<void> {
     if (!this.running || this.current) return;
     // A clip whose hint mode needs a file it doesn't have stays waiting (its task says so); never run it silently without the hint.
+    // loop: NOT-WORTH — the queue's jobs, once per job start
     const job = this.jobs.find((j) => j.status === "waiting" && !j.clip.probeError && !missingInput(j));
     if (!job) {
       this.running = false;
@@ -296,6 +301,7 @@ export class Queue {
 
   private cleanTemp(id: string): void {
     try {
+      // loop: NOT-WORTH — removes a cancelled / crashed job's temp folder once (the killed engine's float16 temp files, up to a few GB: a few unlinks on a local disk)
       rmSync(this.deps.tempDirFor(id), { recursive: true, force: true });
     } catch {
       // error: NOT-WORTH — a temp folder we couldn't remove; the next start of that job clears it (safe_remove)

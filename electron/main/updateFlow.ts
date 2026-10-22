@@ -127,6 +127,7 @@ export class UpdateFlow {
     this.unschedule();
     if (!this.state.automatic || this.state.status === "unsupported") return;
     // lifetime: OK — fires once; cleared by stop(), setAutomatic(false)
+    // loop: NOT-WORTH — the first update check, once per start
     this.firstTimer = setTimeout(() => {
       this.firstTimer = null;
       void this.check(false);

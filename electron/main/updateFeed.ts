@@ -179,6 +179,7 @@ export function selectRelease(
     if (r.draft) continue;
     const m = !r.prerelease ? /^v(\d+\.\d+\.\d+)$/.exec(r.tag_name) : channel === "dev" ? /^v(\d+\.\d+\.\d+-dev\.\d+)$/.exec(r.tag_name) : null;
     if (!m) continue;
+    // loop: NOT-WORTH — a release's few assets, once per update check
     const asset = (r.assets ?? []).find((a) => a.name === appImageName(m[1]));
     if (!asset) continue;
     if (!best || isNewerVersion(m[1], best.version)) best = { release: r, version: m[1], asset };
@@ -256,6 +257,8 @@ export function staleFiles(names: string[], running: string, currentVersion: str
     const m = APPIMAGE_RE.exec(name);
     if (m && isNewerVersion(currentVersion, m[1])) older.push({ name, version: m[1] });
   }
+  // loop: NOT-WORTH — a few old AppImages, once per cleanup
   older.sort((a, b) => (isNewerVersion(a.version, b.version) ? -1 : isNewerVersion(b.version, a.version) ? 1 : 0));
+  // loop: NOT-WORTH — a few old AppImages, once per cleanup
   return [...out, ...older.slice(1).map((o) => o.name)];
 }

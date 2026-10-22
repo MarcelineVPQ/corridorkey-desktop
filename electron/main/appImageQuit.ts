@@ -45,6 +45,7 @@ export function descendantPids(root: number, childrenOf: (pid: number) => number
 export const WAIT_SCRIPT = `end=$(($(date +%s) + ${MAX_WAIT_MS / 1000})); while [ "$(date +%s)" -lt "$end" ]; do a=; for p in "$@"; do kill -0 "$p" 2>/dev/null && a=1; done; [ -z "$a" ] && exit 0; sleep ${STEP_MS / 1000}; done`;
 
 /** /bin/sh's argv for the helper that waits for `pids`. */
+// loop: NOT-WORTH — ≤ MAX_PIDS process ids, once at quit
 export const mountGuardArgs = (pids: number[]): string[] => ["-c", WAIT_SCRIPT, "sh", ...pids.map(String)];
 
 /** A process's direct children (every thread's, from /proc). */

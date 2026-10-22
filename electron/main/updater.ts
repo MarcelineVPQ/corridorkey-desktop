@@ -27,6 +27,7 @@ function runningAppImage(): string | null {
   const raw = process.env.APPIMAGE;
   if (!raw) return null;
   try {
+    // loop: NOT-WORTH — one realpath, once per start (the running AppImage)
     return realpathSync(raw);
   } catch {
     // error: NOT-WORTH — unresolvable: the APPIMAGE path as given is used
@@ -35,15 +36,22 @@ function runningAppImage(): string | null {
 }
 
 const fileOps: FileOps = {
+  // loop: NOT-WORTH — the update folder's few files, once per update action
   readdir: (dir) => readdirSync(dir),
+  // loop: NOT-WORTH — one unlink per stale AppImage, once per update action
   rm: (path) => rmSync(path, { force: true }),
+  // loop: NOT-WORTH — one chmod per downloaded AppImage
   chmod: (path, mode) => chmodSync(path, mode),
+  // loop: NOT-WORTH — one rename per downloaded AppImage
   rename: (from, to) => renameSync(from, to),
+  // loop: NOT-WORTH — one stat per update step
   exists: (path) => existsSync(path),
   kind: (path) => {
+    // loop: NOT-WORTH — one lstat per update step
     const st = lstatSync(path, { throwIfNoEntry: false });
     return !st ? null : st.isSymbolicLink() ? "link" : "file";
   },
+  // loop: NOT-WORTH — one symlink per install
   symlink: (target, path) => symlinkSync(target, path),
 };
 
@@ -62,6 +70,7 @@ function relaunch(target: string): void {
       // At most 5 s: systemd-run blocks the main process while it waits, and on a
       // session bus without systemd it waits for D-Bus's own 25 s timeout
       // (found by tools/update_e2e.sh: the restart froze the window).
+      // loop: SERIAL-REQUIRED — systemd-run for the relaunch, 5 s timeout, at most two tries (with and without ExitType=cgroup), once per restart
       execFileSync("systemd-run", systemdRunArgs({ target, args, env, unit, exitTypeCgroup }), { stdio: "ignore", timeout: 5000 });
       started = true;
       break;
@@ -81,11 +90,13 @@ function relaunch(target: string): void {
   holdAppImageMountUntilExit();
   app.quit();
   // lifetime: OK — fires once; the process is gone before it unless the quit was held up
+  // loop: SERIAL-REQUIRED — the exit fallback 10 s after a relaunch was handed off, once
   setTimeout(() => app.exit(0), 10_000).unref();
 }
 
 function platform(version: string): UpdatePlatform {
   const source = feedSource(process.env);
+  // loop: NOT-WORTH — the fetch the feed reader is given; every caller passes an AbortSignal.timeout [bounded: FEED_TIMEOUT_MS at the call site]
   const fetchFn: FetchFn = (url, init) => net.fetch(url, init);
   return {
     version,
@@ -96,6 +107,7 @@ function platform(version: string): UpdatePlatform {
     fetchText: async (url, fresh) => {
       // no-cache: never Chromium's own cached copy of a feed
       const headers: Record<string, string> = fresh ? { Accept: "application/vnd.github.raw", "Cache-Control": "no-cache" } : { "Cache-Control": "no-cache" };
+      // loop: NOT-WORTH — one feed read per update check, FEED_TIMEOUT_MS
       const r = await net.fetch(url, { headers, signal: AbortSignal.timeout(FEED_TIMEOUT_MS) });
       return { status: r.status, text: r.ok ? await r.text() : "" };
     },
