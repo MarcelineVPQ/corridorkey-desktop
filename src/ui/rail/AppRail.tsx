@@ -73,9 +73,14 @@ export function AppRail(props: { state: AppState; page: PageId; pageDots: Partia
   const e = state.engine;
   const engineLine =
     e.status === "ready"
-      ? { cls: "ok", sym: "✓", text: "Engine ready", sub: `${e.pong?.engine ?? ""} · torch ${e.pong?.torch?.split("+")[0] ?? ""}` }
+      ? {
+          cls: "ok",
+          sym: "✓",
+          text: "Engine ready",
+          sub: e.pong?.torch ? `${e.pong.engine} · torch ${e.pong.torch.split("+")[0]}` : `${e.pong?.engine ?? ""} · ${e.pong?.provider ?? ""} ${e.pong?.precision ?? ""}`.trim(),
+        }
       : e.status === "starting"
-        ? { cls: "warn", sym: "…", text: "Engine starting", sub: "loading Python and CUDA" }
+        ? { cls: "warn", sym: "…", text: "Engine starting", sub: state.engineKind === "python" ? "loading Python and CUDA" : "starting ONNX Runtime" }
         : e.status === "failed"
           ? { cls: "error", sym: "!", text: "Engine failed", sub: "see Engine" }
           : { cls: "idle", sym: "–", text: "Engine idle", sub: "no graphics memory held" };

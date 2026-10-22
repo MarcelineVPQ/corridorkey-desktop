@@ -105,6 +105,28 @@ pub fn ort_version(info: &str) -> String {
     info.split(|c: char| c == ',' || c.is_whitespace()).find_map(|t| t.strip_prefix("git-branch=rel-")).unwrap_or(info).to_string()
 }
 
+/// The version a libonnxruntime reports (OrtGetApiBase()->GetVersionString), e.g. "1.31.0".
+pub fn dylib_version(lib: &Path) -> Option<String> {
+    #[repr(C)]
+    struct ApiBase {
+        get_api: unsafe extern "C" fn(u32) -> *const std::ffi::c_void,
+        get_version_string: unsafe extern "C" fn() -> *const std::ffi::c_char,
+    }
+    // SAFETY: OrtGetApiBase returns a static OrtApiBase {GetApi, GetVersionString} (onnxruntime_c_api.h)
+    unsafe {
+        let l = libloading::Library::new(lib).ok()?;
+        let f: libloading::Symbol<unsafe extern "C" fn() -> *const ApiBase> = l.get(b"OrtGetApiBase\0").ok()?;
+        let base = f();
+        if base.is_null() {
+            return None;
+        }
+        let s = ((*base).get_version_string)();
+        let v = std::ffi::CStr::from_ptr(s).to_string_lossy().into_owned();
+        std::mem::forget(l); // ORT stays loaded for the process anyway
+        Some(v)
+    }
+}
+
 pub struct Runtime {
     env: ort::environment::Environment,
     pub gpu: Option<GpuInfo>,
@@ -130,6 +152,8 @@ impl Runtime {
     }
 
     fn new(ort_lib: Option<&Path>, want: &str) -> Result<Runtime, String> {
+        #[allow(unused_mut, unused_assignments)]
+        let mut version: Option<String> = None;
         #[cfg(feature = "ort-dynamic")]
         let builder = {
             let lib = ort_lib
@@ -137,6 +161,7 @@ impl Runtime {
                 .or_else(|| std::env::var("CK_ENGINE_ORT").ok())
                 .or_else(|| std::env::var("ORT_DYLIB_PATH").ok())
                 .ok_or_else(|| "this build loads ONNX Runtime at run time: pass --ort (or CK_ENGINE_ORT) with libonnxruntime.so".to_string())?;
+            version = dylib_version(Path::new(&lib));
             ort::init_from(&lib).map_err(|e| format!("{lib}: {e}"))?
         };
         #[cfg(not(feature = "ort-dynamic"))]
@@ -145,6 +170,7 @@ impl Runtime {
             ort::init()
         };
         let env = builder.with_name("corridorkey-engine").build().map_err(|e| e.to_string())?;
+        let version = version.unwrap_or_else(|| ort_version(ort::info()));
         #[cfg(feature = "cuda")]
         let cuda_ep = {
             use ort::ep::ExecutionProvider;
@@ -161,7 +187,7 @@ impl Runtime {
         let tensorrt_ep = false;
         let gpu = if want == "cpu" { None } else { nvidia() };
         let threads = std::env::var("CK_ENGINE_THREADS").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(0);
-        Ok(Runtime { env, gpu, cuda_ep, tensorrt_ep, ort_version: ort_version(ort::info()), want: want.to_string(), threads })
+        Ok(Runtime { env, gpu, cuda_ep, tensorrt_ep, ort_version: version, want: want.to_string(), threads })
     }
 
     /// The normal provider: CUDA with a card and the CUDA EP (or when asked), the CPU only when asked.
@@ -193,14 +219,17 @@ impl Runtime {
     }
 
     /// A session for `file` on `prov`. TensorRT: `trt` gives the cache folder and the profile shapes.
-    pub fn session(&self, prov: Provider, file: &Path, trt: Option<&TrtSettings>) -> Result<Session, String> {
+    /// `vram_cap`: the most graphics memory (bytes) the session's CUDA arena may hold (gpu_mem_limit), and
+    /// TensorRT's workspace limit.
+    pub fn session(&self, prov: Provider, file: &Path, trt: Option<&TrtSettings>, vram_cap: Option<u64>) -> Result<Session, String> {
+        let _ = vram_cap;
         let mut b = self.builder()?;
         match prov {
             Provider::Cpu => {}
             Provider::Cuda => {
                 #[cfg(feature = "cuda")]
                 {
-                    b = b.with_execution_providers([cuda_ep().build().error_on_failure()]).map_err(|e| e.to_string())?;
+                    b = b.with_execution_providers([cuda_ep(vram_cap).build().error_on_failure()]).map_err(|e| e.to_string())?;
                 }
                 #[cfg(not(feature = "cuda"))]
                 return Err("this engine was built without the CUDA execution provider".into());
@@ -210,7 +239,8 @@ impl Runtime {
                 {
                     let t = trt.ok_or("TensorRT needs its cache settings")?;
                     std::fs::create_dir_all(&t.cache).map_err(|e| format!("{}: {e}", t.cache.display()))?;
-                    let ep = ort::ep::TensorRT::default()
+                    use ort::ep::ArbitrarilyConfigurableExecutionProvider;
+                    let mut ep = ort::ep::TensorRT::default()
                         .with_device_id(0)
                         .with_fp16(t.fp16)
                         .with_bf16(t.bf16)
@@ -221,7 +251,14 @@ impl Runtime {
                         .with_profile_min_shapes(&t.min)
                         .with_profile_opt_shapes(&t.opt)
                         .with_profile_max_shapes(&t.max);
-                    b = b.with_execution_providers([ep.build().error_on_failure(), cuda_ep().build()]).map_err(|e| e.to_string())?;
+                    if let Some(cap) = vram_cap {
+                        ep = ep.with_max_workspace_size(cap as usize);
+                    }
+                    if !t.exclude.is_empty() {
+                        // these node types stay on the CUDA provider (TensorRT's ONNX parser can't take them)
+                        ep = ep.with_arbitrary_config("trt_op_types_to_exclude", &t.exclude);
+                    }
+                    b = b.with_execution_providers([ep.build().error_on_failure(), cuda_ep(vram_cap).build()]).map_err(|e| e.to_string())?;
                 }
                 #[cfg(not(feature = "tensorrt"))]
                 {
@@ -235,8 +272,13 @@ impl Runtime {
 }
 
 #[cfg(feature = "cuda")]
-fn cuda_ep() -> ort::ep::CUDA {
-    ort::ep::CUDA::default()
+fn cuda_ep(vram_cap: Option<u64>) -> ort::ep::CUDA {
+    let ep = ort::ep::CUDA::default();
+    let ep = match vram_cap {
+        Some(c) => ep.with_memory_limit(c as usize),
+        None => ep,
+    };
+    ep
         .with_device_id(0)
         // the arena grows by what is asked: less held graphics memory
         .with_arena_extend_strategy(ort::ep::ArenaExtendStrategy::SameAsRequested)
@@ -253,6 +295,14 @@ pub struct TrtSettings {
     pub min: String,
     pub opt: String,
     pub max: String,
+    /// op types left to the CUDA provider ("Attention": TensorRT 10.16 builds the opset-23 Attention op only in
+    /// a strongly typed network, which ORT's TensorRT provider does not make)
+    pub exclude: String,
+}
+
+/// CK_ENGINE_TRT_EXCLUDE, else "Attention".
+pub fn trt_exclude() -> String {
+    std::env::var("CK_ENGINE_TRT_EXCLUDE").unwrap_or_else(|_| "Attention".into())
 }
 
 /// A loaded network: its session and how its inputs want to be fed.
@@ -263,21 +313,32 @@ pub struct Net {
     pub precision: Precision,
     pub file: PathBuf,
     f16_inputs: Vec<String>,
+    run_options: Option<ort::session::RunOptions>,
 }
 
 /// A float32 input: name, shape, data.
 pub type Input<'a> = (&'a str, Vec<usize>, Vec<f32>);
 
 impl Net {
-    pub fn load(rt: &Runtime, piece: &'static str, prov: Provider, precision: Precision, file: &Path, trt: Option<&TrtSettings>) -> Result<Net, Error> {
-        let session = rt.session(prov, file, trt).map_err(|e| Error::ort(&format!("loading {}", file.display()), e))?;
+    pub fn load(rt: &Runtime, piece: &'static str, prov: Provider, precision: Precision, file: &Path, trt: Option<&TrtSettings>, vram_cap: Option<u64>) -> Result<Net, Error> {
+        let session = rt.session(prov, file, trt, vram_cap).map_err(|e| Error::ort(&format!("loading {}", file.display()), e))?;
         let f16_inputs = session
             .inputs()
             .iter()
             .filter(|i| i.dtype().tensor_type() == Some(ort::value::TensorElementType::Float16))
             .map(|i| i.name().to_string())
             .collect();
-        Ok(Net { piece, session, provider: prov, precision, file: file.to_path_buf(), f16_inputs })
+        // on the GPU each run gives its arena's working memory back (the five sessions have one arena each, so
+        // without this their peaks would add up); CK_ENGINE_ARENA_SHRINK=0 keeps it
+        let shrink = prov != Provider::Cpu && std::env::var("CK_ENGINE_ARENA_SHRINK").map(|v| v != "0").unwrap_or(true);
+        let run_options = if shrink {
+            let mut o = ort::session::RunOptions::new().map_err(|e| Error::ort(piece, e))?;
+            o.set("memory.enable_memory_arena_shrinkage", "gpu:0").map_err(|e| Error::ort(piece, e))?;
+            Some(o)
+        } else {
+            None
+        };
+        Ok(Net { piece, session, provider: prov, precision, file: file.to_path_buf(), f16_inputs, run_options })
     }
 
     /// Run with float32 inputs (converted to float16 where the graph wants it); outputs as float32 in the
@@ -295,7 +356,11 @@ impl Net {
             feed.push((std::borrow::Cow::Borrowed(name), v));
         }
         let piece = self.piece;
-        let outs = self.session.run(feed).map_err(|e| Error::ort(piece, e))?;
+        let outs = match &self.run_options {
+            Some(o) => self.session.run_with_options(feed, o),
+            None => self.session.run(feed),
+        }
+        .map_err(|e| Error::ort(piece, e))?;
         let mut res = Vec::new();
         // loop: NOT-WORTH — one or two outputs
         for (_, v) in outs.iter() {

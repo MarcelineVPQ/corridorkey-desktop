@@ -8,7 +8,7 @@ import { EngineProcess } from "./engine";
 import { GPU_POLL_MS, readGpu } from "./gpu";
 import { expandPaths, probeClip, still, STILL_WIDTH, VIDEO_EXT } from "./media";
 import { Queue } from "./queue";
-import { checkCheckout, loadSettings, saveSettings } from "./settings";
+import { checkCheckout, checkRustEngine, chooseEngine, loadSettings, saveSettings } from "./settings";
 import { readDesktopPalette, watchDesktopPalette } from "./desktopTheme";
 import { Updater } from "./updater";
 import { holdAppImageMountUntilExit } from "./appImageQuit";
@@ -44,6 +44,12 @@ const cacheDir = join(process.env.XDG_CACHE_HOME || join(app.getPath("home"), ".
 const mediaDir = join(cacheDir, "media");
 let settings = loadSettings(settingsFile, process.env);
 let checkout = checkCheckout(settings.corridorKeyRoot);
+let rustEngine = checkRustEngine(settings.engineBinary, settings.modelsDir);
+/** Re-check both engines' files (after a setting changed, or before the queue starts). */
+function recheckEngines(): void {
+  checkout = checkCheckout(settings.corridorKeyRoot);
+  rustEngine = checkRustEngine(settings.engineBinary, settings.modelsDir);
+}
 let mainWindow: BrowserWindow | null = null;
 let windowShown = false;
 let gpu: GpuInfo | null = null;
@@ -63,6 +69,10 @@ function engineScript(): string {
 
 const queue = new Queue({
   makeEngine: (onReply, onExit) => {
+    // the Rust engine when it is set up; the PyTorch engine (CorridorKey checkout) until it replaces it
+    if (chooseEngine(rustEngine, checkout) === "rust") {
+      return new EngineProcess({ kind: "rust", binary: settings.engineBinary!, models: settings.modelsDir!, ort: settings.ortLibrary, env: process.env }, onReply, onExit);
+    }
     const root = settings.corridorKeyRoot!;
     return new EngineProcess({ python: join(root, "venv", "bin", "python"), script: engineScript(), packageRoot: root, env: process.env }, onReply, onExit);
   },
@@ -81,6 +91,8 @@ function state(): AppState {
     gpuError,
     settings,
     checkout,
+    rustEngine,
+    engineKind: chooseEngine(rustEngine, checkout),
     desktopPalette,
     update: updater.state,
   };
@@ -226,7 +238,22 @@ function registerIpc(): void {
     const r = await dialog.showOpenDialog(mainWindow!, { title: "Your CorridorKey2.0 folder", properties: ["openDirectory"] });
     if (r.canceled) return;
     settings = { ...settings, corridorKeyRoot: r.filePaths[0] };
-    checkout = checkCheckout(settings.corridorKeyRoot);
+    recheckEngines();
+    persist();
+    scheduleSend();
+  });
+  ipcMain.handle(IPC.pickRustEngine, async (_e, what: "binary" | "models" | "ort") => {
+    const opts = {
+      binary: { title: "The CorridorKey engine program (corridorkey-engine)", properties: ["openFile"] as const },
+      models: { title: "The folder with the CorridorKey ONNX models", properties: ["openDirectory"] as const },
+      ort: { title: "ONNX Runtime's library (libonnxruntime.so) for the graphics card", properties: ["openFile"] as const },
+    }[what];
+    if (!opts) return;
+    const r = await dialog.showOpenDialog(mainWindow!, { title: opts.title, properties: [...opts.properties] });
+    if (r.canceled) return;
+    const key = { binary: "engineBinary", models: "modelsDir", ort: "ortLibrary" }[what] as "engineBinary" | "modelsDir" | "ortLibrary";
+    settings = { ...settings, [key]: r.filePaths[0] };
+    recheckEngines();
     persist();
     scheduleSend();
   });
@@ -238,8 +265,8 @@ function registerIpc(): void {
   ipcMain.handle(IPC.removeJob, (_e, id: string) => queue.remove(id));
   ipcMain.handle(IPC.retryJob, (_e, id: string) => queue.retry(id));
   ipcMain.handle(IPC.startQueue, () => {
-    checkout = checkCheckout(settings.corridorKeyRoot);
-    if (!checkout.ok) return scheduleSend();
+    recheckEngines();
+    if (!chooseEngine(rustEngine, checkout)) return scheduleSend();
     return queue.start();
   });
   ipcMain.handle(IPC.stopQueue, () => queue.stop());
@@ -333,7 +360,10 @@ app.on("second-instance", () => {
 
 app.whenReady().then(() => {
   if (WAYLAND_REQUIRED) {
-    dialog.showErrorBox("CorridorKey needs Wayland", "CorridorKey Desktop runs only in a Wayland session, so HDR footage and results can be shown as HDR. Log in to a Wayland session (Plasma, GNOME) and start it again.");
+    dialog.showErrorBox(
+      "CorridorKey needs Wayland",
+      "CorridorKey Desktop runs only in a Wayland session, so HDR footage and results can be shown as HDR. Log in to a Wayland session (Plasma, GNOME) and start it again.",
+    );
     app.quit();
     return;
   }

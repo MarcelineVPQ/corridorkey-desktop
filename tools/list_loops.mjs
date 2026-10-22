@@ -2,7 +2,7 @@
 // Loop pass (rule 7, the AVIEW/DS5 pattern): every loop statement and timer in
 // app code carries one verdict, so no waiting or hot loop goes unexamined.
 // Listed mechanically: `for`/`while`/`do` statements and setInterval in
-// electron/, src/ (.ts/.tsx) and engine/ (.py); tests excluded. Array
+// electron/, src/ (.ts/.tsx), engine/ (.py) and engine-rs/crates/*/src (.rs); tests excluded. Array
 // callbacks (.map/.forEach) aren't listed here: they are bounded by the data
 // they walk and the reviewer reads them with their caller.
 //
@@ -16,9 +16,10 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 export const VERDICTS = ["PARALLELIZE", "BATCH", "SERIAL-REQUIRED", "HOT-PATH-OK", "FIX-HOT-PATH", "NOT-WORTH"];
-const ROOTS = ["electron", "src", "engine"];
+const ROOTS = ["electron", "src", "engine", "engine-rs/crates"];
 const LOOP_TS = /^\s*(for\s*\(|for await\s*\(|while\s*\(|do\s*\{)|setInterval\(/;
 const LOOP_PY = /^\s*(for .+ in .+:|while .+:)\s*(#.*)?$/;
+const LOOP_RS = /^\s*(for .+ in .+\{|while .+\{|loop \{)/;
 const VERDICT = new RegExp(`(//|#|\\{/\\*)\\s*loop: (${VERDICTS.join("|")}) — \\S`);
 
 const files = [];
@@ -26,8 +27,8 @@ const walk = (dir) => {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
     if (statSync(p).isDirectory()) {
-      if (name !== "__pycache__") walk(p);
-    } else if (/\.(tsx?|py)$/.test(p) && !/(\.test\.|\/test_|\.d\.ts$)/.test(p)) files.push(p);
+      if (name !== "__pycache__" && name !== "tests" && name !== "target") walk(p);
+    } else if (/\.(tsx?|py|rs)$/.test(p) && !/(\.test\.|\/test_|\.d\.ts$)/.test(p)) files.push(p);
   }
 };
 ROOTS.forEach(walk);
@@ -35,7 +36,7 @@ ROOTS.forEach(walk);
 const rows = [];
 for (const file of files) {
   const lines = readFileSync(file, "utf8").split("\n");
-  const re = file.endsWith(".py") ? LOOP_PY : LOOP_TS;
+  const re = file.endsWith(".py") ? LOOP_PY : file.endsWith(".rs") ? LOOP_RS : LOOP_TS;
   lines.forEach((line, i) => {
     const code = file.endsWith(".py") ? line : line.replace(/\/\/.*$/, "");
     if (!re.test(code) || /^\s*(\*|\/\/|#)/.test(line)) return;

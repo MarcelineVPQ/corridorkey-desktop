@@ -54,7 +54,7 @@ export function engineOptions(o: JobOptions, kind: "video" | "frames"): Record<s
   return out;
 }
 
-const STAGES = new Set<Stage>(["load", "probe", "rvm", "foundations", "keying"]);
+const STAGES = new Set<Stage>(["load", "optimize", "probe", "rvm", "foundations", "keying"]);
 
 export class Queue {
   jobs: Job[] = [];
@@ -166,8 +166,11 @@ export class Queue {
           device: String(pong.device),
           gpu: (pong.gpu as string | null) ?? null,
           vramTotalMb: (pong.vram_total_mb as number | null) ?? null,
-          python: String(pong.python),
-          torch: String(pong.torch),
+          python: typeof pong.python === "string" ? pong.python : null,
+          torch: typeof pong.torch === "string" ? pong.torch : null,
+          ort: typeof pong.ort === "string" ? pong.ort : null,
+          provider: typeof pong.provider === "string" ? pong.provider : null,
+          precision: typeof pong.precision === "string" ? pong.precision : null,
           assets: (pong.assets as Record<string, boolean>) ?? {},
         },
       };

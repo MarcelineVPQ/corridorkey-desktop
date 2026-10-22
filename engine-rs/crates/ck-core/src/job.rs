@@ -33,6 +33,9 @@ pub struct JobConfig {
     pub writer: WriterConfig,
     /// opt-in TensorRT (docs/BACKLOG.md row 12); off by default
     pub tensorrt: bool,
+    /// graphics memory this job may use (GB): caps the automatic window's budget and the providers' arenas;
+    /// None = the free memory (CK_ENGINE_VRAM_BUDGET_GB sets an engine-wide default)
+    pub vram_budget_gb: Option<f64>,
 }
 
 fn num(o: &serde_json::Map<String, Value>, k: &str) -> Result<Option<f64>, Error> {
@@ -146,6 +149,11 @@ pub fn parse(req: &Value) -> Result<JobConfig, Error> {
         num_frames: int(o, "num_frames")?.unwrap_or(-1),
         writer,
         tensorrt: boolean(o, "tensorrt", false),
+        vram_budget_gb: match num(o, "vram_budget_gb")? {
+            Some(v) if v > 0.0 => Some(v),
+            Some(v) => return Err(Error::input(format!("vram_budget_gb must be above 0, got {v}"))),
+            None => std::env::var("CK_ENGINE_VRAM_BUDGET_GB").ok().and_then(|v| v.trim().parse::<f64>().ok()).filter(|v| *v > 0.0),
+        },
     })
 }
 
@@ -196,6 +204,8 @@ mod tests {
         assert_eq!(parse(&req(json!({"hann_chunk": "x"}))).unwrap_err().code, "input");
         assert_eq!(parse(&req(json!({"output_format": "gif"}))).unwrap_err().code, "input");
         assert_eq!(parse(&req(json!({"exr_dtype": "int"}))).unwrap_err().code, "input");
+        assert_eq!(parse(&req(json!({"vram_budget_gb": 0}))).unwrap_err().code, "input");
+        assert_eq!(parse(&req(json!({"vram_budget_gb": 12}))).unwrap().vram_budget_gb, Some(12.0));
         let c = parse(&req(json!({"outputs": ["fg", "checker", "alpha"], "tensorrt": true}))).unwrap();
         assert_eq!((c.outputs.join(","), c.tensorrt), ("alpha,checker,fg".to_string(), true));
     }

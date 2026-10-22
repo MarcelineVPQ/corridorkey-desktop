@@ -31,7 +31,7 @@ export function JobView({ job }: { job: Job }) {
       {job.status === "running" && (
         <MainBlock title="Progress">
           <div className="stages">
-            {STAGE_ORDER.filter((s) => s !== "foundations" || job.memory?.lowVram).map((s) => {
+            {STAGE_ORDER.filter((s) => (s !== "foundations" || job.memory?.lowVram) && (s !== "optimize" || job.stage === "optimize")).map((s) => {
               const i = STAGE_ORDER.indexOf(s);
               return (
                 <span key={s} className={`stage ${i === nowIdx ? "now" : i < nowIdx ? "past" : ""}`}>

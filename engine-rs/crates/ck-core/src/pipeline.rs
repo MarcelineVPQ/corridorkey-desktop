@@ -69,6 +69,8 @@ pub struct ModelKey {
     pub precision: Precision,
     /// TensorRT: the shape range's cache folder
     pub trt_cache: Option<PathBuf>,
+    /// the job's graphics memory budget (bytes): each session's arena limit
+    pub vram_cap: Option<u64>,
 }
 
 pub struct Pipeline {
@@ -76,6 +78,8 @@ pub struct Pipeline {
     pub models: ModelSet,
     key: Option<ModelKey>,
     nets: HashMap<&'static str, Net>,
+    /// TensorRT jobs: networks TensorRT could not build, and why (they run on CUDA)
+    trt_fallbacks: BTreeMap<&'static str, String>,
 }
 
 pub struct JobResult {
@@ -196,19 +200,21 @@ fn f1(v: f64) -> String {
 
 impl Pipeline {
     pub fn new(rt: &'static Runtime, models: ModelSet) -> Pipeline {
-        Pipeline { rt, models, key: None, nets: HashMap::new() }
+        Pipeline { rt, models, key: None, nets: HashMap::new(), trt_fallbacks: BTreeMap::new() }
     }
 
     /// Drop every loaded network (frees the graphics memory their sessions hold).
     pub fn unload(&mut self) {
         self.nets.clear();
         self.key = None;
+        self.trt_fallbacks.clear();
     }
 
     /// Make sure `pieces` are loaded for `key` (anything loaded for another key is dropped first).
     fn ensure(&mut self, key: &ModelKey, pieces: &[&'static str], trt: Option<&dyn Fn(&str) -> TrtSettings>, sink: &mut dyn Sink, job_stage: &str) -> Result<(), Error> {
         if self.key.as_ref() != Some(key) {
             self.nets.clear();
+            self.trt_fallbacks.clear();
             self.key = Some(key.clone());
         }
         let need: Vec<&'static str> = pieces.iter().copied().filter(|p| !self.nets.contains_key(p)).collect();
@@ -224,8 +230,18 @@ impl Pipeline {
                 .ok_or_else(|| Error::assets(format!("missing ONNX model {piece} ({}) in {}", key.precision.name(), self.models.dir.display())))?;
             let t = Instant::now();
             let settings = trt.map(|f| f(piece));
-            let net = Net::load(self.rt, piece, key.provider, key.precision, &file, settings.as_ref())?;
-            eprintln!("  loaded {piece} ({}, {}) in {:.1} s: {}", key.provider.name(), key.precision.name(), t.elapsed().as_secs_f64(), file.display());
+            let net = match Net::load(self.rt, piece, key.provider, key.precision, &file, settings.as_ref(), key.vram_cap) {
+                Ok(n) => n,
+                // a network TensorRT can't build runs on CUDA (the same file and precision); the reply says so
+                Err(e) if key.provider == Provider::TensorRt => {
+                    let why = e.message.lines().next().unwrap_or("").to_string();
+                    sink.log(&format!("  TensorRT could not build {piece}; it runs on CUDA: {why}"));
+                    self.trt_fallbacks.insert(piece, why);
+                    Net::load(self.rt, piece, Provider::Cuda, key.precision, &file, None, key.vram_cap)?
+                }
+                Err(e) => return Err(e),
+            };
+            eprintln!("  loaded {piece} ({}, {}) in {:.1} s: {}", net.provider.name(), key.precision.name(), t.elapsed().as_secs_f64(), file.display());
             self.nets.insert(piece, net);
         }
         Ok(())
@@ -252,7 +268,11 @@ impl Pipeline {
         if !Path::new(&job.input).exists() {
             return Err(Error::input(format!("input not found: {}", job.input)));
         }
-        let base_key = ModelKey { provider, precision, trt_cache: None };
+        let vram_cap = match provider {
+            Provider::Cpu => None,
+            _ => job.vram_budget_gb.map(|g| (g * 1073741824.0) as u64),
+        };
+        let base_key = ModelKey { provider, precision, trt_cache: None, vram_cap };
         // the CUDA / CPU networks load before the probe, as the runtime's load_model; TensorRT's depend on the clip
         if !job.low_vram && !job.tensorrt {
             self.ensure(&base_key, &crate::runtime::PIECES, None, sink, "load")?;
@@ -303,9 +323,14 @@ impl Pipeline {
         let (sh, sw) = (meta.shape_h, meta.shape_w);
         if !job.manual {
             // the budget the runtime's apply_auto_vram sees: free memory plus what this process holds
-            let (budget, source) = match provider {
+            let (seen, source) = match provider {
                 Provider::Cpu => (crate::gpu::host_available().unwrap_or(0) as f64 / 1073741824.0, "host"),
                 _ => (crate::gpu::budget().map(|b| b.0).unwrap_or(0) as f64 / 1073741824.0, "gpu"),
+            };
+            // the job's budget caps what the card has free
+            let budget = match job.vram_budget_gb {
+                Some(cap) if provider != Provider::Cpu => seen.min(cap),
+                _ => seen,
             };
             let p = select_vram_profile((sh, sw), t_all, budget);
             chunk = p.chunk;
@@ -328,7 +353,8 @@ impl Pipeline {
             sink.send(json!({
                 "type": "memory", "hann_chunk": chunk, "hann_stride": stride, "low_vram": low_vram, "auto": true,
                 "budget_gb": (budget * 100.0).round() / 100.0, "estimate_gb": (est * 100.0).round() / 100.0,
-                "budget_source": source, "estimate_basis": "pytorch-bf16-table", "provider": provider.name()
+                "budget_source": source, "free_gb": (seen * 100.0).round() / 100.0, "budget_cap_gb": job.vram_budget_gb,
+                "estimate_basis": "pytorch-bf16-table", "provider": provider.name()
             }));
         }
         // which provider really runs this job
@@ -341,7 +367,7 @@ impl Pipeline {
             let bf16 = key.precision == Precision::Fp32;
             move |piece: &str| -> TrtSettings {
                 let (min, opt, max) = crate::tensorrt::profile(piece, &bucket).unwrap();
-                TrtSettings { cache: dir.join(piece), fp16: !bf16, bf16, min, opt, max }
+                TrtSettings { cache: dir.join(piece), fp16: !bf16, bf16, min, opt, max, exclude: crate::runtime::trt_exclude() }
             }
         });
         let trt_ref: Option<&dyn Fn(&str) -> TrtSettings> = trt_fn.as_ref().map(|f| f as &dyn Fn(&str) -> TrtSettings);
@@ -475,7 +501,7 @@ impl Pipeline {
         msg["range"] = json!(bucket.key());
         msg["cache"] = json!(if built { "reused" } else { "build" });
         sink.send(msg);
-        Ok((ModelKey { provider: Provider::TensorRt, precision: trt_prec, trt_cache: Some(bdir.clone()) }, Some((bdir, built))))
+        Ok((ModelKey { provider: Provider::TensorRt, precision: trt_prec, trt_cache: Some(bdir.clone()), vram_cap: base.vram_cap }, Some((bdir, built))))
     }
 
     /// Steps 2-4 (and the low-VRAM staging).
@@ -519,6 +545,11 @@ impl Pipeline {
         }
         let first: &[&'static str] = if low_vram { &["rvm"] } else { &crate::runtime::PIECES };
         self.ensure(key, first, trt, sink, load_stage)?;
+        if key.provider == Provider::TensorRt {
+            let pieces: BTreeMap<&str, &str> = self.nets.iter().map(|(k, n)| (*k, n.provider.name())).collect();
+            sink.send(json!({"type": "provider", "provider": if self.trt_fallbacks.is_empty() { "tensorrt" } else if self.trt_fallbacks.len() == pieces.len() { "cuda" } else { "tensorrt+cuda" },
+                "pieces": pieces, "fallbacks": self.trt_fallbacks}));
+        }
         sink.send(json!({"type": "progress", "stage": "rvm"}));
         let rvm_frame = RVM_CH * h64 * w64;
         let mut rvm_file = F16File::create(&rvm_path, rvm_frame)?;
