@@ -1,0 +1,25 @@
+[package]
+name = "ck-engine"
+description = "corridorkey-engine: the CorridorKey engine process (JSON lines over stdio, docs/ENGINE_PROTOCOL.md)"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license-file.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "corridorkey-engine"
+path = "src/main.rs"
+
+[features]
+default = ["ort-static"]
+ort-static = ["ck-core/ort-static"]
+ort-dynamic = ["ck-core/ort-dynamic"]
+cuda = ["ck-core/cuda"]
+tensorrt = ["ck-core/tensorrt"]
+
+[dependencies]
+ck-core = { path = "../ck-core", default-features = false }
+serde_json.workspace = true

@@ -1,0 +1,114 @@
+//! `<clip>_settings.txt`, written as runtime.run_inference writes it (Python's str() of each value).
+
+/// Python's repr of a float: shortest round trip, always with a dot or an exponent ("1.0", "0.95", "1e-07").
+pub fn py_float(v: f64) -> String {
+    if v.is_nan() {
+        return "nan".into();
+    }
+    if v.is_infinite() {
+        return if v > 0.0 { "inf".into() } else { "-inf".into() };
+    }
+    let a = v.abs();
+    if a != 0.0 && !(1e-4..1e16).contains(&a) {
+        // Python switches to exponent notation: mantissa digits as the shortest round trip
+        let s = format!("{v:e}"); // "1e-7", "1.5e16"
+        let (m, e) = s.split_once('e').unwrap();
+        let exp: i32 = e.parse().unwrap();
+        return format!("{m}e{}{:02}", if exp < 0 { '-' } else { '+' }, exp.abs());
+    }
+    let s = format!("{v}");
+    if s.contains('.') {
+        s
+    } else {
+        format!("{s}.0")
+    }
+}
+
+pub fn py_bool(b: bool) -> &'static str {
+    if b {
+        "True"
+    } else {
+        "False"
+    }
+}
+
+pub fn py_opt(s: Option<&str>) -> String {
+    s.map(|x| x.to_string()).unwrap_or_else(|| "None".into())
+}
+
+/// The values the settings log lists.
+pub struct SettingsLog<'a> {
+    pub input: &'a str,
+    pub output_dir: &'a str,
+    pub w: usize,
+    pub h: usize,
+    pub fps: f64,
+    pub outputs: &'a [String],
+    pub output_format: &'a str,
+    pub exr_dtype: &'a str,
+    pub hint_first_frame: Option<&'a str>,
+    pub hint_video: Option<&'a str>,
+    pub hint_quality: f64,
+    pub carry_hint: bool,
+    pub carry_hint_quality: f64,
+    pub despill_strength: f64,
+    pub cutout_linear: bool,
+    pub frame_dir_linear: bool,
+    pub hann_chunk: usize,
+    pub hann_stride: usize,
+    pub low_vram: bool,
+    pub num_frames: i64,
+}
+
+pub fn settings_text(s: &SettingsLog) -> String {
+    let mut sorted: Vec<&String> = s.outputs.iter().collect();
+    sorted.sort();
+    let mut t = String::new();
+    t.push_str("CorridorKey v2 Inference Settings Log\n");
+    t.push_str("====================================\n");
+    t.push_str(&format!("Input: {}\n", s.input));
+    t.push_str(&format!("Output Directory: {}\n", s.output_dir));
+    t.push_str(&format!("Resolution: {}x{}\n", s.w, s.h));
+    t.push_str(&format!("FPS: {}\n", py_float(s.fps)));
+    t.push_str(&format!("Outputs: {}\n", sorted.iter().map(|x| x.as_str()).collect::<Vec<_>>().join(", ")));
+    t.push_str(&format!("Output Format: {}\n", s.output_format));
+    if s.output_format == "exr" {
+        t.push_str(&format!("EXR Pixel Type: {}\n", s.exr_dtype));
+    }
+    t.push_str(&format!("Hint First Frame: {}\n", py_opt(s.hint_first_frame)));
+    t.push_str(&format!("Hint Video: {}\n", py_opt(s.hint_video)));
+    t.push_str(&format!("Hint Quality (Trust): {}\n", py_float(s.hint_quality)));
+    t.push_str(&format!("Carry Hint: {}\n", py_bool(s.carry_hint)));
+    t.push_str(&format!("Carry Hint Quality: {}\n", py_float(s.carry_hint_quality)));
+    t.push_str(&format!("Despill Strength: {}\n", py_float(s.despill_strength)));
+    t.push_str(&format!("Cutout Linear: {}\n", py_bool(s.cutout_linear)));
+    t.push_str(&format!("Frame Dir Linear: {}\n", py_bool(s.frame_dir_linear)));
+    t.push_str(&format!("Hann Chunk: {}\n", s.hann_chunk));
+    t.push_str(&format!("Hann Stride: {}\n", s.hann_stride));
+    t.push_str(&format!("Low VRAM: {}\n", py_bool(s.low_vram)));
+    t.push_str("Model Scale: 1.0\n");
+    t.push_str(&format!("Num Frames: {}\n", s.num_frames));
+    t.push_str("Start Mode: begin\n");
+    t.push_str("Seed: 0\n");
+    t.push_str("Linear Brightness: 1.0\n");
+    t.push_str("Linear Contrast: 1.0\n");
+    t.push_str("Linear Contrast Pivot: 0.18\n");
+    t
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn python_float_repr() {
+        assert_eq!(py_float(1.0), "1.0");
+        assert_eq!(py_float(0.95), "0.95");
+        assert_eq!(py_float(23.976023976023978), "23.976023976023978");
+        assert_eq!(py_float(24.0), "24.0");
+        assert_eq!(py_float(1e-7), "1e-07");
+        assert_eq!(py_float(0.0001), "0.0001");
+        assert_eq!(py_float(-2.5e20), "-2.5e+20");
+        assert_eq!(py_float(0.0), "0.0");
+    }
+}

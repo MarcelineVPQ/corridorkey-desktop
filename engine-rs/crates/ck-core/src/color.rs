@@ -1,0 +1,182 @@
+//! Colour transforms of the upstream runtime (corridorkey/color_utils.py, runtime.py's render helpers), in
+//! float32 as the runtime computes them (torch float32 on the GPU, numpy float32 on the host).
+//!
+//! The model's RGB contract: display-coded sRGB -> scene-linear (IEC 61966-2-1) -> signed asinh
+//! (knee 0.008, ref 16). Its fg output goes back the other way.
+
+pub const HDR_ASINH_KNEE: f32 = 0.008;
+pub const HDR_ASINH_REF: f64 = 16.0;
+
+/// asinh(ref / knee) as color_utils computes it (numpy float64), used as float32 (`x.new_tensor(denom)`).
+pub fn asinh_denom() -> f32 {
+    (HDR_ASINH_REF / HDR_ASINH_KNEE as f64).asinh() as f32
+}
+
+/// IEC 61966-2-1 linear -> sRGB, sign-mirrored for negatives (color_utils.linear_to_srgb).
+#[inline]
+pub fn linear_to_srgb(x: f32) -> f32 {
+    #[inline]
+    fn pos(v: f32) -> f32 {
+        if v <= 0.0031308 {
+            v * 12.92
+        } else {
+            1.055 * v.max(0.0031308).powf(1.0 / 2.4) - 0.055
+        }
+    }
+    if x >= 0.0 {
+        pos(x)
+    } else {
+        -pos(-x)
+    }
+}
+
+/// IEC 61966-2-1 sRGB -> linear, sign-mirrored for negatives (color_utils.srgb_to_linear).
+#[inline]
+pub fn srgb_to_linear(x: f32) -> f32 {
+    #[inline]
+    fn pos(v: f32) -> f32 {
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    }
+    if x >= 0.0 {
+        pos(x)
+    } else {
+        -pos(-x)
+    }
+}
+
+/// Signed asinh encoding (color_utils.linear_to_asinh): asinh(x / knee) / asinh(ref / knee).
+#[inline]
+pub fn linear_to_asinh(x: f32, denom: f32) -> f32 {
+    (x / HDR_ASINH_KNEE).asinh() / denom
+}
+
+/// Inverse of `linear_to_asinh` (color_utils.asinh_to_linear): sinh(y * denom) * knee.
+#[inline]
+pub fn asinh_to_linear(y: f32, denom: f32) -> f32 {
+    (y * denom).sinh() * HDR_ASINH_KNEE
+}
+
+/// The SDR proxy the foundation models see (color_utils.linear_to_vfm_sdr): clip(srgb(max(x, 0)), 0, 1).
+#[inline]
+pub fn linear_to_vfm_sdr(x: f32) -> f32 {
+    linear_to_srgb(x.max(0.0)).clamp(0.0, 1.0)
+}
+
+/// The scene-linear brightness/contrast adjust (video_io.apply_linear_adjust) and its inverse
+/// (runtime._linear_adjust_inverse_torch). Identity at gain = contrast = 1, the protocol's only setting.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LinearAdjust {
+    pub gain: f32,
+    pub contrast: f32,
+    pub pivot: f32,
+}
+
+impl Default for LinearAdjust {
+    fn default() -> Self {
+        LinearAdjust { gain: 1.0, contrast: 1.0, pivot: 0.18 }
+    }
+}
+
+impl LinearAdjust {
+    pub fn is_identity(&self) -> bool {
+        (self.gain - 1.0).abs() <= 1e-6 && (self.contrast - 1.0).abs() <= 1e-6
+    }
+    #[inline]
+    pub fn apply(&self, x: f32) -> f32 {
+        if self.is_identity() {
+            x
+        } else {
+            self.gain * (self.pivot + self.contrast * (x - self.pivot))
+        }
+    }
+    #[inline]
+    pub fn invert(&self, x: f32) -> f32 {
+        if self.is_identity() {
+            x
+        } else {
+            (x / self.gain - self.pivot) / self.contrast + self.pivot
+        }
+    }
+}
+
+/// CorridorKey's average despill on one RGB pixel (runtime._despill_average_srgb_torch): green above the
+/// mean of red and blue is moved half to red, half to blue; `strength` blends with the original.
+#[inline]
+pub fn despill(rgb: [f32; 3], strength: f32) -> [f32; 3] {
+    if strength <= 0.0 {
+        return rgb;
+    }
+    let [r, g, b] = rgb;
+    let spill = (g - (r + b) * 0.5).max(0.0);
+    let full = [r + spill * 0.5, g - spill, b + spill * 0.5];
+    if strength >= 1.0 {
+        return full;
+    }
+    [r * (1.0 - strength) + full[0] * strength, g * (1.0 - strength) + full[1] * strength, b * (1.0 - strength) + full[2] * strength]
+}
+
+/// torch's float32 -> bfloat16 (round to nearest even), back to float32: the runtime keeps decoded frames,
+/// hints and hint quality as bfloat16 tensors.
+#[inline]
+pub fn bf16_round(x: f32) -> f32 {
+    half::bf16::from_f32(x).to_f32()
+}
+
+/// float32 -> float16 -> float32 (the runtime's fp16 memmaps: RVM features and the stage-1 baton).
+#[inline]
+pub fn f16_round(x: f32) -> f32 {
+    half::f16::from_f32(x).to_f32()
+}
+
+/// `(x.clamp(0, 1) * 65535).astype(uint16)`: the 16-bit samples the video writers get (truncated).
+#[inline]
+pub fn to_u16(x: f32) -> u16 {
+    let v = x.clamp(0.0, 1.0) * 65535.0;
+    v as u16
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn asinh_round_trip_and_odd() {
+        let d = asinh_denom();
+        // loop: NOT-WORTH — a handful of test values
+        for x in [-3.0f32, -0.01, 0.0, 0.001, 0.18, 1.0, 16.0, 100.0] {
+            let y = linear_to_asinh(x, d);
+            assert!((asinh_to_linear(y, d) - x).abs() <= 1e-5 * x.abs().max(1.0), "{x}");
+            assert_eq!(linear_to_asinh(-x, d), -y);
+        }
+        assert!((linear_to_asinh(16.0, d) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn srgb_round_trip() {
+        // loop: NOT-WORTH — 101 test values
+        for i in 0..=100 {
+            let x = i as f32 / 100.0;
+            assert!((linear_to_srgb(srgb_to_linear(x)) - x).abs() < 2e-6, "{x}");
+        }
+        assert_eq!(linear_to_srgb(-0.5), -linear_to_srgb(0.5));
+    }
+
+    #[test]
+    fn despill_moves_green() {
+        assert_eq!(despill([0.2, 0.8, 0.4], 1.0), [0.2 + 0.25, 0.8 - 0.5, 0.4 + 0.25]);
+        assert_eq!(despill([0.5, 0.1, 0.5], 1.0), [0.5, 0.1, 0.5]);
+        assert_eq!(despill([0.2, 0.8, 0.4], 0.0), [0.2, 0.8, 0.4]);
+    }
+
+    #[test]
+    fn u16_truncates_like_numpy() {
+        assert_eq!(to_u16(1.0), 65535);
+        assert_eq!(to_u16(2.0), 65535);
+        assert_eq!(to_u16(-1.0), 0);
+        assert_eq!(to_u16(0.5), 32767); // 32767.5 truncated
+    }
+}

@@ -1,0 +1,133 @@
+//! The engine process's protocol loop (docs/ENGINE_PROTOCOL.md): JSON lines on stdin/stdout, the same
+//! replies and semantics as engine/ck_engine.py. stdout carries only protocol replies; logs go to stderr.
+use ck_core::job::{parse, JobConfig};
+use ck_core::pipeline::{JobResult, Sink};
+use ck_core::Error;
+use serde_json::{json, Value};
+use std::collections::HashSet;
+use std::io::{BufRead, Write};
+use std::time::Instant;
+
+pub const ENGINE_VERSION: &str = "0.2.0";
+pub const PROTOCOL: i64 = 1;
+
+/// What runs the jobs: the ONNX Runtime pipeline, or a fake in the protocol tests.
+pub trait Backend {
+    fn pong(&mut self) -> Value;
+    fn run(&mut self, job: &JobConfig, sink: &mut dyn Sink) -> Result<JobResult, Error>;
+}
+
+/// Writes replies as JSON lines, adding the job id when there is one.
+pub struct Replies<W: Write> {
+    out: W,
+    pub job: Option<String>,
+}
+
+impl<W: Write> Replies<W> {
+    pub fn new(out: W) -> Self {
+        Replies { out, job: None }
+    }
+    pub fn send(&mut self, mut msg: Value) {
+        if let (Some(id), Some(m)) = (&self.job, msg.as_object_mut()) {
+            if !m.contains_key("id") {
+                m.insert("id".into(), json!(id));
+            }
+        }
+        let line = serde_json::to_string(&msg).unwrap_or_else(|_| "{}".into());
+        // a closed stdout means the app is gone: nothing left to tell it
+        let _ = writeln!(self.out, "{line}");
+        let _ = self.out.flush();
+    }
+}
+
+impl<W: Write> Sink for Replies<W> {
+    fn send(&mut self, msg: Value) {
+        Replies::send(self, msg);
+    }
+}
+
+fn str_field(req: &Value, k: &str) -> Option<String> {
+    match req.get(k) {
+        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
+        Some(Value::Number(n)) => Some(n.to_string()),
+        _ => None,
+    }
+}
+
+/// Serve requests until `quit` or the end of input. One job at a time, in order.
+pub fn serve<B: Backend, R: BufRead, W: Write>(backend: &mut B, input: R, out: W) {
+    let mut r = Replies::new(out);
+    let mut pending_cancel: HashSet<String> = HashSet::new();
+    // loop: SERIAL-REQUIRED — one job at a time on one GPU; the app queues
+    for line in input.lines() {
+        let Ok(raw) = line else { break };
+        let raw = raw.trim();
+        if raw.is_empty() {
+            continue;
+        }
+        let req: Value = match serde_json::from_str::<Value>(raw) {
+            Ok(v) if v.get("cmd").map(|c| c.is_string()).unwrap_or(false) => v,
+            Ok(_) => {
+                r.send(json!({"type": "error", "code": "bad-request", "message": "bad json: not a request object"}));
+                continue;
+            }
+            Err(e) => {
+                r.send(json!({"type": "error", "code": "bad-request", "message": format!("bad json: {e}")}));
+                continue;
+            }
+        };
+        let id = req.get("id").cloned().unwrap_or(Value::Null);
+        match req["cmd"].as_str().unwrap() {
+            "ping" => {
+                let p = backend.pong();
+                r.send(p);
+            }
+            "quit" => return,
+            "cancel" => {
+                pending_cancel.insert(str_field(&req, "id").unwrap_or_else(|| id.to_string()));
+            }
+            "run" => {
+                let jid = str_field(&req, "id");
+                if jid.is_none() || str_field(&req, "input").is_none() || str_field(&req, "output_dir").is_none() || str_field(&req, "temp_dir").is_none() {
+                    r.send(json!({"type": "error", "id": id, "code": "bad-request", "message": "run needs id, input, output_dir and temp_dir"}));
+                    continue;
+                }
+                let jid = jid.unwrap();
+                if pending_cancel.remove(&jid) {
+                    r.send(json!({"type": "error", "id": jid, "code": "cancelled", "message": "cancelled"}));
+                    continue;
+                }
+                run_job(backend, &req, &jid, &mut r);
+            }
+            other => {
+                r.send(json!({"type": "error", "id": id, "code": "bad-request", "message": format!("unknown cmd: {other}")}));
+            }
+        }
+    }
+}
+
+fn run_job<B: Backend, W: Write>(backend: &mut B, req: &Value, jid: &str, r: &mut Replies<W>) {
+    let started = Instant::now();
+    r.job = Some(jid.to_string());
+    let res = match parse(req) {
+        Err(e) => Err(e),
+        Ok(job) => match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| backend.run(&job, r))) {
+            Ok(res) => res,
+            Err(p) => {
+                let m = p.downcast_ref::<String>().cloned().or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_else(|| "panic".into());
+                Err(Error::engine(format!("internal error: {m}")))
+            }
+        },
+    };
+    match res {
+        Ok(done) => r.send(json!({
+            "type": "result", "outputs": done.outputs, "settings_file": done.settings_file,
+            "seconds": (started.elapsed().as_secs_f64() * 100.0).round() / 100.0
+        })),
+        Err(e) => {
+            eprintln!("job {jid} failed: {e}");
+            r.send(json!({"type": "error", "code": e.code, "message": e.message}));
+        }
+    }
+    r.job = None;
+}
