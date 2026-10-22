@@ -207,7 +207,9 @@ mod tests {
         assert_eq!(bucket_for(2176, 3840), None);
         assert_eq!(bucket_for(4352, 7680), None);
         // every bucket's longest window really fits
+        // loop: NOT-WORTH — 8 x 8 ranges in a test
         for h in DIM_RANGES {
+            // loop: NOT-WORTH — 8 ranges
             for w in DIM_RANGES {
                 if let Some(b) = bucket_for(h.1, w.1) {
                     assert!(b.t.1 * h.1 * w.1 <= PIXEL_FRAMES_MAX);
