@@ -42,6 +42,7 @@ export function tasksOf(state: AppState): Task[] {
     const need = missingInput(job);
     if (need) tasks.push({ id: `hint:${job.id}`, page: "queue", section: "hint", level: "task", text: `${job.clip.name}: ${need}`, jobId: job.id });
   }
+  // loop: HOT-PATH-OK — the queue's jobs per state push (≤ 10/s while shown)
   const failed = state.jobs.filter((j) => j.status === "failed");
   if (failed.length)
     tasks.push({ id: "failed", page: "queue", section: "", level: "error", text: failed.length === 1 ? `${failed[0].clip.name} failed` : `${failed.length} clips failed`, jobId: failed[0].id });

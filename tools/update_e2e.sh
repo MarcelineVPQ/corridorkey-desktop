@@ -13,6 +13,7 @@
 set -euo pipefail
 APP="$(cd "$(dirname "$0")/.." && pwd)"
 DIR="" OLD="" NEW="" VER=""
+# loop: NOT-WORTH — the command line
 while [ $# -gt 0 ]; do
   case "$1" in
     --dir) DIR="$2"; shift 2 ;;
@@ -40,6 +41,7 @@ CK_FEED_KEY="$(cat "$DIR/test-key.pem")" node "$APP/tools/sign-feed.mjs" "$DIR/s
 
 PIDS=()
 cleanup() {
+  # loop: NOT-WORTH — the test copy's few processes at cleanup
   for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
   [ -n "${RUN:-}" ] && rm -rf "$RUN"
 }
@@ -64,6 +66,7 @@ cat > "$DIR/iso/session.conf" <<CONF
 CONF
 dbus-daemon --config-file="$DIR/iso/session.conf" --nofork --print-address=1 > "$DIR/bus.addr" 2>"$DIR/bus.log" &
 PIDS+=($!)
+# loop: SERIAL-REQUIRED — 1 s between checks while the test copy starts
 sleep 1
 BUS="$(head -1 "$DIR/bus.addr")"
 
@@ -76,5 +79,6 @@ env -i HOME="$DIR/home" USER="$USER" PATH="/usr/local/bin:/usr/bin:/bin" LANG="$
   setsid "$DIR/run/$(basename "$OLD")" --no-sandbox --password-store=basic --remote-debugging-port=9350 > "$DIR/app-old.log" 2>&1 &
 PIDS+=($!)
 
+# loop: SERIAL-REQUIRED — the driver step and its failure dump (one run)
 node "$APP/tools/update_e2e.mjs" --port 9350 --expect "$VER" --out "$DIR" || { echo "--- processes:"; ps -eo pid,args | grep -E "CorridorKey|systemd-run|sleep 0.5" | grep -v grep | cut -c1-160; exit 1; }
 echo "--- run/ after the update:"; ls -la "$DIR/run"

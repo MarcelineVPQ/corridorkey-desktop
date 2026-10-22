@@ -24,6 +24,7 @@ const headers = { Accept: "application/vnd.github+json", "User-Agent": "corridor
 if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
 
 async function measure(asset) {
+  // loop: SERIAL-REQUIRED — one release asset download per feed build (CI) [bounded: the feed job's timeout-minutes: 20]
   const r = await fetch(asset.browser_download_url, { redirect: "follow" });
   if (!r.ok || !r.body) throw new Error(`${asset.name}: download returned ${r.status}`);
   const hash = createHash("sha512");
@@ -37,6 +38,7 @@ async function measure(asset) {
   return { sha512: hash.digest("hex"), size };
 }
 
+// loop: SERIAL-REQUIRED — one GitHub API read per feed build (CI) [bounded: the feed job's timeout-minutes: 20]
 const r = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=50`, { headers });
 if (!r.ok) throw new Error(`GitHub API returned ${r.status}`);
 const picked = selectRelease(await r.json(), channel);

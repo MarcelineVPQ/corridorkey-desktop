@@ -35,6 +35,7 @@ def linear_to_srgb(x):
 
 
 def probe_size(path):
+    # loop: SERIAL-REQUIRED — one ffprobe per compared file [bounded: a local file; the caller runs under timeout]
     r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", path],
                        capture_output=True, text=True, check=True)
     w, h = r.stdout.strip().split("\n")[0].split(",")[:2]
@@ -64,17 +65,20 @@ def ffmpeg_frames(args, h, w, channels, dtype, limit):
                 yield a.reshape(h, w, channels)
     finally:
         p.kill()
+        # loop: SERIAL-REQUIRED — reaps ffmpeg after its frames were read [bounded: its pipe was read to the end]
         p.wait()
 
 
 def video_alpha(path, limit):
     h, w = probe_size(path)
+    # loop: SERIAL-REQUIRED — frames stream in order from one ffmpeg (a few frames in memory)
     for f in ffmpeg_frames(["-i", path], h, w, 3, np.uint16, limit):
         yield f[:, :, 0].astype(np.float32) / 65535.0
 
 
 def video_fg(path, limit):
     h, w = probe_size(path)
+    # loop: SERIAL-REQUIRED — frames stream in order from one ffmpeg
     for f in ffmpeg_frames(["-i", path], h, w, 3, np.uint16, limit):
         yield f.astype(np.float32).transpose(2, 0, 1) / 65535.0
 
@@ -85,16 +89,19 @@ def exr_seq(folder, channels, limit):
         raise SystemExit(f"no EXR frames in {folder}")
     h, w = probe_size(files[0])
     args = ["-pattern_type", "glob", "-i", os.path.join(glob.escape(folder), "*.exr")]
+    # loop: SERIAL-REQUIRED — frames stream in order from one ffmpeg
     for f in ffmpeg_frames(args, h, w, channels, np.float32, limit):
         yield f
 
 
 def exr_alpha(folder, limit):
+    # loop: SERIAL-REQUIRED — EXR frames in order
     for f in exr_seq(folder, 1, limit):
         yield np.clip(f[:, :, 0], 0.0, 1.0)
 
 
 def exr_fg(folder, limit):
+    # loop: SERIAL-REQUIRED — EXR frames in order
     for f in exr_seq(folder, 3, limit):
         yield linear_to_srgb(f).transpose(2, 0, 1)
 
@@ -118,6 +125,7 @@ class Source:
 
     @staticmethod
     def _find(folder, name):
+        # loop: NOT-WORTH — three name patterns
         for pat in (f"*_{name}.mp4", f"*_{name}.mov", f"*_{name}_exr"):
             hits = sorted(glob.glob(os.path.join(glob.escape(folder), pat)))
             if hits:
@@ -204,6 +212,7 @@ def compare(ref, test):
 def table(rows):
     head = "| clip | frames | alpha MAE | alpha max | SAD/frame | % > 1/255 | % > 4/255 | alpha PSNR | fg PSNR (all / subject) |"
     lines = [head, "|" + "---|" * 9]
+    # loop: NOT-WORTH — the compared clips, once per report
     for name, m in rows:
         fg = f"{m.get('fg_psnr_db', float('nan')):.1f} / {m.get('fg_psnr_subject_db') or float('nan'):.1f} dB" if m.get("fg_psnr_db") is not None else "n/a"
         lines.append(f"| {name} | {m['frames']} | {m['alpha_mae']:.2e} | {m['alpha_max']:.2e} | {m['alpha_sad_per_frame']:.1f} | "
@@ -242,6 +251,7 @@ def main():
     print(md)
     if a.json:
         with open(a.json, "w") as f:
+            # loop: NOT-WORTH — the compared clips, once per report
             json.dump([m for _, m in rows], f, indent=2)
     if a.md:
         with open(a.md, "w") as f:

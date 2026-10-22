@@ -10,10 +10,12 @@ import { FEED_URLS, feedSignedBy, parseFeed, TRUSTED_KEYS } from "./feed-rules.m
 const local = process.argv.slice(2);
 const read = async (src) => {
   if (local.length) return readFileSync(src, "utf8");
+  // loop: SERIAL-REQUIRED — one feed read per check (CI / by hand) [bounded: the feed job's timeout-minutes: 20]
   const r = await fetch(src, { cache: "no-store" });
   if (!r.ok) throw new Error(`${src}: HTTP ${r.status}`);
   return r.text();
 };
+// loop: NOT-WORTH — one or two feeds
 const items = local.length ? local.map((f) => ({ src: f, channel: /latest-dev\.json$/.test(f) ? "dev" : "stable" })) : Object.entries(FEED_URLS).map(([channel, src]) => ({ src, channel }));
 let bad = 0;
 // loop: NOT-WORTH — two feeds
