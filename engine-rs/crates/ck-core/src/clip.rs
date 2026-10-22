@@ -205,7 +205,31 @@ pub fn ffprobe(path: &Path) -> Result<VideoProbe, Error> {
         return Err(Error::input(format!("Could not open video: {} ({})", path.display(), String::from_utf8_lossy(&out.stderr).trim())));
     }
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(|e| Error::input(format!("ffprobe output: {e}")))?;
-    read_probe(&v)
+    let mut p = read_probe(&v)?;
+    // No frame count in the container (Matroska, WebM): duration x nominal rate is only an estimate. Measured on a
+    // variable-frame-rate MKV: 18 estimated (0.75 s x 24), 8 real; the job failed "failed decoding frame 8". The
+    // packets are counted instead (the frames the decoder delivers; it reads the file once, no decoding).
+    let st = &v["streams"][0];
+    let has_count = st["nb_frames"].as_str().and_then(|s| s.parse::<u64>().ok()).or_else(|| st["nb_frames"].as_u64()).is_some_and(|n| n > 0);
+    if !has_count {
+        if let Some(n) = count_packets(path)? {
+            p.frames = n;
+        }
+    }
+    Ok(p)
+}
+
+/// The video stream's packets, counted by ffprobe (None: ffprobe gave no count).
+fn count_packets(path: &Path) -> Result<Option<usize>, Error> {
+    let mut cmd = Command::new("ffprobe");
+    cmd.args(["-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries", "stream=nb_read_packets", "-of", "json"]).arg(path);
+    // loop: SERIAL-REQUIRED — one ffprobe per clip without a frame count, PROBE_TIMEOUT 120 s
+    let out = crate::proc::output_timeout(&mut cmd, PROBE_TIMEOUT).map_err(|e| Error::input(format!("ffprobe on {}: {e}", path.display())))?;
+    if !out.status.success() {
+        return Ok(None);
+    }
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(|e| Error::input(format!("ffprobe output: {e}")))?;
+    Ok(v["streams"][0]["nb_read_packets"].as_str().and_then(|s| s.parse::<usize>().ok()).filter(|n| *n > 0))
 }
 
 /// probe_video_meta at native resolution, start "begin": the first `num_frames` frames (all when <= 0).
@@ -263,6 +287,28 @@ mod tests {
         let v = serde_json::json!({"streams":[{"width":1920,"height":1080,"avg_frame_rate":"0/0","r_frame_rate":"25/1","side_data_list":[{"rotation":-90}]}],"format":{"duration":"2.0"}});
         let p = read_probe(&v).unwrap();
         assert_eq!((p.w, p.h, p.frames, p.fps), (1080, 1920, 50, 25.0));
+    }
+
+    #[test]
+    fn a_variable_frame_rate_mkv_counts_its_real_frames() {
+        if Command::new("ffmpeg").arg("-version").output().is_err() {
+            eprintln!("no ffmpeg: skipped");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("ck-vfr-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("vfr.mkv");
+        // 8 frames: four 40 ms apart, then 100 ms apart (0.75 s at a nominal 24 fps: 18 by duration x rate)
+        let st = Command::new("ffmpeg")
+            .args(["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=64x48:rate=24", "-frames:v", "8"])
+            .args(["-vf", "setpts='if(lt(N,4),N*0.04,N*0.1)/TB'", "-fps_mode", "vfr", "-c:v", "libx264"])
+            .arg(&f)
+            .status()
+            .unwrap();
+        assert!(st.success());
+        let n = probe_video(&f, -1).map(|m| m.num_frames);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(n, Ok(8));
     }
 
     #[test]
