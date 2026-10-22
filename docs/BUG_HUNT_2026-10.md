@@ -26,7 +26,7 @@ test; every FIXED row names the test that fails on the old code and passes now._
 
 | verdict | HIGH | MEDIUM | LOW | no severity | total |
 |---|---|---|---|---|---|
-| FIXED | 4 | 10 | 9 | | 23 |
+| FIXED | 4 | 10 | 11 | | 25 |
 | NOT-A-BUG | | | | 32 | 32 |
 | BACKLOG | | | 6 | 1 (G4, an idea) | 7 |
 
@@ -158,6 +158,8 @@ guard after the relaunch shell: ≥ 2.9 s, until the test closed the new copy).
 | G1 | `ck-core/src/image.rs` lanczos4_coeffs | clippy error: `S45` written out (approx_constant) | cargo clippy | LOW | FIXED: `std::f64::consts::FRAC_1_SQRT_2` (the same double) | `cargo clippy -- -D warnings` |
 | G2 | `ahead.rs`, `decode.rs`, `pipeline.rs`, `runtime.rs` | clippy warnings: inherent `next()` (should_implement_trait ×4), type_complexity, bool assert | cargo clippy | LOW | FIXED; `npm run check:engine` = fmt --check + clippy --all-targets -D warnings + cargo test | |
 | G3 | `engine-rs/tools/trt-build/ck_trt_build.cpp` | a malformed number (`std::stoll` throws) ended in std::terminate: exit 134, a core dump, no JSON line for the engine | ran the builder with `--min "a:1xZ"` | LOW | FIXED: any exception → `{"ok":false,…}`, exit 1 | the same call after build.sh: `{"ok":false,"error":"bad argument: stoll"}` (needs the TensorRT libraries: not in cargo test) |
+| G5 | `tests/unit/media.test.ts` | each test run left five `ck-media-*` folders in /tmp (RAM on this machine; ~90 had piled up) | counted: +5 per run | LOW | FIXED: removed after the file's tests | the count: +5 → +0 |
+| G6 | `tools/isolated.sh` | the EXIT trap that removes the runtime folder never ran (the shell `exec`'d systemd-run): every isolated copy left a `/tmp/ck-iso-*` folder (8 there) | code + the leftovers' dates | LOW | FIXED: systemd-run runs as a child | one isolated run, closed over CDP: no folder left |
 | G4 | efficiency pass #18 | one decode pass for the low-VRAM RVM + foundation phases (~1 s per job) | the efficiency pass | | BACKLOG (row 15): idea | |
 
 ## Gates and regression
