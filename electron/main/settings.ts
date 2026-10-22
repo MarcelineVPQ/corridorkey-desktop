@@ -1,7 +1,7 @@
 // Settings file (userData/settings.json) and the CorridorKey checkout check.
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { DEFAULT_OPTIONS, type CheckoutCheck, type Settings } from "../../src/shared/types";
+import { DEFAULT_APPEARANCE, DEFAULT_OPTIONS, type CheckoutCheck, type Settings } from "../../src/shared/types";
 
 export function loadSettings(file: string, env: NodeJS.ProcessEnv): Settings {
   let saved: Partial<Settings> = {};
@@ -13,6 +13,8 @@ export function loadSettings(file: string, env: NodeJS.ProcessEnv): Settings {
   return {
     corridorKeyRoot: env.CK_PACKAGE_ROOT || saved.corridorKeyRoot || null,
     lastOptions: { ...DEFAULT_OPTIONS, ...(saved.lastOptions ?? {}) },
+    appearance: { ...DEFAULT_APPEARANCE, ...(saved.appearance ?? {}) },
+    outputRoot: saved.outputRoot ?? null,
   };
 }
 

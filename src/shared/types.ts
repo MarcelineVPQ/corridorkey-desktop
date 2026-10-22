@@ -1,3 +1,5 @@
+import type { DesktopPalette } from "../ui/theme/palette";
+
 // Types shared by the main process, the preload and the page. The engine's
 // own messages are in docs/ENGINE_PROTOCOL.md; these are the app's view of them.
 
@@ -132,10 +134,42 @@ export interface GpuInfo {
   at: number;
 }
 
+export type ThemeMode = "system" | "light" | "dark" | "desktop";
+
+export interface Appearance {
+  // system: the OS light/dark; desktop: the desktop's own colors (KDE scheme or accent)
+  theme: ThemeMode;
+  // the accent in the built-in themes: CorridorKey green, or the desktop's accent
+  accent: "builtin" | "desktop";
+  // Liquid Glass on the rail and panels
+  glass: boolean;
+}
+
+export const DEFAULT_APPEARANCE: Appearance = { theme: "system", accent: "builtin", glass: false };
+
 export interface Settings {
   // The CorridorKey2.0 checkout: corridorkey/, weights/, vfms/, venv/.
   corridorKeyRoot: string | null;
   lastOptions: JobOptions;
+  appearance: Appearance;
+  // null: results go next to each clip (out_<clip>); else into this folder
+  outputRoot: string | null;
+}
+
+// The app's own updates (electron/main/updater). null feed = no release
+// channel set up yet (the repo has no releases): App settings says so.
+export type UpdateChannel = "stable" | "dev";
+export interface UpdateState {
+  feed: string | null;
+  channel: UpdateChannel;
+  automatic: boolean;
+  status: "idle" | "checking" | "current" | "available" | "downloading" | "ready" | "error" | "unsupported";
+  current: string;
+  latest: string | null;
+  notes: string | null;
+  progress: number | null;
+  error: string | null;
+  checkedAt: number | null;
 }
 
 export interface CheckoutCheck {
@@ -144,6 +178,7 @@ export interface CheckoutCheck {
 }
 
 export interface AppState {
+  version: string;
   jobs: Job[];
   queueRunning: boolean;
   engine: EngineState;
@@ -151,6 +186,9 @@ export interface AppState {
   gpuError: string | null;
   settings: Settings;
   checkout: CheckoutCheck;
+  // the desktop's colors (Desktop theme / desktop accent); null = couldn't be read or not asked
+  desktopPalette: DesktopPalette | null;
+  update: UpdateState;
 }
 
 export interface CorridorKeyApi {
@@ -167,5 +205,13 @@ export interface CorridorKeyApi {
   startQueue(): Promise<void>;
   stopQueue(): Promise<void>;
   showInFolder(path: string): Promise<void>;
+  setAppearance(appearance: Appearance): Promise<void>;
+  pickOutputRoot(): Promise<void>;
+  clearOutputRoot(): Promise<void>;
+  checkForUpdates(): Promise<void>;
+  setUpdateChannel(channel: UpdateChannel): Promise<void>;
+  setAutoUpdate(on: boolean): Promise<void>;
+  installUpdate(): Promise<void>;
+  restartToUpdate(): Promise<void>;
   setVisible(visible: boolean): void;
 }

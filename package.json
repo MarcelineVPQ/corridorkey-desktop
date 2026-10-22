@@ -12,7 +12,7 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "test:engine": "python3 -I -m unittest discover -s engine -p 'test_*.py'",
-    "gates": "./.hooks/check_electron_security.sh && node .hooks/check_theme_colors.mjs && node tools/list_loops.mjs --check",
+    "gates": "./.hooks/check_electron_security.sh && node .hooks/check_theme_colors.mjs && node tools/list_loops.mjs --check && node tools/check_no_folds.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "npm run typecheck && npm run format:check && npm run gates && npm test && npm run test:engine"
@@ -20,7 +20,9 @@
   "dependencies": {
     "lucide-react": "0.577.0",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1"
   },
   "devDependencies": {
     "@types/node": "22.20.5",

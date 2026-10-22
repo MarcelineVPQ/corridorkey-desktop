@@ -24,6 +24,14 @@ const api: CorridorKeyApi = {
   stopQueue: () => ipcRenderer.invoke(IPC.stopQueue),
   showInFolder: (path) => ipcRenderer.invoke(IPC.showInFolder, path),
   setVisible: (visible) => ipcRenderer.send(IPC.setVisible, visible),
+  setAppearance: (a) => ipcRenderer.invoke(IPC.setAppearance, a),
+  pickOutputRoot: () => ipcRenderer.invoke(IPC.pickOutputRoot),
+  clearOutputRoot: () => ipcRenderer.invoke(IPC.clearOutputRoot),
+  checkForUpdates: () => ipcRenderer.invoke(IPC.checkForUpdates),
+  setUpdateChannel: (c) => ipcRenderer.invoke(IPC.setUpdateChannel, c),
+  setAutoUpdate: (on) => ipcRenderer.invoke(IPC.setAutoUpdate, on),
+  installUpdate: () => ipcRenderer.invoke(IPC.installUpdate),
+  restartToUpdate: () => ipcRenderer.invoke(IPC.restartToUpdate),
 };
 
 contextBridge.exposeInMainWorld("ck", api);

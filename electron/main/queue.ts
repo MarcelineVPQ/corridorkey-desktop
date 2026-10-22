@@ -4,6 +4,7 @@
 import { rmSync } from "node:fs";
 import type { EngineReply } from "./engine";
 import type { EngineState, Job, JobOptions, OutputName, Stage } from "../../src/shared/types";
+import { missingInput } from "../../src/shared/tasks";
 
 const LOG_LINES = 300;
 // Frames per second is shown once this many frames and seconds are measured.
@@ -184,7 +185,8 @@ export class Queue {
 
   private async next(): Promise<void> {
     if (!this.running || this.current) return;
-    const job = this.jobs.find((j) => j.status === "waiting" && !j.clip.probeError);
+    // A clip whose hint mode needs a file it doesn't have stays waiting (its task says so); never run it silently without the hint.
+    const job = this.jobs.find((j) => j.status === "waiting" && !j.clip.probeError && !missingInput(j));
     if (!job) {
       this.running = false;
       this.proc?.quit(); // frees the graphics memory the model holds

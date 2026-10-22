@@ -1,6 +1,9 @@
 /* The one theme system (rule 2): every color in the app comes from these
    tokens. Dark is the default (a grading-suite look that doesn't fight the
-   footage); light follows the OS setting. Nothing else in the app sets a color. */
+   footage); light follows prefers-color-scheme, which App settings → Theme
+   steers (Electron's nativeTheme.themeSource). The Desktop theme and the
+   desktop accent override these on :root (src/ui/theme/palette.ts, contrast
+   kept ≥ 4.5:1). Nothing else in the app sets a color. */
 :root {
   color-scheme: dark;
   --bg-0: #16181d;
@@ -16,6 +19,7 @@
   --accent-strong: #2fbf70;
   --accent-text: #0b1f13;
   --accent-soft: rgba(61, 220, 132, 0.14);
+  --accent-ink: #3ddc84;
   --status-ok: #3ddc84;
   --status-warn: #f2b84b;
   --status-error: #ff6b6b;
@@ -27,6 +31,9 @@
   --checker-b: #2c303a;
   --focus-ring: #6cb4ff;
   --overlay: rgba(10, 12, 16, 0.78);
+  --task: #f2b84b;
+  --shadow: rgba(0, 0, 0, 0.32);
+  --glass-rim: rgba(255, 255, 255, 0.22);
   --font-ui: system-ui, "Segoe UI", "Noto Sans", sans-serif;
   --font-mono: ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace;
 }
@@ -47,6 +54,7 @@
     --accent-strong: #0f733d;
     --accent-text: #ffffff;
     --accent-soft: rgba(19, 137, 74, 0.12);
+    --accent-ink: #13894a;
     --status-ok: #13894a;
     --status-warn: #a86a00;
     --status-error: #c62828;
@@ -58,5 +66,8 @@
     --checker-b: #c3c8d1;
     --focus-ring: #1f6fd1;
     --overlay: rgba(243, 244, 247, 0.85);
+    --task: #b07200;
+    --shadow: rgba(0, 0, 0, 0.16);
+    --glass-rim: rgba(255, 255, 255, 0.7);
   }
 }

@@ -13,5 +13,5 @@
     "strict": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["electron", "src/shared", "tests"]
+  "include": ["electron", "src/shared", "src/ui/theme/palette.ts", "src/ui/rail/railModel.ts", "tests"]
 }

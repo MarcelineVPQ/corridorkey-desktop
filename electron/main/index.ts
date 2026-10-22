@@ -1,5 +1,5 @@
 // CorridorKey desktop: main process. One window, one queue, one engine.
-import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, net, protocol, shell } from "electron";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
@@ -9,7 +9,10 @@ import { GPU_POLL_MS, readGpu } from "./gpu";
 import { expandPaths, probeClip, still, STILL_WIDTH, VIDEO_EXT } from "./media";
 import { Queue } from "./queue";
 import { checkCheckout, loadSettings, saveSettings } from "./settings";
-import type { AppState, GpuInfo, Job, JobOptions, OutputName } from "../../src/shared/types";
+import { readDesktopPalette, watchDesktopPalette } from "./desktopTheme";
+import { Updater } from "./updater";
+import type { Appearance, AppState, GpuInfo, Job, JobOptions, OutputName } from "../../src/shared/types";
+import type { DesktopPalette } from "../../src/ui/theme/palette";
 import { IPC } from "./ipc";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -41,6 +44,9 @@ let windowShown = false;
 let gpu: GpuInfo | null = null;
 let gpuError: string | null = null;
 let gpuTimer: NodeJS.Timeout | null = null;
+let desktopPalette: DesktopPalette | null = null;
+let stopPaletteWatch: (() => void) | null = null;
+const updater = new Updater({ changed: () => scheduleSend(), version: app.getVersion() });
 
 /** ck-media://f/<encoded path>: only files inside the media cache are served. */
 const mediaUrl = (file: string) => `${MEDIA_SCHEME}://f/${encodeURIComponent(file)}`;
@@ -61,7 +67,18 @@ const queue = new Queue({
 });
 
 function state(): AppState {
-  return { jobs: queue.jobs, queueRunning: queue.running, engine: queue.engine, gpu, gpuError, settings, checkout };
+  return {
+    version: app.getVersion(),
+    jobs: queue.jobs,
+    queueRunning: queue.running,
+    engine: queue.engine,
+    gpu,
+    gpuError,
+    settings,
+    checkout,
+    desktopPalette,
+    update: updater.state,
+  };
 }
 
 // State goes to the page at most every 100 ms (frames already arrive ≤ 4/s).
@@ -101,6 +118,29 @@ function updateGpuPolling(): void {
   }
 }
 
+// The desktop's colors are read (and watched) only while the Desktop theme or
+// the desktop accent is chosen; otherwise nothing reads or watches them.
+async function refreshPalette(): Promise<void> {
+  desktopPalette = await readDesktopPalette();
+  scheduleSend();
+}
+function updatePaletteWatch(): void {
+  const want = settings.appearance.theme === "desktop" || settings.appearance.accent === "desktop";
+  if (want && !stopPaletteWatch) {
+    stopPaletteWatch = watchDesktopPalette(() => void refreshPalette());
+    void refreshPalette();
+  } else if (!want && stopPaletteWatch) {
+    stopPaletteWatch();
+    stopPaletteWatch = null;
+    desktopPalette = null;
+  }
+}
+
+/** Where a clip's results go: next to it, or into the chosen folder. */
+function outputDirFor(clipParent: string, name: string): string {
+  return join(settings.outputRoot ?? clipParent, `out_${name}`);
+}
+
 async function makeStills(job: Job): Promise<void> {
   if (job.status !== "done" || job.options.outputFormat !== "video") return;
   const seconds = job.clip.frames && job.clip.fps ? job.clip.frames / job.clip.fps / 2 : 0;
@@ -131,7 +171,7 @@ async function addPaths(paths: string[]): Promise<void> {
       id: randomUUID(),
       clip,
       options,
-      outputDir: join(parent, `out_${clip.name}`),
+      outputDir: outputDirFor(parent, clip.name),
       status: "waiting",
       stage: null,
       stageDetail: null,
@@ -199,6 +239,30 @@ function registerIpc(): void {
   });
   ipcMain.handle(IPC.stopQueue, () => queue.stop());
   ipcMain.handle(IPC.showInFolder, (_e, path: string) => shell.showItemInFolder(path));
+  ipcMain.handle(IPC.setAppearance, (_e, a: Appearance) => {
+    settings = { ...settings, appearance: { theme: a.theme, accent: a.accent, glass: Boolean(a.glass) } };
+    nativeTheme.themeSource = a.theme === "light" ? "light" : a.theme === "dark" ? "dark" : "system";
+    persist();
+    updatePaletteWatch();
+    scheduleSend();
+  });
+  ipcMain.handle(IPC.pickOutputRoot, async () => {
+    const r = await dialog.showOpenDialog(mainWindow!, { title: "Folder for results", properties: ["openDirectory", "createDirectory"] });
+    if (r.canceled) return;
+    settings = { ...settings, outputRoot: r.filePaths[0] };
+    persist();
+    scheduleSend();
+  });
+  ipcMain.handle(IPC.clearOutputRoot, () => {
+    settings = { ...settings, outputRoot: null };
+    persist();
+    scheduleSend();
+  });
+  ipcMain.handle(IPC.checkForUpdates, () => updater.check(true));
+  ipcMain.handle(IPC.setUpdateChannel, (_e, c: "stable" | "dev") => updater.setChannel(c === "dev" ? "dev" : "stable"));
+  ipcMain.handle(IPC.setAutoUpdate, (_e, on: boolean) => updater.setAutomatic(Boolean(on)));
+  ipcMain.handle(IPC.installUpdate, () => updater.download());
+  ipcMain.handle(IPC.restartToUpdate, () => updater.restart());
   ipcMain.on(IPC.setVisible, (_e, visible: boolean) => {
     windowShown = Boolean(visible);
     updateGpuPolling();
@@ -241,7 +305,11 @@ function createWindow(): void {
   });
   // No navigation away from the app, no new windows.
   mainWindow.webContents.on("will-navigate", (e) => e.preventDefault());
-  mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  // Links (About's credits) open in the default browser; https only, never in-app.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https:\/\//.test(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
   if (devServerUrl) void mainWindow.loadURL(devServerUrl);
   else void mainWindow.loadFile(join(here, "../renderer/index.html"));
 }
@@ -252,9 +320,16 @@ app.whenReady().then(() => {
     if (!resolve(file).startsWith(mediaDir + "/")) return new Response("not found", { status: 404 });
     return net.fetch(pathToFileURL(file).toString());
   });
+  nativeTheme.themeSource = settings.appearance.theme === "light" ? "light" : settings.appearance.theme === "dark" ? "dark" : "system";
+  updatePaletteWatch();
   registerIpc();
   createWindow();
+  updater.start();
 });
 
-app.on("before-quit", () => queue.shutdown());
+app.on("before-quit", () => {
+  queue.shutdown();
+  stopPaletteWatch?.();
+  updater.stop();
+});
 app.on("window-all-closed", () => app.quit());

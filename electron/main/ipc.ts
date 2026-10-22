@@ -13,4 +13,12 @@ export const IPC = {
   stopQueue: "ck:stop-queue",
   showInFolder: "ck:show-in-folder",
   setVisible: "ck:set-visible",
+  setAppearance: "ck:set-appearance",
+  pickOutputRoot: "ck:pick-output-root",
+  clearOutputRoot: "ck:clear-output-root",
+  checkForUpdates: "ck:check-for-updates",
+  setUpdateChannel: "ck:set-update-channel",
+  setAutoUpdate: "ck:set-auto-update",
+  installUpdate: "ck:install-update",
+  restartToUpdate: "ck:restart-to-update",
 } as const;

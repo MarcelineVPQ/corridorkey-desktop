@@ -18,7 +18,10 @@ const ROOTS = ["src", "electron"];
 const SKIP = [/\.test\./, /\.d\.ts$/];
 // Token sources: each file here IS a palette, so a literal color in it is the
 // point, not a violation. Keep this list short; anything else marks its lines.
-const TOKEN_SOURCES = new Map([]);
+const TOKEN_SOURCES = new Map([
+  ["src/ui/theme/palette.ts", "builds the Desktop theme's tokens from the desktop's colors"],
+  ["src/ui/glass/liquidGlass.ts", "the glass filter's displacement map (channel values, not colors)"],
+]);
 const COLOR = /#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(|(?<![\w-])(white|black|red|green|blue|orange|yellow|purple|gray|grey)(?![\w-])/;
 const SHADOW_BLACK = /\brgba?\(\s*0[ ,]+0[ ,]+0\s*(\/|,)/g;
 

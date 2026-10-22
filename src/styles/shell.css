@@ -1,0 +1,468 @@
+/* The app shell: the rail (AppRail.tsx), the page split and its panel
+   (SplitView.tsx), sections (Section.tsx), main-view blocks and Glass.
+   The house look of the DS5 app and Sonata. Colors only through tokens.
+   Idle cost: none (CSS states; transitions only on width/opacity changes). */
+
+.shell {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+.shell-page {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- rail ---- */
+.rail-slot {
+  position: relative;
+  flex: 0 0 auto;
+  width: var(--rail-w-collapsed);
+  transition: width 0.18s ease;
+  z-index: 30;
+}
+.rail-slot.pinned {
+  width: var(--rail-w-expanded);
+}
+.app-rail {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  width: var(--rail-w-collapsed);
+  border-left: 1px solid var(--border-1);
+  background: var(--bg-1);
+  overflow: hidden;
+  transition:
+    width 0.18s ease,
+    box-shadow 0.18s ease;
+}
+.rail-slot.pinned .app-rail,
+.app-rail.open {
+  width: var(--rail-w-expanded);
+}
+.rail-slot:not(.pinned) .app-rail.open {
+  box-shadow: -8px 0 24px var(--shadow);
+}
+.rail-nav {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  padding: 8px 6px;
+  overflow: hidden auto;
+}
+.rail-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border-top: 1px solid var(--border-1);
+}
+.rail-link,
+.rail-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.rail-status {
+  cursor: default;
+  font-size: 12px;
+}
+.rail-link:hover {
+  background: var(--bg-2);
+  color: var(--text-1);
+}
+.rail-link:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.rail-link.active {
+  background: var(--accent-soft);
+  color: var(--text-1);
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.rail-link[aria-pressed="true"] {
+  color: var(--text-1);
+}
+.rail-ic {
+  position: relative;
+  display: grid;
+  flex: 0 0 20px;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+}
+.rail-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.rail-slot.pinned .rail-label,
+.app-rail.open .rail-label {
+  opacity: 1;
+}
+.rail-lock {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin: 2px 0 0 7px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.rail-lock[aria-pressed="true"] {
+  color: var(--text-1);
+}
+.rail-lock:hover {
+  background: var(--bg-2);
+  color: var(--text-1);
+}
+.rail-lock:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.rail-dot {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--bg-3);
+  color: var(--text-1);
+  font-size: 10px;
+  font-weight: 700;
+}
+.rail-status.ok .rail-dot {
+  background: var(--status-ok);
+  color: var(--bg-0);
+}
+.rail-status.warn .rail-dot {
+  background: var(--status-warn);
+  color: var(--bg-0);
+}
+.rail-status.error .rail-dot {
+  background: var(--status-error);
+  color: var(--bg-0);
+}
+.rail-status.ok .rail-label {
+  color: var(--text-1);
+}
+.rail-status-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+.rail-status-text > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rail-status-sub {
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.rail-version {
+  align-self: flex-end;
+  margin: auto 9px 4px 0;
+  color: var(--accent-ink);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  max-height: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rail-version b {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+/* The one task dot (tasks.ts): on a rail icon or a section icon. */
+.task {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--task);
+  box-shadow: 0 0 0 2px var(--bg-1);
+}
+
+/* ---- page split ---- */
+.split {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  position: relative;
+}
+.split-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+.split-panel {
+  flex: 0 0 380px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--border-1);
+  background: var(--bg-1);
+}
+.split-panel.drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(380px, 92%);
+  z-index: 20;
+  box-shadow: -8px 0 24px var(--shadow);
+}
+.panel-head {
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border-1);
+}
+.panel-head h2 {
+  margin: 0;
+  font-size: 15px;
+}
+.panel-sub {
+  color: var(--text-3);
+  font-size: 12px;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 10px 24px;
+}
+
+/* ---- sections ---- */
+.accordion {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sec {
+  border: 1px solid var(--border-1);
+  border-radius: 10px;
+  background: var(--bg-0);
+}
+.sec.open {
+  border-color: var(--border-2);
+}
+.sec-head {
+  position: relative;
+}
+.sec-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 28px 10px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.sec-toggle:hover {
+  background: var(--bg-2);
+}
+.sec-ic {
+  position: relative;
+  display: grid;
+  place-items: center;
+  color: var(--text-2);
+}
+.sec-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.sec-title {
+  font-weight: 600;
+}
+.sec-status {
+  color: var(--text-3);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sec-status.waiting {
+  color: var(--status-warn);
+}
+.sec-chev {
+  color: var(--text-3);
+  transition: transform 0.15s;
+}
+.sec.open .sec-chev {
+  transform: rotate(180deg);
+}
+.sec-pin {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border: 1.5px solid var(--border-2);
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+.sec-pin.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.sec-body {
+  padding: 4px 12px 12px;
+}
+.sec-body fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.sec-body fieldset:disabled {
+  opacity: 0.6;
+}
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border-1);
+}
+.row:first-child {
+  border-top: 0;
+}
+.row-label {
+  display: flex;
+  flex-direction: column;
+  color: var(--text-2);
+}
+.row-hint {
+  color: var(--text-3);
+  font-size: 12px;
+}
+.row-control {
+  min-width: 0;
+}
+
+/* ---- main-view blocks ---- */
+.block {
+  margin: 0 0 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-1);
+  border-radius: 12px;
+  background: var(--bg-1);
+}
+.block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.block-head h3 {
+  margin: 0;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+}
+
+/* ---- Glass (App settings → Appearance; Liquid Glass from the DS5 app) ----
+   The surface turns translucent and the SVG filter (useLiquidGlass) frosts and
+   bends what's behind it; the rim highlight follows the pointer (useSpecular).
+   Reduce transparency (OS) turns it back into the solid surface. */
+.app-rail.glass,
+.split-panel.glass {
+  background: color-mix(in srgb, var(--bg-1) 55%, transparent);
+  backdrop-filter: var(--glass-clear, blur(6px)) saturate(1.4);
+}
+.app-rail.glass.open,
+.split-panel.glass {
+  background: color-mix(in srgb, var(--bg-1) 78%, transparent);
+  backdrop-filter: var(--glass-regular, blur(18px)) saturate(1.4);
+}
+.app-rail.glass::after,
+.split-panel.glass::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-left: 1px solid transparent;
+  background: radial-gradient(160px circle at var(--lx, 30%) var(--ly, 0%), var(--glass-rim), transparent 70%) border-box;
+  /* theme-exempt: an alpha mask (only its opacity counts), not a color */
+  -webkit-mask:
+    linear-gradient(#000 0 0) padding-box exclude,
+    linear-gradient(#000 0 0); /* theme-exempt: an alpha mask, not a color */
+  mask:
+    linear-gradient(#000 0 0) padding-box exclude,
+    linear-gradient(#000 0 0); /* theme-exempt: an alpha mask, not a color */
+}
+.split-panel.glass {
+  position: relative;
+}
+@media (prefers-reduced-transparency: reduce) {
+  .app-rail.glass,
+  .app-rail.glass.open,
+  .split-panel.glass {
+    background: var(--bg-1);
+    backdrop-filter: none;
+  }
+  .app-rail.glass::after,
+  .split-panel.glass::after {
+    display: none;
+  }
+}
+/* What the glass sits over: the page's own backdrop, a soft accent wash so the
+   frost has something to show (static gradient: no idle cost). */
+[data-glass="on"] .shell {
+  background: radial-gradient(900px circle at 85% -10%, var(--accent-soft), transparent 60%), radial-gradient(700px circle at 0% 110%, var(--accent-soft), transparent 55%), var(--bg-0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .rail-slot,
+  .app-rail,
+  .rail-label,
+  .sec-chev {
+    transition: none;
+  }
+}

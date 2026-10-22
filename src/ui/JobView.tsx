@@ -1,8 +1,13 @@
-// A running or finished job: the stages, the measured numbers, the results.
+// The selected clip in the Queue page's main view: its progress, the memory
+// window it used, its results, its error and the engine log, as MainBlocks
+// (readouts are always shown, never folded).
 import { useEffect, useState } from "react";
 import { FolderOpen, RotateCcw } from "lucide-react";
 import type { Job } from "../shared/types";
 import { duration, remaining, STAGE_ORDER, STAGE_TEXT } from "./format";
+import { MainBlock } from "./panel/SplitView";
+
+const LOG_SHOWN = 12;
 
 export function JobView({ job }: { job: Job }) {
   // A 1 s tick for the elapsed clock, only while this job runs and the page is visible (rule 3).
@@ -14,6 +19,7 @@ export function JobView({ job }: { job: Job }) {
     const t = setInterval(() => document.visibilityState === "visible" && tick((n) => n + 1), 1000);
     return () => clearInterval(t);
   }, [job.status]);
+
   const pct = job.framesTotal ? Math.min(100, (job.framesDone / job.framesTotal) * 100) : 0;
   const left = remaining(job);
   const elapsed = job.startedAt ? ((job.finishedAt ?? Date.now()) - job.startedAt) / 1000 : null;
@@ -23,8 +29,7 @@ export function JobView({ job }: { job: Job }) {
   return (
     <>
       {job.status === "running" && (
-        <section className="section">
-          <h3>Progress</h3>
+        <MainBlock title="Progress">
           <div className="stages">
             {STAGE_ORDER.filter((s) => s !== "foundations" || job.memory?.lowVram).map((s) => {
               const i = STAGE_ORDER.indexOf(s);
@@ -45,12 +50,11 @@ export function JobView({ job }: { job: Job }) {
             <Stat k="Elapsed" v={elapsed !== null ? duration(elapsed) : "—"} />
             {job.stageDetail && <Stat k="Stage 1" v={job.stageDetail} />}
           </div>
-        </section>
+        </MainBlock>
       )}
 
       {m && (
-        <section className="section">
-          <h3>Memory used for this job</h3>
+        <MainBlock title="Memory used for this run">
           <div className="stats">
             <Stat k="Temporal window" v={`${m.hannChunk} / ${m.hannStride}`} />
             <Stat k="Low-memory mode" v={m.lowVram ? "on" : "off"} />
@@ -58,12 +62,11 @@ export function JobView({ job }: { job: Job }) {
             {m.budgetGb !== null && <Stat k="Free when it started" v={`${m.budgetGb.toFixed(1)} GB`} />}
             {m.estimateGb !== null && <Stat k="Runtime's peak estimate" v={`${m.estimateGb.toFixed(1)} GB`} />}
           </div>
-        </section>
+        </MainBlock>
       )}
 
       {job.status === "done" && (
-        <section className="section">
-          <h3>Results</h3>
+        <MainBlock title="Results">
           {job.stills.length > 0 && (
             <div className="stills">
               {job.stills.map((s) => (
@@ -78,41 +81,33 @@ export function JobView({ job }: { job: Job }) {
             {job.outputs.map((f) => (
               <li key={f}>
                 <span className="path">{f}</span>
-                <button className="icon-btn" aria-label="Show in folder" title="Show in folder" onClick={() => window.ck.showInFolder(f)}>
+                <button type="button" className="icon-btn" aria-label="Show in folder" title="Show in folder" onClick={() => window.ck.showInFolder(f)}>
                   <FolderOpen size={14} />
                 </button>
               </li>
             ))}
           </ul>
-        </section>
+        </MainBlock>
       )}
 
       {(job.status === "failed" || job.status === "cancelled") && (
-        <section className={`notice ${job.status === "failed" ? "error" : "warn"}`} style={{ margin: "18px 0 0" }}>
+        <section className={`notice ${job.status === "failed" ? "error" : "warn"}`} style={{ margin: "0 0 14px" }}>
           <h3>{job.status === "failed" ? errorTitle(job.error?.code) : "Cancelled"}</h3>
-          <div>{job.status === "failed" ? job.error?.message : "The job was stopped. Files it had started writing stay in the output folder, incomplete."}</div>
-          {job.error?.code === "oom" && <p className="hint-text">Try Manual memory with a smaller window and low-memory mode, or close other programs that use the graphics card.</p>}
+          <div>{job.status === "failed" ? job.error?.message : "Stopped. Files it had started stay in the output folder, incomplete."}</div>
+          {job.error?.code === "oom" && <p className="hint-text">Try Manual memory with a smaller window and low-memory mode, or close other programs using the graphics card.</p>}
           <p>
-            <button className="btn small" onClick={() => window.ck.retryJob(job.id)}>
+            <button type="button" className="btn small" onClick={() => window.ck.retryJob(job.id)}>
               <RotateCcw size={14} /> Run again
             </button>
           </p>
-          {job.error && job.error.stderrTail.length > 0 && (
-            <details>
-              <summary>Engine output</summary>
-              <pre className="log">{job.error.stderrTail.join("\n")}</pre>
-            </details>
-          )}
+          {job.error && job.error.stderrTail.length > 0 && <pre className="log">{job.error.stderrTail.join("\n")}</pre>}
         </section>
       )}
 
       {job.log.length > 0 && (
-        <section className="section">
-          <details>
-            <summary>Engine log ({job.log.length} lines)</summary>
-            <pre className="log">{job.log.join("\n")}</pre>
-          </details>
-        </section>
+        <MainBlock title={`Engine log · last ${Math.min(LOG_SHOWN, job.log.length)} of ${job.log.length} lines`}>
+          <pre className="log">{job.log.slice(-LOG_SHOWN).join("\n")}</pre>
+        </MainBlock>
       )}
     </>
   );
@@ -133,7 +128,7 @@ function errorTitle(code: string | undefined): string {
   }
 }
 
-function Stat({ k, v }: { k: string; v: string }) {
+export function Stat({ k, v }: { k: string; v: string }) {
   return (
     <div className="stat">
       <div className="k">{k}</div>
