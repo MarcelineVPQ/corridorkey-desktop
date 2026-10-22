@@ -95,6 +95,8 @@ export interface Job {
   // ck-media: URLs of result stills (middle frame), per output.
   stills: { output: OutputName; url: string }[];
   error: JobError | null;
+  // a failed / cancelled job: what happened to the files it had started (removed, or why not); null otherwise
+  partial: string | null;
   log: string[];
 }
 

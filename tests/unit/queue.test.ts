@@ -1,17 +1,21 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { clearJobTemps, engineOptions, Queue, type EngineHandle } from "../../electron/main/queue";
 import type { EngineReply } from "../../electron/main/engine";
 import { DEFAULT_OPTIONS, type Job } from "../../src/shared/types";
+
+// the jobs' output folders: real ones (the queue stages each job's files there, partial.ts)
+const OUT = mkdtempSync(join(tmpdir(), "ck-queue-out-"));
+afterAll(() => rmSync(OUT, { recursive: true, force: true }));
 
 function job(id: string, extra: Partial<Job> = {}): Job {
   return {
     id,
     clip: { path: `/c/${id}.mp4`, name: id, kind: "video", width: 640, height: 360, fps: 24, frames: 24, thumb: null, companionFirstFrame: null, companionHintVideo: null, probeError: null },
     options: { ...DEFAULT_OPTIONS },
-    outputDir: `/c/out_${id}`,
+    outputDir: join(OUT, `out_${id}`),
     status: "waiting",
     stage: null,
     stageDetail: null,
@@ -24,6 +28,7 @@ function job(id: string, extra: Partial<Job> = {}): Job {
     outputs: [],
     stills: [],
     error: null,
+    partial: null,
     log: [],
     ...extra,
   };
@@ -90,10 +95,10 @@ describe("Queue", () => {
     await h.q.start();
     await h.flush();
     expect(h.sent.map((m) => m.id)).toEqual(["a"]);
-    h.reply({ type: "result", id: "a", outputs: ["/c/out_a/a_alpha.mp4"] });
+    h.reply({ type: "result", id: "a", outputs: [join(OUT, "out_a", ".corridorkey-partial", "a_alpha.mp4")] });
     await h.flush();
     expect(h.q.jobs[0].status).toBe("done");
-    expect(h.q.jobs[0].outputs).toEqual(["/c/out_a/a_alpha.mp4"]);
+    expect(h.q.jobs[0].outputs).toEqual([join(OUT, "out_a", "a_alpha.mp4")]);
     expect(h.sent.map((m) => m.id)).toEqual(["a", "b"]);
     expect(h.engines).toHaveLength(1); // the model stays loaded between jobs
     h.reply({ type: "result", id: "b", outputs: [] });
@@ -212,6 +217,107 @@ describe("Queue", () => {
     h.q.retry("a");
     expect(h.q.jobs[0].status).toBe("waiting");
     expect(h.q.jobs[0].error).toBeNull();
+  });
+});
+
+// Backlog row 19: a failed or cancelled job removes the files it had started, and only those.
+describe("a job's started files (staging, partial.ts)", () => {
+  // An output folder that holds a previous successful run's results (a video, an EXR folder) and a file of the user's.
+  function earlierRun(id: string): string {
+    const dir = join(OUT, `out_${id}`);
+    mkdirSync(join(dir, `${id}_alpha_exr`), { recursive: true });
+    writeFileSync(join(dir, `${id}_alpha.mp4`), "earlier result");
+    writeFileSync(join(dir, `${id}_alpha_exr`, "000000.exr"), "earlier frame");
+    writeFileSync(join(dir, "notes.txt"), "the user's");
+    return dir;
+  }
+  // What the engine writes before it fails: into the output_dir it was given, under the names it always uses.
+  function engineWrites(h: ReturnType<typeof harness>, id: string): string {
+    const out = String(h.sent.find((m) => m.id === id)!.output_dir);
+    mkdirSync(join(out, `${id}_alpha_exr`), { recursive: true });
+    writeFileSync(join(out, `${id}_alpha.mp4`), "half-written");
+    writeFileSync(join(out, `${id}_alpha_exr`, "000000.exr"), "new frame");
+    writeFileSync(join(out, `${id}_settings.txt`), `Output Directory: ${out}\n`);
+    return out;
+  }
+  const earlierIntact = (dir: string, id: string) => {
+    expect(readFileSync(join(dir, `${id}_alpha.mp4`), "utf8")).toBe("earlier result");
+    expect(readFileSync(join(dir, `${id}_alpha_exr`, "000000.exr"), "utf8")).toBe("earlier frame");
+    expect(readFileSync(join(dir, "notes.txt"), "utf8")).toBe("the user's");
+    expect(readdirSync(dir).sort()).toEqual([`${id}_alpha.mp4`, `${id}_alpha_exr`, "notes.txt"]);
+  };
+
+  it("a failed job: its files go, the earlier run's results and the user's files stay", async () => {
+    const dir = earlierRun("f1");
+    const h = harness();
+    h.q.add(job("f1"));
+    await h.q.start();
+    await h.flush();
+    engineWrites(h, "f1");
+    h.reply({ type: "error", id: "f1", code: "engine", message: "decode failed" });
+    await h.flush();
+    expect(h.q.jobs[0].status).toBe("failed");
+    earlierIntact(dir, "f1");
+    expect(h.q.jobs[0].partial).toBe("Removed the 3 files it had started; earlier results in the folder are untouched.");
+  });
+
+  it("a cancelled job (the engine killed): the same", async () => {
+    const dir = earlierRun("c1");
+    const h = harness();
+    h.q.add(job("c1"));
+    await h.q.start();
+    await h.flush();
+    engineWrites(h, "c1");
+    h.q.stop();
+    expect(h.killed()).toBe(1);
+    expect(h.q.jobs[0].status).toBe("cancelled");
+    earlierIntact(dir, "c1");
+    expect(h.q.jobs[0].partial).toMatch(/^Removed the 3 files/);
+  });
+
+  it("an engine crash: the same; an output folder the job made is removed when it is left empty", async () => {
+    const h = harness();
+    h.q.add(job("x1"));
+    await h.q.start();
+    await h.flush();
+    engineWrites(h, "x1");
+    h.exit(null, "SIGSEGV");
+    await h.flush();
+    expect(h.q.jobs[0].status).toBe("failed");
+    expect(existsSync(join(OUT, "out_x1"))).toBe(false);
+  });
+
+  it("a job stopped before it wrote anything says so", async () => {
+    const h = harness();
+    h.q.add(job("n1"));
+    await h.q.start();
+    await h.flush();
+    h.q.stop();
+    expect(h.q.jobs[0].partial).toBe("It hadn't written any files.");
+  });
+
+  it("success: the new results replace the earlier ones, the user's file stays, the settings file names the real folder", async () => {
+    const dir = earlierRun("s1");
+    const h = harness();
+    h.q.add(job("s1"));
+    await h.q.start();
+    await h.flush();
+    const out = engineWrites(h, "s1");
+    h.reply({ type: "result", id: "s1", outputs: [join(out, "s1_alpha.mp4"), join(out, "s1_alpha_exr")] });
+    await h.flush();
+    const j = h.q.jobs[0];
+    expect(j.status).toBe("done");
+    expect(j.partial).toBeNull();
+    expect(j.outputs).toEqual([join(dir, "s1_alpha.mp4"), join(dir, "s1_alpha_exr")]);
+    expect(readFileSync(join(dir, "s1_alpha.mp4"), "utf8")).toBe("half-written");
+    expect(readdirSync(join(dir, "s1_alpha_exr"))).toEqual(["000000.exr"]);
+    expect(readFileSync(join(dir, "s1_alpha_exr", "000000.exr"), "utf8")).toBe("new frame");
+    expect(readFileSync(join(dir, "s1_settings.txt"), "utf8")).toBe(`Output Directory: ${dir}\n`);
+    expect(readFileSync(join(dir, "notes.txt"), "utf8")).toBe("the user's");
+    // the replaced EXR folder is removed in the background, then nothing of the staging is left
+    // loop: SERIAL-REQUIRED — waits for the background removal [bounded: 50 × 20 ms]
+    for (let i = 0; i < 50 && existsSync(join(dir, ".corridorkey-partial")); i++) await new Promise((r) => setTimeout(r, 20));
+    expect(readdirSync(dir).sort()).toEqual(["notes.txt", "s1_alpha.mp4", "s1_alpha_exr", "s1_settings.txt"]);
   });
 });
 

@@ -228,6 +228,7 @@ async function addPaths(paths: string[]): Promise<void> {
       outputs: [],
       stills: [],
       error: null,
+      partial: null,
       log: [],
     });
   }

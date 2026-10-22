@@ -96,7 +96,8 @@ export function JobView({ job }: { job: Job }) {
       {(job.status === "failed" || job.status === "cancelled") && (
         <section className={`notice ${job.status === "failed" ? "error" : "warn"}`} style={{ margin: "0 0 14px" }}>
           <h3>{job.status === "failed" ? errorTitle(job.error?.code) : "Cancelled"}</h3>
-          <div>{job.status === "failed" ? job.error?.message : "Stopped. Files it had started stay in the output folder, incomplete."}</div>
+          <div>{job.status === "failed" ? job.error?.message : "Stopped."}</div>
+          {job.partial && <p className="hint-text">{job.partial}</p>}
           {job.error?.code === "oom" && <p className="hint-text">Try Manual memory with a smaller window and low-memory mode, or close other programs using the graphics card.</p>}
           <p>
             <button type="button" className="btn small" onClick={() => window.ck.retryJob(job.id)}>

@@ -55,6 +55,10 @@ gets the same signal.
 → {"cmd":"quit"}
 ```
 
+The app gives `output_dir` as a staging folder inside the clip's output folder (`out_shot/.corridorkey-partial`,
+electron/main/partial.ts): it moves the results into place after `result`, and removes the folder after an `error`,
+a cancel (the engine killed) or a crash. The engine writes there as into any output folder and cleans up nothing.
+
 `options` (all optional; missing = the `infer.py` default):
 
 | key | type | meaning |

@@ -48,7 +48,7 @@ the row counts once, as FIXED (the engine's clear refusal).
 | E9 | protocol | `quit` while a job runs is read after the job | by design: the running job can't be interrupted; the app kills the group to stop (queue.stop / shutdown) | | NOT-A-BUG | |
 | E10 | `queue.ts` exited | engine crash mid-job: the job fails with the stderr tail, its temp folder goes, the next job runs on a new engine | existing vitest + A2's test | | NOT-A-BUG | `queue.test.ts` an engine crash fails the job… |
 | E11 | `pipeline.rs` keying error path | a job failing mid-decode (truncated MP4) leaves no ffmpeg child or render thread behind; the engine takes the next request | CPU run: `input` error "failed decoding frame 15", no child processes of the engine afterwards | | NOT-A-BUG | |
-| E12 | `pipeline.rs` | a failed / cancelled job leaves its half-written outputs in the output folder (as upstream) | CPU runs | LOW | BACKLOG (row 19): a UI decision (remove or say so) | |
+| E12 | `pipeline.rs` | a failed / cancelled job leaves its half-written outputs in the output folder (as upstream) | CPU runs | LOW | FIXED 2026-10-22 (backlog row 19), in the app (a cancel kills the engine's process group; both engines): `partial.ts` stages each job in `<out>/.corridorkey-partial`, promotes on `result`, removes it on error / cancel / crash; the row says what was removed | `queue.test.ts` a job's started files: failed, cancelled, crash, nothing written, success (earlier results + a user file survive) |
 | E13 | `engine/ck_engine.py` | the PyTorch engine keeps E1, E8 and I9 (it runs upstream's writer and reader unchanged) | code reading | LOW | BACKLOG (row 20): it stays as the benchmark reference (Marcy 2026-10-22) | |
 
 ## 2. Inputs

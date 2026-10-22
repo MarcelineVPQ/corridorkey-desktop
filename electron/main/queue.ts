@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { EngineReply } from "./engine";
 import type { EngineState, Job, JobOptions, OutputName, Stage } from "../../src/shared/types";
 import { missingInput } from "../../src/shared/tasks";
+import { discard, finalPath, PARTIAL_DIR as PARTIAL_NAME, prepare, promote } from "./partial";
 
 const LOG_LINES = 300;
 // Frames per second is shown once this many frames and seconds are measured.
@@ -64,6 +65,8 @@ export class Queue {
   private proc: EngineHandle | null = null;
   private current: Job | null = null;
   private rateStart: { at: number; frames: number } | null = null;
+  // the running job's staging folder (partial.ts): set once the engine was given it
+  private staged = new Map<string, { madeOutputDir: boolean }>();
   private now: () => number;
 
   constructor(private readonly deps: QueueDeps) {
@@ -106,6 +109,7 @@ export class Queue {
       outputs: [],
       stills: [],
       error: null,
+      partial: null,
       log: [],
     });
     this.deps.changed();
@@ -146,7 +150,11 @@ export class Queue {
   shutdown(): void {
     this.running = false;
     this.proc?.kill();
-    if (this.current) this.cleanTemp(this.current.id);
+    if (this.current) {
+      this.cleanTemp(this.current.id);
+      const st = this.staged.get(this.current.id);
+      if (st) discard(this.current.outputDir, st.madeOutputDir);
+    }
   }
 
   private async ensureEngine(): Promise<boolean> {
@@ -218,11 +226,23 @@ export class Queue {
       return;
     }
     if (this.current !== job) return;
+    let staging: string;
+    try {
+      const st = prepare(job.outputDir);
+      staging = st.staging;
+      this.staged.set(job.id, { madeOutputDir: st.madeOutputDir });
+    } catch (e) {
+      // error: SHOWN — the job fails naming the folder
+      this.current = null;
+      this.finish(job, "failed", { code: "engine", message: `Couldn't create the output folder ${job.outputDir}: ${(e as Error).message}`, stderrTail: [] });
+      this.next();
+      return;
+    }
     this.proc!.send({
       cmd: "run",
       id: job.id,
       input: job.clip.path,
-      output_dir: job.outputDir,
+      output_dir: staging,
       temp_dir: this.deps.tempDirFor(job.id),
       options: engineOptions(job.options, job.clip.kind),
     });
@@ -263,12 +283,22 @@ export class Queue {
         job.log.push(String(r.text));
         if (job.log.length > LOG_LINES) job.log.splice(0, job.log.length - LOG_LINES);
         break;
-      case "result":
-        job.outputs = Array.isArray(r.outputs) ? (r.outputs as string[]) : [];
+      case "result": {
+        // loop: NOT-WORTH — ≤ four output paths, once per job
+        job.outputs = Array.isArray(r.outputs) ? (r.outputs as string[]).map((p) => finalPath(job.outputDir, String(p))) : [];
         this.current = null;
-        this.finish(job, "done", null);
+        const moved = this.staged.has(job.id) ? promote(job.outputDir) : { moved: 0, error: null };
+        this.staged.delete(job.id);
+        if (moved.error)
+          this.finish(job, "failed", {
+            code: "engine",
+            message: `The results are complete but couldn't be moved into ${job.outputDir} (${moved.error}); what wasn't moved is in its ${PARTIAL_NAME} folder.`,
+            stderrTail: [],
+          });
+        else this.finish(job, "done", null);
         this.next();
         return;
+      }
       case "error":
         this.current = null;
         this.finish(job, String(r.code) === "cancelled" ? "cancelled" : "failed", { code: String(r.code), message: String(r.message), stderrTail: this.proc?.stderrTail() ?? [] });
@@ -294,8 +324,12 @@ export class Queue {
 
   // Every ending removes the job's temp folder: the engine deletes its files but not the folder (an empty
   // folder per finished job was left in the cache), and a killed engine leaves its files too.
+  // A failed / cancelled / crashed job's started files go with its staging folder; the row says so (backlog row 19).
   private finish(job: Job, status: "done" | "failed" | "cancelled", error: Job["error"]): void {
     this.cleanTemp(job.id);
+    const st = this.staged.get(job.id);
+    this.staged.delete(job.id);
+    job.partial = status !== "done" && st ? discard(job.outputDir, st.madeOutputDir) : null;
     job.status = status;
     job.finishedAt = this.now();
     job.error = error;
