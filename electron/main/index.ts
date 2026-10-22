@@ -20,16 +20,20 @@ const here = dirname(fileURLToPath(import.meta.url));
 const devServerUrl = process.env.ELECTRON_RENDERER_URL;
 const MEDIA_SCHEME = "ck-media";
 
-// Must run before app ready. NVIDIA + Wayland: Electron's GPU process crash-loops
-// (SIGTRAP) on this driver line; X11 with the GPU sandbox off is the known fix
-// (rule 13: platform quirks handled).
+// Must run before app ready. Linux: Wayland only, because the app must show
+// HDR (Marcy 2026-10-21: "wayland only, since this app has to support HDR
+// strictly"); there is no X11/XWayland fallback. Forcing X11 had also
+// crash-looped the GPU process on her RTX 5080 (exit 139). HDR: render in
+// scRGB (linear, 1.0 = 80 nits), the DS5 app's measured path: KWin 6.6's color
+// manager has no "srgb" transfer function, which Chromium's default asks for;
+// scRGB (ext_linear + windows_scrgb) is the one that reaches the display.
+export const WAYLAND_REQUIRED = process.platform === "linux" && !process.env.WAYLAND_DISPLAY;
 function applyLinuxWorkarounds(): void {
   if (process.platform !== "linux") return;
-  const wayland = process.env.XDG_SESSION_TYPE === "wayland" || Boolean(process.env.WAYLAND_DISPLAY);
-  if (wayland && existsSync("/proc/driver/nvidia/version")) {
-    app.commandLine.appendSwitch("ozone-platform", "x11");
-    app.commandLine.appendSwitch("disable-gpu-sandbox");
-  }
+  app.commandLine.appendSwitch("ozone-platform", "wayland");
+  app.commandLine.appendSwitch("force-color-profile", "scrgb-linear");
+  // Follow the desktop's (fractional) display scale.
+  app.commandLine.appendSwitch("enable-features", "WaylandFractionalScaleV1,WaylandPerSurfaceScale");
 }
 applyLinuxWorkarounds();
 protocol.registerSchemesAsPrivileged([{ scheme: MEDIA_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: false } }]);
@@ -328,6 +332,11 @@ app.on("second-instance", () => {
 });
 
 app.whenReady().then(() => {
+  if (WAYLAND_REQUIRED) {
+    dialog.showErrorBox("CorridorKey needs Wayland", "CorridorKey Desktop runs only in a Wayland session, so HDR footage and results can be shown as HDR. Log in to a Wayland session (Plasma, GNOME) and start it again.");
+    app.quit();
+    return;
+  }
   protocol.handle(MEDIA_SCHEME, (req) => {
     const file = decodeURIComponent(new URL(req.url).pathname.slice(1));
     if (!resolve(file).startsWith(mediaDir + "/")) return new Response("not found", { status: 404 });

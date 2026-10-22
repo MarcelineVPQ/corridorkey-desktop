@@ -5,13 +5,14 @@
 #   tools/isolated.sh --state DIR --port P [--size 1400x900] [--env K=V]...
 #
 # Runs in the foreground until the app quits (close its window over CDP:
-# tools/drive.mjs does). P = the page's DevTools port.
+# tools/drive.mjs does); KWin exits with it. P = the page's DevTools port.
 #   - env -i: a clean environment; no WAYLAND_DISPLAY/DISPLAY/DBUS/XDG_RUNTIME_DIR from your session.
 #   - its own HOME (DIR/home) and XDG dirs, so settings and cache are private.
 #   - a fresh XDG_RUNTIME_DIR (mode 700) and a private D-Bus session bus with
 #     no services to start (no portals, kwalletd/ksecretd, at-spi).
 #   - --password-store=basic: Chromium never looks for a keyring.
-#   - its own virtual display (xvfb-run -a), X11 backend.
+#   - its own headless Wayland compositor (kwin_wayland --virtual), the same
+#     native-Wayland path the app requires (no X11: HDR, Marcy 2026-10-21).
 #   - memory-capped (systemd-run scope, MemoryMax=4G; started from your session, outside env -i).
 set -euo pipefail
 APP="$(cd "$(dirname "$0")/.." && pwd)"
@@ -40,11 +41,17 @@ cat > "$STATE/iso/session.conf" <<CONF
   <policy context="default"><allow send_destination="*" eavesdrop="true"/><allow eavesdrop="true"/><allow own="*"/></policy>
 </busconfig>
 CONF
+W="${SIZE%x*}" H="${SIZE#*x}"
+cat > "$STATE/iso/run-app.sh" <<RUN
+#!/bin/sh
+export WAYLAND_DISPLAY=ck-wl-$PORT
+exec "$APP/node_modules/electron/dist/electron" --no-sandbox --password-store=basic --remote-debugging-port=$PORT "$APP"
+RUN
+chmod +x "$STATE/iso/run-app.sh"
 exec systemd-run --user --scope --quiet --collect -p MemoryMax=4G -p MemorySwapMax=0 -- \
   env -i HOME="$STATE/home" USER="$USER" PATH="/usr/local/bin:/usr/bin:/bin" LANG="${LANG:-C.UTF-8}" \
   XDG_RUNTIME_DIR="$RUN" XDG_CONFIG_HOME="$STATE/home/.config" XDG_CACHE_HOME="$STATE/home/.cache" XDG_DATA_HOME="$STATE/home/.local/share" \
-  GTK_USE_PORTAL=0 NO_AT_BRIDGE=1 GSETTINGS_BACKEND=memory GIO_USE_VFS=local "${ENVS[@]}" \
+  XDG_SESSION_TYPE=wayland GTK_USE_PORTAL=0 NO_AT_BRIDGE=1 GSETTINGS_BACKEND=memory GIO_USE_VFS=local "${ENVS[@]}" \
   dbus-run-session --config-file="$STATE/iso/session.conf" -- \
-  xvfb-run -a -s "-screen 0 ${SIZE}x24" \
-  "$APP/node_modules/electron/dist/electron" --no-sandbox --ozone-platform=x11 --password-store=basic \
-  --remote-debugging-port="$PORT" "$APP" >"$STATE/app.log" 2>&1
+  kwin_wayland --virtual --no-lockscreen --no-global-shortcuts --socket "ck-wl-$PORT" --width "$W" --height "$H" \
+  --exit-with-session="$STATE/iso/run-app.sh" >"$STATE/app.log" 2>&1

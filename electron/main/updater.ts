@@ -59,7 +59,10 @@ function relaunch(target: string): void {
   // loop: SERIAL-REQUIRED — retry: the second form only when systemd refused the first (2 tries)
   for (const exitTypeCgroup of [true, false]) {
     try {
-      execFileSync("systemd-run", systemdRunArgs({ target, args, env, unit, exitTypeCgroup }), { stdio: "ignore" });
+      // At most 5 s: systemd-run blocks the main process while it waits, and on a
+      // session bus without systemd it waits for D-Bus's own 25 s timeout
+      // (found by tools/update_e2e.sh: the restart froze the window).
+      execFileSync("systemd-run", systemdRunArgs({ target, args, env, unit, exitTypeCgroup }), { stdio: "ignore", timeout: 5000 });
       started = true;
       break;
     } catch {
