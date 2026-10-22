@@ -2,7 +2,7 @@
 // edge (the house layout of the DS5 app and Sonata). Drop clips anywhere.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AppState } from "../shared/types";
-import { dots, tasksOf, type PageId } from "../shared/tasks";
+import { dots, jobToSelect, tasksOf, type PageId } from "../shared/tasks";
 import { AppRail } from "./rail/AppRail";
 import { railPress } from "./rail/railModel";
 import { NARROW } from "./panel/SplitView";
@@ -64,9 +64,8 @@ export function App() {
     if (r.panel === "hide") setPanel(r.page, false);
     if (r.section) setFocus({ page: r.page, section: r.section, n: Date.now() });
     // a queue task about one clip selects it
-    // loop: NOT-WORTH — a few tasks per rail click
-    const t = tasks.find((x) => x.page === pressed && x.jobId);
-    if (pressed === "queue" && t?.jobId) setSelected(t.jobId);
+    const job = jobToSelect(tasks, pressed);
+    if (job) setSelected(job);
   };
 
   if (!state) return null;

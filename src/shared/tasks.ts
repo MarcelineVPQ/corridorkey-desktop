@@ -39,6 +39,9 @@ export function tasksOf(state: AppState): Task[] {
   if (state.engine.status === "failed") tasks.push({ id: "engine", page: "engine", section: "", level: "error", text: `The engine didn't start: ${state.engine.error ?? "unknown error"}` });
   // loop: NOT-WORTH — a queue of tens of clips, on each state change (≤ 10/s while running)
   for (const job of state.jobs) {
+    // a clip the app can't read (bug hunt 2026-10 A9): its reason is on the row; the user removes or replaces it
+    if (job.clip.probeError && job.status === "waiting")
+      tasks.push({ id: `unreadable:${job.id}`, page: "queue", section: "", level: "error", text: `${job.clip.name}: Can't read this clip (${job.clip.probeError})`, jobId: job.id });
     const need = missingInput(job);
     if (need) tasks.push({ id: `hint:${job.id}`, page: "queue", section: "hint", level: "task", text: `${job.clip.name}: ${need}`, jobId: job.id });
   }
@@ -47,6 +50,12 @@ export function tasksOf(state: AppState): Task[] {
   if (failed.length)
     tasks.push({ id: "failed", page: "queue", section: "", level: "error", text: failed.length === 1 ? `${failed[0].clip.name} failed` : `${failed.length} clips failed`, jobId: failed[0].id });
   return tasks;
+}
+
+/** The clip a rail press on `page` selects: the first queue task about one clip, or null. */
+export function jobToSelect(tasks: Task[], page: PageId): string | null {
+  // loop: NOT-WORTH — a few tasks per rail click
+  return page === "queue" ? (tasks.find((x) => x.page === page && x.jobId)?.jobId ?? null) : null;
 }
 
 /** The dots: every waiting text per page (one per line), the first text per page/section, and each page's target section. */

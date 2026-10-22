@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dots, missingInput, tasksOf } from "../../src/shared/tasks";
+import { dots, jobToSelect, missingInput, tasksOf } from "../../src/shared/tasks";
 import { DEFAULT_APPEARANCE, DEFAULT_OPTIONS, type AppState, type Job } from "../../src/shared/types";
 
 const job = (id: string, extra: Partial<Job> = {}): Job =>
@@ -46,5 +46,15 @@ describe("tasks (the one mechanism)", () => {
     const d = dots(t);
     expect(d.pages.queue).toBe("2 clips failed");
     expect(d.pages.engine).toMatch(/no python/);
+  });
+  it("a clip the app can't read is an error on the Queue item that selects that clip", () => {
+    const bad = job("b", { clip: { ...job("b").clip, probeError: "ffprobe: Invalid data found when processing input" } });
+    const t = tasksOf(state({ jobs: [job("a"), bad] }));
+    expect(t).toEqual([expect.objectContaining({ page: "queue", level: "error", jobId: "b" })]);
+    expect(jobToSelect(t, "queue")).toBe("b");
+    expect(jobToSelect(t, "engine")).toBe(null);
+    expect(dots(t).pages.queue).toBe("b: Can't read this clip (ffprobe: Invalid data found when processing input)");
+    // it clears when the clip is removed
+    expect(tasksOf(state({ jobs: [job("a")] }))).toEqual([]);
   });
 });
