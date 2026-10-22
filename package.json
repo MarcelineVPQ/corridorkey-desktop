@@ -16,7 +16,8 @@
     "gates": "./.hooks/check_electron_security.sh && node .hooks/check_theme_colors.mjs && node tools/list_loops.mjs --check && node tools/check_no_folds.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "npm run typecheck && npm run format:check && npm run gates && npm test && npm run test:engine"
+    "check": "npm run typecheck && npm run format:check && npm run gates && npm test && npm run test:engine",
+    "check:engine": "cd engine-rs && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test"
   },
   "dependencies": {
     "lucide-react": "0.577.0",

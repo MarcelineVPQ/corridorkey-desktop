@@ -64,6 +64,9 @@ cargo build --release -p ck-engine --no-default-features --features ort-dynamic,
 corridorkey-engine --models DIR [--ort libonnxruntime.so] [--device auto|cuda|cpu]
 ```
 
+`npm run check:engine` (from the repository root) is the engine's gate: `cargo fmt --check`, `cargo clippy --all-targets
+-- -D warnings` (no warning passes) and `cargo test`.
+
 - Default features: pyke's static CPU ONNX Runtime (downloaded at build time), for tests.
 - GPU build: ONNX Runtime loaded at run time (`--ort`, `CK_ENGINE_ORT`, `ORT_DYLIB_PATH`), measured with the
   `onnxruntime-gpu` 1.31 wheel's library (CUDA 13, needs NVIDIA driver ≥ 580). The CUDA, cuDNN and TensorRT

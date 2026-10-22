@@ -597,7 +597,7 @@ mod tests {
         assert_eq!(m.file("moge", Precision::Fp16), None);
         assert_eq!(m.trt_file("rvm", Precision::Fp16), Some(dir.join("stage2_fp16.onnx")));
         assert_eq!((m.trt_file("moge", Precision::Fp16), m.trt_file("rvm", Precision::Fp32)), (None, None));
-        assert_eq!(m.assets(Precision::Fp16)["stage1"], true);
+        assert!(m.assets(Precision::Fp16)["stage1"]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

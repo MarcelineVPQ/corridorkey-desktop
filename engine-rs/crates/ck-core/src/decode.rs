@@ -291,7 +291,7 @@ impl FrameReader {
     }
 
     /// The next frame (None after num_frames).
-    pub fn next(&mut self) -> Result<Option<Prepped>, Error> {
+    pub fn next_frame(&mut self) -> Result<Option<Prepped>, Error> {
         if self.next >= self.meta.num_frames {
             return Ok(None);
         }
@@ -342,7 +342,7 @@ impl Prefetch {
         let thread = std::thread::spawn(move || {
             // loop: SERIAL-REQUIRED — frames decode in order; ends at the clip's end, an error, or a dropped receiver
             loop {
-                let item = reader.next();
+                let item = reader.next_frame();
                 *s2.lock().unwrap() = reader.seconds;
                 let stop = !matches!(item, Ok(Some(_)));
                 let msg = match item {
@@ -359,7 +359,7 @@ impl Prefetch {
     }
 
     /// The next frame, or None at the end.
-    pub fn next(&mut self) -> Result<Option<Prepped>, Error> {
+    pub fn next_frame(&mut self) -> Result<Option<Prepped>, Error> {
         // loop: SERIAL-REQUIRED — frames in order [bounded: the prefetch thread ends at the clip's end (ffmpeg closes its pipe) or an error]
         match self.rx.recv() {
             Ok(Ok(p)) => Ok(Some(p)),
@@ -493,7 +493,7 @@ impl HintReader {
         Ok(HintReader { meta: meta.clone(), video: Some(VideoDecoder::open(path, p.w, p.h, meta.num_frames)?), paths: vec![], next: 0 })
     }
 
-    pub fn next(&mut self) -> Result<Vec<f32>, Error> {
+    pub fn next_frame(&mut self) -> Result<Vec<f32>, Error> {
         let still = match &mut self.video {
             Some(v) => {
                 let (w, h) = (v.w, v.h);

@@ -200,7 +200,7 @@ pub fn resize_bilinear_into(img: &Planar, ho: usize, wo: usize, dst_all: &mut [f
 
 /// OpenCV's Lanczos-4 coefficients for fractional offset `fx` (imgproc resize.cpp interpolateLanczos4).
 fn lanczos4_coeffs(fx: f32) -> [f32; 8] {
-    const S45: f64 = 0.707_106_781_186_547_6;
+    const S45: f64 = std::f64::consts::FRAC_1_SQRT_2; // 0.7071067811865476, the same double as OpenCV's literal
     const CS: [[f64; 2]; 8] = [[1.0, 0.0], [-S45, -S45], [0.0, 1.0], [S45, -S45], [-1.0, 0.0], [S45, S45], [0.0, -1.0], [-S45, S45]];
     let mut c = [0f32; 8];
     if fx < f32::EPSILON {

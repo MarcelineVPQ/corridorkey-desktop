@@ -27,4 +27,5 @@ Built to **Marcy's 15 basic rules for programming applications** (memory
 - **npm:** the system npm 9 (and npm 10) crash in peer resolution on this set; `.npmrc` has
   `legacy-peer-deps=true`. Run Electron's `node node_modules/electron/install.js` if the binary is missing.
 
-Commands: `npm run dev` · `npm run build` · `npm run check` (typecheck, format, gates, unit + engine tests).
+Commands: `npm run dev` · `npm run build` · `npm run check` (typecheck, format, gates, unit + engine tests) ·
+`npm run check:engine` (engine-rs: cargo fmt --check, clippy -D warnings, cargo test).
