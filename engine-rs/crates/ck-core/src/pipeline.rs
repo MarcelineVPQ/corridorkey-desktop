@@ -8,17 +8,19 @@
 //!
 //! Low-VRAM mode stages it: foundations first (to temp_dir), then stage 1 (states to temp_dir), then
 //! stage 2, with only that phase's networks loaded.
+use crate::ahead::Ahead;
 use crate::clip::{probe_frame_dir, probe_video, raw_clip_name, ClipMeta, Source};
 use crate::color::{bf16_round, f16_round, LinearAdjust};
 use crate::decode::{load_initial_hint, FrameReader, HintReader, Prefetch, Prepped};
 use crate::hann::{taper_weights, window_starts, BatonBlend};
 use crate::image::{resize_area, resize_bilinear, Planar};
 use crate::job::{suffix, JobConfig};
-use crate::render::{make_checker, render, RenderOpts};
+use crate::outputs::{Geometry, RenderWorker};
+use crate::render::{make_checker, RenderOpts};
 use crate::runtime::{ModelSet, Net, Precision, Provider, Runtime, TrtSettings};
 use crate::tensorrt::{BATON_CH, CRADIO_CH, MOGE_CH, RVM_CH};
 use crate::vram::{estimate_peak_vram_gb, select_vram_profile};
-use crate::writers::{Batch, ExrType, ExrWriter, VideoWriter, Writer};
+use crate::writers::{ExrType, ExrWriter, VideoWriter, Writer};
 use crate::Error;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
@@ -49,6 +51,11 @@ struct FrameReport {
 impl FrameReport {
     fn report(&mut self, writers: &[(String, Box<dyn Writer>)], sink: &mut dyn Sink, force: bool) {
         let done = writers.iter().map(|(_, w)| w.frames()).min().unwrap_or(0);
+        self.count(done, sink, force);
+    }
+
+    /// `done`: frames every writer has taken (the render thread's count).
+    fn count(&mut self, done: usize, sink: &mut dyn Sink, force: bool) {
         if self.last_done == Some(done) {
             return;
         }
@@ -83,9 +90,11 @@ pub struct Pipeline {
     /// measured once per process: graphics memory the CUDA context and libraries take (bytes), outside any arena
     gpu_overhead: Option<u64>,
     /// this job's measured seconds per network (run, convert, calls), kept across low-VRAM unloads
-    stats: BTreeMap<&'static str, (f64, f64, usize)>,
+    stats: BTreeMap<&'static str, (f64, f64, usize, f64)>,
     /// this job's seconds spent loading sessions
     load_s: f64,
+    /// this job's main-thread seconds around stage 2: [inputs, waiting for the render thread]
+    s2_host: [f64; 2],
 }
 
 pub struct JobResult {
@@ -121,7 +130,9 @@ impl F16File {
         Ok(F16File { f, frame })
     }
     fn put(&mut self, t: usize, v: &[f32]) -> Result<(), Error> {
-        let bytes: Vec<u8> = v.iter().flat_map(|x| half::f16::from_f32(*x).to_le_bytes()).collect();
+        use rayon::prelude::*;
+        let mut bytes = vec![0u8; v.len() * 2];
+        bytes.par_chunks_mut(2).zip(v.par_iter()).with_min_len(1 << 14).for_each(|(b, x)| b.copy_from_slice(&half::f16::from_f32(*x).to_le_bytes()));
         self.f.seek(SeekFrom::Start((t * self.frame * 2) as u64)).and_then(|_| self.f.write_all(&bytes)).map_err(|e| Error::engine(format!("temp file: {e}")))
     }
     /// frames t0..t1 as float32, appended to `out`
@@ -227,7 +238,17 @@ fn f1(v: f64) -> String {
 
 impl Pipeline {
     pub fn new(rt: &'static Runtime, models: ModelSet) -> Pipeline {
-        Pipeline { rt, models, key: None, nets: HashMap::new(), trt_fallbacks: BTreeMap::new(), gpu_overhead: None, stats: BTreeMap::new(), load_s: 0.0 }
+        Pipeline {
+            rt,
+            models,
+            key: None,
+            nets: HashMap::new(),
+            trt_fallbacks: BTreeMap::new(),
+            gpu_overhead: None,
+            stats: BTreeMap::new(),
+            load_s: 0.0,
+            s2_host: [0.0; 2],
+        }
     }
 
     /// Drop every loaded network (frees the graphics memory their sessions hold).
@@ -242,10 +263,13 @@ impl Pipeline {
     fn fold_stats(&mut self) {
         // loop: NOT-WORTH — at most five networks
         for (p, n) in self.nets.iter_mut() {
-            let e = self.stats.entry(*p).or_insert((0.0, 0.0, 0));
+            let e = self.stats.entry(*p).or_insert((0.0, 0.0, 0, 0.0));
             e.0 += n.run_s;
             e.1 += n.convert_s;
             e.2 += n.calls;
+            if n.calls > 0 {
+                e.3 += n.first_s.take().unwrap_or(0.0);
+            }
             n.run_s = 0.0;
             n.convert_s = 0.0;
             n.calls = 0;
@@ -351,6 +375,7 @@ impl Pipeline {
     /// Run one job. Replies go to `sink` (progress, clip, memory, provider, frames, log); the result or the
     /// failure is returned for the engine to send.
     pub fn run(&mut self, job: &JobConfig, sink: &mut dyn Sink) -> Result<JobResult, Error> {
+        let job_t = Instant::now();
         let Some(provider) = self.rt.provider() else {
             return Err(Error::no_gpu("CorridorKey needs an NVIDIA graphics card with CUDA.".into()));
         };
@@ -370,8 +395,11 @@ impl Pipeline {
             _ => job.vram_budget_gb.map(|g| (g * 1073741824.0) as u64),
         };
         let base_key = ModelKey { provider, precision, trt_cache: None, vram_cap };
-        // the CUDA / CPU networks load before the probe, as the runtime's load_model; TensorRT's depend on the clip
-        if !job.low_vram && !job.tensorrt {
+        // a manual normal-mode job loads the CUDA / CPU networks before the probe, as the runtime's load_model
+        // (TensorRT's depend on the clip). An automatic window loads them once the window is chosen: measured, the
+        // early load cost ~3 s per job when the window then came out low-VRAM (every network loaded again per
+        // phase). The automatic budget is free + own memory, the same either way.
+        if job.manual && !job.low_vram && !job.tensorrt {
             self.ensure(&base_key, &crate::runtime::PIECES, None, sink, "load")?;
         }
         sink.send(json!({"type": "progress", "stage": "probe"}));
@@ -531,6 +559,7 @@ impl Pipeline {
         write_settings(chunk, stride, low_vram, sink);
 
         let mut report = FrameReport { total: t_all, last_sent: None, last_done: None };
+        let setup_s = job_t.elapsed().as_secs_f64();
         let mut res;
         // An automatic window that runs out of graphics memory before any frame reached the writers is halved and
         // the job restarted (the PyTorch table the window comes from is not ONNX Runtime's measured memory,
@@ -557,6 +586,7 @@ impl Pipeline {
             }
         }
         // release every writer (its encoder finishes the file), the first failure wins
+        let rel_t = Instant::now();
         let mut rel: Result<(), Error> = Ok(());
         // loop: NOT-WORTH — at most four writers
         for (_, wr) in writers.iter_mut() {
@@ -569,6 +599,11 @@ impl Pipeline {
         if low_vram {
             self.unload();
         }
+        sink.log(&format!(
+            "  job: setup {setup_s:.1} s (probe, writers), writers finishing {:.1} s, total {:.1} s",
+            rel_t.elapsed().as_secs_f64(),
+            job_t.elapsed().as_secs_f64()
+        ));
         res?;
         rel?;
         report.report(&writers, sink, true);
@@ -678,6 +713,7 @@ impl Pipeline {
         });
         self.stats.clear();
         self.load_s = 0.0;
+        self.s2_host = [0.0; 2];
         // wall seconds per phase (the low-VRAM phases include loading their networks)
         let mut phases: Vec<(&str, f64)> = Vec::new();
         let mut phase_t = Instant::now();
@@ -717,16 +753,26 @@ impl Pipeline {
             sink.log(&format!("    RVM continuous prepass: T={t_all}, chunk={}, input={we}x{he}, grid={}x{}", chunk.clamp(1, 8), we / 16, he / 16));
             let ntok = 1 + (he / 16) * (we / 16);
             let mut state = vec![0f32; ntok * RVM_CH];
+            // the small frames are made ahead on their own thread (they don't depend on the state)
             let mut reader = Prefetch::new(FrameReader::open(meta)?.display_only(), 8);
-            let mut t = 0;
-            let net = self.net("rvm")?;
-            // loop: SERIAL-REQUIRED — RVM is recurrent: each frame's step takes the previous state
-            while let Some(f) = reader.next()? {
+            let dec = std::sync::Arc::new(std::sync::Mutex::new(0.0));
+            let dec2 = dec.clone();
+            let mut small_frames = Ahead::spawn(4, move || {
+                let Some(f) = reader.next()? else {
+                    *dec2.lock().unwrap() = reader.seconds();
+                    return Ok(None);
+                };
                 let mut disp = Vec::with_capacity(f.display.len());
                 bf16_to_f32(&f.display, &mut disp);
                 let mut small = resize_bilinear(&Planar::from_vec(3, sh, sw, disp), he, we);
                 small.map(|v| v.clamp(0.0, 1.0));
-                let outs = net.run(vec![("frame", vec![1, 3, he, we], small.data), ("state", vec![1, ntok, RVM_CH], state)])?;
+                Ok(Some(small.data))
+            });
+            let mut t = 0;
+            let net = self.net("rvm")?;
+            // loop: SERIAL-REQUIRED — RVM is recurrent: each frame's step takes the previous state
+            while let Some(small) = small_frames.next()? {
+                let outs = net.run(vec![("frame", vec![1, 3, he, we], small), ("state", vec![1, ntok, RVM_CH], state)])?;
                 let mut it = outs.into_iter();
                 let (_, feat) = it.next().ok_or_else(|| Error::engine("rvm: no output".into()))?;
                 let (_, st) = it.next().ok_or_else(|| Error::engine("rvm: no state".into()))?;
@@ -737,7 +783,8 @@ impl Pipeline {
             if t != t_all {
                 return Err(Error::input(format!("{}: decoded only {t}/{t_all} requested frames", job.input)));
             }
-            decode_s += reader.seconds();
+            decode_s += *dec.lock().unwrap();
+            sink.log(&format!("    RVM inputs prepared on their own thread in {:.1} s", small_frames.seconds()));
         }
         phases.push(("rvm", phase_t.elapsed().as_secs_f64()));
         phase_t = Instant::now();
@@ -752,17 +799,28 @@ impl Pipeline {
             sink.log(&format!("    frozen VFM prepass: T={t_all}, grid={w64}x{h64}, chunk={fchunk}"));
             let mut cf = F32File::create(&cradio_path, CRADIO_CH * h64 * w64)?;
             let mut mf = F32File::create(&moge_path, MOGE_CH * h64 * w64)?;
+            // the resized inputs are made ahead on their own thread
             let mut reader = Prefetch::new(FrameReader::open(meta)?.display_only(), 8);
-            let mut t0 = 0;
-            // loop: SERIAL-REQUIRED — chunks of 4 frames, decoded in order
-            while t0 < t_all {
+            let dec = std::sync::Arc::new(std::sync::Mutex::new(0.0));
+            let dec2 = dec.clone();
+            let mut done_frames = 0;
+            let mut chunks = Ahead::spawn(2, move || {
                 let mut frames = Vec::new();
                 // loop: NOT-WORTH — up to four frames
-                while frames.len() < fchunk && t0 + frames.len() < t_all {
+                while frames.len() < fchunk && done_frames < t_all {
                     frames.push(reader.next()?.ok_or_else(|| Error::input("short read".into()))?);
+                    done_frames += 1;
                 }
-                let n = frames.len();
-                let (c, m) = self.foundations(&frames, sh, sw)?;
+                if frames.is_empty() {
+                    *dec2.lock().unwrap() = reader.seconds();
+                    return Ok(None);
+                }
+                Ok(Some((frames.len(), foundation_inputs(&frames, sh, sw))))
+            });
+            let mut t0 = 0;
+            // loop: SERIAL-REQUIRED — chunks of 4 frames, in order
+            while let Some((n, (radio, moge))) = chunks.next()? {
+                let (c, m) = self.foundation_run(n, radio, moge, sh, sw)?;
                 // loop: NOT-WORTH — up to four frames
                 for j in 0..n {
                     cf.put(t0 + j, &c[j * CRADIO_CH * h64 * w64..(j + 1) * CRADIO_CH * h64 * w64])?;
@@ -770,16 +828,15 @@ impl Pipeline {
                 }
                 t0 += n;
             }
-            decode_s += reader.seconds();
+            decode_s += *dec.lock().unwrap();
+            sink.log(&format!("    foundation inputs prepared on their own thread in {:.1} s", chunks.seconds()));
             found_files = Some((cf, mf));
             phases.push(("foundations", phase_t.elapsed().as_secs_f64()));
             phase_t = Instant::now();
-            self.unload();
-            self.ensure(key, &["stage1"], trt, sink, load_stage)?;
         }
 
+        let window_decode_s = std::sync::Arc::new(std::sync::Mutex::new(0.0));
         // 3. stage 1 on Hann windows (+ 4. stage 2 streamed, normal mode)
-        sink.send(json!({"type": "progress", "stage": "keying"}));
         let starts = window_starts(t_all, chunk, stride);
         let overlap = chunk.saturating_sub(stride);
         sink.log(&format!("    Hann stage1: chunk={chunk}, stride={stride}, windows={}, baton_grid={w16}x{h16}", starts.len()));
@@ -794,10 +851,48 @@ impl Pipeline {
             adjust: LinearAdjust::default(),
         };
         let checker = make_checker(meta.h, meta.w);
-        let mut reader = WindowReader::open(meta)?;
-        let mut hints = match crate::clip::none_path(job.hint_video.as_deref()) {
-            Some(p) => Some(HintWindows { reader: HintReader::open(Path::new(p), meta)?, cache: BTreeMap::new(), next: 0 }),
-            None => None,
+        // render + hand-off to the writers on their own thread (the writers come back when `out` ends)
+        let geo = Geometry { shape: (sh, sw), crop: (meta.pad.t, meta.pad.l), hw: (meta.h, meta.w) };
+        let mut out = RenderWorker::start(writers, ro, checker, geo);
+        // each window's inputs that don't depend on the previous window (decoded frames, hint video, foundation
+        // and RVM features, or the foundations' resized inputs) are made on their own thread while the card runs
+        // the window before (at most one window ahead: a rendezvous channel)
+        let mut windows = {
+            let mut reader = WindowReader::open(meta)?;
+            let mut hints = match crate::clip::none_path(job.hint_video.as_deref()) {
+                Some(p) => Some(HintWindows { reader: HintReader::open(Path::new(p), meta)?, cache: BTreeMap::new(), next: 0 }),
+                None => None,
+            };
+            let mut found_files = found_files.take();
+            let mut rvm_file = rvm_file;
+            let starts = starts.clone();
+            let dec = window_decode_s.clone();
+            let mut i = 0;
+            Ahead::spawn(0, move || {
+                let Some(&t0) = starts.get(i) else {
+                    *dec.lock().unwrap() = reader.reader.seconds();
+                    return Ok(None);
+                };
+                i += 1;
+                let t1 = (t0 + chunk).min(t_all);
+                let frames = reader.window(t0, t1)?;
+                let hint_video = match hints.as_mut() {
+                    Some(hw) => Some(hw.window(t0, t1)?),
+                    None => None,
+                };
+                let found = match found_files.as_mut() {
+                    None => Found::Inputs(foundation_inputs(&frames, sh, sw)),
+                    Some((cf, mf)) => {
+                        let (mut c, mut m) = (Vec::new(), Vec::new());
+                        cf.get(t0, t1, &mut c)?;
+                        mf.get(t0, t1, &mut m)?;
+                        Found::Features(c, m)
+                    }
+                };
+                let mut rvm = Vec::with_capacity((t1 - t0) * rvm_frame);
+                rvm_file.get(t0, t1, &mut rvm)?;
+                Ok(Some(WindowInputs { frames, hint_video, found, rvm }))
+            })
         };
         let baton_frame = BATON_CH * h16 * w16;
         let mut baton_file = if low_vram { Some(F16File::create(&baton_path, baton_frame)?) } else { None };
@@ -807,6 +902,12 @@ impl Pipeline {
         let plane = sh * sw;
         let hq_full = bf16_round(job.hint_quality as f32);
         let hq_carry = bf16_round(job.carry_hint_quality as f32);
+        if low_vram {
+            // stage 1 loads while the first window's inputs are made
+            self.unload();
+            self.ensure(key, &["stage1"], trt, sink, load_stage)?;
+        }
+        sink.send(json!({"type": "progress", "stage": "keying"}));
         // measured host seconds around stage 1: inputs (decode wait, features, hints) and after (carry, blend, hand-off)
         let (mut s1_in_s, mut s1_out_s) = (0.0f64, 0.0f64);
         // loop: SERIAL-REQUIRED — windows run in order: each one's carry hint feeds the next
@@ -814,12 +915,11 @@ impl Pipeline {
             let tw = Instant::now();
             let t1 = (t0 + chunk).min(t_all);
             let tc = t1 - t0;
-            let frames = reader.window(t0, t1)?;
+            let WindowInputs { frames, hint_video, found, rvm } = windows.next()?.ok_or_else(|| Error::engine("the window input thread ended early".into()))?;
             let mut hint = vec![0f32; tc * plane];
             let mut hq = vec![0f32; tc];
             let mut present = vec![false; tc];
-            if let Some(hw) = hints.as_mut() {
-                let hv = hw.window(t0, t1)?;
+            if let Some(hv) = hint_video {
                 // loop: HOT-PATH-OK — the window's frames
                 for (j, m) in hv.iter().enumerate() {
                     hint[j * plane..(j + 1) * plane].copy_from_slice(m);
@@ -849,17 +949,10 @@ impl Pipeline {
                     stage2_frames.entry(t).or_insert_with(|| frames[j].model.clone());
                 }
             }
-            let (cradio, moge) = match found_files.as_mut() {
-                None => self.foundations(&frames, sh, sw)?,
-                Some((cf, mf)) => {
-                    let (mut c, mut m) = (Vec::new(), Vec::new());
-                    cf.get(t0, t1, &mut c)?;
-                    mf.get(t0, t1, &mut m)?;
-                    (c, m)
-                }
+            let (cradio, moge) = match found {
+                Found::Inputs((radio, moge)) => self.foundation_run(tc, radio, moge, sh, sw)?,
+                Found::Features(c, m) => (c, m),
             };
-            let mut rvm = Vec::with_capacity(tc * rvm_frame);
-            rvm_file.get(t0, t1, &mut rvm)?;
             let mut rgb = Vec::with_capacity(tc * 3 * plane);
             // loop: HOT-PATH-OK — the window's frames
             for f in &frames {
@@ -884,15 +977,21 @@ impl Pipeline {
             }
             let next_start = if i + 1 < starts.len() { starts[i + 1] } else { t_all };
             if job.carry_hint {
+                use rayon::prelude::*;
                 let (ah, aw) = (as_[3], as_[4]);
                 let aplane = 4 * ah * aw;
-                // loop: HOT-PATH-OK — the window's frames
-                for (j, t) in (t0..t1).enumerate() {
-                    let a0 = Planar::from_vec(1, ah, aw, aux[j * aplane..j * aplane + ah * aw].to_vec());
-                    let mut up = resize_bilinear(&a0, sh, sw);
-                    up.map(|v| bf16_round(v.clamp(0.0, 1.0)));
-                    carry.insert(t, up.data);
-                }
+                // only the frames the next window takes (t >= next_start) are kept: the others aren't made
+                let ups: Vec<(usize, Vec<f32>)> = (next_start.max(t0)..t1)
+                    .into_par_iter()
+                    .map(|t| {
+                        let j = t - t0;
+                        let a0 = Planar::from_vec(1, ah, aw, aux[j * aplane..j * aplane + ah * aw].to_vec());
+                        let mut up = resize_bilinear(&a0, sh, sw);
+                        up.map(|v| bf16_round(v.clamp(0.0, 1.0)));
+                        (t, up.data)
+                    })
+                    .collect();
+                carry.extend(ups);
                 carry = carry.split_off(&next_start);
             }
             let wts = taper_weights(tc, overlap, i == 0, i == starts.len() - 1);
@@ -904,64 +1003,90 @@ impl Pipeline {
             let ready = blend.flush_before(next_start);
             s1_out_s += tw.elapsed().as_secs_f64();
             let tr = Instant::now();
-            self.baton_frames(ready, &mut baton_file, &mut stage2_frames, meta, &ro, &checker, writers, report, sink)?;
+            self.baton_frames(ready, &mut baton_file, &mut stage2_frames, meta, &mut out, report, sink)?;
             render_s += tr.elapsed().as_secs_f64();
             sink.log(&format!("      window {}/{} [{t0}:{t1}]", i + 1, starts.len()));
             sink.send(json!({"type": "progress", "stage": "keying", "p": ((i + 1) as f64 / starts.len() as f64 * 1e4).round() / 1e4, "detail": format!("window {}/{} done", i + 1, starts.len())}));
         }
         let ready = blend.flush_before(t_all + 1);
-        self.baton_frames(ready, &mut baton_file, &mut stage2_frames, meta, &ro, &checker, writers, report, sink)?;
+        self.baton_frames(ready, &mut baton_file, &mut stage2_frames, meta, &mut out, report, sink)?;
 
-        decode_s += reader.reader.seconds();
+        drop(windows);
+        decode_s += *window_decode_s.lock().unwrap();
         phases.push((if low_vram { "stage1" } else { "windows+stage2" }, phase_t.elapsed().as_secs_f64()));
         phase_t = Instant::now();
         // low-VRAM phase 2: stage 2 over the stored states
         if let Some(mut bf) = baton_file {
             self.unload();
             self.ensure(key, &["stage2"], trt, sink, load_stage)?;
+            // frames and stored states read and made into stage-2 inputs on their own thread, ahead of the card
             let mut reader = Prefetch::new(FrameReader::open(meta)?, 8);
+            let (itx, irx) = std::sync::mpsc::sync_channel::<Result<(Vec<f32>, Vec<f32>), Error>>(2);
+            let producer = std::thread::spawn(move || {
+                let mut prep_s = 0.0;
+                // loop: SERIAL-REQUIRED — frames in order; ends at the clip's end, an error, or a dropped receiver
+                for t in 0..t_all {
+                    let tp = Instant::now();
+                    let item = reader.next().and_then(|f| f.ok_or_else(|| Error::input("short read".into()))).and_then(|f| {
+                        let mut b = Vec::with_capacity(baton_frame);
+                        bf.get(t, t + 1, &mut b)?;
+                        Ok(stage2_inputs(&f.model, b))
+                    });
+                    prep_s += tp.elapsed().as_secs_f64();
+                    let stop = item.is_err();
+                    if itx.send(item).is_err() || stop {
+                        break;
+                    }
+                }
+                (reader.seconds(), prep_s)
+            });
+            let mut res = Ok(());
             // loop: SERIAL-REQUIRED — frames in order to the writers
-            for t in 0..t_all {
-                let f = reader.next()?.ok_or_else(|| Error::input("short read".into()))?;
-                let mut b = Vec::with_capacity(baton_frame);
-                bf.get(t, t + 1, &mut b)?;
-                self.stage2_frame(&f.model, b, meta, &ro, &checker, writers, report, sink)?;
+            for _ in 0..t_all {
+                let tw = Instant::now();
+                let item = irx.recv().map_err(|_| Error::engine("the stage-2 input thread stopped".into())).and_then(|r| r);
+                self.s2_host[0] += tw.elapsed().as_secs_f64();
+                if let Err(e) = item.and_then(|(rgb, b)| self.stage2_run(rgb, b, meta, &mut out, report, sink)) {
+                    res = Err(e);
+                    break;
+                }
             }
-            decode_s += reader.seconds();
+            drop(irx);
+            let (dec_s, prep_s) = producer.join().map_err(|_| Error::engine("the stage-2 input thread panicked".into()))?;
+            res?;
+            sink.log(&format!("    stage 2 phase: inputs prepared on their own thread in {prep_s:.1} s"));
+            decode_s += dec_s;
             phases.push(("stage2", phase_t.elapsed().as_secs_f64()));
         }
-        // measured time per part (stage-2 time includes its render and hand-off to the writers)
+        let worker_s = *out.seconds.lock().unwrap();
+        out.finish()?;
+        // every frame is with the writers now (before they finish encoding): say so right away
+        report.report(writers, sink, true);
+        // measured time per part
         self.fold_stats();
         let mut parts: Vec<String> = vec![format!("decode+prep {decode_s:.1} s"), format!("session loads {:.1} s", self.load_s)];
         // loop: NOT-WORTH — five networks
         for p in crate::runtime::PIECES {
-            if let Some((run_s, convert_s, calls)) = self.stats.get(p) {
-                parts.push(format!("{p} {run_s:.1} s run + {convert_s:.1} s convert ({calls} calls)"));
+            if let Some((run_s, convert_s, calls, first_s)) = self.stats.get(p) {
+                parts.push(format!("{p} {run_s:.1} s run (first calls {first_s:.1} s) + {convert_s:.1} s convert ({calls} calls)"));
             }
         }
         parts.push(format!("stage 1 host: inputs {s1_in_s:.1} s, after {s1_out_s:.1} s"));
-        parts.push(format!("stage 2 + render + write {render_s:.1} s"));
+        parts.push(format!("stage 2 calls + hand-off in the windows {render_s:.1} s"));
+        parts.push(format!(
+            "stage 2 main thread: inputs {:.1} s, waiting for the render thread {:.1} s; render thread {worker_s:.1} s",
+            self.s2_host[0], self.s2_host[1]
+        ));
         let ph: Vec<String> = phases.iter().map(|(n, s)| format!("{n} {s:.1} s")).collect();
         parts.push(format!("phases: {}", ph.join(", ")));
         sink.log(&format!("  timing: {}; wall {:.1} s", parts.join(", "), job_t0.elapsed().as_secs_f64()));
         Ok(())
     }
 
-    /// C-RADIO and MoGe features for frames (area-resized display RGB): (cradio, moge), (N, C, H/64, W/64).
-    fn foundations(&mut self, frames: &[Prepped], sh: usize, sw: usize) -> Result<(Vec<f32>, Vec<f32>), Error> {
-        let n = frames.len();
+    /// C-RADIO and MoGe on `n` frames' resized inputs (`foundation_inputs`).
+    fn foundation_run(&mut self, n: usize, radio: Vec<f32>, moge: Vec<f32>, sh: usize, sw: usize) -> Result<(Vec<f32>, Vec<f32>), Error> {
         let (hr, wr) = (sh / 4, sw / 4);
         let (hm, wm) = (sh * 7 / 32, sw * 7 / 32);
-        let mut radio = Vec::with_capacity(n * 3 * hr * wr);
-        let mut moge = Vec::with_capacity(n * 3 * hm * wm);
-        // loop: HOT-PATH-OK — the window's frames
-        for f in frames {
-            let mut d = Vec::with_capacity(f.display.len());
-            bf16_to_f32(&f.display, &mut d);
-            let p = Planar::from_vec(3, sh, sw, d);
-            radio.extend(resize_area(&p, hr, wr).data);
-            moge.extend(resize_area(&p, hm, wm).data);
-        }
         let c =
             self.net("cradio")?.run(vec![("rgb", vec![n, 3, hr, wr], radio)])?.into_iter().next().ok_or_else(|| Error::engine("cradio: no output".into()))?;
         let m = self.net("moge")?.run(vec![("rgb", vec![n, 3, hm, wm], moge)])?.into_iter().next().ok_or_else(|| Error::engine("moge: no output".into()))?;
@@ -979,9 +1104,7 @@ impl Pipeline {
         baton_file: &mut Option<F16File>,
         stage2_frames: &mut BTreeMap<usize, Vec<half::bf16>>,
         meta: &ClipMeta,
-        ro: &RenderOpts,
-        checker: &[f32],
-        writers: &mut Vec<(String, Box<dyn Writer>)>,
+        out: &mut RenderWorker<'_>,
         report: &mut FrameReport,
         sink: &mut dyn Sink,
     ) -> Result<(), Error> {
@@ -991,45 +1114,82 @@ impl Pipeline {
                 Some(f) => f.put(t, &b)?,
                 None => {
                     let model = stage2_frames.remove(&t).ok_or_else(|| Error::engine(format!("frame {t} not cached for stage 2")))?;
-                    self.stage2_frame(&model, b, meta, ro, checker, writers, report, sink)?;
+                    let t0 = Instant::now();
+                    let (rgb, b) = stage2_inputs(&model, b);
+                    self.s2_host[0] += t0.elapsed().as_secs_f64();
+                    self.stage2_run(rgb, b, meta, out, report, sink)?;
                 }
             }
         }
         Ok(())
     }
 
-    /// Stage 2 on one frame, rendered and handed to every writer.
-    #[allow(clippy::too_many_arguments)]
-    fn stage2_frame(
+    /// Stage 2 on one frame; its output goes to the render thread (rendered and handed to every writer there).
+    fn stage2_run(
         &mut self,
-        model: &[half::bf16],
+        rgb: Vec<f32>,
         baton: Vec<f32>,
         meta: &ClipMeta,
-        ro: &RenderOpts,
-        checker: &[f32],
-        writers: &mut [(String, Box<dyn Writer>)],
+        out: &mut RenderWorker<'_>,
         report: &mut FrameReport,
         sink: &mut dyn Sink,
     ) -> Result<(), Error> {
         let (sh, sw) = (meta.shape_h, meta.shape_w);
-        let mut rgb = Vec::with_capacity(model.len());
-        bf16_to_f32(model, &mut rgb);
-        let baton: Vec<f32> = baton.into_iter().map(f16_round).collect();
         let outs = self.net("stage2")?.run(vec![("rgb", vec![1, 1, 3, sh, sw], rgb), ("baton", vec![1, 1, BATON_CH, sh / 16, sw / 16], baton)])?;
         let (_, logits) = outs.into_iter().next().ok_or_else(|| Error::engine("stage2: no logits".into()))?;
         if logits.len() != 4 * sh * sw {
             return Err(Error::engine(format!("stage2: {} logits for {}x{}", logits.len(), sw, sh)));
         }
-        let rendered = render(ro, &logits, (sh, sw), (meta.pad.t, meta.pad.l), (meta.h, meta.w), checker);
-        // loop: NOT-WORTH — at most four outputs
-        for (name, batch) in rendered {
-            let idx = writers.iter().position(|(n, _)| n == name).ok_or_else(|| Error::engine(format!("no writer for {name}")))?;
-            let b: Batch = batch;
-            writers[idx].1.write_many(b, 1)?;
-            report.report(writers, sink, false);
+        let t = Instant::now();
+        let sent = out.send(logits);
+        self.s2_host[1] += t.elapsed().as_secs_f64();
+        if let Some(done) = out.done() {
+            report.count(done, sink, false);
         }
-        Ok(())
+        sent
     }
+}
+
+/// One stage-1 window's inputs made ahead (`keying`).
+struct WindowInputs {
+    frames: Vec<Prepped>,
+    hint_video: Option<Vec<Vec<f32>>>,
+    found: Found,
+    rvm: Vec<f32>,
+}
+
+/// The window's foundation features (low-VRAM: from the prepass files) or the inputs to compute them.
+enum Found {
+    Features(Vec<f32>, Vec<f32>),
+    Inputs((Vec<f32>, Vec<f32>)),
+}
+
+/// C-RADIO's and MoGe's inputs for frames: display RGB area-resized to 1/4 and 7/32.
+fn foundation_inputs(frames: &[Prepped], sh: usize, sw: usize) -> (Vec<f32>, Vec<f32>) {
+    let n = frames.len();
+    let (hr, wr) = (sh / 4, sw / 4);
+    let (hm, wm) = (sh * 7 / 32, sw * 7 / 32);
+    let mut radio = Vec::with_capacity(n * 3 * hr * wr);
+    let mut moge = Vec::with_capacity(n * 3 * hm * wm);
+    // loop: HOT-PATH-OK — the window's frames
+    for f in frames {
+        let mut d = Vec::with_capacity(f.display.len());
+        bf16_to_f32(&f.display, &mut d);
+        let p = Planar::from_vec(3, sh, sw, d);
+        radio.extend(resize_area(&p, hr, wr).data);
+        moge.extend(resize_area(&p, hm, wm).data);
+    }
+    (radio, moge)
+}
+
+/// Stage 2's inputs for one frame: the model view as float32 and the blended state rounded to float16 (the
+/// runtime keeps it as float16).
+fn stage2_inputs(model: &[half::bf16], baton: Vec<f32>) -> (Vec<f32>, Vec<f32>) {
+    use rayon::prelude::*;
+    let mut rgb = Vec::with_capacity(model.len());
+    bf16_to_f32(model, &mut rgb);
+    let baton: Vec<f32> = baton.into_par_iter().with_min_len(1 << 14).map(f16_round).collect();
+    (rgb, baton)
 }
 
 /// The TensorRT engine cache root: CK_ENGINE_TRT_CACHE, else $XDG_CACHE_HOME (or ~/.cache)/corridorkey-desktop/tensorrt.

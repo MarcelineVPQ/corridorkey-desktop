@@ -295,12 +295,14 @@ fn cuda_ep(vram_cap: Option<u64>) -> ort::ep::CUDA {
     if let Some(c) = vram_cap {
         ep = ep.with_memory_limit(c as usize);
     }
-    // cuDNN's convolution algorithm search and workspace (ORT's defaults: exhaustive, as much workspace as it
-    // wants): CK_ENGINE_CUDNN_SEARCH = exhaustive | heuristic | default, CK_ENGINE_CUDNN_MAX_WORKSPACE = 0 | 1
+    // cuDNN's convolution algorithm search: heuristic. Measured (locked_backdrop, 1280x1152, 3 runs each): the
+    // same stage 1 / stage 2 run times as ORT's exhaustive default, and no first-call outliers (RVM's first call
+    // 0.4 s every run; exhaustive 0.2-3.0 s, job totals 21.8-22.1 s against 22.2-26.1 s).
+    // CK_ENGINE_CUDNN_SEARCH = exhaustive | heuristic | default, CK_ENGINE_CUDNN_MAX_WORKSPACE = 0 | 1
     match std::env::var("CK_ENGINE_CUDNN_SEARCH").as_deref() {
-        Ok("heuristic") => ep = ep.with_conv_algorithm_search(ort::ep::cuda::ConvAlgorithmSearch::Heuristic),
+        Ok("exhaustive") => ep = ep.with_conv_algorithm_search(ort::ep::cuda::ConvAlgorithmSearch::Exhaustive),
         Ok("default") => ep = ep.with_conv_algorithm_search(ort::ep::cuda::ConvAlgorithmSearch::Default),
-        _ => {}
+        _ => ep = ep.with_conv_algorithm_search(ort::ep::cuda::ConvAlgorithmSearch::Heuristic),
     }
     if let Ok(v) = std::env::var("CK_ENGINE_CUDNN_MAX_WORKSPACE") {
         ep = ep.with_conv_max_workspace(v != "0");
@@ -348,6 +350,8 @@ pub struct Net {
     pub run_s: f64,
     pub convert_s: f64,
     pub calls: usize,
+    /// seconds of this session's first run (cuDNN's algorithm search happens there)
+    pub first_s: Option<f64>,
 }
 
 impl Drop for Net {
@@ -408,6 +412,7 @@ impl Net {
             f16_inputs,
             shrink_options,
             shrink: false,
+            first_s: None,
             run_s: 0.0,
             convert_s: 0.0,
             calls: 0,
@@ -451,6 +456,7 @@ impl Net {
         }
         drop(outs);
         self.calls += 1;
+        self.first_s.get_or_insert((t2 - t1).as_secs_f64());
         self.run_s += (t2 - t1).as_secs_f64();
         self.convert_s += (t1 - t0).as_secs_f64() + t2.elapsed().as_secs_f64();
         Ok(res)
