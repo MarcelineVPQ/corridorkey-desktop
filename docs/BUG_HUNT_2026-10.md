@@ -149,7 +149,7 @@ guard after the relaunch shell: ≥ 2.9 s, until the test closed the new copy).
 | U3 | `updater.ts` relaunch | the mount guard waited its full 5 s on the relaunch shell, holding the old mount and descriptors | mount sampler: ≥ 2.9 s → 0.16 s | LOW | FIXED: guard first | `tools/update_e2e.sh` (mounts.log) |
 | U4 | `tools/update_e2e.sh` | ran on Xvfb (the app is Wayland-only); one fixed DevTools port for both copies; no diagnostics | the runs above | MEDIUM | FIXED: headless KWin, port 0 + DevToolsActivePort, failure dump | the harness itself (PASS) |
 | U5 | `tools/update_e2e.sh` test_pids | picked processes by name (`\.mount_Corrid`): a CorridorKey AppImage of the user's matches and would be killed at cleanup | code reading (a scratch probe with the same pattern listed its own shell) | HIGH | FIXED: only processes in the harness's own cgroup | the harness |
-| U6 | `updater.ts` relaunch (systemd-run path) | the normal path also starts the new copy at once, while the old one quits; it can't run in the isolation (no user manager) | code reading | LOW | BACKLOG (row 16): wrap the target in the same wait | |
+| U6 | `updater.ts` relaunch (systemd-run path) | the normal path also starts the new copy at once, while the old one quits | code reading | LOW | FIXED 2026-10-22 (backlog row 16): the unit runs FALLBACK_SCRIPT (waits for the old PID, ≤ 15 s), then the target | `relaunch.test.ts` systemd unit's command waits; `update_e2e.sh --systemd` (private user manager): the new copy ran in a corridorkey-relaunch unit whose command is the wait; the main-branch build's unit ran the AppImage directly (FAIL) |
 
 ## 7. Gates, builder, tools
 

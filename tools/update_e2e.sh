@@ -5,18 +5,22 @@
 # with no services, its own HOME and XDG_RUNTIME_DIR, basic password store.
 # Never your screen, session bus, keyring or real feed.
 #
-#   tools/update_e2e.sh --dir DIR --old OLD.AppImage --new NEW.AppImage --version X.Y.Z-dev.N
+#   tools/update_e2e.sh --dir DIR --old OLD.AppImage --new NEW.AppImage --version X.Y.Z-dev.N [--systemd]
 #
 # DIR gets: run/ (the old AppImage, where the update lands beside it), srv/
 # (the feed + the new AppImage, served on 127.0.0.1:8765), keys, logs, and on a
 # failure diag.txt (each test process's state, kernel wait channel, open files
 # and AppImage mounts).
 # The restart's systemd-run path can't reach your user manager from inside the
-# isolation (on purpose), so it takes its fallback: a detached shell.
+# isolation (on purpose), so it takes its fallback: a detached shell. --systemd gives
+# the isolation its own user manager (systemd --user on the private XDG_RUNTIME_DIR,
+# SYSTEMD_UNIT_PATH = a few empty targets: it starts no unit of yours or the system's),
+# so the restart takes the normal systemd-run path; the run then checks the new copy
+# ran in a corridorkey-relaunch unit and started only after the old copy had exited.
 # Run it memory-capped (memrun.sh / a systemd scope): it starts two Electron copies.
 set -euo pipefail
 APP="$(cd "$(dirname "$0")/.." && pwd)"
-DIR="" OLD="" NEW="" VER=""
+DIR="" OLD="" NEW="" VER="" SYSTEMD=0
 # loop: NOT-WORTH — the command line
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -24,6 +28,7 @@ while [ $# -gt 0 ]; do
     --old) OLD="$2"; shift 2 ;;
     --new) NEW="$2"; shift 2 ;;
     --version) VER="$2"; shift 2 ;;
+    --systemd) SYSTEMD=1; shift ;;
     *) echo "update_e2e.sh: unknown argument $1" >&2; exit 2 ;;
   esac
 done
@@ -47,16 +52,36 @@ CK_FEED_KEY="$(cat "$DIR/test-key.pem")" node "$APP/tools/sign-feed.mjs" "$DIR/s
 PIDS=()
 RUN=""
 # The test copies' processes: the AppImages started from DIR/run, their mounts' Electron, and the shell between them,
-# and only inside this run's own cgroup (the memrun scope it runs in): a CorridorKey AppImage of yours matches the
-# same names and must never be listed, let alone killed at cleanup.
-CG="$(cat /proc/$$/cgroup)"
+# and only inside this run's own cgroup (the memrun scope it runs in) or below it (--systemd: the private manager's
+# units): a CorridorKey AppImage of yours matches the same names and must never be listed, let alone killed at cleanup.
+CG="$(sed -n 's/^0:://p' /proc/$$/cgroup)"
+in_our_cgroup() {
+  local c
+  c="$(sed -n 's/^0:://p' "/proc/$1/cgroup" 2>/dev/null)"
+  [ "$c" = "$CG" ] || [ "${c#"$CG"/}" != "$c" ]
+}
 test_pids() {
   # loop: NOT-WORTH — the few processes matching the names, per diagnostics / cleanup
   for p in $(pgrep -f -- "$DIR/run/|\.mount_Corrid" 2>/dev/null); do
-    [ "$(cat "/proc/$p/cgroup" 2>/dev/null)" = "$CG" ] && echo "$p"
+    in_our_cgroup "$p" && echo "$p"
   done
   return 0
 }
+# the copies' Electron main processes: a binary inside an AppImage mount, not a Chromium helper (--type=)
+main_pids() {
+  # loop: NOT-WORTH — the test copies' few processes
+  for p in $(test_pids); do
+    case "$(readlink "/proc/$p/exe" 2>/dev/null)" in */.mount_Corrid*) ;; *) continue ;; esac
+    tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q -- '--type=' || echo "$p"
+  done
+  return 0
+}
+# a process's start in seconds since boot (/proc/PID/stat field 22, clock ticks), the clock of `uptime_now`
+# (not the epoch: /proc/stat's btime is whole seconds, measured 0.9 s off)
+started_at() {
+  awk -v hz="$(getconf CLK_TCK)" '{sub(/^.*\) /, ""); printf "%.2f", $20 / hz}' "/proc/$1/stat"
+}
+uptime_now() { cut -d' ' -f1 /proc/uptime; }
 diag() {
   set +o pipefail
   {
@@ -88,11 +113,14 @@ cleanup() {
   for p in $(test_pids); do kill "$p" 2>/dev/null || true; done
   # loop: NOT-WORTH — the harness's own few processes at cleanup
   for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
+  # the private user manager does not quit on SIGTERM (measured): it goes now, its units were the test copies above
+  [ -n "${SD_PID:-}" ] && kill -9 "$SD_PID" 2>/dev/null
   # loop: SERIAL-REQUIRED — 1 s for the copies to go before the leftover check [bounded: one second]
   sleep 1
   # loop: NOT-WORTH — stragglers after SIGTERM, once at cleanup
   for p in $(test_pids); do kill -9 "$p" 2>/dev/null || true; done
-  [ -n "$RUN" ] && rm -rf "$RUN"
+  # systemd's read-only inaccessible/ nodes (--systemd) need write access back before they can go
+  [ -n "$RUN" ] && { chmod -R u+rwX "$RUN" 2>/dev/null; rm -rf "$RUN"; }
 }
 trap cleanup EXIT
 
@@ -127,6 +155,18 @@ PIDS+=($!)
 for _ in $(seq 1 50); do [ -S "$RUN/$WL" ] && break; sleep 0.2; done
 [ -S "$RUN/$WL" ] || { echo "kwin_wayland did not start (kwin.log)" >&2; exit 1; }
 
+SD_PID=""
+if [ "$SYSTEMD" = 1 ]; then
+  mkdir -p "$DIR/iso/units"
+  # loop: NOT-WORTH — the six empty targets a transient service's default dependencies name
+  for t in default basic sockets timers paths shutdown exit; do printf '[Unit]\nDescription=%s (test)\n' "$t" > "$DIR/iso/units/$t.target"; done
+  env -i "${ISO_ENV[@]}" SYSTEMD_UNIT_PATH="$DIR/iso/units" /usr/lib/systemd/systemd --user --log-target=console > "$DIR/systemd.log" 2>&1 &
+  SD_PID=$!
+  # loop: SERIAL-REQUIRED — waits for the private manager's socket, 0.1 s steps [bounded: 5 s]
+  for _ in $(seq 1 50); do [ -S "$RUN/systemd/private" ] && break; sleep 0.1; done
+  [ -S "$RUN/systemd/private" ] || { echo "the private systemd --user did not start (systemd.log)" >&2; exit 1; }
+fi
+
 # The old copy, isolated. Its restart passes the session variables on (relaunch.ts), so the new copy is isolated too.
 env -i "${ISO_ENV[@]}" WAYLAND_DISPLAY="$WL" \
   CK_UPDATE_MANIFEST=http://127.0.0.1:8765/latest.json CK_UPDATE_PUBKEY="$(cat "$DIR/test-key.pub")" \
@@ -138,11 +178,39 @@ PIDS+=($!)
 # loop: SERIAL-REQUIRED — a 0.2 s sampler for the test's length [bounded: killed at cleanup]
 ( while :; do echo "$(date +%T.%N | cut -c1-12) $(grep -oE '/tmp/\.mount_Corrid[^ ]*' /proc/self/mountinfo | tr '\n' ' ')"; sleep 0.2; done > "$DIR/mounts.log" 2>&1 ) &
 PIDS+=($!)
+# The old copy's Electron main and the moment it is gone (kill -0 only: no /proc reads while it exits from FUSE),
+# then the new copy's main: its start time and cgroup (read while it runs: the driver closes it at the end).
+# loop: SERIAL-REQUIRED — waits for the old main, its end, then the new main, 0.05-0.1 s steps [bounded: killed at cleanup]
+( m=""; while [ -z "$m" ]; do m="$(main_pids | head -1)"; sleep 0.1; done; echo "$m" > "$DIR/old-main.pid"
+  # loop: SERIAL-REQUIRED — the old main's end, 0.05 s steps [bounded: killed at cleanup]
+  while kill -0 "$m" 2>/dev/null; do sleep 0.05; done; uptime_now > "$DIR/old-gone"
+  # loop: SERIAL-REQUIRED — the new main's start, 0.1 s steps [bounded: killed at cleanup]
+  n=""; while [ -z "$n" ]; do n="$(main_pids | grep -vx "$m" | head -1 || true)"; sleep 0.1; done
+  echo "$n $(started_at "$n") $(sed -n 's/^0:://p' "/proc/$n/cgroup")" > "$DIR/new-main"
+  # --systemd: the relaunch unit's command as the private manager has it (the unit is gone once the copy closes)
+  if [ "$SYSTEMD" = 1 ]; then
+    u="$(sed -n 's/^0:://p' "/proc/$n/cgroup" | grep -oE 'corridorkey-relaunch-[0-9]+\.service' || true)"
+    [ -n "$u" ] && env -i "${ISO_ENV[@]}" systemctl --user show -p ExecStart --value "$u" > "$DIR/relaunch-unit.txt" 2>&1
+  fi ) &
+PIDS+=($!)
 # loop: SERIAL-REQUIRED — the driver step and its failure dump (one run)
 if ! node "$APP/tools/update_e2e.mjs" --port-file "$DIR/home/.config/corridorkey-desktop/DevToolsActivePort" --expect "$VER" --out "$DIR"; then
   diag
   echo "--- diagnostics: $DIR/diag.txt"
   exit 1
+fi
+if [ -f "$DIR/new-main" ] && [ -f "$DIR/old-gone" ]; then
+  read -r NEW_PID NEW_START NEW_CG < "$DIR/new-main"
+  echo "--- the new copy's main process ($NEW_PID) started $(awk -v a="$NEW_START" -v b="$(cat "$DIR/old-gone")" 'BEGIN{printf "%+.2f", a - b}') s after the old one ($(cat "$DIR/old-main.pid")) had exited"
+  echo "--- the new copy's cgroup: $NEW_CG"
+fi
+if [ "$SYSTEMD" = 1 ]; then
+  case "${NEW_CG:-}" in *corridorkey-relaunch-*) ;; *) echo "FAIL: the new copy did not start through systemd-run" >&2; exit 1 ;; esac
+  echo "--- the relaunch unit runs: $(grep -oE 'argv\[\]=[^;]*' "$DIR/relaunch-unit.txt" 2>/dev/null | cut -c1-160)"
+  grep -q 'corridorkey-relaunch' "$DIR/relaunch-unit.txt" 2>/dev/null || { echo "FAIL: the relaunch unit does not wait for the old copy" >&2; exit 1; }
+  # 0.25 s: the old copy's end is seen by a 0.05 s poll, the start time is in clock ticks
+  awk -v a="$NEW_START" -v b="$(cat "$DIR/old-gone")" 'BEGIN{exit !(a - b >= -0.25)}' ||
+    { echo "FAIL: the new copy started while the old one still ran" >&2; exit 1; }
 fi
 # loop: SERIAL-REQUIRED — 6 s: the mount guard's longest wait, then the old copy's mount must be gone
 sleep 6

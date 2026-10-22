@@ -19,8 +19,8 @@ describe("relaunch", () => {
   it("keeps the user's flags, never Chromium's per-process ones", () => {
     expect(relaunchArgs(["/app", "--no-sandbox", "--type=renderer", "--ozone-platform=x11"])).toEqual(["--no-sandbox", "--ozone-platform=x11"]);
   });
-  it("systemd-run: a transient user unit with a clean env; older systemd falls back to KillMode=process", () => {
-    expect(systemdRunArgs({ target: "/a/CorridorKey-Desktop.AppImage", args: ["--no-sandbox"], env: { HOME: "/h" }, unit: "u1" })).toEqual([
+  it("systemd-run: a transient user unit with a clean env that waits for the old copy; older systemd falls back to KillMode=process", () => {
+    expect(systemdRunArgs({ target: "/a/CorridorKey-Desktop.AppImage", args: ["--no-sandbox"], env: { HOME: "/h" }, unit: "u1", oldPid: 42, shell: "/bin/bash" })).toEqual([
       "--user",
       "--collect",
       "--unit=u1",
@@ -28,10 +28,15 @@ describe("relaunch", () => {
       "ExitType=cgroup",
       "--setenv=HOME=/h",
       "--",
+      "/bin/bash",
+      "-c",
+      FALLBACK_SCRIPT,
+      "corridorkey-relaunch",
+      "42",
       "/a/CorridorKey-Desktop.AppImage",
       "--no-sandbox",
     ]);
-    expect(systemdRunArgs({ target: "/t", unit: "u", exitTypeCgroup: false })).toContain("KillMode=process");
+    expect(systemdRunArgs({ target: "/t", unit: "u", exitTypeCgroup: false, oldPid: 1, shell: "/bin/sh" })).toContain("KillMode=process");
   });
   it("the shell fallback passes the pid, target and flags as arguments, never in the script", () => {
     expect(shellArgs(42, "/a b/x'y", ["--z"])).toEqual(["-c", FALLBACK_SCRIPT, "corridorkey-relaunch", "42", "/a b/x'y", "--z"]);
@@ -42,7 +47,18 @@ describe("relaunch", () => {
 
   // Runs the fallback as the updater does: `old` stands for this copy (still quitting), fd 3 for the AppImage
   // runtime's keepalive pipe. The target writes its descriptors and the time it started.
-  async function runFallback(shell: string): Promise<{ fds: number[]; startedAfterOld: boolean }> {
+  type Command = (oldPid: number, target: string, args: string[]) => string[];
+  const viaShell =
+    (shell: string): Command =>
+    (pid, target, args) => [shell, ...shellArgs(pid, target, args)];
+  // what the systemd unit runs: everything after systemd-run's "--"
+  const viaSystemdUnit =
+    (shell: string): Command =>
+    (pid, target, args) => {
+      const a = systemdRunArgs({ target, args, unit: "u", oldPid: pid, shell });
+      return a.slice(a.indexOf("--") + 1);
+    };
+  async function runFallback(command: Command): Promise<{ fds: number[]; startedAfterOld: boolean }> {
     const dir = mkdtempSync(join(tmpdir(), "ck-relaunch-"));
     try {
       const target = join(dir, "new copy's target");
@@ -51,7 +67,8 @@ describe("relaunch", () => {
       const out = join(dir, "fds.txt");
       const gone = join(dir, "old-gone");
       const old = spawn("/bin/sh", ["-c", `sleep 1; touch "${gone}"`]);
-      const child = spawn(shell, shellArgs(old.pid!, target, [out, gone]), { stdio: ["ignore", "ignore", "ignore", "pipe"] });
+      const [program, ...programArgs] = command(old.pid!, target, [out, gone]);
+      const child = spawn(program, programArgs, { stdio: ["ignore", "ignore", "ignore", "pipe"] });
       // loop: NOT-WORTH — one test child [bounded: it ends ~1 s after the stand-in old copy]
       await new Promise((r) => child.on("exit", r));
       const lines = readFileSync(out, "utf8").split("\n").filter(Boolean);
@@ -61,13 +78,17 @@ describe("relaunch", () => {
     }
   }
   it("the shell fallback (bash) waits for the old copy and drops the descriptors it inherited", async () => {
-    const r = await runFallback(fallbackShell((p) => p === "/bin/bash"));
+    const r = await runFallback(viaShell(fallbackShell((p) => p === "/bin/bash")));
     expect(r.fds).toContain(0);
     expect(r.fds).not.toContain(3);
     expect(r.startedAfterOld).toBe(true);
   });
   it("the shell fallback still starts the new copy under plain sh (dash)", async () => {
-    const r = await runFallback("/bin/sh");
+    const r = await runFallback(viaShell("/bin/sh"));
+    expect(r.startedAfterOld).toBe(true);
+  });
+  it("the systemd unit's command waits for the old copy too (it no longer starts the target at once)", async () => {
+    const r = await runFallback(viaSystemdUnit("/bin/bash"));
     expect(r.startedAfterOld).toBe(true);
   });
 });

@@ -66,16 +66,6 @@ export function relaunchArgs(argv: string[]): string[] {
   return argv.slice(1).filter((a) => typeof a === "string" && !/^--type=/.test(a));
 }
 
-// `systemd-run` arguments: a transient user service, gone when it ends (--collect). ExitType=cgroup as
-// KDE's own launcher sets it: the unit lasts until its last process is gone, so the AppImage's FUSE helper
-// unmounts by itself after the app quits instead of being killed with the mount in place. systemd older
-// than 250 refuses ExitType: then KillMode=process (DS5's fallback).
-export function systemdRunArgs(o: { target: string; args?: string[]; env?: Record<string, string>; unit: string; exitTypeCgroup?: boolean }): string[] {
-  // loop: NOT-WORTH — a few environment variables, once per relaunch
-  const setenv = Object.entries(o.env ?? {}).map(([k, v]) => `--setenv=${k}=${v}`);
-  return ["--user", "--collect", `--unit=${o.unit}`, "-p", o.exitTypeCgroup === false ? "KillMode=process" : "ExitType=cgroup", ...setenv, "--", o.target, ...(o.args ?? [])];
-}
-
 // No systemd: a detached shell that waits for this copy to be gone, then becomes the new copy.
 // Measured with tools/update_e2e.sh (2026-10-22), two faults of the old "sleep 0.5; exec":
 //  - Node's spawn passes on every descriptor without close-on-exec, and one is this AppImage
@@ -103,4 +93,19 @@ export function shellArgs(oldPid: number, target: string, args: string[] = []): 
 export function fallbackShell(exists: (p: string) => boolean): string {
   // loop: NOT-WORTH — two paths, once per restart
   return ["/bin/bash", "/usr/bin/bash"].find(exists) ?? "/bin/sh";
+}
+
+// `systemd-run` arguments: a transient user service, gone when it ends (--collect). ExitType=cgroup as
+// KDE's own launcher sets it: the unit lasts until its last process is gone, so the AppImage's FUSE helper
+// unmounts by itself after the app quits instead of being killed with the mount in place. systemd older
+// than 250 refuses ExitType: then KillMode=process (DS5's fallback).
+// The unit runs the fallback's own wait (FALLBACK_SCRIPT through `shell`), not the target itself: systemd
+// starts the unit at once, while this copy still quits (bug hunt 2026-10 U6, backlog row 16), so the new copy
+// starts only once this process is gone (at most WAIT_OLD_S). The descriptor close in it is a no-op there
+// (systemd hands a service none of ours).
+export function systemdRunArgs(o: { target: string; args?: string[]; env?: Record<string, string>; unit: string; exitTypeCgroup?: boolean; oldPid: number; shell: string }): string[] {
+  // loop: NOT-WORTH — a few environment variables, once per relaunch
+  const setenv = Object.entries(o.env ?? {}).map(([k, v]) => `--setenv=${k}=${v}`);
+  const kill = o.exitTypeCgroup === false ? "KillMode=process" : "ExitType=cgroup";
+  return ["--user", "--collect", `--unit=${o.unit}`, "-p", kill, ...setenv, "--", o.shell, ...shellArgs(o.oldPid, o.target, o.args ?? [])];
 }
