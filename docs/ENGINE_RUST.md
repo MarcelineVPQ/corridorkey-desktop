@@ -2,7 +2,7 @@
 
 `engine-rs/` is CorridorKey's engine in Rust on ONNX Runtime (Marcy 2026-10-21: Rust + ORT is the
 house engine stack). It speaks [ENGINE_PROTOCOL.md](ENGINE_PROTOCOL.md) exactly like the PyTorch engine
-(`engine/ck_engine.py`), which keeps working until Marcy retires it. Measured on 2026-10-21; every
+(`engine/ck_engine.py`), which stays as the benchmark reference (Marcy 2026-10-22). Measured on 2026-10-21; every
 number below comes from a run whose command is given or from the tests.
 
 ## Architecture

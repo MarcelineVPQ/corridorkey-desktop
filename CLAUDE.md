@@ -7,7 +7,7 @@ Built to **Marcy's 15 basic rules for programming applications** (memory
 - **Engine/app contract (rule 10):** the app never imports the model. Two engines speak
   `docs/ENGINE_PROTOCOL.md` (the Sonata helper pattern): the Rust engine on ONNX Runtime
   (`engine-rs/`, docs/ENGINE_RUST.md; the default when set up) and `engine/ck_engine.py`, which runs
-  the upstream runtime unchanged from a CorridorKey2.0 checkout (kept until Marcy retires it).
+  the upstream runtime unchanged from a CorridorKey2.0 checkout (kept permanently as the benchmark reference for the Rust engine, Marcy 2026-10-22).
   Protocol changes: additive fields, bump `PROTOCOL` only for what the app must know.
 - **Accuracy (rule 1):** every number on screen comes from an engine reply (frames handed to
   the writers, the window really used, the free memory it saw). Never estimate progress in the app.

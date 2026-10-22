@@ -13,8 +13,8 @@ talk in **JSON lines**, one JSON object per line, UTF-8.
 Any engine that speaks this protocol works with the app: the Rust engine on
 ONNX Runtime (`engine-rs/`, `corridorkey-engine --models DIR`, docs/ENGINE_RUST.md;
 the default when it is set up) and the PyTorch engine (`engine/ck_engine.py`,
-run with the CorridorKey2.0 checkout's venv and `--package-root`), kept until
-the Rust engine replaces it.
+run with the CorridorKey2.0 checkout's venv and `--package-root`), kept as the Rust engine's
+benchmark reference (Marcy 2026-10-22).
 
 **Versions.** The pong carries `"protocol"`. New fields are additive, and the
 app ignores fields it doesn't know. The app refuses an engine whose protocol it

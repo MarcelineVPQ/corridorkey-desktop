@@ -49,7 +49,7 @@ the row counts once, as FIXED (the engine's clear refusal).
 | E10 | `queue.ts` exited | engine crash mid-job: the job fails with the stderr tail, its temp folder goes, the next job runs on a new engine | existing vitest + A2's test | | NOT-A-BUG | `queue.test.ts` an engine crash fails the job… |
 | E11 | `pipeline.rs` keying error path | a job failing mid-decode (truncated MP4) leaves no ffmpeg child or render thread behind; the engine takes the next request | CPU run: `input` error "failed decoding frame 15", no child processes of the engine afterwards | | NOT-A-BUG | |
 | E12 | `pipeline.rs` | a failed / cancelled job leaves its half-written outputs in the output folder (as upstream) | CPU runs | LOW | BACKLOG (row 19): a UI decision (remove or say so) | |
-| E13 | `engine/ck_engine.py` | the PyTorch engine keeps E1, E8 and I9 (it runs upstream's writer and reader unchanged) | code reading | LOW | BACKLOG (row 20): kept only until it is retired | |
+| E13 | `engine/ck_engine.py` | the PyTorch engine keeps E1, E8 and I9 (it runs upstream's writer and reader unchanged) | code reading | LOW | BACKLOG (row 20): it stays as the benchmark reference (Marcy 2026-10-22) | |
 
 ## 2. Inputs
 

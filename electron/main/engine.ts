@@ -2,7 +2,7 @@
 // the child's stdin/stdout, the Sonata helper pattern. Two engines speak it:
 // the Rust one on ONNX Runtime (engine-rs/, `corridorkey-engine --models DIR`,
 // the default when it is set up) and the PyTorch one (engine/ck_engine.py run
-// with a CorridorKey2.0 checkout's venv), kept until the Rust one replaces it.
+// with a CorridorKey2.0 checkout's venv), kept as the Rust engine's benchmark reference (Marcy 2026-10-22).
 //
 // lifetime: at most ONE engine process. Spawned when the queue starts, sent
 // `quit` when the queue ends (a loaded model holds GBs of graphics memory:
