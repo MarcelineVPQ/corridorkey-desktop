@@ -543,7 +543,7 @@ mod tests {
         };
         // loop: NOT-WORTH — both EXR codings
         for linear in [true, false] {
-            let v = vec![f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.5];
+            let v = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.5];
             let p = prep_frame(Planar::from_vec(3, 1, 4, v.repeat(3)), linear, &meta, crate::color::asinh_denom());
             // loop: NOT-WORTH — twelve values
             assert!(p.model.iter().chain(p.display.iter()).all(|x| x.to_f32().is_finite()), "linear={linear}: {:?} {:?}", p.model, p.display);
