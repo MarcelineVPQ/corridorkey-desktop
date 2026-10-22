@@ -80,7 +80,10 @@ corridorkey-engine --models DIR [--ort libonnxruntime.so] [--device auto|cuda|cp
   exhaustive | default), `CK_ENGINE_CUDNN_MAX_WORKSPACE`, `CK_ENGINE_GRAPH_OPT` (all | layout | extended),
   `CK_ENGINE_PROFILE=<dir>` (ORT per-node profile; on CUDA it times kernel launches, not GPU work),
   `CK_ENGINE_THREADS`; TensorRT: `CK_ENGINE_TRT_CACHE` (engine folder), `CK_ENGINE_TRT_BUILD` (ck-trt-build,
-  else next to the engine binary).
+  else next to the engine binary), `CK_ENGINE_TRT_BUILD_TIMEOUT_S` (one engine build's deadline, default 1800 s).
+- No open-ended waits: ffprobe 120 s, `ffmpeg -version` 30 s, each TensorRT build `CK_ENGINE_TRT_BUILD_TIMEOUT_S`, a
+  writer finishing its file 300 s (then ffmpeg is killed and the job fails saying so) (`proc.rs`,
+  docs/LOOP_PASS_2026-10.md).
 
 ## The app
 
@@ -323,10 +326,11 @@ PyTorch against itself at 80/40 vs 20/10 (2.15e-2, above).
 
 ## What's left
 
-1. **More speed**: stage 1 is now half of a job's time (walking_sitting 29.5 of 62.4 s); its remaining GPU time is
-   attention, MatMul and ~1700 small element-wise nodes (fusing those needs TensorRT or custom fused ops).
-   Stage 2's host↔device copies (~5.5 ms per frame) could use pinned buffers. Session loads in low-VRAM mode
-   (3.4 s per job) and the stage-1 window wait (3.3 s on walking_sitting) remain.
+1. **More speed**: stage 1 is now half of a job's time (walking_sitting 28.8 of 54.4 s); its remaining GPU time is
+   attention, MatMul and ~1700 small element-wise nodes (fusing those needs TensorRT or custom fused ops). The
+   efficiency pass (docs/EFFICIENCY_PASS_2026-10.md) removed the host-side copies and conversions around the
+   networks and loads each low-VRAM phase's networks ahead; stage 2's host↔device copies measured at most
+   1.1 ms of wall time per call (run 54.5 ms vs 53.4 ms of kernels), so pinned buffers / IOBinding are not worth it.
 2. **An ONNX Runtime VRAM table** for the automatic window (the measured points above, more sizes, peaks
    read inside the engine rather than sampled), replacing halve-on-oom as the normal path.
 3. **TensorRT**: (a) longer windows: the measured memory cap gives TensorRT 12-24-frame windows where CUDA's

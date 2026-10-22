@@ -49,6 +49,7 @@ pub fn estimate_peak_vram_gb(megapixels: f64, frames: usize, low_vram: bool) -> 
     let frames = frames.max(chunks[0]) as f64;
     let per_chunk: Vec<(f64, f64)> = (0..chunks.len())
         .map(|i| {
+            // loop: NOT-WORTH — the table's rows (≤ 10), once per job
             let pts: Vec<(f64, f64)> = rows.iter().map(|(mp, peaks)| (*mp, peaks[i])).collect();
             (chunks[i] as f64, interp(megapixels, &pts).max(rows[0].1[i]))
         })

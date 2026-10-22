@@ -32,6 +32,7 @@ impl Planar {
         &mut self.data[c * n..(c + 1) * n]
     }
     pub fn map(&mut self, f: impl Fn(f32) -> f32) {
+        // loop: HOT-PATH-OK — one pass over a small image (RVM input, carry hint, hint); clamp / round
         self.data.iter_mut().for_each(|v| *v = f(*v));
     }
 }
@@ -74,25 +75,30 @@ pub fn reflect101(mut p: isize, len: usize) -> usize {
     p as usize
 }
 
+/// Rows per rayon task in the per-frame image passes (a 1280-wide row is ~1 µs of work).
+pub const ROWS_MIN: usize = 8;
+
 /// cv2.copyMakeBorder(BORDER_REFLECT_101) of every plane.
 pub fn pad_reflect101(img: &Planar, pad: Pad) -> Planar {
     if pad == (Pad { l: 0, r: 0, t: 0, b: 0 }) {
         return img.clone();
     }
     let (ho, wo) = (img.h + pad.t + pad.b, img.w + pad.l + pad.r);
+    // loop: NOT-WORTH — the column table, once per padded frame (≤ 4096 entries)
     let xs: Vec<usize> = (0..wo).map(|x| reflect101(x as isize - pad.l as isize, img.w)).collect();
     let mut out = Planar::new(img.c, ho, wo);
-    // loop: HOT-PATH-OK — once per frame and plane; the inner row copy is a gather over a precomputed table
+    use rayon::prelude::*;
+    // loop: HOT-PATH-OK — once per frame and plane (3); the rows of a plane in parallel
     for c in 0..img.c {
         let src = img.plane(c);
         let dst = out.plane_mut(c);
-        // loop: HOT-PATH-OK — rows of one plane
-        for y in 0..ho {
+        // loop: HOT-PATH-OK — rows of one plane in parallel (this pass: were one thread); a gather over the column table
+        dst.par_chunks_mut(wo).with_min_len(ROWS_MIN).enumerate().for_each(|(y, drow)| {
             let sy = reflect101(y as isize - pad.t as isize, img.h);
             let srow = &src[sy * img.w..(sy + 1) * img.w];
-            let drow = &mut dst[y * wo..(y + 1) * wo];
+            // loop: HOT-PATH-OK — one row's gather (≤ 4096)
             drow.iter_mut().zip(&xs).for_each(|(d, &sx)| *d = srow[sx]);
-        }
+        });
     }
     out
 }
@@ -124,24 +130,28 @@ fn adaptive_range(o: usize, n_out: usize, n_in: usize) -> (usize, usize) {
 /// (`sum / kh / kw` in float32, as the CPU kernel).
 pub fn resize_area(img: &Planar, ho: usize, wo: usize) -> Planar {
     let mut out = Planar::new(img.c, ho, wo);
+    // loop: NOT-WORTH — the row table, once per resize (≤ 960 entries)
     let ys: Vec<(usize, usize)> = (0..ho).map(|o| adaptive_range(o, ho, img.h)).collect();
+    // loop: NOT-WORTH — the column table, once per resize (≤ 960 entries)
     let xs: Vec<(usize, usize)> = (0..wo).map(|o| adaptive_range(o, wo, img.w)).collect();
-    // loop: HOT-PATH-OK — per frame and plane; the cells are small (4x4 for C-RADIO, ~5x5 for MoGe)
+    use rayon::prelude::*;
+    // loop: HOT-PATH-OK — per frame and plane (3); the output rows of a plane in parallel
     for c in 0..img.c {
         let src = img.plane(c);
         let dst = out.plane_mut(c);
-        // loop: HOT-PATH-OK — output rows
-        for (oy, &(y0, y1)) in ys.iter().enumerate() {
-            // loop: HOT-PATH-OK — output columns
+        // loop: HOT-PATH-OK — output rows in parallel (this pass: were one thread)
+        dst.par_chunks_mut(wo).with_min_len(ROWS_MIN).zip(ys.par_iter()).for_each(|(drow, &(y0, y1))| {
+            // loop: HOT-PATH-OK — output columns of one row (wo ≤ 960)
             for (ox, &(x0, x1)) in xs.iter().enumerate() {
                 let mut sum = 0.0f32;
-                // loop: HOT-PATH-OK — the cell's rows
+                // loop: HOT-PATH-OK — the cell's rows (4 for C-RADIO, ~5 for MoGe)
                 for y in y0..y1 {
+                    // loop: HOT-PATH-OK — one cell row (4-5 values)
                     sum += src[y * img.w + x0..y * img.w + x1].iter().fold(0.0f32, |a, &v| a + v);
                 }
-                dst[oy * wo + ox] = sum / (y1 - y0) as f32 / (x1 - x0) as f32;
+                drow[ox] = sum / (y1 - y0) as f32 / (x1 - x0) as f32;
             }
-        }
+        });
     }
     out
 }
@@ -171,19 +181,20 @@ pub fn resize_bilinear(img: &Planar, ho: usize, wo: usize) -> Planar {
 pub fn resize_bilinear_into(img: &Planar, ho: usize, wo: usize, dst_all: &mut [f32]) {
     let ys = bilinear_axis(img.h, ho);
     let xs = bilinear_axis(img.w, wo);
-    // loop: HOT-PATH-OK — per frame and plane
+    use rayon::prelude::*;
+    // loop: HOT-PATH-OK — per frame and plane (3, or 1 for a carry hint); the output rows in parallel
     for c in 0..img.c {
         let src = img.plane(c);
         let dst = &mut dst_all[c * ho * wo..(c + 1) * ho * wo];
-        // loop: HOT-PATH-OK — output rows
-        for (oy, &(y0, y1, wy0, wy1)) in ys.iter().enumerate() {
+        // loop: HOT-PATH-OK — output rows in parallel (this pass: were one thread)
+        dst.par_chunks_mut(wo).with_min_len(ROWS_MIN).zip(ys.par_iter()).for_each(|(drow, &(y0, y1, wy0, wy1))| {
             let r0 = &src[y0 * img.w..(y0 + 1) * img.w];
             let r1 = &src[y1 * img.w..(y1 + 1) * img.w];
-            let drow = &mut dst[oy * wo..(oy + 1) * wo];
+            // loop: HOT-PATH-OK — one output row (≤ 2176)
             drow.iter_mut().zip(&xs).for_each(|(d, &(x0, x1, wx0, wx1))| {
                 *d = (r0[x0] * wx0 + r0[x1] * wx1) * wy0 + (r1[x0] * wx0 + r1[x1] * wx1) * wy1;
             });
-        }
+        });
     }
 }
 
@@ -208,6 +219,7 @@ fn lanczos4_coeffs(fx: f32) -> [f32; 8] {
         sum += v;
     }
     let inv = 1.0 / sum;
+    // loop: NOT-WORTH — eight taps
     c.iter_mut().for_each(|v| *v = (*v as f64 * inv) as f32);
     c
 }

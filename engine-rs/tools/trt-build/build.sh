@@ -10,6 +10,7 @@ LIBS=$1; OUT=$2
 INC=$OUT/include; mkdir -p "$INC" "$OUT/lib"
 T=https://raw.githubusercontent.com/NVIDIA/TensorRT/d0faf303ba766f20cd9fd8c413a112fc2e5a397b/include
 P=https://raw.githubusercontent.com/onnx/onnx-tensorrt/6bde6596eca84abf9afe9b4d21c18c32800fd3ad
+# loop: NOT-WORTH — the pinned headers' checksums, once per builder build
 while read -r sum name; do
   [ -f "$INC/$name" ] || { if [ "$name" = NvOnnxParser.h ]; then curl -sSf -o "$INC/$name" "$P/$name"; else curl -sSf -o "$INC/$name" "$T/$name"; fi; }
   echo "$sum  $INC/$name" | sha256sum -c --quiet -

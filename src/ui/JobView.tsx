@@ -31,6 +31,7 @@ export function JobView({ job }: { job: Job }) {
       {job.status === "running" && (
         <MainBlock title="Progress">
           <div className="stages">
+            {/* loop: HOT-PATH-OK — ≤ seven stages per render (≤ 10/s while a job runs and the page is shown) */}
             {STAGE_ORDER.filter((s) => (s !== "foundations" || job.memory?.lowVram) && (s !== "optimize" || job.stage === "optimize")).map((s) => {
               const i = STAGE_ORDER.indexOf(s);
               return (
@@ -69,6 +70,7 @@ export function JobView({ job }: { job: Job }) {
         <MainBlock title="Results">
           {job.stills.length > 0 && (
             <div className="stills">
+              {/* loop: HOT-PATH-OK — ≤ four stills per render */}
               {job.stills.map((s) => (
                 <figure key={s.output}>
                   <img src={s.url} alt={`${s.output}, middle frame`} width={320} />
@@ -78,6 +80,7 @@ export function JobView({ job }: { job: Job }) {
             </div>
           )}
           <ul className="outputs">
+            {/* loop: HOT-PATH-OK — ≤ four outputs per render */}
             {job.outputs.map((f) => (
               <li key={f}>
                 <span className="path">{f}</span>

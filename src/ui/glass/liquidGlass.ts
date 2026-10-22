@@ -118,6 +118,7 @@ export function glassFilter(id: string, w: number, h: number, o: GlassOptions): 
   const only = (c: number) => [0, 1, 2].map((r) => [0, 1, 2, 3].map((k) => (r === c && k === c ? 1 : 0)).join(" ") + " 0").join("  ") + "  0 0 0 1 0";
   step("feImage", { href: map, x: 0, y: 0, width: w, height: h, preserveAspectRatio: "none", result: "map" });
   step("feGaussianBlur", { in: "SourceGraphic", stdDeviation: o.frost, result: "frost" });
+  // loop: NOT-WORTH — three channels, once per filter build
   ["r", "g", "b"].forEach((c, i) => {
     step("feDisplacementMap", { in: "frost", in2: "map", scale: s * (1 + a * (1 - i)), xChannelSelector: "R", yChannelSelector: "G", result: `d${c}` });
     step("feColorMatrix", { in: `d${c}`, type: "matrix", values: only(i), result: c });

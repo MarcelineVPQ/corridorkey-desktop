@@ -106,12 +106,14 @@ pub fn frame_paths(dir: &Path) -> Result<Vec<PathBuf>, Error> {
     // loop: HOT-PATH-OK — one pass over the folder's entries
     for e in rd.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
+        // loop: NOT-WORTH — four extensions per file name, once per probe
         let ok = [".exr", ".png", ".jpg", ".jpeg"].iter().any(|x| name.ends_with(x) && name.len() > x.len() && !name.starts_with('.'));
         if ok && e.path().is_file() {
             out.push(e.path().to_string_lossy().into_owned());
         }
     }
     out.sort();
+    // loop: NOT-WORTH — the folder's file names, once per probe
     Ok(out.into_iter().map(PathBuf::from).collect())
 }
 
@@ -168,6 +170,7 @@ pub fn read_probe(json: &serde_json::Value) -> Result<VideoProbe, Error> {
     }
     let rot = st["side_data_list"]
         .as_array()
+        // loop: NOT-WORTH — a stream's side data (a few entries), once per probe
         .and_then(|l| l.iter().find_map(|d| d.get("rotation").map(num)))
         .or_else(|| st["tags"].get("rotate").map(num))
         .unwrap_or(0.0);
@@ -180,14 +183,24 @@ pub fn read_probe(json: &serde_json::Value) -> Result<VideoProbe, Error> {
     Ok(VideoProbe { w, h, fps, frames })
 }
 
+/// ffprobe's deadline.
+pub const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
 pub fn ffprobe(path: &Path) -> Result<VideoProbe, Error> {
-    let out = Command::new("ffprobe")
-        .args(["-v", "error", "-select_streams", "v:0", "-show_entries"])
+    let mut cmd = Command::new("ffprobe");
+    cmd.args(["-v", "error", "-select_streams", "v:0", "-show_entries"])
         .arg("stream=width,height,avg_frame_rate,r_frame_rate,nb_frames,duration:stream_tags=rotate:stream_side_data=rotation:format=duration")
         .args(["-of", "json"])
-        .arg(path)
-        .output()
-        .map_err(|e| Error::assets(format!("ffprobe could not run: {e}")))?;
+        .arg(path);
+    // a local file answers in well under a second; a stalled mount or device doesn't hold the job
+    // loop: SERIAL-REQUIRED — one ffprobe per clip, PROBE_TIMEOUT 120 s (added in this pass; it had no deadline)
+    let out = crate::proc::output_timeout(&mut cmd, PROBE_TIMEOUT).map_err(|e| {
+        if e.starts_with("no answer") {
+            Error::input(format!("ffprobe on {}: {e}", path.display()))
+        } else {
+            Error::assets(format!("ffprobe could not run: {e}"))
+        }
+    })?;
     if !out.status.success() {
         return Err(Error::input(format!("Could not open video: {} ({})", path.display(), String::from_utf8_lossy(&out.stderr).trim())));
     }

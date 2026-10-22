@@ -98,19 +98,39 @@ function state(): AppState {
   };
 }
 
-// State goes to the page at most every 100 ms (frames already arrive ≤ 4/s).
+// State goes to the page at most every 100 ms (frames already arrive ≤ 4/s), and only while the window
+// is shown: a hidden page isn't re-rendered for nothing; it gets the latest state the moment it shows.
 let sendTimer: NodeJS.Timeout | null = null;
+let sendPending = false;
 function scheduleSend(): void {
   updateGpuPolling();
+  if (!windowShown) {
+    sendPending = true;
+    return;
+  }
   if (sendTimer) return;
+  // lifetime: OK — one-shot 100 ms coalescing timer, re-armed only by the next change
+  // loop: HOT-PATH-OK — state pushes coalesced to ≤ 10/s, only while the window is shown (this pass); measured ~2/s during a job (engine replies), 3-134 KiB each
   sendTimer = setTimeout(() => {
     sendTimer = null;
+    sendPending = false;
     mainWindow?.webContents.send(IPC.state, state());
   }, 100);
 }
 
-// GPU readout: polled only while a job runs AND the window is shown (rule 3).
+/** The window's shown state changed: the GPU readout follows it, and a state held back while hidden goes out. */
+function setShown(v: boolean): void {
+  windowShown = v;
+  updateGpuPolling();
+  if (v && sendPending) scheduleSend();
+}
+
+// GPU readout: polled only while a job runs AND the window is shown (rule 3). One read at a time: a slow
+// nvidia-smi (its own timeout is GPU_READ_TIMEOUT_MS) never stacks reads up.
+let gpuReading = false;
 async function pollGpu(): Promise<void> {
+  if (gpuReading) return;
+  gpuReading = true;
   try {
     const pid = queue.enginePid;
     gpu = await readGpu(new Set(pid ? [pid] : []));
@@ -118,6 +138,8 @@ async function pollGpu(): Promise<void> {
   } catch (e) {
     // error: SHOWN — the GPU card says nvidia-smi couldn't be read
     gpuError = e instanceof Error ? e.message.split("\n")[0] : String(e);
+  } finally {
+    gpuReading = false;
   }
   scheduleSend();
 }
@@ -164,7 +186,9 @@ async function makeStills(job: Job): Promise<void> {
   const order: OutputName[] = ["checker", "alpha", "cutout", "fg"];
   // loop: SERIAL-REQUIRED — one ffmpeg at a time while the next job may be keying on the same machine
   for (const output of order) {
+    // loop: NOT-WORTH — ≤ four outputs, once per finished job
     const file = job.outputs.find((f) => basename(f).includes(`_${output === "checker" ? "checker_comp" : output}`));
+    // loop: NOT-WORTH — one stat per output, once per finished job
     if (!file || !existsSync(file)) continue;
     try {
       job.stills.push({ output, url: mediaUrl(await still(mediaDir, file, seconds, STILL_WIDTH)) });
@@ -178,6 +202,7 @@ async function makeStills(job: Job): Promise<void> {
 async function addPaths(paths: string[]): Promise<void> {
   // loop: SERIAL-REQUIRED — ffprobe/ffmpeg per clip, one at a time so a big drop doesn't fork dozens
   for (const { path, kind } of expandPaths(paths)) {
+    // loop: NOT-WORTH — the queue's jobs per dropped clip (a drop of N clips is N × jobs comparisons)
     if (queue.jobs.some((j) => j.clip.path === path && j.status === "waiting")) continue;
     const clip = await probeClip(path, kind, mediaDir, mediaUrl);
     const options: JobOptions = { ...settings.lastOptions, hintFirstFrame: null, hintVideo: null, hintMode: "none" };
@@ -217,11 +242,13 @@ function persist(): void {
 
 function registerIpc(): void {
   ipcMain.handle(IPC.getState, () => state());
+  // loop: NOT-WORTH — the dropped paths, once per drop
   ipcMain.handle(IPC.addPaths, (_e, paths: string[]) => addPaths(paths.filter((p) => typeof p === "string")));
   ipcMain.handle(IPC.pickClips, async () => {
     const r = await dialog.showOpenDialog(mainWindow!, {
       title: "Add clips",
       properties: ["openFile", "openDirectory", "multiSelections"],
+      // loop: NOT-WORTH — seven extensions, once per file dialog
       filters: [{ name: "Video", extensions: [...VIDEO_EXT].map((e) => e.slice(1)) }],
     });
     if (!r.canceled) await addPaths(r.filePaths);
@@ -230,6 +257,7 @@ function registerIpc(): void {
     const r = await dialog.showOpenDialog(mainWindow!, {
       title: kind === "hint-image" ? "First-frame hint (matte image)" : "Hint video or frame folder",
       properties: kind === "hint-image" ? ["openFile"] : ["openFile", "openDirectory"],
+      // loop: NOT-WORTH — a few extensions, once per file dialog
       filters: kind === "hint-image" ? [{ name: "Matte image", extensions: ["png", "jpg", "jpeg", "exr"] }] : [{ name: "Video", extensions: [...VIDEO_EXT].map((e) => e.slice(1)) }],
     });
     return r.canceled ? null : r.filePaths[0];
@@ -299,10 +327,7 @@ function registerIpc(): void {
     if (!queue.running) updater.restart();
   });
   ipcMain.handle(IPC.backToStable, () => updater.backToStable());
-  ipcMain.on(IPC.setVisible, (_e, visible: boolean) => {
-    windowShown = Boolean(visible);
-    updateGpuPolling();
-  });
+  ipcMain.on(IPC.setVisible, (_e, visible: boolean) => setShown(Boolean(visible)));
 }
 
 function createWindow(): void {
@@ -326,18 +351,14 @@ function createWindow(): void {
     },
   });
   mainWindow.once("ready-to-show", () => mainWindow?.show());
-  const shown = (v: boolean) => () => {
-    windowShown = v;
-    updateGpuPolling();
-  };
+  const shown = (v: boolean) => () => setShown(v);
   mainWindow.on("show", shown(true));
   mainWindow.on("restore", shown(true));
   mainWindow.on("hide", shown(false));
   mainWindow.on("minimize", shown(false));
   mainWindow.on("closed", () => {
     mainWindow = null;
-    windowShown = false;
-    updateGpuPolling();
+    setShown(false);
   });
   // No navigation away from the app, no new windows.
   mainWindow.webContents.on("will-navigate", (e) => e.preventDefault());
@@ -370,6 +391,7 @@ app.whenReady().then(() => {
   protocol.handle(MEDIA_SCHEME, (req) => {
     const file = decodeURIComponent(new URL(req.url).pathname.slice(1));
     if (!resolve(file).startsWith(mediaDir + "/")) return new Response("not found", { status: 404 });
+    // loop: NOT-WORTH — one local file per media request (thumbnails / stills from the app's cache) [bounded: a local file: URL]
     return net.fetch(pathToFileURL(file).toString());
   });
   nativeTheme.themeSource = settings.appearance.theme === "light" ? "light" : settings.appearance.theme === "dark" ? "dark" : "system";

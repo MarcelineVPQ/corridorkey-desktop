@@ -6,12 +6,14 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 const hits = [];
 const walk = (d) => {
+  // loop: NOT-WORTH — the source folders' entries, once per gate run
   for (const n of readdirSync(d)) {
     const p = join(d, n);
     if (statSync(p).isDirectory()) walk(p);
     else if (/\.tsx?$/.test(p))
       readFileSync(p, "utf8")
         .split("\n")
+        // loop: NOT-WORTH — one file's lines, once per gate run
         .forEach((l, i) => /<(details|summary)[\s>]/.test(l) && hits.push(`${p}:${i + 1}: ${l.trim()}`));
   }
 };

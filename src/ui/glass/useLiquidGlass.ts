@@ -34,6 +34,7 @@ export function useLiquidGlass(on: boolean, clear: Partial<GlassOptions>, regula
     const ro = new ResizeObserver(() => {
       clearTimeout(timer);
       // lifetime: OK — one-shot debounce, cleared on the next resize and in the cleanup
+      // loop: NOT-WORTH — one-shot 120 ms debounce of a filter rebuild per resize
       timer = setTimeout(build, 120);
     });
     ro.observe(el);
@@ -42,6 +43,7 @@ export function useLiquidGlass(on: boolean, clear: Partial<GlassOptions>, regula
       clearTimeout(timer);
       el.style.removeProperty("--glass-clear");
       el.style.removeProperty("--glass-regular");
+      // loop: NOT-WORTH — a few filter ids on unmount
       ids.forEach(removeGlassFilter);
     };
   }, [el, on, c, r]);

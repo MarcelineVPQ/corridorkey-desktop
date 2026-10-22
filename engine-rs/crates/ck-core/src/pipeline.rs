@@ -10,14 +10,14 @@
 //! stage 2, with only that phase's networks loaded.
 use crate::ahead::Ahead;
 use crate::clip::{probe_frame_dir, probe_video, raw_clip_name, ClipMeta, Source};
-use crate::color::{bf16_round, f16_round, LinearAdjust};
+use crate::color::{bf16_round, LinearAdjust};
 use crate::decode::{load_initial_hint, FrameReader, HintReader, Prefetch, Prepped};
 use crate::hann::{taper_weights, window_starts, BatonBlend};
 use crate::image::{resize_area, resize_bilinear, Planar};
 use crate::job::{suffix, JobConfig};
 use crate::outputs::{Geometry, RenderWorker};
 use crate::render::{make_checker, RenderOpts};
-use crate::runtime::{ModelSet, Net, Precision, Provider, Runtime, TrtSettings};
+use crate::runtime::{Data, ModelSet, Net, Precision, Provider, Runtime, TrtSettings};
 use crate::tensorrt::{BATON_CH, CRADIO_CH, MOGE_CH, RVM_CH};
 use crate::vram::{estimate_peak_vram_gb, select_vram_profile};
 use crate::writers::{ExrType, ExrWriter, VideoWriter, Writer};
@@ -27,6 +27,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Instant;
 
 /// Where replies go (the engine adds "id"). Every message is a protocol reply object with its "type".
@@ -50,6 +51,7 @@ struct FrameReport {
 
 impl FrameReport {
     fn report(&mut self, writers: &[(String, Box<dyn Writer>)], sink: &mut dyn Sink, force: bool) {
+        // loop: NOT-WORTH — ≤ four writers, ≤ 4 times per second
         let done = writers.iter().map(|(_, w)| w.frames()).min().unwrap_or(0);
         self.count(done, sink, force);
     }
@@ -93,8 +95,14 @@ pub struct Pipeline {
     gpu_overhead: Option<u64>,
     /// this job's measured seconds per network (run, convert, calls), kept across low-VRAM unloads
     stats: BTreeMap<&'static str, (f64, f64, usize, f64)>,
-    /// this job's seconds spent loading sessions
+    /// this job's seconds spent loading sessions, in all and per network
     load_s: f64,
+    load_each: BTreeMap<&'static str, f64>,
+    /// low-VRAM phases: the next phase's networks loading on their own thread while this phase runs, with the
+    /// key they are for; `ensure` takes them (waiting if they aren't done)
+    pending: Vec<(&'static str, ModelKey, std::thread::JoinHandle<Result<(Net, f64), Error>>)>,
+    /// this job's seconds of session loads done ahead on their own thread
+    preload_s: f64,
     /// this job's main-thread seconds around stage 2: [inputs, waiting for the render thread]
     s2_host: [f64; 2],
 }
@@ -108,13 +116,23 @@ pub struct JobResult {
 struct Temps(Vec<PathBuf>);
 impl Drop for Temps {
     fn drop(&mut self) {
+        // loop: NOT-WORTH — four temp files at the job's end
         self.0.iter().for_each(|p| {
             let _ = std::fs::remove_file(p);
         });
     }
 }
 
-/// A float16 (T, C*H*W) array on disk (the runtime's np.memmap files).
+fn open_rw(p: &Path) -> Result<File, Error> {
+    std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(p).map_err(|e| Error::engine(format!("{}: {e}", p.display())))
+}
+
+fn temp_err(e: std::io::Error) -> Error {
+    Error::engine(format!("temp file: {e}"))
+}
+
+/// A float16 (T, C*H*W) array on disk (the runtime's np.memmap files): written and read as raw float16, no
+/// conversion on the way.
 struct F16File {
     f: File,
     frame: usize,
@@ -122,62 +140,64 @@ struct F16File {
 
 impl F16File {
     fn create(p: &Path, frame: usize) -> Result<F16File, Error> {
-        let f = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(p)
-            .map_err(|e| Error::engine(format!("{}: {e}", p.display())))?;
-        Ok(F16File { f, frame })
+        Ok(F16File { f: open_rw(p)?, frame })
     }
-    fn put(&mut self, t: usize, v: &[f32]) -> Result<(), Error> {
-        use rayon::prelude::*;
-        let mut bytes = vec![0u8; v.len() * 2];
-        bytes.par_chunks_mut(2).zip(v.par_iter()).with_min_len(1 << 14).for_each(|(b, x)| b.copy_from_slice(&half::f16::from_f32(*x).to_le_bytes()));
-        self.f.seek(SeekFrom::Start((t * self.frame * 2) as u64)).and_then(|_| self.f.write_all(&bytes)).map_err(|e| Error::engine(format!("temp file: {e}")))
+    /// frames from `t` on (`v` holds whole frames)
+    fn put(&mut self, t: usize, v: &[half::f16]) -> Result<(), Error> {
+        self.f.seek(SeekFrom::Start((t * self.frame * 2) as u64)).and_then(|_| self.f.write_all(bytemuck::cast_slice(v))).map_err(temp_err)
     }
-    /// frames t0..t1 as float32, appended to `out`
-    fn get(&mut self, t0: usize, t1: usize, out: &mut Vec<f32>) -> Result<(), Error> {
-        let mut buf = vec![0u8; (t1 - t0) * self.frame * 2];
-        self.f
-            .seek(SeekFrom::Start((t0 * self.frame * 2) as u64))
-            .and_then(|_| self.f.read_exact(&mut buf))
-            .map_err(|e| Error::engine(format!("temp file: {e}")))?;
-        out.extend(buf.chunks_exact(2).map(|c| half::f16::from_le_bytes([c[0], c[1]]).to_f32()));
-        Ok(())
+    /// frames t0..t1
+    fn get(&mut self, t0: usize, t1: usize) -> Result<Vec<half::f16>, Error> {
+        let mut out = vec![half::f16::ZERO; (t1 - t0) * self.frame];
+        // loop: HOT-PATH-OK — one RVM window or baton frame from the local temp file, read straight into float16 (this pass: no byte buffer + conversion) [bounded: a local file read]
+        self.f.seek(SeekFrom::Start((t0 * self.frame * 2) as u64)).and_then(|_| self.f.read_exact(bytemuck::cast_slice_mut(&mut out))).map_err(temp_err)?;
+        Ok(out)
     }
 }
 
-/// A float32 (T, C*H*W) array on disk (the low-VRAM foundation features).
-struct F32File {
+/// The low-VRAM foundation features on disk, (T, C*H*W) in the type the network made them (float16 for the fp16
+/// models, float32 for fp32): kept exactly, half the bytes of the float32 file for fp16.
+struct FeatFile {
     f: File,
     frame: usize,
+    /// set by the first `put`: float16 (true) or float32
+    half: Option<bool>,
 }
 
-impl F32File {
-    fn create(p: &Path, frame: usize) -> Result<F32File, Error> {
-        let f = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(p)
-            .map_err(|e| Error::engine(format!("{}: {e}", p.display())))?;
-        Ok(F32File { f, frame })
+impl FeatFile {
+    fn create(p: &Path, frame: usize) -> Result<FeatFile, Error> {
+        Ok(FeatFile { f: open_rw(p)?, frame, half: None })
     }
-    fn put(&mut self, t: usize, v: &[f32]) -> Result<(), Error> {
-        let bytes: Vec<u8> = v.iter().flat_map(|x| x.to_le_bytes()).collect();
-        self.f.seek(SeekFrom::Start((t * self.frame * 4) as u64)).and_then(|_| self.f.write_all(&bytes)).map_err(|e| Error::engine(format!("temp file: {e}")))
+    /// frames from `t` on
+    fn put(&mut self, t: usize, v: &Data) -> Result<(), Error> {
+        let (half, bytes): (bool, &[u8]) = match v {
+            Data::F16(x) => (true, bytemuck::cast_slice(x)),
+            Data::F32(x) => (false, bytemuck::cast_slice(x)),
+            Data::Bf16(_) => return Err(Error::engine("foundation features as bfloat16".into())),
+        };
+        if *self.half.get_or_insert(half) != half {
+            return Err(Error::engine("foundation features changed type".into()));
+        }
+        let size = if half { 2 } else { 4 };
+        self.f.seek(SeekFrom::Start((t * self.frame * size) as u64)).and_then(|_| self.f.write_all(bytes)).map_err(temp_err)
     }
-    fn get(&mut self, t0: usize, t1: usize, out: &mut Vec<f32>) -> Result<(), Error> {
-        let mut buf = vec![0u8; (t1 - t0) * self.frame * 4];
-        self.f
-            .seek(SeekFrom::Start((t0 * self.frame * 4) as u64))
-            .and_then(|_| self.f.read_exact(&mut buf))
-            .map_err(|e| Error::engine(format!("temp file: {e}")))?;
-        out.extend(buf.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])));
-        Ok(())
+    /// frames t0..t1
+    fn get(&mut self, t0: usize, t1: usize) -> Result<Data<'static>, Error> {
+        let n = (t1 - t0) * self.frame;
+        let half = self.half.ok_or_else(|| Error::engine("foundation features not written".into()))?;
+        let size = if half { 2 } else { 4 };
+        self.f.seek(SeekFrom::Start((t0 * self.frame * size) as u64)).map_err(temp_err)?;
+        Ok(if half {
+            let mut out = vec![half::f16::ZERO; n];
+            // loop: HOT-PATH-OK — one window's foundation features from the local temp file, in their own type (this pass: float16, half the bytes) [bounded: a local file read]
+            self.f.read_exact(bytemuck::cast_slice_mut(&mut out)).map_err(temp_err)?;
+            Data::F16(out)
+        } else {
+            let mut out = vec![0f32; n];
+            // loop: HOT-PATH-OK — the float32 (CPU / fp32) case of the same read [bounded: a local file read]
+            self.f.read_exact(bytemuck::cast_slice_mut(&mut out)).map_err(temp_err)?;
+            Data::F32(out)
+        })
     }
 }
 
@@ -185,6 +205,7 @@ fn bf16_to_f32(v: &[half::bf16], out: &mut Vec<f32>) {
     use rayon::prelude::*;
     let start = out.len();
     out.resize(start + v.len(), 0.0);
+    // loop: HOT-PATH-OK — one frame's display view to float32 (RVM / foundation inputs), parallel
     out[start..].par_iter_mut().with_min_len(1 << 14).zip(v.par_iter()).for_each(|(o, x)| *o = x.to_f32());
 }
 
@@ -207,6 +228,7 @@ impl WindowReader {
             self.cache.insert(self.next, f);
             self.next += 1;
         }
+        // loop: HOT-PATH-OK — a window's frames (≤ 80): Arc clones, no pixel copies (this pass: each frame was deep-copied, ~850 MB per 48-frame window)
         let out = (t0..t1).map(|t| self.cache[&t].clone()).collect();
         self.cache = self.cache.split_off(&t0);
         Ok(out)
@@ -216,18 +238,19 @@ impl WindowReader {
 /// Full hint, read in window order with its own cache.
 struct HintWindows {
     reader: HintReader,
-    cache: BTreeMap<usize, Vec<f32>>,
+    cache: BTreeMap<usize, Arc<Vec<f32>>>,
     next: usize,
 }
 
 impl HintWindows {
-    fn window(&mut self, t0: usize, t1: usize) -> Result<Vec<Vec<f32>>, Error> {
+    fn window(&mut self, t0: usize, t1: usize) -> Result<Vec<Arc<Vec<f32>>>, Error> {
         // loop: SERIAL-REQUIRED — hint frames decode in order
         while self.next < t1 {
             let h = self.reader.next()?;
-            self.cache.insert(self.next, h);
+            self.cache.insert(self.next, Arc::new(h));
             self.next += 1;
         }
+        // loop: HOT-PATH-OK — a window's hint frames (≤ 80): Arc clones (this pass: were deep copies)
         let out = (t0..t1).map(|t| self.cache[&t].clone()).collect();
         self.cache = self.cache.split_off(&t0);
         Ok(out)
@@ -250,15 +273,23 @@ impl Pipeline {
             gpu_overhead: None,
             stats: BTreeMap::new(),
             load_s: 0.0,
+            load_each: BTreeMap::new(),
+            pending: Vec::new(),
+            preload_s: 0.0,
             s2_host: [0.0; 2],
         }
     }
 
-    /// Drop every loaded network (frees the graphics memory their sessions hold).
+    /// Drop every loaded network (frees the graphics memory their sessions hold), and give the host memory
+    /// their loading used back to the system.
     pub fn unload(&mut self) {
         self.fold_stats();
+        let had = !self.nets.is_empty();
         self.nets.clear();
         self.key = None;
+        if had {
+            trim_host_memory();
+        }
     }
 
     /// Move the loaded networks' counters into `stats` (and zero them).
@@ -291,6 +322,7 @@ impl Pipeline {
             self.nets.clear();
             self.key = Some(key.clone());
         }
+        // loop: NOT-WORTH — ≤ five networks per phase
         let need: Vec<&'static str> = pieces.iter().copied().filter(|p| !self.nets.contains_key(p)).collect();
         if need.is_empty() {
             return Ok(());
@@ -298,6 +330,20 @@ impl Pipeline {
         sink.send(json!({"type": "progress", "stage": job_stage}));
         // loop: NOT-WORTH — at most five networks
         for piece in need {
+            // loop: NOT-WORTH — ≤ two pending loads
+            if let Some(i) = self.pending.iter().position(|(p, k, _)| *p == piece && k == key) {
+                // loaded ahead (or still loading): wait for it here
+                let (_, _, h) = self.pending.remove(i);
+                let t = Instant::now();
+                // loop: SERIAL-REQUIRED — takes a network loaded ahead; waits only for the part not yet done [bounded: ORT session creation ends (succeeds or fails)]
+                let (net, secs) = h.join().map_err(|_| Error::engine(format!("loading {piece} panicked")))??;
+                self.load_s += t.elapsed().as_secs_f64();
+                *self.load_each.entry(piece).or_insert(0.0) += t.elapsed().as_secs_f64();
+                self.preload_s += secs;
+                self.nets.insert(piece, net);
+                self.set_shrink();
+                continue;
+            }
             let file = self
                 .models
                 .file(piece, key.precision)
@@ -310,8 +356,11 @@ impl Pipeline {
                 // (the same precision), and the `provider` reply says why
                 let tried = match (self.trt_fallbacks.get(piece), settings.as_ref()) {
                     (Some(why), _) => Err(why.clone()),
-                    (None, Some(st)) => Net::load(self.rt, piece, Provider::TensorRt, key.precision, &crate::tensorrt::stub_path(&st.dir, piece), Some(st), cap)
-                        .map_err(|e| format!("loading its engine: {}", e.message.lines().next().unwrap_or(""))),
+                    (None, Some(st)) => {
+                        Net::load(self.rt, piece, Provider::TensorRt, key.precision, &crate::tensorrt::stub_path(&st.dir, piece), Some(st), cap)
+                            // loop: NOT-WORTH — first line of an error message
+                            .map_err(|e| format!("loading its engine: {}", e.message.lines().next().unwrap_or("")))
+                    }
                     (None, None) => Err("no TensorRT folder".to_string()),
                 };
                 match tried {
@@ -336,6 +385,7 @@ impl Pipeline {
                 file.display()
             );
             self.load_s += t.elapsed().as_secs_f64();
+            *self.load_each.entry(piece).or_insert(0.0) += t.elapsed().as_secs_f64();
             self.nets.insert(piece, net);
             self.set_shrink();
             if self.gpu_overhead.is_none() && key.vram_cap.is_some() {
@@ -351,6 +401,46 @@ impl Pipeline {
             }
         }
         Ok(())
+    }
+
+    /// Low-VRAM mode: start loading `pieces` (the next phase's networks) on their own thread while the current
+    /// phase runs; `ensure` takes them. Their memory is within the job's budget by construction: every session's
+    /// arena limit already leaves room for all the other networks' weights (`arena_limit`). Measured per load
+    /// (RTX 5080, fp16): C-RADIO 0.75 s, MoGe 0.11 s, stage 1 1.7 s, stage 2 0.55 s.
+    fn preload(&mut self, key: &ModelKey, pieces: &[&'static str]) {
+        // CUDA only: TensorRT jobs don't stage, and on the CPU provider (tests) a session loaded on another thread
+        // left its host memory in that thread's malloc arena (measured: the CPU end-to-end run went from 5.3 GB
+        // to past its 8 GB cap)
+        if key.provider != Provider::Cuda {
+            return;
+        }
+        // loop: NOT-WORTH — at most two networks
+        for &piece in pieces {
+            // loop: NOT-WORTH — ≤ two pending loads
+            if self.nets.contains_key(piece) || self.pending.iter().any(|(p, k, _)| *p == piece && k == key) {
+                continue;
+            }
+            let Some(file) = self.models.file(piece, key.precision) else { continue };
+            let cap = self.arena_limit(key, piece);
+            let (rt, prov, prec) = (self.rt, key.provider, key.precision);
+            // loop: PARALLELIZE — the next low-VRAM phase's network loads while this phase runs (this pass; measured: 1.3-1.5 s less per job)
+            let h = std::thread::spawn(move || {
+                let t = Instant::now();
+                let net = Net::load(rt, piece, prov, prec, &file, None, cap)?;
+                eprintln!("  loaded {piece} ahead ({}, {}) in {:.1} s on its own thread", prov.name(), prec.name(), t.elapsed().as_secs_f64());
+                Ok((net, t.elapsed().as_secs_f64()))
+            });
+            self.pending.push((piece, key.clone(), h));
+        }
+    }
+
+    /// Drop loads started ahead (a job ends or restarts).
+    fn drop_pending(&mut self) {
+        // loop: NOT-WORTH — at most two loads [bounded: each load ends (ORT session creation)]
+        for (_, _, h) in self.pending.drain(..) {
+            // loop: NOT-WORTH — joins loads that were started ahead [bounded: ORT session creation ends]
+            let _ = h.join();
+        }
     }
 
     /// Arena shrinkage for what is loaded now (`crate::runtime::shrinks`).
@@ -371,6 +461,7 @@ impl Pipeline {
     fn arena_limit(&self, key: &ModelKey, piece: &str) -> Option<u64> {
         let cap = key.vram_cap?;
         let others: u64 = crate::runtime::PIECES
+            // loop: NOT-WORTH — five model files' sizes, once per session load
             .iter()
             .filter(|p| **p != piece)
             .filter_map(|p| self.models.file(p, key.precision))
@@ -396,7 +487,8 @@ impl Pipeline {
         if !missing.is_empty() {
             return Err(Error::assets(format!("missing ONNX model(s) {} ({}) in {}", missing.join(", "), precision.name(), self.models.dir.display())));
         }
-        if std::process::Command::new("ffmpeg").arg("-version").stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().is_err() {
+        // loop: NOT-WORTH — ffmpeg -version once per job, 30 s deadline (this pass: had none)
+        if crate::proc::output_timeout(std::process::Command::new("ffmpeg").arg("-version"), std::time::Duration::from_secs(30)).is_err() {
             return Err(Error::assets("ffmpeg binary not found: ffmpeg. Install ffmpeg.".into()));
         }
         if !Path::new(&job.input).exists() {
@@ -585,9 +677,10 @@ impl Pipeline {
         // An automatic window that runs out of graphics memory before any frame reached the writers is halved and
         // the job restarted (the PyTorch table the window comes from is not ONNX Runtime's measured memory,
         // docs/ENGINE_RUST.md).
-        // loop: SERIAL-REQUIRED — one attempt at a time; at most log2(80) ≈ 7 rounds
+        // loop: SERIAL-REQUIRED — one attempt at a time [bounded: the window halves each round, and only while nothing was written: ≤ log2(80) ≈ 7 rounds]
         loop {
             res = self.keying(job, &meta, &key, trt_ref, load_stage, chunk, stride, low_vram, &clip, &mut writers, &mut report, sink);
+            // loop: NOT-WORTH — ≤ four writers, once per attempt
             let nothing_written = writers.iter().all(|(_, w)| w.frames() == 0);
             match &res {
                 Err(e) if e.code == "oom" && !job.manual && nothing_written && chunk > 1 => {
@@ -606,6 +699,8 @@ impl Pipeline {
                 _ => break,
             }
         }
+        // a load started ahead for a phase that never came (an error) is not kept
+        self.drop_pending();
         // release every writer (its encoder finishes the file), the first failure wins
         let rel_t = Instant::now();
         let mut rel: Result<(), Error> = Ok(());
@@ -630,6 +725,7 @@ impl Pipeline {
         report.report(&writers, sink, true);
         sink.log(&format!("  wrote {} output video(s) for {clip} ({t_all} frames @ {w}x{h})", writers.len()));
         Ok(JobResult {
+            // loop: NOT-WORTH — ≤ four outputs, once per job
             outputs: writers.iter().map(|(_, w)| w.path().to_string_lossy().into_owned()).collect(),
             settings_file: settings_path.to_string_lossy().into_owned(),
         })
@@ -637,6 +733,7 @@ impl Pipeline {
 
     /// Whether a TensorRT job can run on TensorRT at all (the card, the provider, TensorRT-ready models).
     fn trt_possible(&self, provider: Provider) -> bool {
+        // loop: NOT-WORTH — five networks, once per job
         provider == Provider::Cuda && self.rt.tensorrt_ep && crate::runtime::PIECES.iter().any(|p| self.models.trt_file(p, Precision::Fp16).is_some())
     }
 
@@ -684,6 +781,7 @@ impl Pipeline {
         let gpu = self.rt.gpu.clone().unwrap();
         let trt_ver = crate::gpu::tensorrt_version().unwrap_or_else(|| "unknown".into());
         let trt_prec = Precision::Fp16;
+        // loop: NOT-WORTH — five networks, once per TensorRT job
         let ready: Vec<&str> = crate::runtime::PIECES.iter().copied().filter(|p| self.models.trt_file(p, trt_prec).is_some()).collect();
         if ready.is_empty() {
             fallback("the models folder has no TensorRT-ready models".to_string(), &mut msg);
@@ -694,6 +792,7 @@ impl Pipeline {
         let dir = crate::tensorrt::cache_dir(&root, &gpu.name, &gpu.driver, &trt_ver, &self.rt.ort_version, "fp16");
         let stale = crate::tensorrt::stale_dirs(&root, &dir, &gpu.name);
         if !stale.is_empty() {
+            // loop: NOT-WORTH — a few stale cache folders, once per TensorRT job
             let names: Vec<String> = stale.iter().filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).collect();
             sink.log(&format!("  TensorRT: the graphics driver or TensorRT changed; engines built for {} can't be used and were removed", names.join(", ")));
             msg["cache_invalidated"] = json!(names);
@@ -703,6 +802,7 @@ impl Pipeline {
             }
         }
         let bdir = dir.join(bucket.key());
+        // loop: NOT-WORTH — five networks' stamps, once per TensorRT job
         let built = ready.iter().all(|p| {
             let stamp = self.models.trt_file(p, trt_prec).map(|f| crate::tensorrt::source_stamp(&f)).unwrap_or_default();
             crate::tensorrt::built(&bdir.join(p), p, &stamp)
@@ -730,6 +830,7 @@ impl Pipeline {
         // TensorRT's working memory while it builds: half the job's budget, at most 4 GiB
         let workspace_mb = key.vram_cap.map(|c| (c >> 21).min(4096)).unwrap_or(4096).max(512);
         let stamp = |p: &str| self.models.trt_file(p, key.precision).map(|f| crate::tensorrt::source_stamp(&f)).unwrap_or_default();
+        // loop: NOT-WORTH — five networks, once per TensorRT job
         let todo: Vec<&'static str> = crate::runtime::PIECES.iter().copied().filter(|p| !crate::tensorrt::built(&dir.join(p), p, &stamp(p))).collect();
         // loop: NOT-WORTH — five networks
         for (i, piece) in crate::runtime::PIECES.iter().copied().enumerate() {
@@ -746,6 +847,7 @@ impl Pipeline {
                 self.trt_fallbacks.insert(piece, "the TensorRT engine builder (ck-trt-build) is not installed".into());
                 continue;
             };
+            // loop: NOT-WORTH — five names
             let n = todo.iter().position(|p| *p == piece).map(|k| k + 1).unwrap_or(i + 1);
             sink.send(json!({"type": "progress", "stage": "optimize", "detail": format!("{} ({n}/{})", piece_name(piece), todo.len())}));
             sink.log(&format!("  TensorRT: building the {} engine for {} (one time)", piece_name(piece), bucket.key()));
@@ -792,7 +894,10 @@ impl Pipeline {
             n.calls = 0;
         });
         self.stats.clear();
+        self.drop_pending();
         self.load_s = 0.0;
+        self.preload_s = 0.0;
+        self.load_each.clear();
         self.s2_host = [0.0; 2];
         // wall seconds per phase (the low-VRAM phases include loading their networks)
         let mut phases: Vec<(&str, f64)> = Vec::new();
@@ -810,8 +915,8 @@ impl Pipeline {
         let td = &job.temp_dir;
         let rvm_path = td.join(format!("{clip}_rvm_feat.f16"));
         let baton_path = td.join(format!("{clip}_baton.f16"));
-        let cradio_path = td.join(format!("{clip}_foundation_cradio.f32"));
-        let moge_path = td.join(format!("{clip}_foundation_moge.f32"));
+        let cradio_path = td.join(format!("{clip}_foundation_cradio.bin"));
+        let moge_path = td.join(format!("{clip}_foundation_moge.bin"));
         let _temps = Temps(vec![rvm_path.clone(), baton_path.clone(), cradio_path.clone(), moge_path.clone()]);
 
         // 2. RVM prepass
@@ -821,10 +926,16 @@ impl Pipeline {
         let first: &[&'static str] = if low_vram { &["rvm"] } else { &crate::runtime::PIECES };
         self.ensure(key, first, trt, sink, load_stage)?;
         if key.provider == Provider::TensorRt {
+            // loop: NOT-WORTH — five networks, once per TensorRT job
             let pieces: BTreeMap<&str, &str> = self.nets.iter().map(|(k, n)| (*k, n.provider.name())).collect();
+            // loop: NOT-WORTH — five networks, once per TensorRT job
             let built: BTreeMap<&str, f64> = self.trt_seconds.iter().filter(|(_, v)| v.1).map(|(k, v)| (*k, v.0)).collect();
             sink.send(json!({"type": "provider", "provider": if self.trt_fallbacks.is_empty() { "tensorrt" } else if self.trt_fallbacks.len() == pieces.len() { "cuda" } else { "tensorrt+cuda" },
                 "pieces": pieces, "fallbacks": self.trt_fallbacks, "build_s": built}));
+        }
+        if low_vram {
+            // the foundations load while RVM runs
+            self.preload(key, &["cradio", "moge"]);
         }
         sink.send(json!({"type": "progress", "stage": "rvm"}));
         let rvm_frame = RVM_CH * h64 * w64;
@@ -833,7 +944,7 @@ impl Pipeline {
             let (he, we) = (sh / 4, sw / 4);
             sink.log(&format!("    RVM continuous prepass: T={t_all}, chunk={}, input={we}x{he}, grid={}x{}", chunk.clamp(1, 8), we / 16, he / 16));
             let ntok = 1 + (he / 16) * (we / 16);
-            let mut state = vec![0f32; ntok * RVM_CH];
+            let mut state: Data<'static> = Data::F32(vec![0f32; ntok * RVM_CH]);
             // the small frames are made ahead on their own thread (they don't depend on the state)
             let mut reader = Prefetch::new(FrameReader::open(meta)?.display_only(), 8);
             let dec = std::sync::Arc::new(std::sync::Mutex::new(0.0));
@@ -853,12 +964,13 @@ impl Pipeline {
             let net = self.net("rvm")?;
             // loop: SERIAL-REQUIRED — RVM is recurrent: each frame's step takes the previous state
             while let Some(small) = small_frames.next()? {
-                let outs = net.run(vec![("frame", vec![1, 3, he, we], small), ("state", vec![1, ntok, RVM_CH], state)])?;
+                let outs = net.run(vec![("frame", vec![1, 3, he, we], small.into()), ("state", vec![1, ntok, RVM_CH], state)])?;
+                // loop: NOT-WORTH — two outputs per RVM step
                 let mut it = outs.into_iter();
                 let (_, feat) = it.next().ok_or_else(|| Error::engine("rvm: no output".into()))?;
                 let (_, st) = it.next().ok_or_else(|| Error::engine("rvm: no state".into()))?;
                 state = st;
-                rvm_file.put(t, &feat)?;
+                rvm_file.put(t, &feat.into_f16())?;
                 t += 1;
             }
             if t != t_all {
@@ -871,15 +983,17 @@ impl Pipeline {
         phase_t = Instant::now();
 
         // foundations prepass (low-VRAM only)
-        let mut found_files: Option<(F32File, F32File)> = None;
+        let mut found_files: Option<(FeatFile, FeatFile)> = None;
         if low_vram {
             self.unload();
             self.ensure(key, &["cradio", "moge"], trt, sink, load_stage)?;
+            // stage 1 loads while the foundations run
+            self.preload(key, &["stage1"]);
             sink.send(json!({"type": "progress", "stage": "foundations"}));
             let fchunk = 4;
             sink.log(&format!("    frozen VFM prepass: T={t_all}, grid={w64}x{h64}, chunk={fchunk}"));
-            let mut cf = F32File::create(&cradio_path, CRADIO_CH * h64 * w64)?;
-            let mut mf = F32File::create(&moge_path, MOGE_CH * h64 * w64)?;
+            let mut cf = FeatFile::create(&cradio_path, CRADIO_CH * h64 * w64)?;
+            let mut mf = FeatFile::create(&moge_path, MOGE_CH * h64 * w64)?;
             // the resized inputs are made ahead on their own thread
             let mut reader = Prefetch::new(FrameReader::open(meta)?.display_only(), 8);
             let dec = std::sync::Arc::new(std::sync::Mutex::new(0.0));
@@ -902,11 +1016,8 @@ impl Pipeline {
             // loop: SERIAL-REQUIRED — chunks of 4 frames, in order
             while let Some((n, (radio, moge))) = chunks.next()? {
                 let (c, m) = self.foundation_run(n, radio, moge, sh, sw)?;
-                // loop: NOT-WORTH — up to four frames
-                for j in 0..n {
-                    cf.put(t0 + j, &c[j * CRADIO_CH * h64 * w64..(j + 1) * CRADIO_CH * h64 * w64])?;
-                    mf.put(t0 + j, &m[j * MOGE_CH * h64 * w64..(j + 1) * MOGE_CH * h64 * w64])?;
-                }
+                cf.put(t0, &c)?;
+                mf.put(t0, &m)?;
                 t0 += n;
             }
             decode_s += *dec.lock().unwrap();
@@ -922,9 +1033,13 @@ impl Pipeline {
         let overlap = chunk.saturating_sub(stride);
         sink.log(&format!("    Hann stage1: chunk={chunk}, stride={stride}, windows={}, baton_grid={w16}x{h16}", starts.len()));
         let ro = RenderOpts {
+            // loop: NOT-WORTH — ≤ four output names, once per attempt
             alpha: job.outputs.iter().any(|o| o == "alpha"),
+            // loop: NOT-WORTH — ≤ four output names, once per attempt
             fg: job.outputs.iter().any(|o| o == "fg"),
+            // loop: NOT-WORTH — ≤ four output names, once per attempt
             checker: job.outputs.iter().any(|o| o == "checker"),
+            // loop: NOT-WORTH — ≤ four output names, once per attempt
             cutout: job.outputs.iter().any(|o| o == "cutout"),
             despill: job.despill_strength as f32,
             cutout_linear: job.cutout_linear,
@@ -963,15 +1078,9 @@ impl Pipeline {
                 };
                 let found = match found_files.as_mut() {
                     None => Found::Inputs(foundation_inputs(&frames, sh, sw)),
-                    Some((cf, mf)) => {
-                        let (mut c, mut m) = (Vec::new(), Vec::new());
-                        cf.get(t0, t1, &mut c)?;
-                        mf.get(t0, t1, &mut m)?;
-                        Found::Features(c, m)
-                    }
+                    Some((cf, mf)) => Found::Features(cf.get(t0, t1)?, mf.get(t0, t1)?),
                 };
-                let mut rvm = Vec::with_capacity((t1 - t0) * rvm_frame);
-                rvm_file.get(t0, t1, &mut rvm)?;
+                let rvm = rvm_file.get(t0, t1)?;
                 Ok(Some(WindowInputs { frames, hint_video, found, rvm }))
             })
         };
@@ -979,7 +1088,7 @@ impl Pipeline {
         let mut baton_file = if low_vram { Some(F16File::create(&baton_path, baton_frame)?) } else { None };
         let mut blend = BatonBlend::default();
         let mut carry: BTreeMap<usize, Vec<f32>> = BTreeMap::new();
-        let mut stage2_frames: BTreeMap<usize, Vec<half::bf16>> = BTreeMap::new();
+        let mut stage2_frames: BTreeMap<usize, Arc<Vec<half::bf16>>> = BTreeMap::new();
         let plane = sh * sw;
         let hq_full = bf16_round(job.hint_quality as f32);
         let hq_carry = bf16_round(job.carry_hint_quality as f32);
@@ -1003,9 +1112,11 @@ impl Pipeline {
             if let Some(hv) = hint_video {
                 // loop: HOT-PATH-OK — the window's frames
                 for (j, m) in hv.iter().enumerate() {
-                    hint[j * plane..(j + 1) * plane].copy_from_slice(m);
+                    hint[j * plane..(j + 1) * plane].copy_from_slice(&m[..]);
                 }
+                // loop: NOT-WORTH — the window's hint qualities (≤ 80)
                 hq.iter_mut().for_each(|q| *q = hq_full);
+                // loop: NOT-WORTH — the window's flags (≤ 80)
                 present.iter_mut().for_each(|p| *p = true);
             }
             // loop: HOT-PATH-OK — the window's frames
@@ -1021,7 +1132,9 @@ impl Pipeline {
                 hq[0] = hq_full;
                 present[0] = true;
             }
+            // loop: NOT-WORTH — the window's flags (≤ 80)
             if !present.iter().any(|p| *p) {
+                // loop: NOT-WORTH — the window's hint qualities (≤ 80)
                 hq.iter_mut().for_each(|q| *q = -1.0);
             }
             if !low_vram {
@@ -1034,26 +1147,30 @@ impl Pipeline {
                 Found::Inputs((radio, moge)) => self.foundation_run(tc, radio, moge, sh, sw)?,
                 Found::Features(c, m) => (c, m),
             };
-            let mut rgb = Vec::with_capacity(tc * 3 * plane);
-            // loop: HOT-PATH-OK — the window's frames
-            for f in &frames {
-                bf16_to_f32(&f.model, &mut rgb);
-            }
-            drop(frames);
+            // the model views only (the display views are done with); converted once, to the type stage 1 takes
+            // loop: HOT-PATH-OK — the window's frames (≤ 80): moves the model views out, the display views are dropped before the run
+            let models: Vec<Arc<Vec<half::bf16>>> = frames.into_iter().map(|f| f.model).collect();
             s1_in_s += tw.elapsed().as_secs_f64();
+            if low_vram && i + 1 == starts.len() {
+                // stage 2 loads while the last stage-1 window runs
+                self.preload(key, &["stage2"]);
+            }
             let outs = self.net("stage1")?.run(vec![
-                ("rgb", vec![1, tc, 3, sh, sw], rgb),
-                ("hint", vec![1, tc, 1, sh, sw], hint),
-                ("hint_quality", vec![1, tc], hq),
+                // loop: HOT-PATH-OK — ≤ 80 slice references; converted once inside the run (this pass: bf16 -> f32 -> f16 was two passes and an 850 MB float32 copy per 48-frame window)
+                ("rgb", vec![1, tc, 3, sh, sw], Data::Bf16(models.iter().map(|m| &m[..]).collect())),
+                ("hint", vec![1, tc, 1, sh, sw], hint.into()),
+                ("hint_quality", vec![1, tc], hq.into()),
                 ("moge", vec![1, tc, MOGE_CH, h64, w64], moge),
                 ("cradio", vec![1, tc, CRADIO_CH, h64, w64], cradio),
-                ("rvm", vec![1, tc, RVM_CH, h64, w64], rvm),
+                ("rvm", vec![1, tc, RVM_CH, h64, w64], Data::F16(rvm)),
             ])?;
+            drop(models);
             let tw = Instant::now();
+            // loop: NOT-WORTH — two outputs per window
             let mut it = outs.into_iter();
             let (bs, baton) = it.next().ok_or_else(|| Error::engine("stage1: no baton".into()))?;
             let (as_, aux) = it.next().ok_or_else(|| Error::engine("stage1: no aux".into()))?;
-            if bs != vec![1, tc, BATON_CH, h16, w16] {
+            if bs != vec![1, tc, BATON_CH, h16, w16] || baton.len() != tc * baton_frame {
                 return Err(Error::engine(format!("stage1: baton shape {bs:?}")));
             }
             let next_start = if i + 1 < starts.len() { starts[i + 1] } else { t_all };
@@ -1063,10 +1180,11 @@ impl Pipeline {
                 let aplane = 4 * ah * aw;
                 // only the frames the next window takes (t >= next_start) are kept: the others aren't made
                 let ups: Vec<(usize, Vec<f32>)> = (next_start.max(t0)..t1)
+                    // loop: HOT-PATH-OK — carry hints: only the frames the next window takes (≤ stride), in parallel, each a small upsample
                     .into_par_iter()
                     .map(|t| {
                         let j = t - t0;
-                        let a0 = Planar::from_vec(1, ah, aw, aux[j * aplane..j * aplane + ah * aw].to_vec());
+                        let a0 = Planar::from_vec(1, ah, aw, aux.range_f32(j * aplane..j * aplane + ah * aw));
                         let mut up = resize_bilinear(&a0, sh, sw);
                         up.map(|v| bf16_round(v.clamp(0.0, 1.0)));
                         (t, up.data)
@@ -1076,9 +1194,14 @@ impl Pipeline {
                 carry = carry.split_off(&next_start);
             }
             let wts = taper_weights(tc, overlap, i == 0, i == starts.len() - 1);
-            // loop: HOT-PATH-OK — the window's frames
+            // loop: HOT-PATH-OK — the window's frames; each frame's values blended in parallel, read in stage 1's type
             for (j, t) in (t0..t1).enumerate() {
-                blend.add(t, &baton[j * baton_frame..(j + 1) * baton_frame], wts[j]);
+                let r = j * baton_frame..(j + 1) * baton_frame;
+                match &baton {
+                    Data::F16(v) => blend.add(t, &v[r], wts[j]),
+                    Data::F32(v) => blend.add(t, &v[r], wts[j]),
+                    Data::Bf16(_) => return Err(Error::engine("stage1: bfloat16 baton".into())),
+                }
             }
             drop(baton);
             let ready = blend.flush_before(next_start);
@@ -1102,16 +1225,19 @@ impl Pipeline {
             self.ensure(key, &["stage2"], trt, sink, load_stage)?;
             // frames and stored states read and made into stage-2 inputs on their own thread, ahead of the card
             let mut reader = Prefetch::new(FrameReader::open(meta)?, 8);
-            let (itx, irx) = std::sync::mpsc::sync_channel::<Result<(Vec<f32>, Vec<f32>), Error>>(2);
+            // the frame converted here, on the producer thread, to the type stage 2 takes
+            let rgb_f16 = self.net("stage2")?.wants_f16("rgb");
+            let (itx, irx) = std::sync::mpsc::sync_channel::<Result<(Data<'static>, Data<'static>), Error>>(2);
+            // loop: SERIAL-REQUIRED — the low-VRAM stage-2 producer: frames in order; ends at the clip's end, an error, or a dropped receiver
             let producer = std::thread::spawn(move || {
                 let mut prep_s = 0.0;
                 // loop: SERIAL-REQUIRED — frames in order; ends at the clip's end, an error, or a dropped receiver
                 for t in 0..t_all {
                     let tp = Instant::now();
                     let item = reader.next().and_then(|f| f.ok_or_else(|| Error::input("short read".into()))).and_then(|f| {
-                        let mut b = Vec::with_capacity(baton_frame);
-                        bf.get(t, t + 1, &mut b)?;
-                        Ok(stage2_inputs(&f.model, b))
+                        let b = bf.get(t, t + 1)?;
+                        let rgb = Data::Bf16(vec![&f.model[..]]);
+                        Ok((if rgb_f16 { Data::F16(rgb.into_f16()) } else { Data::F32(rgb.into_f32()) }, Data::F16(b)))
                     });
                     prep_s += tp.elapsed().as_secs_f64();
                     let stop = item.is_err();
@@ -1125,6 +1251,7 @@ impl Pipeline {
             // loop: SERIAL-REQUIRED — frames in order to the writers
             for _ in 0..t_all {
                 let tw = Instant::now();
+                // loop: SERIAL-REQUIRED — stage 2's next input, in order [bounded: the producer sends every frame or its error, then ends]
                 let item = irx.recv().map_err(|_| Error::engine("the stage-2 input thread stopped".into())).and_then(|r| r);
                 self.s2_host[0] += tw.elapsed().as_secs_f64();
                 if let Err(e) = item.and_then(|(rgb, b)| self.stage2_run(rgb, b, meta, &mut out, report, sink)) {
@@ -1133,6 +1260,7 @@ impl Pipeline {
                 }
             }
             drop(irx);
+            // loop: SERIAL-REQUIRED — joins the producer after the receiver is dropped [bounded: its next send fails and it ends]
             let (dec_s, prep_s) = producer.join().map_err(|_| Error::engine("the stage-2 input thread panicked".into()))?;
             res?;
             sink.log(&format!("    stage 2 phase: inputs prepared on their own thread in {prep_s:.1} s"));
@@ -1145,7 +1273,12 @@ impl Pipeline {
         report.report(writers, sink, true);
         // measured time per part
         self.fold_stats();
-        let mut parts: Vec<String> = vec![format!("decode+prep {decode_s:.1} s"), format!("session loads {:.1} s", self.load_s)];
+        // loop: NOT-WORTH — five networks, once per job (the timing line)
+        let each: Vec<String> = self.load_each.iter().map(|(p, s)| format!("{p} {s:.2}")).collect();
+        let mut parts: Vec<String> = vec![
+            format!("decode+prep {decode_s:.1} s"),
+            format!("session loads {:.1} s on the main thread ({}), {:.1} s ahead on their own thread", self.load_s, each.join(", "), self.preload_s),
+        ];
         // loop: NOT-WORTH — five networks
         for p in crate::runtime::PIECES {
             if let Some((run_s, convert_s, calls, first_s)) = self.stats.get(p) {
@@ -1158,6 +1291,7 @@ impl Pipeline {
             "stage 2 main thread: inputs {:.1} s, waiting for the render thread {:.1} s; render thread {worker_s:.1} s",
             self.s2_host[0], self.s2_host[1]
         ));
+        // loop: NOT-WORTH — ≤ four phases, once per job
         let ph: Vec<String> = phases.iter().map(|(n, s)| format!("{n} {s:.1} s")).collect();
         parts.push(format!("phases: {}", ph.join(", ")));
         sink.log(&format!("  timing: {}; wall {:.1} s", parts.join(", "), job_t0.elapsed().as_secs_f64()));
@@ -1165,12 +1299,15 @@ impl Pipeline {
     }
 
     /// C-RADIO and MoGe on `n` frames' resized inputs (`foundation_inputs`).
-    fn foundation_run(&mut self, n: usize, radio: Vec<f32>, moge: Vec<f32>, sh: usize, sw: usize) -> Result<(Vec<f32>, Vec<f32>), Error> {
+    fn foundation_run(&mut self, n: usize, radio: Vec<f32>, moge: Vec<f32>, sh: usize, sw: usize) -> Result<(Data<'static>, Data<'static>), Error> {
         let (hr, wr) = (sh / 4, sw / 4);
         let (hm, wm) = (sh * 7 / 32, sw * 7 / 32);
         let c =
-            self.net("cradio")?.run(vec![("rgb", vec![n, 3, hr, wr], radio)])?.into_iter().next().ok_or_else(|| Error::engine("cradio: no output".into()))?;
-        let m = self.net("moge")?.run(vec![("rgb", vec![n, 3, hm, wm], moge)])?.into_iter().next().ok_or_else(|| Error::engine("moge: no output".into()))?;
+            // loop: NOT-WORTH — one output per C-RADIO call
+            self.net("cradio")?.run(vec![("rgb", vec![n, 3, hr, wr], radio.into())])?.into_iter().next().ok_or_else(|| Error::engine("cradio: no output".into()))?;
+        // loop: NOT-WORTH — one output per MoGe call
+        let m =
+            self.net("moge")?.run(vec![("rgb", vec![n, 3, hm, wm], moge.into())])?.into_iter().next().ok_or_else(|| Error::engine("moge: no output".into()))?;
         if c.0 != vec![n, CRADIO_CH, sh / 64, sw / 64] || m.0 != vec![n, MOGE_CH, sh / 64, sw / 64] {
             return Err(Error::engine(format!("foundation shapes {:?} / {:?}", c.0, m.0)));
         }
@@ -1181,9 +1318,9 @@ impl Pipeline {
     #[allow(clippy::too_many_arguments)]
     fn baton_frames(
         &mut self,
-        ready: Vec<(usize, Vec<f32>)>,
+        ready: Vec<(usize, Vec<half::f16>)>,
         baton_file: &mut Option<F16File>,
-        stage2_frames: &mut BTreeMap<usize, Vec<half::bf16>>,
+        stage2_frames: &mut BTreeMap<usize, Arc<Vec<half::bf16>>>,
         meta: &ClipMeta,
         out: &mut RenderWorker<'_>,
         report: &mut FrameReport,
@@ -1195,10 +1332,8 @@ impl Pipeline {
                 Some(f) => f.put(t, &b)?,
                 None => {
                     let model = stage2_frames.remove(&t).ok_or_else(|| Error::engine(format!("frame {t} not cached for stage 2")))?;
-                    let t0 = Instant::now();
-                    let (rgb, b) = stage2_inputs(&model, b);
-                    self.s2_host[0] += t0.elapsed().as_secs_f64();
-                    self.stage2_run(rgb, b, meta, out, report, sink)?;
+                    // converted inside the run, once, to the type stage 2 takes
+                    self.stage2_run(Data::Bf16(vec![&model[..]]), Data::F16(b), meta, out, report, sink)?;
                 }
             }
         }
@@ -1208,8 +1343,8 @@ impl Pipeline {
     /// Stage 2 on one frame; its output goes to the render thread (rendered and handed to every writer there).
     fn stage2_run(
         &mut self,
-        rgb: Vec<f32>,
-        baton: Vec<f32>,
+        rgb: Data<'_>,
+        baton: Data<'_>,
         meta: &ClipMeta,
         out: &mut RenderWorker<'_>,
         report: &mut FrameReport,
@@ -1217,6 +1352,8 @@ impl Pipeline {
     ) -> Result<(), Error> {
         let (sh, sw) = (meta.shape_h, meta.shape_w);
         let outs = self.net("stage2")?.run(vec![("rgb", vec![1, 1, 3, sh, sw], rgb), ("baton", vec![1, 1, BATON_CH, sh / 16, sw / 16], baton)])?;
+        // the logits go to the render thread as stage 2 made them (float16 there becomes float32 off this thread)
+        // loop: NOT-WORTH — one output per stage-2 call
         let (_, logits) = outs.into_iter().next().ok_or_else(|| Error::engine("stage2: no logits".into()))?;
         if logits.len() != 4 * sh * sw {
             return Err(Error::engine(format!("stage2: {} logits for {}x{}", logits.len(), sw, sh)));
@@ -1234,14 +1371,14 @@ impl Pipeline {
 /// One stage-1 window's inputs made ahead (`keying`).
 struct WindowInputs {
     frames: Vec<Prepped>,
-    hint_video: Option<Vec<Vec<f32>>>,
+    hint_video: Option<Vec<Arc<Vec<f32>>>>,
     found: Found,
-    rvm: Vec<f32>,
+    rvm: Vec<half::f16>,
 }
 
 /// The window's foundation features (low-VRAM: from the prepass files) or the inputs to compute them.
 enum Found {
-    Features(Vec<f32>, Vec<f32>),
+    Features(Data<'static>, Data<'static>),
     Inputs((Vec<f32>, Vec<f32>)),
 }
 
@@ -1263,14 +1400,21 @@ fn foundation_inputs(frames: &[Prepped], sh: usize, sw: usize) -> (Vec<f32>, Vec
     (radio, moge)
 }
 
-/// Stage 2's inputs for one frame: the model view as float32 and the blended state rounded to float16 (the
-/// runtime keeps it as float16).
-fn stage2_inputs(model: &[half::bf16], baton: Vec<f32>) -> (Vec<f32>, Vec<f32>) {
-    use rayon::prelude::*;
-    let mut rgb = Vec::with_capacity(model.len());
-    bf16_to_f32(model, &mut rgb);
-    let baton: Vec<f32> = baton.into_par_iter().with_min_len(1 << 14).map(f16_round).collect();
-    (rgb, baton)
+/// Give freed host memory back to the system (glibc keeps it per malloc arena otherwise). Measured, four jobs
+/// in one engine process (locked_backdrop, with_motion_blur, locked_backdrop, metal_glasses): sessions loaded
+/// on their own thread left their freed host memory in that thread's arena, and the engine's resident memory
+/// grew from job to job (3.8 -> 9.1 GB after each job, peak 12.3 GB); trimming after each unload keeps it flat.
+pub fn trim_host_memory() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        extern "C" {
+            fn malloc_trim(pad: usize) -> std::os::raw::c_int;
+        }
+        // SAFETY: glibc's malloc_trim(3) takes a pad size and only releases free memory
+        unsafe {
+            malloc_trim(0);
+        }
+    }
 }
 
 /// The TensorRT engine cache root: CK_ENGINE_TRT_CACHE, else $XDG_CACHE_HOME (or ~/.cache)/corridorkey-desktop/tensorrt.

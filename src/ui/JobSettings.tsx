@@ -37,12 +37,14 @@ export function JobSettings({ job, focus, sectionTasks, onChange }: { job: Job; 
   const toggleOutput = (name: OutputName) => {
     const has = o.outputs.includes(name);
     if (has && o.outputs.length === 1) return; // at least one output
+    // loop: NOT-WORTH — four outputs per click
     set({ outputs: has ? o.outputs.filter((x) => x !== name) : OUTPUT_NAMES.filter((x) => x === name || o.outputs.includes(x)) });
   };
   const despillUsed = o.outputs.includes("checker") || o.outputs.includes("cutout");
   const hintFile = o.hintMode === "first-frame" ? o.hintFirstFrame : o.hintMode === "video" ? o.hintVideo : null;
   const hintStatus = o.hintMode === "none" ? "No hint · the model picks the subject" : `${HINT_TEXT[o.hintMode]} · trust ${o.hintQuality.toFixed(2)}${hintFile ? "" : " · no file yet"}`;
   const memStatus = o.memory.auto ? "Automatic · from free graphics memory" : `Manual · ${o.memory.hannChunk}/${o.memory.hannStride}${o.memory.lowVram ? " · low-memory" : ""}`;
+  // loop: HOT-PATH-OK — ≤ four outputs per render
   const outStatus = `${o.outputs.map((x) => OUTPUT_TEXT[x].label).join(", ")} · ${o.outputFormat === "exr" ? `EXR ${o.exrDtype}` : "video"}`;
 
   return (
@@ -88,6 +90,7 @@ export function JobSettings({ job, focus, sectionTasks, onChange }: { job: Job; 
           <>
             <Row label="Files">
               <div className="checks">
+                {/* loop: HOT-PATH-OK — four outputs per render */}
                 {OUTPUT_NAMES.map((name) => (
                   <label key={name} title={OUTPUT_TEXT[name].help}>
                     <input type="checkbox" checked={o.outputs.includes(name)} onChange={() => toggleOutput(name)} />
@@ -179,10 +182,12 @@ export function JobSettings({ job, focus, sectionTasks, onChange }: { job: Job; 
                     id="win"
                     value={`${o.memory.hannChunk}/${o.memory.hannStride}`}
                     onChange={(e) => {
+                      // loop: NOT-WORTH — two numbers per window choice
                       const [c, s] = e.target.value.split("/").map(Number);
                       if (!o.memory.auto) set({ memory: { ...o.memory, hannChunk: c, hannStride: s } });
                     }}
                   >
+                    {/* loop: HOT-PATH-OK — a few window choices per render */}
                     {WINDOWS.map(([c, s]) => (
                       <option key={c} value={`${c}/${s}`}>
                         {c} / {s}

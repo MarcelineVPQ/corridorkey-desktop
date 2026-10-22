@@ -18,6 +18,7 @@ export function loadUpdatePrefs(file: string, version: string): UpdatePrefs {
   const fallback: UpdatePrefs = { channel: isDevVersion(version) ? "dev" : "stable", automatic: true };
   let saved: Partial<UpdatePrefs> = {};
   try {
+    // loop: NOT-WORTH — reads the update prefs (a few bytes) once at start
     saved = JSON.parse(readFileSync(file, "utf8")) as Partial<UpdatePrefs>;
   } catch {
     // error: NOT-WORTH — no file yet (first start) or unreadable: the defaults
@@ -30,8 +31,11 @@ export function loadUpdatePrefs(file: string, version: string): UpdatePrefs {
 }
 
 export function saveUpdatePrefs(file: string, prefs: UpdatePrefs): void {
+  // loop: NOT-WORTH — one mkdir per prefs save (a user action)
   mkdirSync(dirname(file), { recursive: true });
   const tmp = `${file}.tmp`;
+  // loop: NOT-WORTH — writes the prefs file per save
   writeFileSync(tmp, JSON.stringify(prefs, null, 2) + "\n");
+  // loop: NOT-WORTH — one rename per save
   renameSync(tmp, file);
 }

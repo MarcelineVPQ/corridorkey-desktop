@@ -24,6 +24,7 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
       </div>
     ) : (
       <ul className="check-list">
+        {/* loop: NOT-WORTH — a few problems per render */}
         {c.problems.map((m) => (
           <li key={m} className="check-line error">
             <X size={15} aria-hidden /> {m}
@@ -93,6 +94,7 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
           {checks(rust, "Engine program and the five networks found")}
           {p && !p.torch && (
             <ul className="check-list">
+              {/* loop: NOT-WORTH — five networks per render */}
               {Object.entries(p.assets).map(([k, ok]) => (
                 <li key={k} className={`check-line ${ok ? "ok" : "error"}`}>
                   {ok ? <Check size={15} aria-hidden /> : <X size={15} aria-hidden />} {k} {ok ? `found by the engine (${p.precision ?? ""})` : "missing"}
@@ -110,6 +112,7 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
               {checks(state.checkout, "Code, Python environment, weights and foundation models found")}
               {p && p.torch && (
                 <ul className="check-list">
+                  {/* loop: NOT-WORTH — five networks per render */}
                   {Object.entries(p.assets).map(([k, ok]) => (
                     <li key={k} className={`check-line ${ok ? "ok" : "error"}`}>
                       {ok ? <Check size={15} aria-hidden /> : <X size={15} aria-hidden />} {k.replace("_", " ")} {ok ? "found by the engine" : "missing"}
@@ -131,6 +134,7 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
                 <Stat k="Busy" v={`${state.gpu.utilization}%`} />
               </div>
               <ul className="gpu-procs">
+                {/* loop: HOT-PATH-OK — a few compute processes per render (GPU readout every 2 s while a job runs) */}
                 {state.gpu.processes.map((g) => (
                   <li key={g.pid}>
                     {g.ours ? "CorridorKey engine" : g.name} — {gb(g.usedMb)}

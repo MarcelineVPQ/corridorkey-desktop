@@ -24,6 +24,7 @@ function update(): void {
 function onMove(e: PointerEvent): void {
   pointer = { x: e.clientX, y: e.clientY };
   // lifetime: OK — one-shot, at most one pending; only pointer moves arm it (none while hidden)
+  // loop: HOT-PATH-OK — one rAF per pointer move while glass is on, coalesced (frame set until it runs)
   if (!frame) frame = requestAnimationFrame(update);
 }
 

@@ -13,6 +13,7 @@ pub fn read(path: &std::path::Path) -> Result<(Vec<usize>, Vec<f32>), String> {
         return Err("fortran order not supported".into());
     }
     let shape: Vec<usize> = header
+        // loop: NOT-WORTH — a fixture header (tests only)
         .split("'shape':")
         .nth(1)
         .and_then(|r| r.split('(').nth(1))
@@ -21,18 +22,24 @@ pub fn read(path: &std::path::Path) -> Result<(Vec<usize>, Vec<f32>), String> {
         .ok_or(format!("no shape in {header}"))?;
     let d = &buf[start + hlen..];
     let v: Vec<f32> = if header.contains("'<f4'") {
+        // loop: NOT-WORTH — fixture data (tests only)
         d.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
     } else if header.contains("'<f2'") {
+        // loop: NOT-WORTH — fixture data (tests only)
         d.chunks_exact(2).map(|c| half::f16::from_le_bytes([c[0], c[1]]).to_f32()).collect()
     } else if header.contains("'<f8'") {
+        // loop: NOT-WORTH — fixture data (tests only)
         d.chunks_exact(8).map(|c| f64::from_le_bytes(c.try_into().unwrap()) as f32).collect()
     } else if header.contains("'|u1'") {
+        // loop: NOT-WORTH — fixture data (tests only)
         d.iter().map(|&b| b as f32).collect()
     } else if header.contains("'<u2'") {
+        // loop: NOT-WORTH — fixture data (tests only)
         d.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]]) as f32).collect()
     } else {
         return Err(format!("dtype not supported: {header}"));
     };
+    // loop: NOT-WORTH — a shape's few dimensions
     if v.len() != shape.iter().product::<usize>() {
         return Err(format!("{}: {} values for shape {shape:?}", path.display(), v.len()));
     }

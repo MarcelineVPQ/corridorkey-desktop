@@ -17,6 +17,7 @@ async function page(timeoutMs) {
   // loop: SERIAL-REQUIRED — waits for the app's page (bounded by timeoutMs)
   while (Date.now() < until) {
     try {
+      // loop: SERIAL-REQUIRED — polls the test copy's DevTools port, 2 s timeout per ask
       const t = (await (await fetch(`http://127.0.0.1:${port}/json`, { signal: AbortSignal.timeout(2000) })).json()).find((x) => x.type === "page");
       if (t) return t;
     } catch {
@@ -37,6 +38,7 @@ async function connect(timeoutMs) {
     const d = JSON.parse(m.data);
     if (d.id && wait.has(d.id)) (wait.get(d.id)(d), wait.delete(d.id));
   });
+  // loop: NOT-WORTH — pending DevTools calls when the socket closes
   ws.addEventListener("close", () => wait.forEach((r) => r({ error: "closed" })));
   const send = (method, params = {}) => new Promise((r) => (wait.set(++id, r), ws.send(JSON.stringify({ id, method, params }))));
   // every evaluation gives up after 15 s (a page that is quitting never answers)
@@ -83,6 +85,7 @@ let moved = false;
 while (Date.now() < until && !moved) {
   await sleep(1000);
   try {
+    // loop: SERIAL-REQUIRED — polls the test copy's DevTools port, 2 s timeout per ask
     const t = (await (await fetch(`http://127.0.0.1:${port}/json`, { signal: AbortSignal.timeout(2000) })).json()).find((x) => x.type === "page");
     moved = Boolean(t && t.id !== oldTarget);
     console.log(new Date().toISOString(), t ? (t.id === oldTarget ? "old page still up" : "new page up") : "no page");

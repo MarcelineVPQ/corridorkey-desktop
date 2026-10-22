@@ -62,6 +62,7 @@ export function relaunchEnv(env: Record<string, string | undefined>): Record<str
 
 // the flags this copy was started with (--no-sandbox…), never Chromium's own per-process switches
 export function relaunchArgs(argv: string[]): string[] {
+  // loop: NOT-WORTH — the command line, once per relaunch
   return argv.slice(1).filter((a) => typeof a === "string" && !/^--type=/.test(a));
 }
 
@@ -70,6 +71,7 @@ export function relaunchArgs(argv: string[]): string[] {
 // unmounts by itself after the app quits instead of being killed with the mount in place. systemd older
 // than 250 refuses ExitType: then KillMode=process (DS5's fallback).
 export function systemdRunArgs(o: { target: string; args?: string[]; env?: Record<string, string>; unit: string; exitTypeCgroup?: boolean }): string[] {
+  // loop: NOT-WORTH — a few environment variables, once per relaunch
   const setenv = Object.entries(o.env ?? {}).map(([k, v]) => `--setenv=${k}=${v}`);
   return ["--user", "--collect", `--unit=${o.unit}`, "-p", o.exitTypeCgroup === false ? "KillMode=process" : "ExitType=cgroup", ...setenv, "--", o.target, ...(o.args ?? [])];
 }

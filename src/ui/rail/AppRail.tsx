@@ -95,6 +95,7 @@ export function AppRail(props: { state: AppState; page: PageId; pageDots: Partia
         onPointerEnter={() => send("enter")}
         onPointerLeave={() => send("leave")}
         onPointerDown={() => (pointerDown.current = true)}
+        // loop: NOT-WORTH — one zero-delay timer per pointer-up on the rail
         onPointerUp={() => setTimeout(() => (pointerDown.current = false))}
         onFocus={(ev) => send(ev.target.matches(":focus-visible") ? "focus-visible" : "focus-pointer")}
         onBlur={(ev) => {
@@ -103,6 +104,7 @@ export function AppRail(props: { state: AppState; page: PageId; pageDots: Partia
         onKeyDown={onKeyDown}
       >
         <div className="rail-nav" role="list">
+          {/* loop: HOT-PATH-OK — the rail's few items per render */}
           {ITEMS.map((it) => {
             const Icon = ICONS[it.id];
             const waiting = pageDots[it.id];

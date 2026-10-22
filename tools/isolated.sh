@@ -17,6 +17,7 @@
 set -euo pipefail
 APP="$(cd "$(dirname "$0")/.." && pwd)"
 STATE="" PORT="" SIZE="1400x900" ENVS=()
+# loop: NOT-WORTH — the command line
 while [ $# -gt 0 ]; do
   case "$1" in
     --state) STATE="$2"; shift 2 ;;

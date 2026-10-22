@@ -13,6 +13,8 @@
 //   node tools/engine_bench.mjs footprint NAME=PATH[,PATH...] ...      (install size with du)
 //
 // opts: --vram-budget GB (the run option vram_budget_gb, same for both engines), --tensorrt,
+//       --stall-s S (default 600: an engine silent that long is killed and the clip recorded as stalled;
+//       the longest silence measured is one TensorRT engine build, 93 s),
 //       --option key=json (any extra run option), --env K=V (engine environment), --cpu (no GPU guard; CPU only).
 // Defaults for both engines: outputs alpha+fg, automatic memory window, no hint.
 // GPU guard: refuses to start, and stops between clips, while Sonata runs or another process holds > 1 GiB.
@@ -22,9 +24,10 @@ import { appendFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } f
 import { basename, extname, join, resolve } from "node:path";
 
 const SAMPLE_MS = 250;
+const STALL_S = 600;
 
 export function parseArgs(argv) {
-  const a = { clips: [], option: {}, env: {}, kind: argv[0] };
+  const a = { clips: [], option: {}, env: {}, kind: argv[0], stallS: STALL_S };
   // loop: NOT-WORTH — the command line
   for (let i = 1; i < argv.length; i++) {
     const k = argv[i];
@@ -39,6 +42,7 @@ export function parseArgs(argv) {
     else if (k === "--out") a.out = next();
     else if (k === "--vram-budget") a.vramBudget = Number(next());
     else if (k === "--tensorrt") a.tensorrt = true;
+    else if (k === "--stall-s") a.stallS = Number(next());
     else if (k === "--cpu") a.cpu = true;
     else if (k === "--option") {
       const [key, ...v] = next().split("=");
@@ -77,6 +81,7 @@ export function tree(root) {
     try {
       // loop: NOT-WORTH — the threads of one process
       for (const t of readdirSync(`/proc/${all[i]}/task`)) {
+        // loop: HOT-PATH-OK — the engine's few processes, every 250 ms while a bench clip runs
         all.push(...readFileSync(`/proc/${all[i]}/task/${t}/children`, "utf8").split(" ").filter(Boolean).map(Number));
       }
     } catch {
@@ -87,6 +92,7 @@ export function tree(root) {
 }
 
 const rssMb = (pids) =>
+  // loop: HOT-PATH-OK — the engine's few processes, every 250 ms while a bench clip runs
   pids.reduce((s, p) => {
     try {
       return s + Number(/VmRSS:\s+(\d+)/.exec(readFileSync(`/proc/${p}/status`, "utf8"))[1]) / 1024;
@@ -97,10 +103,14 @@ const rssMb = (pids) =>
 
 function gpuApps() {
   try {
-    return execFileSync("nvidia-smi", ["--query-compute-apps=pid,used_memory", "--format=csv,noheader,nounits"], { encoding: "utf8" })
-      .split("\n")
-      .filter(Boolean)
-      .map((l) => l.split(",").map((s) => Number(s.trim())));
+    // loop: HOT-PATH-OK — one nvidia-smi call every 250 ms while a bench clip runs [bounded: 5 s timeout (this pass: had none)]
+    return (
+      execFileSync("nvidia-smi", ["--query-compute-apps=pid,used_memory", "--format=csv,noheader,nounits"], { encoding: "utf8", timeout: 5000 })
+        .split("\n")
+        // loop: HOT-PATH-OK — a few compute processes, every 250 ms
+        .filter(Boolean)
+        .map((l) => l.split(",").map((s) => Number(s.trim())))
+    );
   } catch {
     return [];
   }
@@ -108,9 +118,12 @@ function gpuApps() {
 
 const vramMb = (pids) => {
   const set = new Set(pids);
-  return gpuApps()
-    .filter(([pid]) => set.has(pid))
-    .reduce((s, [, mb]) => s + mb, 0);
+  return (
+    gpuApps()
+      // loop: HOT-PATH-OK — a few compute processes, every 250 ms
+      .filter(([pid]) => set.has(pid))
+      .reduce((s, [, mb]) => s + mb, 0)
+  );
 };
 
 /** null when the GPU may be used, else why not (Sonata playing, or another process holding > 1 GiB). */
@@ -118,20 +131,25 @@ export function gpuBusy(ownPids = []) {
   const pattern = ["mount_s", "onata|S", "onata.AppImage"].join("");
   try {
     // helper command lines under ~/.cache/claude-scratch (other agents' guards and test copies) are not Sonata
+    // loop: NOT-WORTH — pgrep once per clip (the GPU guard) [bounded: pgrep reads /proc and exits]
     const out = execFileSync("pgrep", ["-fai", pattern], { encoding: "utf8" })
       .split("\n")
+      // loop: NOT-WORTH — pgrep's few lines, once per clip
       .filter((l) => l.trim() && !l.includes("claude-scratch") && !l.includes("pgrep"));
     if (out.length) return `Sonata is running (${out[0]})`;
   } catch {
     // pgrep exits 1 when nothing matches
   }
   const own = new Set(ownPids);
+  // loop: NOT-WORTH — a few compute processes, once per clip
   const big = gpuApps().filter(([pid, mb]) => !own.has(pid) && mb > 1024);
+  // loop: NOT-WORTH — a few compute processes, once per clip
   return big.length ? `another process holds graphics memory: ${big.map(([p, m]) => `${p} ${m} MiB`).join(", ")}` : null;
 }
 
 /** frames/s after the first window: from the first `frames` reply after "window 1/n done" to the last. */
 export function steadyFps(frames, firstWindowAt) {
+  // loop: NOT-WORTH — the clip's frames replies (≤ a few hundred), once per clip
   const f = frames.filter(([t, d]) => d > 0 && (firstWindowAt === undefined || t >= firstWindowAt));
   if (f.length < 2) return null;
   const [t0, d0] = f[0];
@@ -154,7 +172,15 @@ async function runClip(a, clip) {
   });
   // lifetime: OK — cleared when the engine exits
   // loop: HOT-PATH-OK — /proc reads + one nvidia-smi call every 250 ms while a bench clip runs
+  let lastReply = 0;
+  // loop: HOT-PATH-OK — the 250 ms sampler while a clip runs; also the stall watchdog (STALL_S, this pass: a silent engine is killed instead of holding the GPU lock)
   const sampler = setInterval(() => {
+    if (sec() - lastReply > a.stallS && r.exit === undefined && !r.stalled) {
+      // a wait that never ends would hold the GPU lock: the silent engine is stopped and the clip says so
+      r.stalled = true;
+      r.error = `stalled: no engine reply for ${a.stallS} s`;
+      child.kill("SIGKILL");
+    }
     const p = tree(child.pid);
     if (!a.cpu) r.peakVramMb = Math.max(r.peakVramMb, vramMb(p));
     r.peakRssMb = Math.max(r.peakRssMb, Math.round(rssMb(p)));
@@ -164,6 +190,7 @@ async function runClip(a, clip) {
     writeFileSync(replies, "");
     createInterface({ input: child.stdout }).on("line", (line) => {
       appendFileSync(replies, line + "\n");
+      lastReply = sec();
       let m;
       try {
         m = JSON.parse(line);
@@ -219,6 +246,7 @@ export function markdown(rows) {
   return (
     head +
     rows
+      // loop: NOT-WORTH — the bench's rows, once per report
       .map((r) => {
         const m = r.memory;
         const win = m ? `${m.hann_chunk}/${m.hann_stride}${m.low_vram ? " low" : ""}${m.auto ? " auto" : ""}` : "n/a";
@@ -233,6 +261,7 @@ export function markdown(rows) {
 function du(paths) {
   // loop: NOT-WORTH — a few install paths
   let total = 0;
+  // loop: NOT-WORTH — a few install paths, du once each [bounded: du over a local folder]
   for (const p of paths) total += Number(execFileSync("du", ["-sbL", p], { encoding: "utf8" }).split("\t")[0]);
   return total;
 }
@@ -240,6 +269,7 @@ function du(paths) {
 async function main() {
   const a = parseArgs(process.argv.slice(2));
   if (a.kind === "footprint") {
+    // loop: NOT-WORTH — the command line's clips
     const rows = a.clips.map((spec) => {
       const [name, list] = spec.split("=");
       const paths = list.split(",");

@@ -14,8 +14,7 @@ use std::path::{Path, PathBuf};
 /// Padded height / width ranges (inclusive, multiples of 128), 3-4 quanta wide so a range's largest shape stays
 /// close to the clips in it (TensorRT sizes its working memory, and so the longest window, for the largest shape).
 /// 720p pads to 768x1280, 1080p to 1152x1920, UHD to 2176x3840.
-pub const DIM_RANGES: [(usize, usize); 8] =
-    [(128, 512), (640, 896), (1024, 1280), (1408, 1664), (1792, 2176), (2304, 2816), (2944, 3456), (3584, 4096)];
+pub const DIM_RANGES: [(usize, usize); 8] = [(128, 512), (640, 896), (1024, 1280), (1408, 1664), (1792, 2176), (2304, 2816), (2944, 3456), (3584, 4096)];
 /// Stage-1 window lengths a range can get: the longest whose window × largest frame fits PIXEL_FRAMES_MAX.
 pub const WINDOWS: [usize; 5] = [24, 16, 12, 8, 4];
 /// Measured (RTX 5080, TensorRT 10.16, 12 GB budget): stage 1 for windows up to 24 at 1152x1280 builds with
@@ -32,6 +31,7 @@ pub struct Bucket {
 }
 
 fn range_of(v: usize, ranges: &[(usize, usize)]) -> Option<(usize, usize)> {
+    // loop: NOT-WORTH — eight ranges
     ranges.iter().copied().find(|(lo, hi)| v >= *lo && v <= *hi)
 }
 
@@ -39,6 +39,7 @@ fn range_of(v: usize, ranges: &[(usize, usize)]) -> Option<(usize, usize)> {
 pub fn bucket_for(shape_h: usize, shape_w: usize) -> Option<Bucket> {
     let h = range_of(shape_h, &DIM_RANGES)?;
     let w = range_of(shape_w, &DIM_RANGES)?;
+    // loop: NOT-WORTH — five window lengths
     let tmax = WINDOWS.iter().copied().find(|t| t * h.1 * w.1 <= PIXEL_FRAMES_MAX)?;
     Some(Bucket { h, w, t: (1, tmax) })
 }
@@ -91,22 +92,30 @@ pub fn builder_path() -> Option<PathBuf> {
     p.exists().then_some(p)
 }
 
+/// The longest one engine build may take: CK_ENGINE_TRT_BUILD_TIMEOUT_S, default 1800 s (measured builds on the
+/// RTX 5080: 23-93 s per network; slower cards take longer, a hung build is stopped and the network runs on CUDA).
+pub fn build_timeout() -> std::time::Duration {
+    let s = std::env::var("CK_ENGINE_TRT_BUILD_TIMEOUT_S").ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(1800);
+    std::time::Duration::from_secs(s.max(1))
+}
+
 /// Build `piece`'s engine for bucket `b` into `dir` (`<piece>.engine`) with ck-trt-build, a child process (its
 /// host memory goes back when it ends). Ok(seconds), Err(why). `workspace_mb`: TensorRT's working-memory limit.
 pub fn build_engine(builder: &Path, onnx: &Path, piece: &str, b: &Bucket, dir: &Path, workspace_mb: u64, timing_cache: &Path) -> Result<f64, String> {
     let (min, opt, max) = profile(piece, b).ok_or("unknown network")?;
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let t = std::time::Instant::now();
-    let out = std::process::Command::new(builder)
-        .arg("--onnx")
+    let mut cmd = std::process::Command::new(builder);
+    cmd.arg("--onnx")
         .arg(onnx)
         .arg("--engine")
         .arg(engine_path(dir, piece))
         .args(["--min", &min, "--opt", &opt, "--max", &max, "--workspace-mb", &workspace_mb.to_string()])
         .arg("--timing-cache")
-        .arg(timing_cache)
-        .output()
-        .map_err(|e| format!("{}: {e}", builder.display()))?;
+        .arg(timing_cache);
+    // loop: SERIAL-REQUIRED — one engine build at a time (the builder needs the card to itself); deadline build_timeout() 1800 s (this pass: it had none)
+    let out = crate::proc::output_timeout(&mut cmd, build_timeout()).map_err(|e| format!("ck-trt-build: {e}"))?;
+    // loop: NOT-WORTH — the builder's output lines, once per build
     let line = String::from_utf8_lossy(&out.stdout).lines().last().unwrap_or("").to_string();
     if out.status.success() && line.contains("\"ok\":true") {
         return Ok(t.elapsed().as_secs_f64());
@@ -114,6 +123,7 @@ pub fn build_engine(builder: &Path, onnx: &Path, piece: &str, b: &Bucket, dir: &
     let why = serde_json::from_str::<serde_json::Value>(&line)
         .ok()
         .and_then(|v| v["error"].as_str().map(|s| s.to_string()))
+        // loop: NOT-WORTH — the builder's stderr, once per failed build
         .unwrap_or_else(|| format!("ck-trt-build exited with {}: {}", out.status, String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("")));
     Err(why)
 }
@@ -166,6 +176,7 @@ pub fn stale_dirs(root: &Path, current: &Path, gpu: &str) -> Vec<PathBuf> {
 pub fn source_stamp(onnx: &Path) -> String {
     let data = PathBuf::from(format!("{}.data", onnx.display()));
     [onnx.to_path_buf(), data]
+        // loop: NOT-WORTH — a few cache folders, once per TensorRT job
         .iter()
         .map(|p| match std::fs::metadata(p) {
             Ok(m) => format!("{}:{}", m.len(), m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0)),
