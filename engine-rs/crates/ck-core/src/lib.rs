@@ -1,6 +1,7 @@
 //! CorridorKey's inference pipeline on ONNX Runtime (docs/ENGINE_RUST.md): a port of the upstream runtime's
 //! host side (corridorkey/runtime.py, video_io.py, color_utils.py) around the five exported networks
 //! (C-RADIO, MoGe, RVM single step, stage 1, stage 2).
+pub mod ahead;
 pub mod clip;
 pub mod color;
 pub mod decode;
@@ -9,6 +10,7 @@ pub mod hann;
 pub mod image;
 pub mod job;
 pub mod npy;
+pub mod outputs;
 pub mod pipeline;
 pub mod render;
 pub mod runtime;

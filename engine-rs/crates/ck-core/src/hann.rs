@@ -45,11 +45,13 @@ impl BatonBlend {
     pub fn add(&mut self, t: usize, baton: &[f32], w: f32) {
         match self.acc.get_mut(&t) {
             Some((sum, wsum)) => {
-                sum.iter_mut().zip(baton).for_each(|(s, &b)| *s += b * w);
+                use rayon::prelude::*;
+                sum.par_iter_mut().zip(baton.par_iter()).with_min_len(1 << 14).for_each(|(s, &b)| *s += b * w);
                 *wsum += w as f64;
             }
             None => {
-                self.acc.insert(t, (baton.iter().map(|&b| b * w).collect(), w as f64));
+                use rayon::prelude::*;
+                self.acc.insert(t, (baton.par_iter().with_min_len(1 << 14).map(|&b| b * w).collect(), w as f64));
             }
         }
     }
@@ -61,7 +63,8 @@ impl BatonBlend {
             .map(|k| {
                 let (sum, wsum) = self.acc.remove(&k).unwrap();
                 let d = wsum.max(1e-6) as f32;
-                (k, sum.into_iter().map(|v| crate::color::f16_round(v / d)).collect())
+                use rayon::prelude::*;
+                (k, sum.into_par_iter().with_min_len(1 << 14).map(|v| crate::color::f16_round(v / d)).collect())
             })
             .collect()
     }
