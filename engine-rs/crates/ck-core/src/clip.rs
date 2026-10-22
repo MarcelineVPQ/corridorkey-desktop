@@ -40,6 +40,23 @@ impl ClipMeta {
     }
 }
 
+/// Whether the ONNX networks take this padded model shape; an `input` error that says why when they don't.
+/// Measured (CPU fp32 and CUDA fp16, the 2.0.0-onnx.1 and onnx.2 sets): every frame taller than wide failed in
+/// C-RADIO (its export adds a square position grid: 240 tokens against 400 at 768x1280 padded), every landscape
+/// and square one ran; a side of 128 px failed in stage 1 (a reflect pad of 3 on a 2-cell grid). Refused before
+/// any work, in words, instead of an ONNX Runtime message after the RVM pass.
+pub fn model_shape_supported(shape_h: usize, shape_w: usize, w: usize, h: usize) -> Result<(), Error> {
+    if shape_h <= SHAPE_QUANTUM || shape_w <= SHAPE_QUANTUM {
+        return Err(Error::input(format!("This clip is too small ({w}x{h}): CorridorKey's networks need more than {SHAPE_QUANTUM} pixels in each direction.")));
+    }
+    if shape_h > shape_w {
+        return Err(Error::input(format!(
+            "Portrait clips (taller than wide, here {w}x{h}) can't be keyed by the ONNX engine yet: its C-RADIO model only takes landscape or square frames."
+        )));
+    }
+    Ok(())
+}
+
 /// video_io.none_path: "", none, null, off, false, - mean no path.
 pub fn none_path(p: Option<&str>) -> Option<&str> {
     let p = p?;
@@ -309,6 +326,20 @@ mod tests {
         let n = probe_video(&f, -1).map(|m| m.num_frames);
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(n, Ok(8));
+    }
+
+    #[test]
+    fn shapes_the_networks_take() {
+        // measured: these ran (CPU fp32 / CUDA fp16)
+        // loop: NOT-WORTH — a few test shapes
+        for (sh, sw) in [(256, 384), (256, 256), (384, 384), (768, 1280), (2176, 3840)] {
+            assert_eq!(model_shape_supported(sh, sw, sw, sh), Ok(()), "{sh}x{sw}");
+        }
+        // measured: these failed inside C-RADIO (portrait) or stage 1 (a 128 px side)
+        // loop: NOT-WORTH — a few test shapes
+        for (sh, sw) in [(384, 256), (384, 128), (1280, 768), (128, 384)] {
+            assert_eq!(model_shape_supported(sh, sw, sw, sh).unwrap_err().code, "input", "{sh}x{sw}");
+        }
     }
 
     #[test]

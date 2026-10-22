@@ -551,6 +551,7 @@ impl Pipeline {
             sink.send(json!({"type": "memory", "hann_chunk": chunk, "hann_stride": stride, "low_vram": low_vram, "auto": false, "provider": provider.name()}));
         }
         sink.send(json!({"type": "clip", "width": meta.w, "height": meta.h, "fps": meta.fps, "frames": meta.num_frames}));
+        crate::clip::model_shape_supported(meta.shape_h, meta.shape_w, meta.w, meta.h)?;
         let t_all = meta.num_frames;
         let (sh, sw) = (meta.shape_h, meta.shape_w);
         // TensorRT jobs with an automatic window: the longest window the clip's TensorRT range was built for (its
