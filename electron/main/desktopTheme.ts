@@ -27,6 +27,7 @@ function plasmaRunning(): boolean {
     for (const pid of readdirSync("/proc")) {
       if (!/^\d+$/.test(pid)) continue;
       try {
+        // loop: NOT-WORTH — one /proc read per process while scanning for Plasma, once per app start (the result is cached)
         if (/^(plasmashell|kwin_wayland|kwin_x11)$/.test(readFileSync(`/proc/${pid}/comm`, "utf8").trim())) return true;
       } catch {
         // error: NOT-WORTH — the process ended meanwhile: skip it
@@ -42,7 +43,9 @@ function plasmaRunning(): boolean {
 let kde: boolean | null = null;
 function isKde(): boolean {
   if (process.platform !== "linux") return false;
+  // loop: NOT-WORTH — one stat, once per app start (cached in `kde`)
   kde ??= isKdeSession(process.env, existsSync(kdeGlobals), plasmaRunning);
+  // loop: NOT-WORTH — one stat per palette read (Desktop theme only, on a theme change)
   return kde && existsSync(kdeGlobals);
 }
 
@@ -64,6 +67,7 @@ function systemAccent(): Rgb | null {
 function portalAccent(): Promise<Rgb | null> {
   return new Promise((resolve) => {
     // lifetime: OK — exits on its own; the 2 s timeout kills a hung gdbus
+    // loop: NOT-WORTH — one gdbus portal read per palette refresh (Desktop theme only) [bounded: its 2 s timeout option]
     execFile(
       "gdbus",
       [
@@ -83,6 +87,7 @@ function portalAccent(): Promise<Rgb | null> {
         // error: NOT-WORTH — no portal answers null: the system accent is tried next
         const m = !error && /\(([\d.]+),\s*([\d.]+),\s*([\d.]+)\)/.exec(stdout);
         if (!m) return resolve(null);
+        // loop: NOT-WORTH — three channels
         resolve([m[1], m[2], m[3]].map((v) => Math.round(Math.min(1, Math.max(0, Number(v))) * 255)) as Rgb);
       },
     );
@@ -95,6 +100,7 @@ export async function readDesktopPalette(): Promise<DesktopPalette | null> {
   let text: string | null = null;
   if (isKde()) {
     try {
+      // loop: NOT-WORTH — reads kdeglobals (a few KB) per palette refresh, Desktop theme only
       text = readFileSync(kdeGlobals, "utf8");
     } catch {
       // error: NOT-WORTH — no readable kdeglobals: the portal and the system accent are tried next
@@ -116,6 +122,7 @@ export function watchDesktopPalette(onChange: () => void): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
   const fire = () => {
     if (timer) clearTimeout(timer);
+    // loop: NOT-WORTH — one-shot 300 ms debounce per settings-file change
     timer = setTimeout(onChange, 300); // lifetime: OK — one-shot 300 ms debounce, cleared by the next fire()
   };
   let watcher: FSWatcher | null = null;

@@ -1,5 +1,8 @@
-// Client for the CorridorKey engine (engine/ck_engine.py, docs/ENGINE_PROTOCOL.md):
-// JSON lines over the child's stdin/stdout, the Sonata helper pattern.
+// Client for the CorridorKey engine (docs/ENGINE_PROTOCOL.md): JSON lines over
+// the child's stdin/stdout, the Sonata helper pattern. Two engines speak it:
+// the Rust one on ONNX Runtime (engine-rs/, `corridorkey-engine --models DIR`,
+// the default when it is set up) and the PyTorch one (engine/ck_engine.py run
+// with a CorridorKey2.0 checkout's venv), kept until the Rust one replaces it.
 //
 // lifetime: at most ONE engine process. Spawned when the queue starts, sent
 // `quit` when the queue ends (a loaded model holds GBs of graphics memory:
@@ -8,20 +11,34 @@
 // (the engine and its ffmpeg writers) and delete the job's temp folder.
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { createInterface } from "node:readline";
+import { existsSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 export const PROTOCOL = 1;
-const PING_TIMEOUT_MS = 120_000; // importing torch + CUDA init; more when the disk cache is cold
+const PING_TIMEOUT_MS = 120_000; // PyTorch engine: importing torch + CUDA init; more when the disk cache is cold
 const QUIT_GRACE_MS = 10_000;
 const STDERR_LINES = 40;
 
 export type EngineReply = { type: string; id?: string; [key: string]: unknown };
 
-export interface EngineLaunch {
+export interface PythonLaunch {
+  kind?: "python";
   python: string;
   script: string;
   packageRoot: string;
   env: NodeJS.ProcessEnv;
 }
+
+export interface RustLaunch {
+  kind: "rust";
+  binary: string;
+  models: string;
+  // libonnxruntime.so for the GPU build (null: the engine's own, or CK_ENGINE_ORT)
+  ort: string | null;
+  env: NodeJS.ProcessEnv;
+}
+
+export type EngineLaunch = PythonLaunch | RustLaunch;
 
 export type SpawnFn = (cmd: string, args: string[], opts: SpawnOptions) => ChildProcess;
 
@@ -33,6 +50,45 @@ export function engineEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   out.PYTHONUNBUFFERED = "1";
   out.PYTHONDONTWRITEBYTECODE = "1";
   return out;
+}
+
+/**
+ * The Rust engine's environment: ours minus what an AppImage/Electron sets, plus the folders of
+ * ONNX Runtime's library and of the CUDA / cuDNN / TensorRT libraries a pip-wheel layout keeps next to
+ * it (site-packages/onnxruntime/capi → site-packages/nvidia/<x>/lib, site-packages/tensorrt_libs).
+ */
+// loop: NOT-WORTH — a few stats + one readdir per engine spawn (the CUDA library folders)
+export function rustEngineEnv(env: NodeJS.ProcessEnv, ort: string | null, exists: (p: string) => boolean = existsSync, list: (p: string) => string[] = (p) => readdirSync(p)): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = { ...env };
+  // loop: NOT-WORTH — three names, once per engine spawn
+  for (const k of ["LD_PRELOAD", "ELECTRON_RUN_AS_NODE", "LD_LIBRARY_PATH"]) delete out[k];
+  const dirs: string[] = [];
+  if (ort) {
+    const capi = dirname(ort);
+    dirs.push(capi);
+    const site = dirname(dirname(capi));
+    const nvidia = join(site, "nvidia");
+    if (exists(nvidia)) {
+      // loop: NOT-WORTH — a handful of CUDA library folders
+      for (const d of list(nvidia).sort()) if (exists(join(nvidia, d, "lib"))) dirs.push(join(nvidia, d, "lib"));
+    }
+    if (exists(join(site, "tensorrt_libs"))) dirs.push(join(site, "tensorrt_libs"));
+    out.CK_ENGINE_ORT = ort;
+  }
+  // loop: NOT-WORTH — a user's extra library folders, once per engine spawn
+  if (env.CK_ENGINE_LD_LIBRARY_PATH) dirs.push(...env.CK_ENGINE_LD_LIBRARY_PATH.split(":").filter(Boolean));
+  if (dirs.length) out.LD_LIBRARY_PATH = dirs.join(":");
+  return out;
+}
+
+/** The command line and environment of an engine launch. */
+export function launchCommand(launch: EngineLaunch): { cmd: string; args: string[]; env: NodeJS.ProcessEnv } {
+  if (launch.kind === "rust") {
+    const args = ["--models", launch.models];
+    if (launch.ort) args.push("--ort", launch.ort);
+    return { cmd: launch.binary, args, env: rustEngineEnv(launch.env, launch.ort) };
+  }
+  return { cmd: launch.python, args: ["-u", launch.script, "--package-root", launch.packageRoot], env: engineEnv(launch.env) };
 }
 
 export class EngineProcess {
@@ -50,9 +106,9 @@ export class EngineProcess {
 
   /** Spawn and ping. Resolves with the pong; rejects (and kills) on a bad protocol or no answer. */
   start(): Promise<EngineReply> {
-    const { python, script, packageRoot, env } = this.launch;
+    const { cmd, args, env } = launchCommand(this.launch);
     // detached: its own process group, so a cancel also ends the ffmpeg writers it started
-    const child = this.spawnFn(python, ["-u", script, "--package-root", packageRoot], { env: engineEnv(env), stdio: ["pipe", "pipe", "pipe"], detached: true });
+    const child = this.spawnFn(cmd, args, { env, stdio: ["pipe", "pipe", "pipe"], detached: true });
     this.child = child;
     // lifetime: OK — both readers end with the child's streams
     createInterface({ input: child.stdout! }).on("line", (line) => this.line(line));
@@ -68,6 +124,7 @@ export class EngineProcess {
       this.onExit(code, signal, [...this.stderr]);
     });
     return new Promise<EngineReply>((resolve, reject) => {
+      // loop: SERIAL-REQUIRED — the ping deadline (PING_TIMEOUT_MS), once per engine start
       const timer = setTimeout(() => {
         this.fail(new Error(`engine did not answer within ${PING_TIMEOUT_MS / 1000} s`));
         this.kill();
@@ -100,6 +157,7 @@ export class EngineProcess {
     this.send({ cmd: "quit" });
     const child = this.child;
     // lifetime: OK — one timer per quit, a no-op once the child is gone
+    // loop: SERIAL-REQUIRED — the quit grace (QUIT_GRACE_MS), then kill; once per engine stop
     setTimeout(() => {
       if (this.child === child) this.kill();
     }, QUIT_GRACE_MS).unref();

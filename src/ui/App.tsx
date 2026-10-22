@@ -44,6 +44,7 @@ export function App() {
   // Select the first clip when nothing (or a removed clip) is selected.
   useEffect(() => {
     if (!state) return;
+    // loop: HOT-PATH-OK — the queue's jobs per state push (≤ 10/s while shown)
     if (!selected || !state.jobs.some((j) => j.id === selected)) setSelected(state.jobs[0]?.id ?? null);
   }, [state, selected]);
 
@@ -62,6 +63,7 @@ export function App() {
     if (r.panel === "hide") setPanel(r.page, false);
     if (r.section) setFocus({ page: r.page, section: r.section, n: Date.now() });
     // a queue task about one clip selects it
+    // loop: NOT-WORTH — a few tasks per rail click
     const t = tasks.find((x) => x.page === pressed && x.jobId);
     if (pressed === "queue" && t?.jobId) setSelected(t.jobId);
   };
@@ -73,6 +75,7 @@ export function App() {
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
+    // loop: NOT-WORTH — the dropped files, once per drop
     const paths = [...e.dataTransfer.files].map((f) => window.ck.pathForFile(f)).filter(Boolean);
     if (paths.length) {
       void window.ck.addPaths(paths);

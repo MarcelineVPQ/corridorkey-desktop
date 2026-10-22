@@ -20,7 +20,9 @@ export function QueuePage(props: {
   hidePanel: () => void;
 }) {
   const { state, selected, onSelect } = props;
+  // loop: HOT-PATH-OK — the queue's jobs per render (≤ 10/s while shown)
   const job = state.jobs.find((j) => j.id === selected) ?? null;
+  // loop: HOT-PATH-OK — the queue's jobs per render (≤ 10/s while shown)
   const runnable = state.jobs.some((j) => j.status === "waiting" && !j.clip.probeError && !missingInput(j));
 
   const main = (
@@ -39,8 +41,8 @@ export function QueuePage(props: {
           <button
             type="button"
             className="btn primary"
-            disabled={!runnable || !state.checkout.ok}
-            title={!state.checkout.ok ? "Set up the engine first (Engine page)" : !runnable ? "Add a clip that's ready to run" : undefined}
+            disabled={!runnable || !state.engineKind}
+            title={!state.engineKind ? "Set up the engine first (Engine page)" : !runnable ? "Add a clip that's ready to run" : undefined}
             onClick={() => window.ck.startQueue()}
           >
             <Play size={16} /> Start queue
@@ -58,6 +60,7 @@ export function QueuePage(props: {
               </button>
             </div>
           ) : (
+            // loop: HOT-PATH-OK — one row per job per render (≤ 10/s while shown; rows are cheap, measured pushes ~2/s during a job)
             state.jobs.map((j) => <JobRow key={j.id} job={j} selected={j.id === selected} onSelect={() => onSelect(j.id)} />)
           )}
         </nav>
@@ -159,6 +162,7 @@ function Detail({ job }: { job: Job }) {
 }
 
 function OtherGpuUsers({ state }: { state: AppState }) {
+  // loop: HOT-PATH-OK — a few compute processes per render
   const others = state.gpu!.processes.filter((p) => !p.ours && p.usedMb >= 512);
   if (others.length === 0) return null;
   return (
@@ -166,6 +170,7 @@ function OtherGpuUsers({ state }: { state: AppState }) {
       <h3>Other programs are using the graphics card</h3>
       <div className="hint-text">Automatic memory picks a smaller window when less is free; both run slower together.</div>
       <ul className="gpu-procs">
+        {/* loop: HOT-PATH-OK — a few compute processes per render */}
         {others.map((p) => (
           <li key={p.pid}>
             {p.name} — {gb(p.usedMb)}

@@ -1,0 +1,33 @@
+# The CorridorKey engine on ONNX Runtime (docs/ENGINE_RUST.md).
+# ck-core: the pipeline as a library (decode, colour, Hann windows, the five networks, render, writers);
+# ck-engine: the `corridorkey-engine` binary speaking docs/ENGINE_PROTOCOL.md over stdio.
+[workspace]
+resolver = "2"
+members = ["crates/ck-core", "crates/ck-engine"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+publish = false
+license-file = "../LICENSE"
+
+[workspace.dependencies]
+# a release candidate: pinned exactly (the API changed between rcs); the same pin as the house's other Rust engine
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "ndarray", "half", "api-31"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+# half: its bytemuck feature lets float16 buffers go to files as bytes without a copy
+half = { version = "2", features = ["bytemuck"] }
+bytemuck = "1"
+libloading = "0.8"
+rayon = "1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+strip = true
+
+# the ported math is checked against Python's float32 results: keep tests optimised (the e2e test decodes frames)
+[profile.test]
+opt-level = 2

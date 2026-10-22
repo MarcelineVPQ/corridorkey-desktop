@@ -28,13 +28,14 @@ export function remaining(job: Job): number | null {
 export const STAGE_TEXT: Record<Stage, string> = {
   start: "Starting the engine",
   load: "Loading the model",
+  optimize: "Optimizing for this resolution (one-time TensorRT build)",
   probe: "Reading the clip",
   rvm: "Motion features (RVM)",
   foundations: "Foundation features",
   keying: "Keying",
 };
 
-export const STAGE_ORDER: Stage[] = ["start", "load", "probe", "rvm", "foundations", "keying"];
+export const STAGE_ORDER: Stage[] = ["start", "load", "probe", "optimize", "rvm", "foundations", "keying"];
 
 export function statusText(job: Job): string {
   switch (job.status) {

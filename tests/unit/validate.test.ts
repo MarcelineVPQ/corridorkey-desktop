@@ -1,0 +1,67 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { loadSettings } from "../../electron/main/settings";
+import { idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir } from "../../electron/main/validate";
+import { DEFAULT_APPEARANCE, DEFAULT_OPTIONS } from "../../src/shared/types";
+
+describe("IPC and settings validation", () => {
+  it("keeps valid job options as they are", () => {
+    const o = { ...DEFAULT_OPTIONS, outputs: ["alpha", "cutout"], memory: { auto: false, hannChunk: 24, hannStride: 12, lowVram: true }, hintMode: "video", hintVideo: "/h.mp4" };
+    expect(sanitizeOptions(o)).toEqual(o);
+  });
+
+  it("replaces what the engine would refuse or the app can't use", () => {
+    const o = sanitizeOptions({
+      outputs: ["alpha", "matte"],
+      memory: { auto: false, hannChunk: 2, hannStride: 4 },
+      despillStrength: "0.5",
+      hintQuality: 7,
+      outputFormat: "gif",
+      frameDirFps: -1,
+      hintMode: "magic",
+    });
+    expect(o.outputs).toEqual(["alpha"]);
+    expect(o.memory).toEqual({ auto: true });
+    expect([o.despillStrength, o.hintQuality, o.outputFormat, o.frameDirFps, o.hintMode]).toEqual([0.5, 0.95, "video", 24, "none"]);
+    expect(sanitizeOptions(null)).toEqual(DEFAULT_OPTIONS);
+    expect(sanitizeOptions({ outputs: [] }).outputs).toEqual(["alpha", "fg"]);
+  });
+
+  it("appearance: only known themes and accents", () => {
+    expect(sanitizeAppearance({ theme: "solarized", accent: "desktop", glass: "yes" })).toEqual({ ...DEFAULT_APPEARANCE, accent: "desktop" });
+  });
+
+  it("ids, paths and dropped paths", () => {
+    expect([idArg("a1"), idArg(3), idArg("")]).toEqual(["a1", null, null]);
+    expect([pathArg("/o/x.mp4"), pathArg("x.mp4"), pathArg({})]).toEqual(["/o/x.mp4", null, null]);
+    expect(pathsArg(["/a", 4, null, "/b"])).toEqual(["/a", "/b"]);
+    expect(pathsArg("/a")).toEqual([]);
+  });
+
+  it("a settings file from an older or hand-edited version loads as valid settings", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ck-settings-"));
+    try {
+      const file = join(dir, "settings.json");
+      writeFileSync(file, JSON.stringify({ lastOptions: { outputs: ["matte"], memory: { auto: false, hannChunk: 24 } }, appearance: { theme: "neon" }, outputRoot: 5 }));
+      const s = loadSettings(file, {});
+      expect(s.lastOptions.outputs).toEqual(["alpha", "fg"]);
+      expect(s.lastOptions.memory).toEqual({ auto: true });
+      expect(s.appearance).toEqual(DEFAULT_APPEARANCE);
+      expect(s.outputRoot).toBeNull();
+      writeFileSync(file, "[1, 2"); // cut short
+      expect(loadSettings(file, {}).lastOptions).toEqual(DEFAULT_OPTIONS);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("two clips with the same name never share an output folder", () => {
+    const jobs = [{ outputDir: "/c/out_shot", clip: { path: "/c/shot.mp4" } }] as Parameters<typeof uniqueOutputDir>[2];
+    expect(uniqueOutputDir("/c/out_shot", "/c/shot.mov", jobs)).toBe("/c/out_shot-2");
+    expect(uniqueOutputDir("/c/out_shot", "/c/shot.mp4", jobs)).toBe("/c/out_shot"); // the same clip again
+    const more = [...jobs, { outputDir: "/c/out_shot-2", clip: { path: "/d/shot.mp4" } }] as typeof jobs;
+    expect(uniqueOutputDir("/c/out_shot", "/e/shot.mp4", more)).toBe("/c/out_shot-3");
+  });
+});

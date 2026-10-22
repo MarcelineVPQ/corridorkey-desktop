@@ -46,6 +46,7 @@ function rgb(value: string | undefined): Rgb | undefined {
   const m = value?.match(/^(\d{1,3}),(\d{1,3}),(\d{1,3})/);
   if (!m) return undefined;
   const c = [Number(m[1]), Number(m[2]), Number(m[3])] as Rgb;
+  // loop: NOT-WORTH — three channels per parsed colour
   return c.every((v) => v <= 255) ? c : undefined;
 }
 

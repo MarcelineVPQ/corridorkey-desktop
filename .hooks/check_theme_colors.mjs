@@ -27,13 +27,17 @@ const SHADOW_BLACK = /\brgba?\(\s*0[ ,]+0[ ,]+0\s*(\/|,)/g;
 
 const files = [];
 const walk = (dir) => {
+  // loop: NOT-WORTH — the source folders' entries, once per gate run
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
     if (statSync(p).isDirectory()) walk(p);
+    // loop: NOT-WORTH — a few skip patterns per file, once per gate run
     else if (/\.(css|tsx?)$/.test(p) && !SKIP.some((r) => r.test(p))) files.push(p);
   }
 };
+// loop: NOT-WORTH — two roots
 ROOTS.forEach(walk);
+// loop: NOT-WORTH — a few token sources
 const staleSources = [...TOKEN_SOURCES.keys()].filter((f) => !files.includes(f));
 if (staleSources.length) {
   console.log(`Theme gate: TOKEN_SOURCES lists files that aren't walked (moved or deleted?): ${staleSources.join(", ")}`);
@@ -41,6 +45,7 @@ if (staleSources.length) {
 }
 
 const hits = [];
+// loop: NOT-WORTH — a few token sources
 const exempt = [...TOKEN_SOURCES].map(([file, why]) => `${file}: (whole file) token source: ${why}`);
 const check = (file, startLine, text, rawText) => {
   if (!COLOR.test(text)) return;
@@ -53,6 +58,7 @@ const check = (file, startLine, text, rawText) => {
   }
   hits.push(where);
 };
+// loop: NOT-WORTH — the source files, once per gate run
 for (const file of files) {
   if (TOKEN_SOURCES.has(file)) continue;
   const source = readFileSync(file, "utf8");
@@ -61,6 +67,7 @@ for (const file of files) {
     // multi-line value covers it (the formatter moves comments around).
     const noComments = source.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "));
     let start = 0;
+    // loop: NOT-WORTH — one file's characters, once per gate run (comment stripping)
     for (let k = 0; k <= noComments.length; k++) {
       const ch = noComments[k];
       if (k === noComments.length || ch === ";" || ch === "{" || ch === "}") {
@@ -77,6 +84,7 @@ for (const file of files) {
       }
     }
   } else {
+    // loop: NOT-WORTH — one file's lines, once per gate run
     source.split("\n").forEach((line, i) => {
       const code = line.replace(/\/\/.*$/, "");
       if (!/(style=|color|background|fill|stroke|Color|#[0-9a-fA-F]{6}")/.test(code)) return;

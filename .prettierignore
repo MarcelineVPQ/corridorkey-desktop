@@ -3,3 +3,5 @@ out
 *.md
 package-lock.json
 release
+engine-rs/crates/*/tests/fixtures
+engine-rs/target

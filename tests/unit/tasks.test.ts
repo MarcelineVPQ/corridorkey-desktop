@@ -21,6 +21,8 @@ const state = (extra: Partial<AppState>): AppState =>
     gpuError: null,
     settings: { corridorKeyRoot: "/ck", lastOptions: DEFAULT_OPTIONS, appearance: DEFAULT_APPEARANCE, outputRoot: null },
     checkout: { ok: true, problems: [] },
+    rustEngine: { ok: false, problems: ["Choose the CorridorKey engine program (corridorkey-engine)."] },
+    engineKind: "python",
     desktopPalette: null,
     ...extra,
   }) as AppState;
@@ -33,10 +35,11 @@ describe("tasks (the one mechanism)", () => {
     expect(t).toEqual([expect.objectContaining({ page: "queue", section: "hint", jobId: "a" })]);
     expect(dots(t).targets.queue).toBe("hint");
   });
-  it("a missing checkout points at Engine → CorridorKey folder; it clears when fixed", () => {
-    const t = tasksOf(state({ checkout: { ok: false, problems: ["Choose your CorridorKey2.0 folder."] } }));
-    expect(t[0]).toMatchObject({ page: "engine", section: "folder" });
+  it("no engine set up points at Engine → ONNX engine; it clears when either engine is set up", () => {
+    const t = tasksOf(state({ checkout: { ok: false, problems: ["Choose your CorridorKey2.0 folder."] }, engineKind: null }));
+    expect(t[0]).toMatchObject({ page: "engine", section: "onnx", text: "Choose the CorridorKey engine program (corridorkey-engine)." });
     expect(tasksOf(state({}))).toEqual([]);
+    expect(tasksOf(state({ engineKind: "rust", checkout: { ok: false, problems: ["x"] } }))).toEqual([]);
   });
   it("failed clips are one error on the Queue item, every text on its own line", () => {
     const t = tasksOf(state({ jobs: [job("a", { status: "failed" }), job("b", { status: "failed" })], engine: { status: "failed", pong: null, error: "no python" } }));

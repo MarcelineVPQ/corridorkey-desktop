@@ -16,6 +16,7 @@ const api: CorridorKeyApi = {
   pickClips: () => ipcRenderer.invoke(IPC.pickClips),
   pickFile: (kind) => ipcRenderer.invoke(IPC.pickFile, kind),
   pickCheckout: () => ipcRenderer.invoke(IPC.pickCheckout),
+  pickRustEngine: (what) => ipcRenderer.invoke(IPC.pickRustEngine, what),
   pathForFile: (file) => webUtils.getPathForFile(file),
   setJobOptions: (id, options) => ipcRenderer.invoke(IPC.setJobOptions, id, options),
   removeJob: (id) => ipcRenderer.invoke(IPC.removeJob, id),

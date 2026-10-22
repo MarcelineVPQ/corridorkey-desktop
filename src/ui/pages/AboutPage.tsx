@@ -24,6 +24,7 @@ const slug = (s: string) =>
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
+// loop: NOT-WORTH — a doc's chapter headings (≤ 20), per render of the About page
 const chapters = (md: string) => [...md.matchAll(/^##\s+(.+)$/gm)].map((m) => m[1].trim());
 
 export function AboutPage(props: { version: string; panelShown: boolean; narrow: boolean; glass: boolean; focus: string | null; hidePanel: () => void }) {
@@ -57,10 +58,12 @@ export function AboutPage(props: { version: string; panelShown: boolean; narrow:
 
   const panel = (
     <Accordion page="about" focus={props.focus}>
+      {/* loop: NOT-WORTH — three docs per render */}
       {(Object.keys(DOCS) as DocId[]).map((id) => (
         <Section key={id} id={id} icon={DOCS[id].icon} title={DOCS[id].title} status={id === doc ? "Shown" : "Click a chapter to read it"}>
           {() => (
             <ul className="chapters">
+              {/* loop: NOT-WORTH — a doc's chapters (≤ 20) per render */}
               {chapters(DOCS[id].text).map((h) => (
                 <li key={h}>
                   <button
@@ -68,6 +71,7 @@ export function AboutPage(props: { version: string; panelShown: boolean; narrow:
                     className="link-btn"
                     onClick={() => {
                       setDoc(id);
+                      // loop: NOT-WORTH — one rAF per chapter click (scroll after the page switch)
                       requestAnimationFrame(() => document.getElementById(slug(h))?.scrollIntoView({ behavior: "smooth" }));
                     }}
                   >

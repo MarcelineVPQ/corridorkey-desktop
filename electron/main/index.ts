@@ -7,14 +7,15 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { EngineProcess } from "./engine";
 import { GPU_POLL_MS, readGpu } from "./gpu";
 import { expandPaths, probeClip, still, STILL_WIDTH, VIDEO_EXT } from "./media";
-import { Queue } from "./queue";
-import { checkCheckout, loadSettings, saveSettings } from "./settings";
+import { clearJobTemps, Queue } from "./queue";
+import { checkCheckout, checkRustEngine, chooseEngine, loadSettings, saveSettings } from "./settings";
 import { readDesktopPalette, watchDesktopPalette } from "./desktopTheme";
 import { Updater } from "./updater";
 import { holdAppImageMountUntilExit } from "./appImageQuit";
-import type { Appearance, AppState, GpuInfo, Job, JobOptions, OutputName } from "../../src/shared/types";
+import type { AppState, GpuInfo, Job, JobOptions, OutputName } from "../../src/shared/types";
 import type { DesktopPalette } from "../../src/ui/theme/palette";
 import { IPC } from "./ipc";
+import { idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir } from "./validate";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const devServerUrl = process.env.ELECTRON_RENDERER_URL;
@@ -44,6 +45,12 @@ const cacheDir = join(process.env.XDG_CACHE_HOME || join(app.getPath("home"), ".
 const mediaDir = join(cacheDir, "media");
 let settings = loadSettings(settingsFile, process.env);
 let checkout = checkCheckout(settings.corridorKeyRoot);
+let rustEngine = checkRustEngine(settings.engineBinary, settings.modelsDir);
+/** Re-check both engines' files (after a setting changed, or before the queue starts). */
+function recheckEngines(): void {
+  checkout = checkCheckout(settings.corridorKeyRoot);
+  rustEngine = checkRustEngine(settings.engineBinary, settings.modelsDir);
+}
 let mainWindow: BrowserWindow | null = null;
 let windowShown = false;
 let gpu: GpuInfo | null = null;
@@ -63,6 +70,10 @@ function engineScript(): string {
 
 const queue = new Queue({
   makeEngine: (onReply, onExit) => {
+    // the Rust engine when it is set up; the PyTorch engine (CorridorKey checkout) until it replaces it
+    if (chooseEngine(rustEngine, checkout) === "rust") {
+      return new EngineProcess({ kind: "rust", binary: settings.engineBinary!, models: settings.modelsDir!, ort: settings.ortLibrary, env: process.env }, onReply, onExit);
+    }
     const root = settings.corridorKeyRoot!;
     return new EngineProcess({ python: join(root, "venv", "bin", "python"), script: engineScript(), packageRoot: root, env: process.env }, onReply, onExit);
   },
@@ -81,24 +92,46 @@ function state(): AppState {
     gpuError,
     settings,
     checkout,
+    rustEngine,
+    engineKind: chooseEngine(rustEngine, checkout),
     desktopPalette,
     update: updater.state,
   };
 }
 
-// State goes to the page at most every 100 ms (frames already arrive ≤ 4/s).
+// State goes to the page at most every 100 ms (frames already arrive ≤ 4/s), and only while the window
+// is shown: a hidden page isn't re-rendered for nothing; it gets the latest state the moment it shows.
 let sendTimer: NodeJS.Timeout | null = null;
+let sendPending = false;
 function scheduleSend(): void {
   updateGpuPolling();
+  if (!windowShown) {
+    sendPending = true;
+    return;
+  }
   if (sendTimer) return;
+  // lifetime: OK — one-shot 100 ms coalescing timer, re-armed only by the next change
+  // loop: HOT-PATH-OK — state pushes coalesced to ≤ 10/s, only while the window is shown (this pass); measured ~2/s during a job (engine replies), 3-134 KiB each
   sendTimer = setTimeout(() => {
     sendTimer = null;
+    sendPending = false;
     mainWindow?.webContents.send(IPC.state, state());
   }, 100);
 }
 
-// GPU readout: polled only while a job runs AND the window is shown (rule 3).
+/** The window's shown state changed: the GPU readout follows it, and a state held back while hidden goes out. */
+function setShown(v: boolean): void {
+  windowShown = v;
+  updateGpuPolling();
+  if (v && sendPending) scheduleSend();
+}
+
+// GPU readout: polled only while a job runs AND the window is shown (rule 3). One read at a time: a slow
+// nvidia-smi (its own timeout is GPU_READ_TIMEOUT_MS) never stacks reads up.
+let gpuReading = false;
 async function pollGpu(): Promise<void> {
+  if (gpuReading) return;
+  gpuReading = true;
   try {
     const pid = queue.enginePid;
     gpu = await readGpu(new Set(pid ? [pid] : []));
@@ -106,6 +139,8 @@ async function pollGpu(): Promise<void> {
   } catch (e) {
     // error: SHOWN — the GPU card says nvidia-smi couldn't be read
     gpuError = e instanceof Error ? e.message.split("\n")[0] : String(e);
+  } finally {
+    gpuReading = false;
   }
   scheduleSend();
 }
@@ -152,7 +187,9 @@ async function makeStills(job: Job): Promise<void> {
   const order: OutputName[] = ["checker", "alpha", "cutout", "fg"];
   // loop: SERIAL-REQUIRED — one ffmpeg at a time while the next job may be keying on the same machine
   for (const output of order) {
+    // loop: NOT-WORTH — ≤ four outputs, once per finished job
     const file = job.outputs.find((f) => basename(f).includes(`_${output === "checker" ? "checker_comp" : output}`));
+    // loop: NOT-WORTH — one stat per output, once per finished job
     if (!file || !existsSync(file)) continue;
     try {
       job.stills.push({ output, url: mediaUrl(await still(mediaDir, file, seconds, STILL_WIDTH)) });
@@ -166,6 +203,7 @@ async function makeStills(job: Job): Promise<void> {
 async function addPaths(paths: string[]): Promise<void> {
   // loop: SERIAL-REQUIRED — ffprobe/ffmpeg per clip, one at a time so a big drop doesn't fork dozens
   for (const { path, kind } of expandPaths(paths)) {
+    // loop: NOT-WORTH — the queue's jobs per dropped clip (a drop of N clips is N × jobs comparisons)
     if (queue.jobs.some((j) => j.clip.path === path && j.status === "waiting")) continue;
     const clip = await probeClip(path, kind, mediaDir, mediaUrl);
     const options: JobOptions = { ...settings.lastOptions, hintFirstFrame: null, hintVideo: null, hintMode: "none" };
@@ -176,7 +214,8 @@ async function addPaths(paths: string[]): Promise<void> {
       id: randomUUID(),
       clip,
       options,
-      outputDir: outputDirFor(parent, clip.name),
+      // never a folder another queued clip of the same name writes to (its files have the same names)
+      outputDir: uniqueOutputDir(outputDirFor(parent, clip.name), path, queue.jobs),
       status: "waiting",
       stage: null,
       stageDetail: null,
@@ -205,19 +244,23 @@ function persist(): void {
 
 function registerIpc(): void {
   ipcMain.handle(IPC.getState, () => state());
-  ipcMain.handle(IPC.addPaths, (_e, paths: string[]) => addPaths(paths.filter((p) => typeof p === "string")));
+  // Every handler checks its arguments (validate.ts): the page is sandboxed, but what it sends is still input.
+  ipcMain.handle(IPC.addPaths, (_e, paths: unknown) => addPaths(pathsArg(paths)));
   ipcMain.handle(IPC.pickClips, async () => {
     const r = await dialog.showOpenDialog(mainWindow!, {
       title: "Add clips",
       properties: ["openFile", "openDirectory", "multiSelections"],
+      // loop: NOT-WORTH — seven extensions, once per file dialog
       filters: [{ name: "Video", extensions: [...VIDEO_EXT].map((e) => e.slice(1)) }],
     });
     if (!r.canceled) await addPaths(r.filePaths);
   });
-  ipcMain.handle(IPC.pickFile, async (_e, kind: "hint-image" | "hint-video") => {
+  ipcMain.handle(IPC.pickFile, async (_e, kindArg: unknown) => {
+    const kind = kindArg === "hint-video" ? "hint-video" : "hint-image";
     const r = await dialog.showOpenDialog(mainWindow!, {
       title: kind === "hint-image" ? "First-frame hint (matte image)" : "Hint video or frame folder",
       properties: kind === "hint-image" ? ["openFile"] : ["openFile", "openDirectory"],
+      // loop: NOT-WORTH — a few extensions, once per file dialog
       filters: kind === "hint-image" ? [{ name: "Matte image", extensions: ["png", "jpg", "jpeg", "exr"] }] : [{ name: "Video", extensions: [...VIDEO_EXT].map((e) => e.slice(1)) }],
     });
     return r.canceled ? null : r.filePaths[0];
@@ -226,26 +269,56 @@ function registerIpc(): void {
     const r = await dialog.showOpenDialog(mainWindow!, { title: "Your CorridorKey2.0 folder", properties: ["openDirectory"] });
     if (r.canceled) return;
     settings = { ...settings, corridorKeyRoot: r.filePaths[0] };
-    checkout = checkCheckout(settings.corridorKeyRoot);
+    recheckEngines();
     persist();
     scheduleSend();
   });
-  ipcMain.handle(IPC.setJobOptions, (_e, id: string, options: JobOptions) => {
+  ipcMain.handle(IPC.pickRustEngine, async (_e, whatArg: unknown) => {
+    if (whatArg !== "binary" && whatArg !== "models" && whatArg !== "ort") return;
+    const what = whatArg;
+    const opts = {
+      binary: { title: "The CorridorKey engine program (corridorkey-engine)", properties: ["openFile"] as const },
+      models: { title: "The folder with the CorridorKey ONNX models", properties: ["openDirectory"] as const },
+      ort: { title: "ONNX Runtime's library (libonnxruntime.so) for the graphics card", properties: ["openFile"] as const },
+    }[what];
+    if (!opts) return;
+    const r = await dialog.showOpenDialog(mainWindow!, { title: opts.title, properties: [...opts.properties] });
+    if (r.canceled) return;
+    const key = { binary: "engineBinary", models: "modelsDir", ort: "ortLibrary" }[what] as "engineBinary" | "modelsDir" | "ortLibrary";
+    settings = { ...settings, [key]: r.filePaths[0] };
+    recheckEngines();
+    persist();
+    scheduleSend();
+  });
+  ipcMain.handle(IPC.setJobOptions, (_e, idIn: unknown, optionsIn: unknown) => {
+    const id = idArg(idIn);
+    if (!id) return;
+    const options: JobOptions = sanitizeOptions(optionsIn);
     queue.setOptions(id, options);
     settings = { ...settings, lastOptions: { ...options, hintFirstFrame: null, hintVideo: null, hintMode: "none" } };
     persist();
   });
-  ipcMain.handle(IPC.removeJob, (_e, id: string) => queue.remove(id));
-  ipcMain.handle(IPC.retryJob, (_e, id: string) => queue.retry(id));
+  ipcMain.handle(IPC.removeJob, (_e, id: unknown) => {
+    const v = idArg(id);
+    if (v) queue.remove(v);
+  });
+  ipcMain.handle(IPC.retryJob, (_e, id: unknown) => {
+    const v = idArg(id);
+    if (v) queue.retry(v);
+  });
   ipcMain.handle(IPC.startQueue, () => {
-    checkout = checkCheckout(settings.corridorKeyRoot);
-    if (!checkout.ok) return scheduleSend();
+    recheckEngines();
+    if (!chooseEngine(rustEngine, checkout)) return scheduleSend();
     return queue.start();
   });
   ipcMain.handle(IPC.stopQueue, () => queue.stop());
-  ipcMain.handle(IPC.showInFolder, (_e, path: string) => shell.showItemInFolder(path));
-  ipcMain.handle(IPC.setAppearance, (_e, a: Appearance) => {
-    settings = { ...settings, appearance: { theme: a.theme, accent: a.accent, glass: Boolean(a.glass) } };
+  ipcMain.handle(IPC.showInFolder, (_e, pathIn: unknown) => {
+    const p = pathArg(pathIn);
+    if (p) shell.showItemInFolder(p);
+  });
+  ipcMain.handle(IPC.setAppearance, (_e, aIn: unknown) => {
+    const a = sanitizeAppearance(aIn);
+    settings = { ...settings, appearance: a };
     nativeTheme.themeSource = a.theme === "light" ? "light" : a.theme === "dark" ? "dark" : "system";
     persist();
     updatePaletteWatch();
@@ -264,18 +337,15 @@ function registerIpc(): void {
     scheduleSend();
   });
   ipcMain.handle(IPC.checkForUpdates, () => updater.check(true));
-  ipcMain.handle(IPC.setUpdateChannel, (_e, c: "stable" | "dev") => updater.setChannel(c === "dev" ? "dev" : "stable"));
-  ipcMain.handle(IPC.setAutoUpdate, (_e, on: boolean) => updater.setAutomatic(Boolean(on)));
+  ipcMain.handle(IPC.setUpdateChannel, (_e, c: unknown) => updater.setChannel(c === "dev" ? "dev" : "stable"));
+  ipcMain.handle(IPC.setAutoUpdate, (_e, on: unknown) => updater.setAutomatic(on === true));
   ipcMain.handle(IPC.installUpdate, () => updater.download());
   // Never restart into an update while the queue runs (it would kill a job).
   ipcMain.handle(IPC.restartToUpdate, () => {
     if (!queue.running) updater.restart();
   });
   ipcMain.handle(IPC.backToStable, () => updater.backToStable());
-  ipcMain.on(IPC.setVisible, (_e, visible: boolean) => {
-    windowShown = Boolean(visible);
-    updateGpuPolling();
-  });
+  ipcMain.on(IPC.setVisible, (_e, visible: unknown) => setShown(visible === true));
 }
 
 function createWindow(): void {
@@ -299,18 +369,14 @@ function createWindow(): void {
     },
   });
   mainWindow.once("ready-to-show", () => mainWindow?.show());
-  const shown = (v: boolean) => () => {
-    windowShown = v;
-    updateGpuPolling();
-  };
+  const shown = (v: boolean) => () => setShown(v);
   mainWindow.on("show", shown(true));
   mainWindow.on("restore", shown(true));
   mainWindow.on("hide", shown(false));
   mainWindow.on("minimize", shown(false));
   mainWindow.on("closed", () => {
     mainWindow = null;
-    windowShown = false;
-    updateGpuPolling();
+    setShown(false);
   });
   // No navigation away from the app, no new windows.
   mainWindow.webContents.on("will-navigate", (e) => e.preventDefault());
@@ -323,8 +389,11 @@ function createWindow(): void {
   else void mainWindow.loadFile(join(here, "../renderer/index.html"));
 }
 
-// One copy at a time: a second start brings the first window forward.
-if (!app.requestSingleInstanceLock()) app.quit();
+// One copy at a time: a second start brings the first window forward. app.quit() doesn't stop this module or
+// the ready event: measured (tools-style isolated test, two copies on one profile), the second copy still ran
+// whenReady and removed the first copy's running job folder. So the second copy does nothing at ready.
+const primary = app.requestSingleInstanceLock();
+if (!primary) app.quit();
 app.on("second-instance", () => {
   if (!mainWindow) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
@@ -332,16 +401,23 @@ app.on("second-instance", () => {
 });
 
 app.whenReady().then(() => {
+  if (!primary) return;
   if (WAYLAND_REQUIRED) {
-    dialog.showErrorBox("CorridorKey needs Wayland", "CorridorKey Desktop runs only in a Wayland session, so HDR footage and results can be shown as HDR. Log in to a Wayland session (Plasma, GNOME) and start it again.");
+    dialog.showErrorBox(
+      "CorridorKey needs Wayland",
+      "CorridorKey Desktop runs only in a Wayland session, so HDR footage and results can be shown as HDR. Log in to a Wayland session (Plasma, GNOME) and start it again.",
+    );
     app.quit();
     return;
   }
   protocol.handle(MEDIA_SCHEME, (req) => {
     const file = decodeURIComponent(new URL(req.url).pathname.slice(1));
     if (!resolve(file).startsWith(mediaDir + "/")) return new Response("not found", { status: 404 });
+    // loop: NOT-WORTH — one local file per media request (thumbnails / stills from the app's cache) [bounded: a local file: URL]
     return net.fetch(pathToFileURL(file).toString());
   });
+  // one copy runs (single-instance lock) and no engine yet: any job folder is left over from a crash
+  clearJobTemps(join(cacheDir, "jobs"));
   nativeTheme.themeSource = settings.appearance.theme === "light" ? "light" : settings.appearance.theme === "dark" ? "dark" : "system";
   updatePaletteWatch();
   registerIpc();

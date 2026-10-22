@@ -16,14 +16,22 @@ export const FRAME_EXT = new Set([".exr", ".png", ".jpg", ".jpeg"]);
 const HINT_IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".exr"]);
 const THUMB_WIDTH = 320; // shown at 160 CSS px: 2x for HiDPI, no larger (rule 3)
 const STILL_WIDTH = 640; // result stills, shown at up to 320 CSS px
+// ffprobe -count_packets reads the whole file (seconds for a large clip on a local disk); a stalled mount or
+// device fails the probe (the row says why) instead of holding every clip dropped after it.
+const PROBE_TIMEOUT_MS = 120_000;
+// one frame seeked and scaled: well under a second normally
+const STILL_TIMEOUT_MS = 60_000;
 
 /** The frame files of a folder, sorted by name like the runtime reads them. */
 export function frameFiles(dir: string): string[] {
   // loop: HOT-PATH-OK — one readdir per added folder, not per frame of playback
-  return readdirSync(dir)
-    .filter((f) => FRAME_EXT.has(extname(f).toLowerCase()))
-    .sort()
-    .map((f) => join(dir, f));
+  return (
+    readdirSync(dir)
+      // loop: NOT-WORTH — a frame folder's names, once per probe
+      .filter((f) => FRAME_EXT.has(extname(f).toLowerCase()))
+      .sort()
+      .map((f) => join(dir, f))
+  );
 }
 
 /** Expand dropped paths into clips: videos, frame folders, and folders of clips (one level). */
@@ -31,12 +39,15 @@ export function expandPaths(paths: string[]): { path: string; kind: "video" | "f
   const out: { path: string; kind: "video" | "frames" }[] = [];
   // loop: NOT-WORTH — a handful of dropped paths, once per drop
   for (const p of paths) {
+    // loop: NOT-WORTH — one stat per dropped path, once per drop (blocking but local; the drop is a user action)
     if (!existsSync(p)) continue;
+    // loop: NOT-WORTH — one stat per dropped path, once per drop
     if (statSync(p).isFile()) {
       if (VIDEO_EXT.has(extname(p).toLowerCase()) && !isCompanionHint(p)) out.push({ path: p, kind: "video" });
       continue;
     }
     // run_interactive.py's sequence layout: <shot>/Input (+ <shot>/AlphaHint)
+    // loop: NOT-WORTH — one readdir + a stat per entry of a dropped folder, once per drop
     const input = readdirSync(p).find((n) => n.toLowerCase() === "input" && statSync(join(p, n)).isDirectory());
     if (input) {
       out.push({ path: join(p, input), kind: "frames" });
@@ -49,6 +60,7 @@ export function expandPaths(paths: string[]): { path: string; kind: "video" | "f
     // loop: NOT-WORTH — one folder level of a dropped batch folder, once per drop
     for (const name of readdirSync(p).sort()) {
       const child = join(p, name);
+      // loop: NOT-WORTH — one stat per entry of a dropped folder, once per drop
       if (statSync(child).isFile() && VIDEO_EXT.has(extname(name).toLowerCase()) && !isCompanionHint(child)) out.push({ path: child, kind: "video" });
     }
   }
@@ -61,16 +73,19 @@ export function isCompanionHint(path: string): boolean {
 }
 
 function companions(dir: string, stem: string, exts: Set<string>, markers: string[]): string | null {
+  // loop: NOT-WORTH — one stat per hint lookup, once per probed clip
   if (!existsSync(dir)) return null;
   const base = stem.toLowerCase();
   const found = new Map<string, string>();
   // loop: NOT-WORTH — one readdir of the clip's folder, once per added clip
   for (const name of readdirSync(dir).sort()) {
     const full = join(dir, name);
+    // loop: NOT-WORTH — one stat per candidate hint file, once per probed clip
     if (!exts.has(extname(name).toLowerCase()) || !statSync(full).isFile()) continue;
     const s = basename(name, extname(name)).toLowerCase();
     if (!s.startsWith(base)) continue;
     const rest = s.slice(base.length).replace(/^[_\- ]+/, "");
+    // loop: NOT-WORTH — a few hint markers per file name
     const marker = markers.find((m) => rest.startsWith(m));
     if (marker && !found.has(marker)) found.set(marker, full);
   }
@@ -89,6 +104,7 @@ export function findHintVideo(clip: string, kind: "video" | "frames"): string | 
   if (kind === "frames") {
     const shot = dirname(clip);
     if (basename(clip).toLowerCase() !== "input") return null;
+    // loop: NOT-WORTH — one readdir of a shot folder + a stat, once per probed clip
     const hint = readdirSync(shot).find((n) => n.toLowerCase() === "alphahint" && statSync(join(shot, n)).isDirectory());
     return hint ? join(shot, hint) : null;
   }
@@ -103,6 +119,7 @@ export function clipName(path: string): string {
 
 function parseRate(rate: string | undefined): number | null {
   if (!rate) return null;
+  // loop: NOT-WORTH — a rate's two numbers
   const [n, d] = rate.split("/").map(Number);
   if (!n) return null;
   return d ? n / d : n;
@@ -114,6 +131,7 @@ export async function probeVideo(path: string): Promise<{ width: number; height:
     ["-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries", "stream=width,height,avg_frame_rate,r_frame_rate,nb_read_packets", "-of", "json", path],
     {
       maxBuffer: 1 << 20,
+      timeout: PROBE_TIMEOUT_MS,
     },
   );
   const s = (JSON.parse(stdout) as { streams?: Record<string, string | number>[] }).streams?.[0];
@@ -128,7 +146,8 @@ export async function probeVideo(path: string): Promise<{ width: number; height:
 }
 
 async function probeImage(path: string): Promise<{ width: number; height: number }> {
-  const { stdout } = await run("ffprobe", ["-v", "error", "-show_entries", "stream=width,height", "-of", "json", path], { maxBuffer: 1 << 20 });
+  // loop: SERIAL-REQUIRED — ffprobe of one frame image per probed folder, PROBE_TIMEOUT_MS (this pass: had none)
+  const { stdout } = await run("ffprobe", ["-v", "error", "-show_entries", "stream=width,height", "-of", "json", path], { maxBuffer: 1 << 20, timeout: PROBE_TIMEOUT_MS });
   const s = (JSON.parse(stdout) as { streams?: { width: number; height: number }[] }).streams?.[0];
   if (!s) throw new Error("not an image");
   return { width: s.width, height: s.height };
@@ -136,15 +155,19 @@ async function probeImage(path: string): Promise<{ width: number; height: number
 
 /** One frame of `source` at `seconds`, scaled to `width`, cached by path+mtime+time. Returns the file path. */
 export async function still(cacheDir: string, source: string, seconds: number, width: number): Promise<string> {
+  // loop: NOT-WORTH — one mkdir (exists after the first) per still
   mkdirSync(cacheDir, { recursive: true });
   const key = createHash("sha1")
+    // loop: NOT-WORTH — one stat per still (the cache key)
     .update(`${source}|${statSync(source).mtimeMs}|${seconds}|${width}`)
     .digest("hex")
     .slice(0, 20);
   const out = join(cacheDir, `${key}.jpg`);
+  // loop: NOT-WORTH — one stat per still (cache hit check)
   if (existsSync(out)) return out;
   const seek = seconds > 0 ? ["-ss", seconds.toFixed(3)] : [];
-  await run("ffmpeg", ["-v", "error", "-y", ...seek, "-i", source, "-frames:v", "1", "-vf", `scale=${width}:-2`, "-q:v", "4", out]);
+  // loop: SERIAL-REQUIRED — one ffmpeg still at a time, STILL_TIMEOUT_MS (this pass: had none)
+  await run("ffmpeg", ["-v", "error", "-y", ...seek, "-i", source, "-frames:v", "1", "-vf", `scale=${width}:-2`, "-q:v", "4", out], { timeout: STILL_TIMEOUT_MS });
   return out;
 }
 

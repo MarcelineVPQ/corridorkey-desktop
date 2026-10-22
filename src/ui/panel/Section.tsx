@@ -28,6 +28,7 @@ export function Accordion({ page, focus, children }: { page: string; focus: stri
   useEffect(() => {
     if (focus) setOpen(focus);
   }, [focus, setOpen]);
+  // loop: NOT-WORTH — a few pinned sections per click
   const togglePin = (id: string) => setPinned((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
   const onKeys = (e: KeyboardEvent<HTMLDivElement>) => {
     if (!(e.target instanceof HTMLElement) || !e.target.classList.contains("sec-toggle")) return;
@@ -110,6 +111,7 @@ export function Row({ label, hint, htmlFor, children }: { label: string; hint?: 
 export function Segmented<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: [T, string][]; onChange: (v: T) => void }) {
   return (
     <div className="seg" role="radiogroup" aria-label={label}>
+      {/* loop: HOT-PATH-OK — a few options per render */}
       {options.map(([v, text]) => (
         <button key={v} type="button" role="radio" aria-checked={value === v} className={value === v ? "on" : ""} onClick={() => onChange(v)}>
           {text}

@@ -59,7 +59,7 @@ export interface ClipInfo {
 }
 
 export type JobStatus = "waiting" | "running" | "done" | "failed" | "cancelled";
-export type Stage = "start" | "load" | "probe" | "rvm" | "foundations" | "keying";
+export type Stage = "start" | "load" | "optimize" | "probe" | "rvm" | "foundations" | "keying";
 
 export interface MemoryInfo {
   hannChunk: number;
@@ -105,8 +105,13 @@ export interface Pong {
   device: string;
   gpu: string | null;
   vramTotalMb: number | null;
-  python: string;
-  torch: string;
+  // the PyTorch engine
+  python: string | null;
+  torch: string | null;
+  // the Rust engine (ONNX Runtime): its version, provider (cuda / cpu) and precision (fp16 / fp32)
+  ort: string | null;
+  provider: string | null;
+  precision: string | null;
   assets: Record<string, boolean>;
 }
 
@@ -154,7 +159,14 @@ export interface Settings {
   appearance: Appearance;
   // null: results go next to each clip (out_<clip>); else into this folder
   outputRoot: string | null;
+  // The Rust engine (ONNX Runtime): its program, the models folder, and ONNX Runtime's library for the
+  // GPU build (null: the engine finds its own). Set up = the engine the queue uses.
+  engineBinary: string | null;
+  modelsDir: string | null;
+  ortLibrary: string | null;
 }
+
+export type EngineKind = "rust" | "python";
 
 // The app's own updates (electron/main/updater). null feed = no release
 // channel set up yet (the repo has no releases): App settings says so.
@@ -186,6 +198,9 @@ export interface AppState {
   gpuError: string | null;
   settings: Settings;
   checkout: CheckoutCheck;
+  // the Rust engine's setup, and which engine the queue uses (null: none is set up)
+  rustEngine: CheckoutCheck;
+  engineKind: EngineKind | null;
   // the desktop's colors (Desktop theme / desktop accent); null = couldn't be read or not asked
   desktopPalette: DesktopPalette | null;
   update: UpdateState;
@@ -198,6 +213,7 @@ export interface CorridorKeyApi {
   pickClips(): Promise<void>;
   pickFile(kind: "hint-image" | "hint-video"): Promise<string | null>;
   pickCheckout(): Promise<void>;
+  pickRustEngine(what: "binary" | "models" | "ort"): Promise<void>;
   pathForFile(file: File): string;
   setJobOptions(id: string, options: JobOptions): Promise<void>;
   removeJob(id: string): Promise<void>;

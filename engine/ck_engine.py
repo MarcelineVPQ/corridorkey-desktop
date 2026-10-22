@@ -89,6 +89,7 @@ class JobState:
         self.last_done = -1
 
     def frames_done(self) -> int:
+        # loop: HOT-PATH-OK — ≤ four writers, per frames reply (≤ 4/s)
         return min((w.ck_frames for w in self.writers), default=0)
 
     def report_frames(self, force: bool = False) -> None:
@@ -285,6 +286,7 @@ class Engine:
                              initial_hint_path=o.get("hint_first_frame"),
                              hint_video_path=o.get("hint_video"))
             self.state.report_frames(force=True)
+            # loop: NOT-WORTH — ≤ four writers, once per job
             outputs = [w.path for w in self.state.writers if hasattr(w, "path")]
             clip = self.vio.raw_clip_name(req["input"])
             send({"type": "result", "id": job, "outputs": outputs,

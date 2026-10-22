@@ -2,13 +2,16 @@
 // download → ready → restart, then reconnect to the new copy and read its
 // version. Every step's state is printed; any other outcome fails.
 /* global WebSocket */
-import { writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 const args = process.argv.slice(2);
 const opt = (k) => args[args.indexOf(k) + 1];
-const port = Number(opt("--port"));
+// --port-file: Chromium's DevToolsActivePort (the copies run with --remote-debugging-port=0, so the old copy, still
+// quitting, and the new one never compete for one port); its first line is the port in use now
+const portFile = opt("--port-file");
+const portNow = () => Number(readFileSync(portFile, "utf8").split("\n")[0]);
 const expect = opt("--expect");
 const out = opt("--out");
 
@@ -17,7 +20,8 @@ async function page(timeoutMs) {
   // loop: SERIAL-REQUIRED — waits for the app's page (bounded by timeoutMs)
   while (Date.now() < until) {
     try {
-      const t = (await (await fetch(`http://127.0.0.1:${port}/json`, { signal: AbortSignal.timeout(2000) })).json()).find((x) => x.type === "page");
+      // loop: SERIAL-REQUIRED — polls the test copy's DevTools port, 2 s timeout per ask
+      const t = (await (await fetch(`http://127.0.0.1:${portNow()}/json`, { signal: AbortSignal.timeout(2000) })).json()).find((x) => x.type === "page");
       if (t) return t;
     } catch {
       // error: NOT-WORTH — the app is still starting; retried until the timeout
@@ -37,6 +41,7 @@ async function connect(timeoutMs) {
     const d = JSON.parse(m.data);
     if (d.id && wait.has(d.id)) (wait.get(d.id)(d), wait.delete(d.id));
   });
+  // loop: NOT-WORTH — pending DevTools calls when the socket closes
   ws.addEventListener("close", () => wait.forEach((r) => r({ error: "closed" })));
   const send = (method, params = {}) => new Promise((r) => (wait.set(++id, r), ws.send(JSON.stringify({ id, method, params }))));
   // every evaluation gives up after 15 s (a page that is quitting never answers)
@@ -74,6 +79,8 @@ const ready = await waitFor(old, ["ready"], 120_000);
 console.log("after download:", JSON.stringify(ready));
 await old.shot("update-ready");
 const oldTarget = (await page(5000)).id;
+// the new copy writes its own port file
+rmSync(portFile, { force: true });
 console.log("restarting at", new Date().toISOString());
 old.evaluate("window.ck.restartToUpdate()");
 // the old copy quits; the new one starts on the same flags (same DevTools port): wait for a different page target
@@ -83,7 +90,8 @@ let moved = false;
 while (Date.now() < until && !moved) {
   await sleep(1000);
   try {
-    const t = (await (await fetch(`http://127.0.0.1:${port}/json`, { signal: AbortSignal.timeout(2000) })).json()).find((x) => x.type === "page");
+    // loop: SERIAL-REQUIRED — polls the test copy's DevTools port, 2 s timeout per ask
+    const t = (await (await fetch(`http://127.0.0.1:${portNow()}/json`, { signal: AbortSignal.timeout(2000) })).json()).find((x) => x.type === "page");
     moved = Boolean(t && t.id !== oldTarget);
     console.log(new Date().toISOString(), t ? (t.id === oldTarget ? "old page still up" : "new page up") : "no page");
   } catch {

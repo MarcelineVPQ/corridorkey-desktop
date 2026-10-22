@@ -1,0 +1,29 @@
+[package]
+name = "ck-core"
+description = "CorridorKey's inference pipeline on ONNX Runtime: frame decode, colour encoding, Hann windows, the five networks, render and writers"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license-file.workspace = true
+
+[features]
+default = ["ort-static"]
+# ONNX Runtime linked in (pyke's static CPU build, downloaded at build time): CPU only, for tests
+ort-static = ["ort/download-binaries", "ort/tls-rustls", "ort/copy-dylibs"]
+# ONNX Runtime loaded at run time (--ort / CK_ENGINE_ORT / ORT_DYLIB_PATH): the GPU build
+ort-dynamic = ["ort/load-dynamic"]
+# the CUDA execution provider's API (needs an ORT build with it at run time)
+cuda = ["ort/cuda"]
+# the TensorRT execution provider's API (opt-in per job; needs ORT's TensorRT EP and TensorRT at run time)
+tensorrt = ["ort/tensorrt", "cuda"]
+
+[dependencies]
+ort.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+half.workspace = true
+bytemuck.workspace = true
+libloading.workspace = true
+rayon.workspace = true
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+exr = "1.73"

@@ -1,7 +1,8 @@
 // The job queue: owns the jobs and the one engine process, turns engine
 // replies into job state. Every number a job shows comes from an engine reply
 // (rule 1); nothing here estimates progress on its own.
-import { rmSync } from "node:fs";
+import { readdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import type { EngineReply } from "./engine";
 import type { EngineState, Job, JobOptions, OutputName, Stage } from "../../src/shared/types";
 import { missingInput } from "../../src/shared/tasks";
@@ -54,7 +55,7 @@ export function engineOptions(o: JobOptions, kind: "video" | "frames"): Record<s
   return out;
 }
 
-const STAGES = new Set<Stage>(["load", "probe", "rvm", "foundations", "keying"]);
+const STAGES = new Set<Stage>(["load", "optimize", "probe", "rvm", "foundations", "keying"]);
 
 export class Queue {
   jobs: Job[] = [];
@@ -80,13 +81,16 @@ export class Queue {
   }
 
   remove(id: string): void {
+    // loop: NOT-WORTH — the queue's jobs, once per user action
     const job = this.jobs.find((j) => j.id === id);
     if (!job || job.status === "running") return;
+    // loop: NOT-WORTH — the queue's jobs, once per user action
     this.jobs = this.jobs.filter((j) => j.id !== id);
     this.deps.changed();
   }
 
   retry(id: string): void {
+    // loop: NOT-WORTH — the queue's jobs, once per user action
     const job = this.jobs.find((j) => j.id === id);
     if (!job || (job.status !== "failed" && job.status !== "cancelled")) return;
     Object.assign(job, {
@@ -109,6 +113,7 @@ export class Queue {
   }
 
   setOptions(id: string, options: JobOptions): void {
+    // loop: NOT-WORTH — the queue's jobs, once per user action
     const job = this.jobs.find((j) => j.id === id);
     if (!job || job.status !== "waiting") return;
     job.options = options;
@@ -128,11 +133,11 @@ export class Queue {
     if (this.current) {
       const job = this.current;
       this.current = null;
-      this.finish(job, "cancelled", null);
+      // killed first, so nothing writes into the temp folder finish() removes
       this.proc?.kill();
       this.proc = null;
       this.engine = { status: "stopped", pong: null, error: null };
-      this.cleanTemp(job.id);
+      this.finish(job, "cancelled", null);
     }
     this.deps.changed();
   }
@@ -166,14 +171,19 @@ export class Queue {
           device: String(pong.device),
           gpu: (pong.gpu as string | null) ?? null,
           vramTotalMb: (pong.vram_total_mb as number | null) ?? null,
-          python: String(pong.python),
-          torch: String(pong.torch),
+          python: typeof pong.python === "string" ? pong.python : null,
+          torch: typeof pong.torch === "string" ? pong.torch : null,
+          ort: typeof pong.ort === "string" ? pong.ort : null,
+          provider: typeof pong.provider === "string" ? pong.provider : null,
+          precision: typeof pong.precision === "string" ? pong.precision : null,
           assets: (pong.assets as Record<string, boolean>) ?? {},
         },
       };
       this.deps.changed();
       return true;
     } catch (e) {
+      // stopped by the user while it started (stop() killed it and already reset the state): not a failure
+      if (this.proc !== proc) return false;
       // error: SHOWN — the engine card and the waiting jobs say why it didn't start
       this.engine = { status: "failed", pong: null, error: e instanceof Error ? e.message : String(e) };
       this.running = false;
@@ -186,6 +196,7 @@ export class Queue {
   private async next(): Promise<void> {
     if (!this.running || this.current) return;
     // A clip whose hint mode needs a file it doesn't have stays waiting (its task says so); never run it silently without the hint.
+    // loop: NOT-WORTH — the queue's jobs, once per job start
     const job = this.jobs.find((j) => j.status === "waiting" && !j.clip.probeError && !missingInput(j));
     if (!job) {
       this.running = false;
@@ -275,14 +286,16 @@ export class Queue {
     if (job) {
       this.current = null;
       this.finish(job, "failed", { code: "engine", message: `The engine stopped unexpectedly (${signal ?? `exit code ${code}`}).`, stderrTail: tail });
-      this.cleanTemp(job.id);
       this.next();
       return;
     }
     this.deps.changed();
   }
 
+  // Every ending removes the job's temp folder: the engine deletes its files but not the folder (an empty
+  // folder per finished job was left in the cache), and a killed engine leaves its files too.
   private finish(job: Job, status: "done" | "failed" | "cancelled", error: Job["error"]): void {
+    this.cleanTemp(job.id);
     job.status = status;
     job.finishedAt = this.now();
     job.error = error;
@@ -293,11 +306,27 @@ export class Queue {
 
   private cleanTemp(id: string): void {
     try {
+      // loop: NOT-WORTH — removes a cancelled / crashed job's temp folder once (the killed engine's float16 temp files, up to a few GB: a few unlinks on a local disk)
       rmSync(this.deps.tempDirFor(id), { recursive: true, force: true });
     } catch {
       // error: NOT-WORTH — a temp folder we couldn't remove; the next start of that job clears it (safe_remove)
     }
   }
+}
+
+/** Remove every job folder under `root` (the app's jobs cache): called at start, when no engine runs, for what a
+ * crash or a killed engine left (a low-VRAM job's temp files are GBs). */
+export function clearJobTemps(root: string): void {
+  let names: string[] = [];
+  try {
+    // loop: NOT-WORTH — the jobs folder's entries, once per app start
+    names = readdirSync(root);
+  } catch {
+    // error: NOT-WORTH — no jobs folder yet: nothing to clear
+    return;
+  }
+  // loop: NOT-WORTH — leftover job folders (usually none), once per app start
+  for (const n of names) rmSync(join(root, n), { recursive: true, force: true });
 }
 
 export function outputStem(name: OutputName, despill: number): string {

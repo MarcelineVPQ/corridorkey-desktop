@@ -1,5 +1,9 @@
+import { spawn } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { cleanPathList, isAppImageMount, relaunchArgs, relaunchEnv, shellArgs, systemdRunArgs } from "../../electron/main/relaunch";
+import { cleanPathList, FALLBACK_SCRIPT, fallbackShell, isAppImageMount, relaunchArgs, relaunchEnv, shellArgs, systemdRunArgs } from "../../electron/main/relaunch";
 
 describe("relaunch", () => {
   it("drops AppImage mounts, empties and repeats from PATH", () => {
@@ -29,7 +33,41 @@ describe("relaunch", () => {
     ]);
     expect(systemdRunArgs({ target: "/t", unit: "u", exitTypeCgroup: false })).toContain("KillMode=process");
   });
-  it("the shell fallback passes the target as an argument, never in the script", () => {
-    expect(shellArgs("/a b/x'y", ["--z"])).toEqual(["-c", 'sleep 0.5; exec "$0" "$@"', "/a b/x'y", "--z"]);
+  it("the shell fallback passes the pid, target and flags as arguments, never in the script", () => {
+    expect(shellArgs(42, "/a b/x'y", ["--z"])).toEqual(["-c", FALLBACK_SCRIPT, "corridorkey-relaunch", "42", "/a b/x'y", "--z"]);
+    expect(FALLBACK_SCRIPT).not.toContain("x'y");
+    expect(fallbackShell((p) => p === "/usr/bin/bash")).toBe("/usr/bin/bash");
+    expect(fallbackShell(() => false)).toBe("/bin/sh");
+  });
+
+  // Runs the fallback as the updater does: `old` stands for this copy (still quitting), fd 3 for the AppImage
+  // runtime's keepalive pipe. The target writes its descriptors and the time it started.
+  async function runFallback(shell: string): Promise<{ fds: number[]; startedAfterOld: boolean }> {
+    const dir = mkdtempSync(join(tmpdir(), "ck-relaunch-"));
+    try {
+      const target = join(dir, "new copy's target");
+      writeFileSync(target, `#!/bin/sh\nls /proc/$$/fd > "$1"\n[ -e "$2" ] && echo after >> "$1" || echo before >> "$1"\n`);
+      chmodSync(target, 0o755);
+      const out = join(dir, "fds.txt");
+      const gone = join(dir, "old-gone");
+      const old = spawn("/bin/sh", ["-c", `sleep 1; touch "${gone}"`]);
+      const child = spawn(shell, shellArgs(old.pid!, target, [out, gone]), { stdio: ["ignore", "ignore", "ignore", "pipe"] });
+      // loop: NOT-WORTH — one test child [bounded: it ends ~1 s after the stand-in old copy]
+      await new Promise((r) => child.on("exit", r));
+      const lines = readFileSync(out, "utf8").split("\n").filter(Boolean);
+      return { fds: lines.filter((l) => /^\d+$/.test(l)).map(Number), startedAfterOld: lines.includes("after") };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  it("the shell fallback (bash) waits for the old copy and drops the descriptors it inherited", async () => {
+    const r = await runFallback(fallbackShell((p) => p === "/bin/bash"));
+    expect(r.fds).toContain(0);
+    expect(r.fds).not.toContain(3);
+    expect(r.startedAfterOld).toBe(true);
+  });
+  it("the shell fallback still starts the new copy under plain sh (dash)", async () => {
+    const r = await runFallback("/bin/sh");
+    expect(r.startedAfterOld).toBe(true);
   });
 });

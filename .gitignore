@@ -1,7 +1,9 @@
 node_modules/
+node_modules
 out/
 dist/
 *.tsbuildinfo
 __pycache__/
 .claude/
 release/
+engine-rs/target/
