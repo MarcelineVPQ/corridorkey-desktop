@@ -87,6 +87,8 @@ pub struct Pipeline {
     nets: HashMap<&'static str, Net>,
     /// TensorRT jobs: networks TensorRT could not build, and why (they run on CUDA)
     trt_fallbacks: BTreeMap<&'static str, String>,
+    /// TensorRT jobs: seconds each network took to build its engine (built in this job) or to load it (reused)
+    trt_seconds: BTreeMap<&'static str, (f64, bool)>,
     /// measured once per process: graphics memory the CUDA context and libraries take (bytes), outside any arena
     gpu_overhead: Option<u64>,
     /// this job's measured seconds per network (run, convert, calls), kept across low-VRAM unloads
@@ -244,6 +246,7 @@ impl Pipeline {
             key: None,
             nets: HashMap::new(),
             trt_fallbacks: BTreeMap::new(),
+            trt_seconds: BTreeMap::new(),
             gpu_overhead: None,
             stats: BTreeMap::new(),
             load_s: 0.0,
@@ -256,7 +259,6 @@ impl Pipeline {
         self.fold_stats();
         self.nets.clear();
         self.key = None;
-        self.trt_fallbacks.clear();
     }
 
     /// Move the loaded networks' counters into `stats` (and zero them).
@@ -287,7 +289,6 @@ impl Pipeline {
     ) -> Result<(), Error> {
         if self.key.as_ref() != Some(key) {
             self.nets.clear();
-            self.trt_fallbacks.clear();
             self.key = Some(key.clone());
         }
         let need: Vec<&'static str> = pieces.iter().copied().filter(|p| !self.nets.contains_key(p)).collect();
@@ -304,16 +305,27 @@ impl Pipeline {
             let t = Instant::now();
             let settings = trt.map(|f| f(piece));
             let cap = self.arena_limit(key, piece);
-            let net = match Net::load(self.rt, piece, key.provider, key.precision, &file, settings.as_ref(), cap) {
-                Ok(n) => n,
-                // a network TensorRT can't build runs on CUDA (the same file and precision); the reply says so
-                Err(e) if key.provider == Provider::TensorRt => {
-                    let why = e.message.lines().next().unwrap_or("").to_string();
-                    sink.log(&format!("  TensorRT could not build {piece}; it runs on CUDA: {why}"));
-                    self.trt_fallbacks.insert(piece, why);
-                    Net::load(self.rt, piece, Provider::Cuda, key.precision, &file, None, cap)?
+            let net = if key.provider == Provider::TensorRt {
+                // the engine trt_prepare built (or found); a network without one runs on CUDA with the normal file
+                // (the same precision), and the `provider` reply says why
+                let tried = match (self.trt_fallbacks.get(piece), settings.as_ref()) {
+                    (Some(why), _) => Err(why.clone()),
+                    (None, Some(st)) => Net::load(self.rt, piece, Provider::TensorRt, key.precision, &crate::tensorrt::stub_path(&st.dir, piece), Some(st), cap)
+                        .map_err(|e| format!("loading its engine: {}", e.message.lines().next().unwrap_or(""))),
+                    (None, None) => Err("no TensorRT folder".to_string()),
+                };
+                match tried {
+                    Ok(n) => n,
+                    Err(why) => {
+                        if !self.trt_fallbacks.contains_key(piece) {
+                            sink.log(&format!("  TensorRT could not run {piece}; it runs on CUDA: {why}"));
+                            self.trt_fallbacks.insert(piece, why);
+                        }
+                        Net::load(self.rt, piece, Provider::Cuda, key.precision, &file, None, cap)?
+                    }
                 }
-                Err(e) => return Err(e),
+            } else {
+                Net::load(self.rt, piece, key.provider, key.precision, &file, settings.as_ref(), cap)?
             };
             eprintln!(
                 "  loaded {piece} ({}, {}) in {:.1} s, arena limit {}: {}",
@@ -446,7 +458,19 @@ impl Pipeline {
         sink.send(json!({"type": "clip", "width": meta.w, "height": meta.h, "fps": meta.fps, "frames": meta.num_frames}));
         let t_all = meta.num_frames;
         let (sh, sw) = (meta.shape_h, meta.shape_w);
-        if !job.manual {
+        // TensorRT jobs with an automatic window: the longest window the clip's TensorRT range was built for (its
+        // engines' memory is measured for it, tensorrt.rs PIXEL_FRAMES_MAX), all networks loaded (no low-VRAM staging)
+        let trt_window = if job.tensorrt && !job.manual && self.trt_possible(provider) { crate::tensorrt::bucket_for(sh, sw) } else { None };
+        if let Some(b) = trt_window {
+            chunk = b.t.1;
+            stride = (chunk / 2).max(1);
+            low_vram = false;
+            sink.log(&format!("  TensorRT window: {sw}x{sh} is in range {} -> hann_chunk={chunk}, hann_stride={stride}, low_vram=False", b.key()));
+            sink.send(json!({
+                "type": "memory", "hann_chunk": chunk, "hann_stride": stride, "low_vram": low_vram, "auto": true,
+                "budget_cap_gb": job.vram_budget_gb, "estimate_basis": "tensorrt-range", "range": b.key(), "provider": "tensorrt"
+            }));
+        } else if !job.manual {
             // the budget the runtime's apply_auto_vram sees: free memory plus what this process holds
             let (seen, source) = match provider {
                 Provider::Cpu => (crate::gpu::host_available().unwrap_or(0) as f64 / 1073741824.0, "host"),
@@ -485,23 +509,20 @@ impl Pipeline {
         // which provider really runs this job
         let tc = chunk.min(t_all);
         let (key, trt_info) = self.job_key(job, &base_key, sh, sw, tc, low_vram, sink)?;
+        if key.provider == Provider::TensorRt {
+            if trt_info.as_ref().is_some_and(|i| !i.1) {
+                sink.log("  TensorRT: optimizing for this resolution range (a one-time build; later clips in this range reuse it)");
+            }
+            let bucket = crate::tensorrt::bucket_for(sh, sw).ok_or_else(|| Error::engine("no TensorRT range".into()))?;
+            self.trt_prepare(&key, &bucket, sink)?;
+        }
         let trt_dir = key.trt_cache.clone();
         let trt_fn = trt_dir.as_ref().map(|dir| {
             let dir = dir.clone();
-            let bucket = crate::tensorrt::bucket_for(sh, sw, tc).unwrap();
-            let bf16 = key.precision == Precision::Fp32;
-            move |piece: &str| -> TrtSettings {
-                let (min, opt, max) = crate::tensorrt::profile(piece, &bucket).unwrap();
-                TrtSettings { cache: dir.join(piece), fp16: !bf16, bf16, min, opt, max, exclude: crate::runtime::trt_exclude() }
-            }
+            move |piece: &str| -> TrtSettings { TrtSettings { dir: dir.join(piece) } }
         });
         let trt_ref: Option<&dyn Fn(&str) -> TrtSettings> = trt_fn.as_ref().map(|f| f as &dyn Fn(&str) -> TrtSettings);
-        let load_stage = if trt_info.as_ref().is_some_and(|i| !i.1) { "optimize" } else { "load" };
-        if let Some((_, built)) = &trt_info {
-            if !built {
-                sink.log("  TensorRT: optimizing for this resolution (a one-time build; later clips in this range reuse it)");
-            }
-        }
+        let load_stage = "load";
 
         let clip = raw_clip_name(&job.input);
         let (h, w) = (meta.h, meta.w);
@@ -614,6 +635,11 @@ impl Pipeline {
         })
     }
 
+    /// Whether a TensorRT job can run on TensorRT at all (the card, the provider, TensorRT-ready models).
+    fn trt_possible(&self, provider: Provider) -> bool {
+        provider == Provider::Cuda && self.rt.tensorrt_ep && crate::runtime::PIECES.iter().any(|p| self.models.trt_file(p, Precision::Fp16).is_some())
+    }
+
     /// The networks' key for this job and, for TensorRT, (cache folder, already built). Sends the
     /// `provider` reply.
     #[allow(clippy::too_many_arguments)]
@@ -645,26 +671,27 @@ impl Pipeline {
             sink.send(msg);
             return Ok((base.clone(), None));
         }
-        let Some(bucket) = crate::tensorrt::bucket_for(sh, sw, tc) else {
-            fallback(format!("{sw}x{sh} with {tc}-frame windows is outside every TensorRT range"), &mut msg);
+        let Some(bucket) = crate::tensorrt::bucket_for(sh, sw) else {
+            fallback(format!("{sw}x{sh} is outside every TensorRT range"), &mut msg);
             sink.send(msg);
             return Ok((base.clone(), None));
         };
+        if tc > bucket.t.1 {
+            fallback(format!("the {tc}-frame window is longer than the {}-frame TensorRT range for {sw}x{sh}", bucket.t.1), &mut msg);
+            sink.send(msg);
+            return Ok((base.clone(), None));
+        }
         let gpu = self.rt.gpu.clone().unwrap();
         let trt_ver = crate::gpu::tensorrt_version().unwrap_or_else(|| "unknown".into());
-        // bf16 (CK_ENGINE_TRT_PRECISION=bf16): the fp32 graphs with TensorRT's bf16 kernels; else fp16
-        let trt_prec = match std::env::var("CK_ENGINE_TRT_PRECISION").as_deref() {
-            Ok("bf16") => Precision::Fp32,
-            _ => Precision::Fp16,
-        };
-        let pname = if trt_prec == Precision::Fp32 { "bf16" } else { "fp16" };
-        if !self.models.missing(trt_prec).is_empty() {
-            fallback(format!("the {} models for TensorRT {pname} are not in the models folder", trt_prec.name()), &mut msg);
+        let trt_prec = Precision::Fp16;
+        let ready: Vec<&str> = crate::runtime::PIECES.iter().copied().filter(|p| self.models.trt_file(p, trt_prec).is_some()).collect();
+        if ready.is_empty() {
+            fallback("the models folder has no TensorRT-ready models".to_string(), &mut msg);
             sink.send(msg);
             return Ok((base.clone(), None));
         }
         let root = trt_root();
-        let dir = crate::tensorrt::cache_dir(&root, &gpu.name, &gpu.driver, &trt_ver, &self.rt.ort_version, pname);
+        let dir = crate::tensorrt::cache_dir(&root, &gpu.name, &gpu.driver, &trt_ver, &self.rt.ort_version, "fp16");
         let stale = crate::tensorrt::stale_dirs(&root, &dir, &gpu.name);
         if !stale.is_empty() {
             let names: Vec<String> = stale.iter().filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).collect();
@@ -676,13 +703,66 @@ impl Pipeline {
             }
         }
         let bdir = dir.join(bucket.key());
-        let built = crate::runtime::PIECES.iter().all(|p| crate::tensorrt::built(&bdir.join(p)));
+        let built = ready.iter().all(|p| {
+            let stamp = self.models.trt_file(p, trt_prec).map(|f| crate::tensorrt::source_stamp(&f)).unwrap_or_default();
+            crate::tensorrt::built(&bdir.join(p), p, &stamp)
+        });
         msg["provider"] = json!("tensorrt");
-        msg["precision"] = json!(pname);
+        msg["precision"] = json!("fp16");
         msg["range"] = json!(bucket.key());
         msg["cache"] = json!(if built { "reused" } else { "build" });
         sink.send(msg);
         Ok((ModelKey { provider: Provider::TensorRt, precision: trt_prec, trt_cache: Some(bdir.clone()), vram_cap: base.vram_cap }, Some((bdir, built))))
+    }
+
+    /// TensorRT jobs: build every engine this range is missing (one network at a time, ck-trt-build in a child
+    /// process, before any network is loaded, so the builder has the card to itself) and put each engine's
+    /// EPContext stub next to it. A network without a TensorRT-ready export, or whose build fails, is recorded
+    /// and runs on CUDA.
+    fn trt_prepare(&mut self, key: &ModelKey, bucket: &crate::tensorrt::Bucket, sink: &mut dyn Sink) -> Result<(), Error> {
+        self.unload();
+        self.trt_fallbacks.clear();
+        self.trt_seconds.clear();
+        self.key = Some(key.clone());
+        let Some(dir) = key.trt_cache.clone() else { return Ok(()) };
+        let timing = dir.parent().map(|p| p.join("timing.cache")).unwrap_or_else(|| dir.join("timing.cache"));
+        let builder = crate::tensorrt::builder_path();
+        // TensorRT's working memory while it builds: half the job's budget, at most 4 GiB
+        let workspace_mb = key.vram_cap.map(|c| (c >> 21).min(4096)).unwrap_or(4096).max(512);
+        let stamp = |p: &str| self.models.trt_file(p, key.precision).map(|f| crate::tensorrt::source_stamp(&f)).unwrap_or_default();
+        let todo: Vec<&'static str> = crate::runtime::PIECES.iter().copied().filter(|p| !crate::tensorrt::built(&dir.join(p), p, &stamp(p))).collect();
+        // loop: NOT-WORTH — five networks
+        for (i, piece) in crate::runtime::PIECES.iter().copied().enumerate() {
+            let pdir = dir.join(piece);
+            let (Some(onnx), Some(stub)) = (self.models.trt_file(piece, key.precision), self.models.trt_stub(piece, key.precision)) else {
+                self.trt_fallbacks.insert(piece, format!("no TensorRT-ready export of {piece} in the models folder"));
+                continue;
+            };
+            let source = crate::tensorrt::source_stamp(&onnx);
+            if crate::tensorrt::built(&pdir, piece, &source) {
+                continue;
+            }
+            let Some(b) = &builder else {
+                self.trt_fallbacks.insert(piece, "the TensorRT engine builder (ck-trt-build) is not installed".into());
+                continue;
+            };
+            let n = todo.iter().position(|p| *p == piece).map(|k| k + 1).unwrap_or(i + 1);
+            sink.send(json!({"type": "progress", "stage": "optimize", "detail": format!("{} ({n}/{})", piece_name(piece), todo.len())}));
+            sink.log(&format!("  TensorRT: building the {} engine for {} (one time)", piece_name(piece), bucket.key()));
+            match crate::tensorrt::build_engine(b, &onnx, piece, bucket, &pdir, workspace_mb, &timing) {
+                Ok(secs) => {
+                    std::fs::copy(&stub, crate::tensorrt::stub_path(&pdir, piece)).map_err(|e| Error::engine(format!("{}: {e}", pdir.display())))?;
+                    std::fs::write(crate::tensorrt::source_path(&pdir, piece), &source).map_err(|e| Error::engine(format!("{}: {e}", pdir.display())))?;
+                    sink.log(&format!("  TensorRT: {} engine built in {secs:.1} s", piece_name(piece)));
+                    self.trt_seconds.insert(piece, ((secs * 10.0).round() / 10.0, true));
+                }
+                Err(why) => {
+                    sink.log(&format!("  TensorRT could not build {piece}; it runs on CUDA: {why}"));
+                    self.trt_fallbacks.insert(piece, why);
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Steps 2-4 (and the low-VRAM staging).
@@ -742,8 +822,9 @@ impl Pipeline {
         self.ensure(key, first, trt, sink, load_stage)?;
         if key.provider == Provider::TensorRt {
             let pieces: BTreeMap<&str, &str> = self.nets.iter().map(|(k, n)| (*k, n.provider.name())).collect();
+            let built: BTreeMap<&str, f64> = self.trt_seconds.iter().filter(|(_, v)| v.1).map(|(k, v)| (*k, v.0)).collect();
             sink.send(json!({"type": "provider", "provider": if self.trt_fallbacks.is_empty() { "tensorrt" } else if self.trt_fallbacks.len() == pieces.len() { "cuda" } else { "tensorrt+cuda" },
-                "pieces": pieces, "fallbacks": self.trt_fallbacks}));
+                "pieces": pieces, "fallbacks": self.trt_fallbacks, "build_s": built}));
         }
         sink.send(json!({"type": "progress", "stage": "rvm"}));
         let rvm_frame = RVM_CH * h64 * w64;
@@ -1205,4 +1286,16 @@ pub fn trt_root() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into())).join(".cache"));
     base.join("corridorkey-desktop").join("tensorrt")
+}
+
+/// A network's name for people (progress details and logs).
+pub fn piece_name(piece: &str) -> &'static str {
+    match piece {
+        "cradio" => "C-RADIO",
+        "moge" => "MoGe",
+        "rvm" => "RVM",
+        "stage1" => "stage 1",
+        "stage2" => "stage 2",
+        _ => "network",
+    }
 }

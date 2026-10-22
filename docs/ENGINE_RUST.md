@@ -17,7 +17,7 @@ engine-rs/
     hann.rs            window_starts, taper_weights, the baton blend
     vram.rs            select_vram_profile / estimate_peak_vram_gb (same table and margins)
     runtime.rs         ORT environment, CUDA / TensorRT / CPU providers, model files, sessions
-    tensorrt.rs        TensorRT shape ranges, profiles, cache folders
+    tensorrt.rs        TensorRT shape ranges, profiles, cache folders, ck-trt-build runs
     pipeline.rs        run_inference + hann_stage1_stream (normal and staged low-VRAM paths)
     ahead.rs           work done ahead on its own thread (network inputs while the card runs)
     outputs.rs         the render thread: render + hand-off to the writers, frame counts back
@@ -27,6 +27,7 @@ engine-rs/
   crates/ck-engine/    the corridorkey-engine binary: the protocol loop (lib.rs) and main.rs
   tools/gen_fixtures.py   parity fixtures from the upstream Python functions
   tools/e2e_cpu.sh        CPU end-to-end parity check
+  tools/trt-build/        ck-trt-build: strongly typed TensorRT engine builder (C++), build.sh
 ```
 
 One job, as in `runtime.run_inference`: probe → window (automatic or the job's) → RVM prepass (one
@@ -78,8 +79,8 @@ corridorkey-engine --models DIR [--ort libonnxruntime.so] [--device auto|cuda|cp
   networks; default: only when stage 1 and 2 share the card), `CK_ENGINE_CUDNN_SEARCH` (heuristic |
   exhaustive | default), `CK_ENGINE_CUDNN_MAX_WORKSPACE`, `CK_ENGINE_GRAPH_OPT` (all | layout | extended),
   `CK_ENGINE_PROFILE=<dir>` (ORT per-node profile; on CUDA it times kernel launches, not GPU work),
-  `CK_ENGINE_THREADS`; TensorRT: `CK_ENGINE_TRT_CACHE`, `CK_ENGINE_TRT_PRECISION` (fp16 | bf16),
-  `CK_ENGINE_TRT_EXCLUDE`.
+  `CK_ENGINE_THREADS`; TensorRT: `CK_ENGINE_TRT_CACHE` (engine folder), `CK_ENGINE_TRT_BUILD` (ck-trt-build,
+  else next to the engine binary).
 
 ## The app
 
@@ -255,15 +256,70 @@ Where walking_sitting's 62.4 s go now (engine log): stage 1 29.5 s run, stage 2 
 
 ## TensorRT (opt-in, `tensorrt: true`)
 
-Built and unit-tested: shape ranges per axis (padded H and W in 128..640, 768..1152, 1280..2176,
-2304..4096; windows 1-8, 9-24, 25-48, 49-80), one cached engine set per range under
-`~/.cache/corridorkey-desktop/tensorrt/<card>__drv<driver>__trt<version>__ort<version>__<precision>/`;
-stale folders (driver / TensorRT / ORT changed) are removed and the `provider` reply says so; a
-clip outside every range runs on CUDA; a network TensorRT can't build runs on CUDA (`fallbacks`).
-Measured on the GPU (tiny clip): C-RADIO builds (31 s, 834 MB cache, 9.6 GB host peak); MoGe doesn't
-(TensorRT can't parse its antialiased bilinear `Resize`); the opset-23 `Attention` op needs a strongly
-typed network, which ORT's TensorRT provider doesn't make. TensorRT builds need lots of host memory: two
-attempts at an 8 GB cap were killed. Stopped there.
+OFF by default; CUDA fp16 stays the normal path. Measured 2026-10-21 (RTX 5080, driver 615, TensorRT 10.16,
+ORT 1.31).
+
+**How it runs.** The models folder carries a TensorRT-ready fp16 set next to the normal one (`models.json` keys
+`tensorrt-fp16` and `tensorrt-fp16-ctx`; CorridorKey2.0 `scripts/onnx_spike/build_trt_models.sh`, ONNX_SPIKE.md
+"TensorRT set"): plain attention instead of `com.microsoft::MultiHeadAttention` (no TensorRT plugin), MoGe's
+antialiased resize as weight matrices, Swin regions in 7 dimensions (TensorRT allows 8), the `onnx.2` speed
+rewrites, and FP32 islands for weight GEMMs and convolutions. For a clip's range, `trt_prepare` builds each
+missing engine with `ck-trt-build` (`tools/trt-build/`, C++ on TensorRT's API, `build.sh` fetches the pinned
+headers), one network at a time in a child process before any network is loaded, then ONNX Runtime runs the
+engine through the EPContext stub copied next to it. Why not ORT's own TensorRT build: it makes weakly typed
+networks, where TensorRT ignores the FP32 islands; its FP16 kernels measured 2-4× the CUDA fp16 error in every
+network (stage 2 alpha MAE 1.24e-4 vs 1.58e-5). Strongly typed with the islands: 1.38e-5 (per-network table in
+ONNX_SPIKE.md).
+
+**Ranges.** Padded H and W each fall in one of 128-512, 640-896, 1024-1280, 1408-1664, 1792-2176, 2304-2816,
+2944-3456, 3584-4096 (720p → h640-896 w1024-1280, 1080p → h1024-1280 w1792-2176, 1280×1080 → h1024-1280
+w1024-1280). A range's longest stage-1 window is the longest of 24/16/12/8/4 with window × largest frame ≤
+24 × 1152 × 1280 (stage 1 for windows to 24 at 1152×1280 built with 6.5 GB of graphics memory, context 3.1 GiB;
+to 24 at 1152×2176 found no tactic; to 48 at 1152×2176 went past 12 GiB while building and was stopped). So
+1080p gets 12-frame windows, 1280×1080 16, 720p 24; UHD is outside every range (CUDA). An automatic TensorRT job
+uses that window with stride half of it and no low-VRAM staging (`memory` reply `estimate_basis:
+"tensorrt-range"`). Engines live under `<cache>/<card>__drv…__trt…__ort…__fp16/<range>/<network>/`, with the
+export's size and time stamp (`<network>.source`): a new model set rebuilds; a driver / TensorRT / ORT change
+removes the folder and says so. A network without an export, or whose build or load fails, runs on CUDA and the
+`provider` reply lists it under `fallbacks` with why; `build_s` gives each build's seconds; `progress` stage
+`optimize` names the network being built ("stage 1 (4/5)").
+
+**One-time builds** (seconds, `build_s`; host peak of the whole bench process tree under memrun, builder
+included; VRAM peak of the tree):
+
+| range | C-RADIO | MoGe | RVM | stage 1 | stage 2 | total | host peak | VRAM peak |
+|---|---|---|---|---|---|---|---|---|
+| h1024-1280_w1024-1280_t1-16 | 27.2 | 22.7 | 25.0 | 88.0 | 41.3 | 204 s | 5.35 GB (both ranges, one run) | 7.53 GB |
+| h640-896_w1024-1280_t1-24 | 36.1 | 23.1 | 25.6 | 93.4 | 44.0 | 222 s | | |
+
+The earlier attempts' 9.6 GB host peak (ORT's TensorRT provider building C-RADIO in-process) is gone: the
+builder is a child process, and ORT never holds the ONNX weights while it builds.
+
+**Six clips** (`tools/engine_bench.mjs`, 12 GB budget, alpha+fg, auto window, no hint, engines already built;
+`~/.cache/claude-scratch/ck-bench/rust-trt2`). CUDA fp16 = the same engine without TensorRT
+(`ck-speed2/bench/final-fa2`), PyTorch = `ck-bench/pytorch12`. Totals are the fair comparison: "steady fps" counts
+from the first stage-1 window, and the CUDA/PyTorch low-VRAM runs do their foundations before it.
+
+| clip | TensorRT: window · total · VRAM · RAM | CUDA fp16: window · total · VRAM · RAM | PyTorch: window · total | TensorRT / CUDA, / PyTorch |
+|---|---|---|---|---|
+| godiva_close 960×720, 349 f | 24/12 · 28.8 s · 7.33 · 4.19 GB | 80/40 low · 42.7 s · 8.88 · 7.58 GB | 80/40 low · 68.4 s | 0.67, 0.42 |
+| locked_backdrop 1280×1080, 80 f | 16/8 · 14.4 s · 7.36 · 5.25 GB | 48/24 low · 21.9 s · 7.92 · 7.67 GB | 48/24 low · 40.3 s | 0.66, 0.36 |
+| metal_glasses, 139 f | 16/8 · 22.4 s · 7.36 · 5.67 GB | 48/24 low · 29.9 s · 7.93 · 7.95 GB | 48/24 low · 44.7 s | 0.75, 0.50 |
+| smoke, 250 f | 16/8 · 37.0 s · 7.36 · 5.80 GB | 48/24 low · 51.7 s · 7.92 · 8.46 GB | 48/24 low · 76.5 s | 0.72, 0.48 |
+| walking_sitting, 314 f | 16/8 · 44.6 s · 7.36 · 5.89 GB | 48/24 low · 63.1 s · 7.92 · 8.61 GB | 48/24 low · 94.2 s | 0.71, 0.47 |
+| with_motion_blur, 50 f | 16/8 · 10.1 s · 7.36 · 4.43 GB | 80/40 low · 12.3 s · 8.89 · 5.06 GB | 80/40 low · 19.0 s | 0.82, 0.53 |
+
+Load to first frame with built engines: 3.4-4.9 s (CUDA 8.2-43.6 s, which includes its low-VRAM foundations
+pass). At the same window CUDA fp16 is slower still: locked_backdrop 16/8 low 23.4 s, metal_glasses 28.4 s,
+godiva_close 24/12 low 34.3 s.
+
+**Mattes** (`tools/matte_compare.py`, both x264 CRF 12). At the same window, TensorRT vs CUDA fp16:
+locked_backdrop (16/8) alpha MAE 3.72e-4, max 6.6e-2, 3.32 % > 1/255; metal_glasses 5.55e-4, 9.7e-2, 4.61 %;
+godiva_close (24/12) 9.82e-4, 1.1e-1, 7.92 %. For scale: CUDA fp16 vs PyTorch at their (same) auto windows
+2.71e-4 to 1.56e-3 MAE (godiva 1.56e-3, 14.8 % > 1/255); Rust fp16 vs fp32 on locked_backdrop at 4/2 was 3.41e-4,
+3.08 %. At the automatic windows the window dominates: TensorRT (16/8, 24/12) vs CUDA fp16 (48/24, 80/40) alpha
+MAE 3.39e-4 (with_motion_blur) to 2.06e-2 (godiva_close), vs PyTorch 4.12e-4 to 2.10e-2 — the same size as
+PyTorch against itself at 80/40 vs 20/10 (2.15e-2, above).
 
 ## What's left
 
@@ -273,8 +329,12 @@ attempts at an 8 GB cap were killed. Stopped there.
    (3.4 s per job) and the stage-1 window wait (3.3 s on walking_sitting) remain.
 2. **An ONNX Runtime VRAM table** for the automatic window (the measured points above, more sizes, peaks
    read inside the engine rather than sampled), replacing halve-on-oom as the normal path.
-3. **TensorRT**: exports TensorRT can parse (opset-18 attention or strongly typed, MoGe's antialiased resize),
-   then builds under a host-memory guard; FP8 only if it passes the matte test.
+3. **TensorRT**: (a) longer windows: the measured memory cap gives TensorRT 12-24-frame windows where CUDA's
+   automatic window is 48 or 80, which changes the matte more than precision does; a low-VRAM-style staging for
+   TensorRT, or stage 1 split per window half, would allow longer ones. (b) UHD (outside every range today).
+   (c) Settings toggle and its explanation in the app; packaging ck-trt-build (needs the TensorRT libraries, +4.5 GB).
+   (d) Ranges other than the two measured (720p/1080p-wide/portrait) are built on the same cap but not measured.
+   (e) FP8 / BF16 only if they pass the matte test (weakly typed BF16 didn't build stage 1).
 4. **Packaging**: the GPU build plus ORT's CUDA libraries and the models in the AppImage, the driver check.
 5. A TensorRT job whose window is halved keeps its original range.
 6. EXIF orientation of JPEG frames (cv2 applies it, this engine doesn't); grayscale EXR frames.

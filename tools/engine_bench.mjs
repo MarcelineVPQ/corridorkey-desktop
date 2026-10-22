@@ -117,8 +117,11 @@ const vramMb = (pids) => {
 export function gpuBusy(ownPids = []) {
   const pattern = ["mount_s", "onata|S", "onata.AppImage"].join("");
   try {
-    const out = execFileSync("pgrep", ["-fai", pattern], { encoding: "utf8" }).trim();
-    if (out) return `Sonata is running (${out.split("\n")[0]})`;
+    // helper command lines under ~/.cache/claude-scratch (other agents' guards and test copies) are not Sonata
+    const out = execFileSync("pgrep", ["-fai", pattern], { encoding: "utf8" })
+      .split("\n")
+      .filter((l) => l.trim() && !l.includes("claude-scratch") && !l.includes("pgrep"));
+    if (out.length) return `Sonata is running (${out[0]})`;
   } catch {
     // pgrep exits 1 when nothing matches
   }
