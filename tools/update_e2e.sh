@@ -46,8 +46,17 @@ CK_FEED_KEY="$(cat "$DIR/test-key.pem")" node "$APP/tools/sign-feed.mjs" "$DIR/s
 
 PIDS=()
 RUN=""
-# The test copies' processes: anything started from DIR/run (both AppImages, their mounts' Electron) and the shell between them.
-test_pids() { pgrep -f -- "$DIR/run/|/tmp/.mount_CorridKey|\.mount_Corrid" 2>/dev/null || true; }
+# The test copies' processes: the AppImages started from DIR/run, their mounts' Electron, and the shell between them,
+# and only inside this run's own cgroup (the memrun scope it runs in): a CorridorKey AppImage of yours matches the
+# same names and must never be listed, let alone killed at cleanup.
+CG="$(cat /proc/$$/cgroup)"
+test_pids() {
+  # loop: NOT-WORTH — the few processes matching the names, per diagnostics / cleanup
+  for p in $(pgrep -f -- "$DIR/run/|\.mount_Corrid" 2>/dev/null); do
+    [ "$(cat "/proc/$p/cgroup" 2>/dev/null)" = "$CG" ] && echo "$p"
+  done
+  return 0
+}
 diag() {
   set +o pipefail
   {
