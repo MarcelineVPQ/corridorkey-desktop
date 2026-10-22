@@ -1,0 +1,82 @@
+name: Update feed
+
+# Rebuilds latest.json (Stable) and latest-dev.json (Development: dev
+# prereleases and stable releases) from the releases published on GitHub,
+# signs them with the CK_FEED_KEY secret and commits them to main: after every
+# release, daily, and on demand (Actions -> Update feed -> Run workflow).
+# tools/build-feed.mjs downloads and hashes the AppImage, so a feed never
+# points at a file that doesn't exist or doesn't match. Never edit the feeds by
+# hand (docs/RELEASING.md).
+
+on:
+  workflow_call:
+    secrets:
+      CK_FEED_KEY:
+        required: true
+  workflow_dispatch:
+  schedule:
+    - cron: "41 6 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: feed
+  cancel-in-progress: false
+
+jobs:
+  feed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      # esbuild (with Vite) loads the app's own feed rules (tools/feed-rules.mjs); no Electron binary needed.
+      - run: npx -y npm@10.9.2 ci --ignore-scripts
+
+      - name: Signing key present
+        env:
+          CK_FEED_KEY: ${{ secrets.CK_FEED_KEY }}
+        run: '[ -n "$CK_FEED_KEY" ] || { echo "::error::the CK_FEED_KEY secret is not set (docs/RELEASING.md, Signing key)"; exit 1; }'
+
+      - name: Build latest.json and latest-dev.json
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        # Exit 2 = no matching release yet: nothing to publish on that channel.
+        run: |
+          node tools/build-feed.mjs --channel stable --out latest.json || [ $? -eq 2 ]
+          node tools/build-feed.mjs --channel dev --out latest-dev.json || [ $? -eq 2 ]
+
+      - name: Sign
+        env:
+          CK_FEED_KEY: ${{ secrets.CK_FEED_KEY }}
+        run: |
+          set -euo pipefail
+          for f in latest.json latest-dev.json; do
+            if [ -f "$f" ]; then node tools/sign-feed.mjs "$f"; fi
+          done
+
+      # The same check the app makes (signature by a key in TRUSTED_KEYS, every field).
+      - name: Verify like the app
+        run: |
+          set -euo pipefail
+          files=(); for f in latest.json latest-dev.json; do [ -f "$f" ] && files+=("$f"); done
+          if [ ${#files[@]} -gt 0 ]; then node tools/verify-feed.mjs "${files[@]}"; fi
+
+      - name: Commit if changed
+        run: |
+          set -euo pipefail
+          files=(); for f in latest.json latest.json.sig latest-dev.json latest-dev.json.sig; do [ -f "$f" ] && files+=("$f"); done
+          if [ ${#files[@]} -gt 0 ] && [ -n "$(git status --porcelain "${files[@]}")" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add "${files[@]}"
+            git commit -m "chore(release): update latest.json / latest-dev.json"
+            git push origin HEAD:main
+          else
+            echo "Feeds unchanged."
+          fi

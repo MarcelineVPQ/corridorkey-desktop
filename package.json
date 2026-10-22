@@ -9,6 +9,7 @@
     "dev": "electron-vite dev -- --no-sandbox",
     "build": "electron-vite build",
     "start": "electron-vite preview -- --no-sandbox",
+    "dist:linux": "electron-vite build && electron-builder --linux AppImage --x64 --publish never",
     "typecheck": "tsc -b",
     "test": "vitest run",
     "test:engine": "python3 -I -m unittest discover -s engine -p 'test_*.py'",
@@ -28,6 +29,7 @@
     "@types/react-dom": "18.3.7",
     "@vitejs/plugin-react": "5.2.0",
     "electron": "45.0.0-beta.3",
+    "electron-builder": "26.17.0",
     "electron-vite": "5.0.0",
     "prettier": "3.9.9",
     "typescript": "5.9.3",
@@ -37,5 +39,6 @@
   "engines": {
     "node": ">=22"
   },
+  "author": "MarcelineVPQ",
   "license": "SEE LICENSE IN LICENSE"
 }
