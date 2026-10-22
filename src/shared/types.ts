@@ -143,6 +143,20 @@ export interface CheckoutCheck {
   problems: string[];
 }
 
+export type UpdateChannel = "stable" | "dev";
+export interface UpdateState {
+  feed: string | null; // the feed URL; null = no release channel set up
+  channel: UpdateChannel;
+  automatic: boolean; // check automatically (persist it)
+  status: "idle" | "checking" | "current" | "available" | "downloading" | "ready" | "error" | "unsupported";
+  current: string;
+  latest: string | null;
+  notes: string | null;
+  progress: number | null; // 0..1 while downloading
+  error: string | null; // shown verbatim
+  checkedAt: number | null;
+}
+
 export interface AppState {
   jobs: Job[];
   queueRunning: boolean;
