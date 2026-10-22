@@ -32,6 +32,7 @@ const api: CorridorKeyApi = {
   setAutoUpdate: (on) => ipcRenderer.invoke(IPC.setAutoUpdate, on),
   installUpdate: () => ipcRenderer.invoke(IPC.installUpdate),
   restartToUpdate: () => ipcRenderer.invoke(IPC.restartToUpdate),
+  backToStable: () => ipcRenderer.invoke(IPC.backToStable),
 };
 
 contextBridge.exposeInMainWorld("ck", api);

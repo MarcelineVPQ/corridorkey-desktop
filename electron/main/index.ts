@@ -11,6 +11,7 @@ import { Queue } from "./queue";
 import { checkCheckout, loadSettings, saveSettings } from "./settings";
 import { readDesktopPalette, watchDesktopPalette } from "./desktopTheme";
 import { Updater } from "./updater";
+import { holdAppImageMountUntilExit } from "./appImageQuit";
 import type { Appearance, AppState, GpuInfo, Job, JobOptions, OutputName } from "../../src/shared/types";
 import type { DesktopPalette } from "../../src/ui/theme/palette";
 import { IPC } from "./ipc";
@@ -262,7 +263,11 @@ function registerIpc(): void {
   ipcMain.handle(IPC.setUpdateChannel, (_e, c: "stable" | "dev") => updater.setChannel(c === "dev" ? "dev" : "stable"));
   ipcMain.handle(IPC.setAutoUpdate, (_e, on: boolean) => updater.setAutomatic(Boolean(on)));
   ipcMain.handle(IPC.installUpdate, () => updater.download());
-  ipcMain.handle(IPC.restartToUpdate, () => updater.restart());
+  // Never restart into an update while the queue runs (it would kill a job).
+  ipcMain.handle(IPC.restartToUpdate, () => {
+    if (!queue.running) updater.restart();
+  });
+  ipcMain.handle(IPC.backToStable, () => updater.backToStable());
   ipcMain.on(IPC.setVisible, (_e, visible: boolean) => {
     windowShown = Boolean(visible);
     updateGpuPolling();
@@ -314,6 +319,14 @@ function createWindow(): void {
   else void mainWindow.loadFile(join(here, "../renderer/index.html"));
 }
 
+// One copy at a time: a second start brings the first window forward.
+if (!app.requestSingleInstanceLock()) app.quit();
+app.on("second-instance", () => {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
+});
+
 app.whenReady().then(() => {
   protocol.handle(MEDIA_SCHEME, (req) => {
     const file = decodeURIComponent(new URL(req.url).pathname.slice(1));
@@ -333,3 +346,5 @@ app.on("before-quit", () => {
   updater.stop();
 });
 app.on("window-all-closed", () => app.quit());
+// The DS5 app's AppImage mount guard: keeps the mount until the process is gone, so quitting never crashes on the way out.
+app.on("will-quit", () => holdAppImageMountUntilExit());

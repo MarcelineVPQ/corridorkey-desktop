@@ -1,0 +1,29 @@
+# Packaging: a Linux AppImage (x64). `npm run dist:linux` builds it into
+# release/ (electron-vite build first). Releases are built by
+# .github/workflows/release.yml on a version tag; docs/RELEASING.md.
+appId: io.github.MarcelineVPQ.CorridorKeyDesktop
+productName: CorridorKey
+copyright: Copyright © 2026 MarcelineVPQ. CorridorKey © Corridor Digital.
+directories:
+  output: release
+files:
+  - out/**
+  - package.json
+  - engine/ck_engine.py
+asar: true
+# Python runs ck_engine.py from disk: it can't read inside app.asar.
+# electron/main/index.ts looks in app.asar.unpacked/engine when packaged.
+asarUnpack:
+  - engine/**
+# The updater (electron/main/updateFeed.ts) expects exactly this name.
+artifactName: CorridorKey-Desktop-${version}.${ext}
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+  category: AudioVideo
+  # The window's WM_CLASS matches the .desktop entry (DS5 does the same).
+  syncDesktopName: true
+  synopsis: Free desktop app for CorridorKey 2.0
+  description: A free Linux desktop app for CorridorKey 2.0, Corridor Digital's AI green-screen keyer.

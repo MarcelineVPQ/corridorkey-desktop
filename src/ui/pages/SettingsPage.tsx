@@ -120,7 +120,7 @@ export function versionText(v: string): string {
 function updateStatus(u: UpdateState): string {
   switch (u.status) {
     case "unsupported":
-      return u.feed ? "Updates work in the installed app (AppImage)" : "No release channel yet";
+      return "Not available in this copy";
     case "checking":
       return "Checking…";
     case "current":
@@ -182,6 +182,13 @@ function Updates({ u, queueRunning }: { u: UpdateState; queueRunning: boolean })
           )}
         </div>
       </Row>
+      {u.channel === "stable" && /-dev\.\d+$/.test(u.current) && (
+        <Row label="Back to stable" hint="Installs the newest stable release over this dev build">
+          <button type="button" className="btn small" disabled={u.status === "checking" || u.status === "downloading"} onClick={() => window.ck.backToStable()}>
+            <RotateCcw size={14} /> Back to stable
+          </button>
+        </Row>
+      )}
       {u.notes && <p className="hint-text">{u.notes}</p>}
     </>
   );

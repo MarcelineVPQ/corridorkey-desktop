@@ -213,5 +213,6 @@ export interface CorridorKeyApi {
   setAutoUpdate(on: boolean): Promise<void>;
   installUpdate(): Promise<void>;
   restartToUpdate(): Promise<void>;
+  backToStable(): Promise<void>;
   setVisible(visible: boolean): void;
 }

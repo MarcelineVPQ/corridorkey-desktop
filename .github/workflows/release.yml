@@ -1,0 +1,80 @@
+name: Release
+
+# A tag vX.Y.Z (Stable) or vX.Y.Z-dev.N (Development) runs the checks, builds the
+# AppImage, publishes the GitHub release (AppImage + SHA256SUMS; a dev tag as a
+# prerelease, never "Latest"), then feed.yml writes and signs latest.json /
+# latest-dev.json from the published release. Feeds are never edited by hand.
+# docs/RELEASING.md.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      # Only X.Y.Z or X.Y.Z-dev.N, and it must be package.json's version.
+      - name: Tag shape and version
+        id: tag
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"; v="${tag#v}"
+          if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then dev=false
+          elif [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-dev\.[0-9]+$ ]]; then dev=true
+          else echo "::error::tag $tag is neither vX.Y.Z nor vX.Y.Z-dev.N"; exit 1; fi
+          pkg="$(node -p 'require("./package.json").version')"
+          [ "$pkg" = "$v" ] || { echo "::error::tag $tag but package.json says $pkg"; exit 1; }
+          lock="$(node -p 'require("./package-lock.json").version')"
+          [ "$lock" = "$v" ] || { echo "::error::package-lock.json says $lock"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "dev=$dev" >> "$GITHUB_OUTPUT"
+
+      # npm 9/10's own peer resolution crashes on this tree; .npmrc sets legacy-peer-deps.
+      - run: npx -y npm@10.9.2 ci
+      - run: npm run check
+      - run: npm run dist:linux
+
+      - name: Checksums and notes
+        run: |
+          set -euo pipefail
+          v="${{ steps.tag.outputs.version }}"
+          file="CorridorKey-Desktop-$v.AppImage"
+          [ -f "release/$file" ] || { echo "::error::release/$file was not built"; exit 1; }
+          (cd release && sha256sum "$file" > SHA256SUMS && sha512sum "$file" > SHA512SUMS)
+          # The CHANGELOG section "## X.Y.Z…" up to the next "## ".
+          awk -v v="$v" '$0 == "## " v || index($0, "## " v " ") == 1 {on=1; next} on && /^## / {exit} on' CHANGELOG.md > release/notes.md
+          [ -s release/notes.md ] || echo "See CHANGELOG.md." > release/notes.md
+          if [ "${{ steps.tag.outputs.dev }}" = true ]; then
+            printf '\n**This is a development build**: newer than the stable release and less tested. The app offers it only with Update channel set to Development.\n' >> release/notes.md
+          fi
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          v="${{ steps.tag.outputs.version }}"
+          flags=(--verify-tag --title "CorridorKey $v" --notes-file release/notes.md)
+          if [ "${{ steps.tag.outputs.dev }}" = true ]; then flags+=(--prerelease); else flags+=(--latest); fi
+          gh release create "$GITHUB_REF_NAME" --draft "${flags[@]}"
+          gh release upload "$GITHUB_REF_NAME" "release/CorridorKey-Desktop-$v.AppImage" release/SHA256SUMS release/SHA512SUMS
+          gh release edit "$GITHUB_REF_NAME" --draft=false
+
+  feed:
+    needs: build
+    uses: ./.github/workflows/feed.yml
+    secrets: inherit

@@ -21,4 +21,5 @@ export const IPC = {
   setAutoUpdate: "ck:set-auto-update",
   installUpdate: "ck:install-update",
   restartToUpdate: "ck:restart-to-update",
+  backToStable: "ck:back-to-stable",
 } as const;
