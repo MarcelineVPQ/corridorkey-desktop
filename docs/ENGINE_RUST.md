@@ -51,9 +51,12 @@ existing default name is used: `<piece>_fp16.onnx`, `<piece>_op23fp16.onnx`, `<p
 `rvm`, `stage1`, `stage2` (the ONNX spike's exports, `scripts/onnx_spike` on the CorridorKey2.0 clone's
 `spike/onnx` branch). Precision: fp16 on the GPU, fp32 on the CPU; `CK_ENGINE_PRECISION` overrides.
 
-Use the **`2.0.0-onnx.2`** set (`onnx/stage2` branch, `scripts/onnx_spike/speed_patches.py`): stage 1 and
-stage 2 with three exact graph rewrites (window pads, depatchify ConvTranspose, grouped 7×7 convs), same
-inputs and outputs as `2.0.0-onnx.1`. The engine runs both sets; the speed numbers below are onnx.2.
+Use the **`2.0.0-onnx.3`** set: `2.0.0-onnx.2` (stage 1 and stage 2 with three exact graph rewrites: window
+pads, depatchify ConvTranspose, grouped 7×7 convs; `scripts/onnx_spike/speed_patches.py`) with C-RADIO
+re-exported so it takes portrait frames (CorridorKey2.0 branch `onnx/portrait`, `docs/ONNX_SPIKE.md` "Portrait").
+Same inputs and outputs as `2.0.0-onnx.1`. The engine runs all three; the speed numbers below are onnx.2, and
+onnx.3 gives identical landscape output at the same speed ("Portrait" below). The engine reads the set's version
+from `manifest.json` and refuses portrait clips up front (an `input` error) only for onnx.1 / onnx.2.
 
 ## Build and run
 
@@ -260,6 +263,40 @@ Where walking_sitting's 62.4 s go now (engine log): stage 1 29.5 s run, stage 2 
 2.8 s, session loads 3.4 s, stage-1 host inputs 3.3 s, float16 conversions 3.2 s; then the encoders finish
 (0.5 s after the last frame).
 
+## Portrait (2026-10-22)
+
+Frames taller than wide failed in every C-RADIO export up to onnx.2: the export dropped the position grid's column
+crop (a Python `if` at the landscape trace), so a portrait frame got rows × rows position tokens (400 against 240
+patches at 1280×768 padded) and ONNX Runtime stopped with a broadcast error after the RVM pass. `2.0.0-onnx.3`
+re-exports C-RADIO with both crops in the graph (exact; patched PyTorch = upstream PyTorch bit for bit); no padding
+to square, C-RADIO sees what upstream shows it. `clip.rs` `model_shape_supported` now refuses portrait only for a
+set whose `manifest.json` says onnx.1 / onnx.2 (`runtime.rs` `ModelSet::takes_portrait`; their message names
+onnx.3). A side of 128 px or less is still refused: the ONNX stage 1 fails there with every set, onnx.3 included
+(reflect pad on a 2-cell grid; upstream PyTorch switches to a replicate pad, a branch the export fixed).
+
+Measured (engine built from `fix/portrait`, CUDA fp16, 12 GB budget, alpha+fg, auto window, `tools/engine_bench.mjs`;
+portrait clips made from the test plates as ProRes 4444: locked_backdrop rotated 90° = 1080×1280, 80 f;
+with_motion_blur cropped to 608×1080, 50 f):
+
+| check | result |
+|---|---|
+| C-RADIO alone, CPU, vs upstream PyTorch fp32 (max / mean abs, features up to 26) | fp32 1.2e-5 to 3.3e-5 / 7e-7 to 1e-6 on six portrait shapes (384×256 to 1920×1152, 5:1); fp16 6.1e-3 to 7.1e-3 / 1.7e-4 to 2.0e-4; landscape the same size (fp32 ≤ 4.7e-5, fp16 ≤ 1.0e-2 / 1.8e-4) |
+| landscape C-RADIO, onnx.3 vs onnx.2 (CPU, fp32 and fp16, four shapes) | bit-identical |
+| six landscape clips, onnx.3 vs onnx.2 mattes (same engine binary) | alpha and fg identical on every clip (MAE 0, max 0) |
+| CPU fp32 end to end (`tools/e2e_cpu.sh`), tiny clip transposed (200×320) vs PyTorch fp32 on it | alpha MAE 1.46e-7, max 3.4e-5, 0 % > 1/255, fg PSNR 103.0 / 96.1 dB; low-VRAM identical; all four jobs ran (landscape tiny with onnx.3: 2.11e-7, identical to onnx.2) |
+| locked_backdrop_rot90 vs the PyTorch engine (bf16 autocast, what ships) | alpha MAE 6.86e-4, max 6.1e-2, 4.01 % > 1/255, fg PSNR 49.4 / 47.7 dB (landscape locked_backdrop: 6.12e-4, 6.4e-2, 3.93 %, 49.0 / 47.5 dB) |
+| with_motion_blur_tall vs the PyTorch engine | alpha MAE 3.69e-4, max 6.5e-2, 2.86 % > 1/255, fg PSNR 52.6 / 47.2 dB (landscape with_motion_blur: 3.01e-4, 8.2e-2, 2.18 %, 50.9 / 45.2 dB) |
+| onnx.2 on the two portrait clips | refused before any work: `input`, "Portrait clips … need the 2.0.0-onnx.3 models or newer" |
+
+Portrait jobs: locked_backdrop_rot90 48/24 low, 18.3 s total, 8.33 GB VRAM, 5.36 GB RAM (PyTorch 43.6 s, 11.62 GB,
+9.87 GB); with_motion_blur_tall 80/40, 9.3 s, 7.22 GB, 3.85 GB (PyTorch 13.1 s). Landscape speed, onnx.3 vs onnx.2,
+one run each, same binary (total s): godiva_close 34.1 / 33.4, locked_backdrop 17.9 / 17.9, metal_glasses 25.5 /
+25.6, smoke 44.3 / 44.6, walking_sitting 54.6 / 54.4, with_motion_blur 10.5 / 10.5; peak VRAM 8.07-9.44 GB both.
+
+TensorRT: `models-trt-1`'s C-RADIO has the same fault. `models-trt-2` (scratch) is `models-trt-1` with C-RADIO
+rebuilt from onnx.3's; on ONNX Runtime's CPU it takes portrait (mean 3.1e-4 to 3.4e-4 vs PyTorch, landscape 3.2e-4).
+A TensorRT engine for a portrait range was not built or run on the card.
+
 ## TensorRT (opt-in, `tensorrt: true`)
 
 OFF by default; CUDA fp16 stays the normal path. Measured 2026-10-21 (RTX 5080, driver 615, TensorRT 10.16,
@@ -345,6 +382,6 @@ PyTorch against itself at 80/40 vs 20/10 (2.15e-2, above).
 4. **Packaging**: the GPU build plus ORT's CUDA libraries and the models in the AppImage, the driver check.
 5. A TensorRT job whose window is halved keeps its original range.
 6. EXIF orientation of JPEG frames (cv2 applies it, this engine doesn't); grayscale EXR frames.
-7. Portrait clips: every C-RADIO export fails on frames taller than wide, so the engine refuses them (an `input`
-   error), as it does frames with a side of 128 px or less (stage 1's reflect pad); docs/BACKLOG.md row 14,
-   docs/BUG_HUNT_2026-10.md I3 / I4.
+7. Portrait clips run with `2.0.0-onnx.3` ("Portrait"); the TensorRT path for portrait (`models-trt-2`) is
+   unmeasured on the card. Frames with a side of 128 px or less are still refused (stage 1's reflect pad,
+   docs/BUG_HUNT_2026-10.md I4): a stage-1 re-export with the replicate branch would lift it.
