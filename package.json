@@ -1,0 +1,41 @@
+{
+  "name": "corridorkey-desktop",
+  "private": true,
+  "version": "0.1.0-dev.1",
+  "type": "module",
+  "description": "Free Linux desktop app for CorridorKey 2.0, Corridor Digital's AI green-screen keyer.",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev -- --no-sandbox",
+    "build": "electron-vite build",
+    "start": "electron-vite preview -- --no-sandbox",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "test:engine": "python3 -I -m unittest discover -s engine -p 'test_*.py'",
+    "gates": "./.hooks/check_electron_security.sh && node .hooks/check_theme_colors.mjs && node tools/list_loops.mjs --check",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run typecheck && npm run format:check && npm run gates && npm test && npm run test:engine"
+  },
+  "dependencies": {
+    "lucide-react": "0.577.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/react": "18.3.31",
+    "@types/react-dom": "18.3.7",
+    "@vitejs/plugin-react": "5.2.0",
+    "electron": "45.0.0-beta.3",
+    "electron-vite": "5.0.0",
+    "prettier": "3.9.9",
+    "typescript": "5.9.3",
+    "vite": "7.3.6",
+    "vitest": "5.0.3"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "SEE LICENSE IN LICENSE"
+}

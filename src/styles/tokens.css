@@ -1,0 +1,62 @@
+/* The one theme system (rule 2): every color in the app comes from these
+   tokens. Dark is the default (a grading-suite look that doesn't fight the
+   footage); light follows the OS setting. Nothing else in the app sets a color. */
+:root {
+  color-scheme: dark;
+  --bg-0: #16181d;
+  --bg-1: #1d2027;
+  --bg-2: #252932;
+  --bg-3: #2f3440;
+  --border-1: #323743;
+  --border-2: #444b5a;
+  --text-1: #e8eaef;
+  --text-2: #aab0bd;
+  --text-3: #7c8392;
+  --accent: #3ddc84;
+  --accent-strong: #2fbf70;
+  --accent-text: #0b1f13;
+  --accent-soft: rgba(61, 220, 132, 0.14);
+  --status-ok: #3ddc84;
+  --status-warn: #f2b84b;
+  --status-error: #ff6b6b;
+  --status-info: #6cb4ff;
+  --status-error-soft: rgba(255, 107, 107, 0.12);
+  --status-warn-soft: rgba(242, 184, 75, 0.12);
+  --progress-track: #2a2e38;
+  --checker-a: #3a3f4b;
+  --checker-b: #2c303a;
+  --focus-ring: #6cb4ff;
+  --overlay: rgba(10, 12, 16, 0.78);
+  --font-ui: system-ui, "Segoe UI", "Noto Sans", sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg-0: #f3f4f7;
+    --bg-1: #ffffff;
+    --bg-2: #eceef2;
+    --bg-3: #e1e4ea;
+    --border-1: #d8dce4;
+    --border-2: #c2c8d3;
+    --text-1: #1a1d24;
+    --text-2: #4b5260;
+    --text-3: #6f7685;
+    --accent: #13894a;
+    --accent-strong: #0f733d;
+    --accent-text: #ffffff;
+    --accent-soft: rgba(19, 137, 74, 0.12);
+    --status-ok: #13894a;
+    --status-warn: #a86a00;
+    --status-error: #c62828;
+    --status-info: #1f6fd1;
+    --status-error-soft: rgba(198, 40, 40, 0.08);
+    --status-warn-soft: rgba(168, 106, 0, 0.1);
+    --progress-track: #dfe3ea;
+    --checker-a: #d5d9e0;
+    --checker-b: #c3c8d1;
+    --focus-ring: #1f6fd1;
+    --overlay: rgba(243, 244, 247, 0.85);
+  }
+}
