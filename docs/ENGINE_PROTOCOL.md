@@ -56,6 +56,7 @@ a kill.
 | `carry_hint_quality` | 0–1 | 0.95 |
 | `hann_chunk`, `hann_stride` | int | a manual window; neither set and no `low_vram` = automatic from free graphics memory |
 | `low_vram` | bool | staged low-memory mode |
+| `vram_budget_gb` | number | cap on the graphics memory this job may use (the automatic window is chosen within it; the engine refuses to go past it). Absent = the free memory |
 | `outputs` | list | any of `alpha fg checker cutout` (`alpha fg`) |
 | `output_format` | `video` \| `exr` | `video` |
 | `exr_dtype` | `half` \| `float` | `half` |

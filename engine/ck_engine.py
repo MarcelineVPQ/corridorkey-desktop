@@ -116,6 +116,7 @@ class Engine:
         self.vio = video_io
         self.paths = runtime.RuntimePaths.from_package(package_root)
         self.model = None
+        self.vram_budget_gb: float | None = None
         self.state: JobState | None = None
         self.log = ModelLog()
         sys.stdout = self.log
@@ -147,10 +148,19 @@ class Engine:
         orig_auto = rt.apply_auto_vram
 
         def auto_vram(cfg, shape_hw, num_frames):
-            # The same budget apply_auto_vram computes (nothing allocates in between).
+            # The same budget apply_auto_vram computes (nothing allocates in between),
+            # capped by the job's vram_budget_gb (Marcy keeps the rest of the card).
             free_bytes, _ = engine.torch.cuda.mem_get_info()
             budget_gb = (free_bytes + engine.torch.cuda.memory_reserved()) / 2**30
-            orig_auto(cfg, shape_hw, num_frames)
+            cap = engine.vram_budget_gb
+            if cap is not None and cap < budget_gb:
+                budget_gb = cap
+                chunk, stride, low_vram, _ = rt.select_vram_profile(shape_hw, num_frames, budget_gb)
+                cfg.hann_chunk, cfg.hann_stride, cfg.low_vram = chunk, stride, low_vram
+                print(f"  Auto VRAM: budget capped at {cap:.1f} GB -> hann_chunk={chunk}, "
+                      f"hann_stride={stride}, low_vram={low_vram}")
+            else:
+                orig_auto(cfg, shape_hw, num_frames)
             mp = shape_hw[0] * shape_hw[1] / 1e6
             estimate = rt.estimate_peak_vram_gb(mp, min(cfg.hann_chunk, num_frames), cfg.low_vram)
             if engine.state:
@@ -257,6 +267,12 @@ class Engine:
                 send({"type": "error", "id": job, "code": "input",
                       "message": f"input not found: {req['input']}"})
                 return
+            budget = (req.get("options") or {}).get("vram_budget_gb")
+            self.vram_budget_gb = float(budget) if budget else None
+            if self.vram_budget_gb:
+                # A hard cap for this process: PyTorch raises OOM instead of going past it.
+                total = torch.cuda.get_device_properties(0).total_memory / 2**30
+                torch.cuda.set_per_process_memory_fraction(min(1.0, self.vram_budget_gb / total))
             if self.model is None:
                 send({"type": "progress", "id": job, "stage": "load"})
                 self.model = rt.load_model(self.paths, device="cuda")
