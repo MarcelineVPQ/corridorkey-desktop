@@ -96,6 +96,25 @@ impl ModelSet {
         default_names(piece, p).into_iter().map(|n| self.dir.join(n)).find(|f| f.exists())
     }
 
+    /// The TensorRT-ready export of `piece` at `p`: models.json's "tensorrt-fp16" / "tensorrt-fp32" (files
+    /// TensorRT's ONNX parser takes: plain attention instead of com.microsoft::MultiHeadAttention, MoGe's
+    /// antialiased resize as weight matrices, at most 8-dimensional tensors; CorridorKey2.0
+    /// scripts/onnx_spike/to_trt.py). None: no such file, the network runs on CUDA.
+    pub fn trt_file(&self, piece: &str, p: Precision) -> Option<PathBuf> {
+        let name = self.manifest.get(&format!("tensorrt-{}", p.name()))?.get(piece)?;
+        let f = self.dir.join(name);
+        f.exists().then_some(f)
+    }
+
+    /// The EPContext stub for `piece`'s TensorRT engine (models.json "tensorrt-fp16-ctx": an ONNX file with the
+    /// TensorRT-ready export's inputs and outputs and one EPContext node pointing at `<piece>.engine` next to it;
+    /// CorridorKey2.0 scripts/onnx_spike/trt_ctx.py).
+    pub fn trt_stub(&self, piece: &str, p: Precision) -> Option<PathBuf> {
+        let name = self.manifest.get(&format!("tensorrt-{}-ctx", p.name()))?.get(piece)?;
+        let f = self.dir.join(name);
+        f.exists().then_some(f)
+    }
+
     /// Which networks are there at `p` (the pong's "assets").
     pub fn assets(&self, p: Precision) -> BTreeMap<String, bool> {
         PIECES.iter().map(|k| (k.to_string(), self.file(k, p).is_some())).collect()
@@ -239,9 +258,8 @@ impl Runtime {
         Ok(b)
     }
 
-    /// A session for `file` on `prov`. TensorRT: `trt` gives the cache folder and the profile shapes.
-    /// `vram_cap`: the most graphics memory (bytes) the session's CUDA arena may hold (gpu_mem_limit), and
-    /// TensorRT's workspace limit.
+    /// A session for `file` on `prov` (TensorRT: `file` is the network's EPContext stub, see TrtSettings).
+    /// `vram_cap`: the most graphics memory (bytes) the session's CUDA arena may hold (gpu_mem_limit).
     pub fn session(&self, prov: Provider, file: &Path, trt: Option<&TrtSettings>, vram_cap: Option<u64>) -> Result<Session, String> {
         let _ = vram_cap;
         let mut b = self.builder()?;
@@ -261,29 +279,12 @@ impl Runtime {
                 return Err("this engine was built without the CUDA execution provider".into());
             }
             Provider::TensorRt => {
+                // `file` is an EPContext stub next to an engine ck-trt-build made (tensorrt.rs): TensorRT runs the
+                // prebuilt engine, nothing is built here; the CUDA provider stays behind it
                 #[cfg(feature = "tensorrt")]
                 {
-                    let t = trt.ok_or("TensorRT needs its cache settings")?;
-                    std::fs::create_dir_all(&t.cache).map_err(|e| format!("{}: {e}", t.cache.display()))?;
-                    use ort::ep::ArbitrarilyConfigurableExecutionProvider;
-                    let mut ep = ort::ep::TensorRT::default()
-                        .with_device_id(0)
-                        .with_fp16(t.fp16)
-                        .with_bf16(t.bf16)
-                        .with_engine_cache(true)
-                        .with_engine_cache_path(t.cache.to_string_lossy())
-                        .with_timing_cache(true)
-                        .with_timing_cache_path(t.cache.to_string_lossy())
-                        .with_profile_min_shapes(&t.min)
-                        .with_profile_opt_shapes(&t.opt)
-                        .with_profile_max_shapes(&t.max);
-                    if let Some(cap) = vram_cap {
-                        ep = ep.with_max_workspace_size(cap as usize);
-                    }
-                    if !t.exclude.is_empty() {
-                        // these node types stay on the CUDA provider (TensorRT's ONNX parser can't take them)
-                        ep = ep.with_arbitrary_config("trt_op_types_to_exclude", &t.exclude);
-                    }
+                    let _ = trt;
+                    let ep = ort::ep::TensorRT::default().with_device_id(0);
                     b = b.with_execution_providers([ep.build().error_on_failure(), cuda_ep(vram_cap).build()]).map_err(|e| e.to_string())?;
                 }
                 #[cfg(not(feature = "tensorrt"))]
@@ -322,23 +323,10 @@ fn cuda_ep(vram_cap: Option<u64>) -> ort::ep::CUDA {
         .with_tf32(false)
 }
 
-/// What a TensorRT session is built for.
+/// Where a TensorRT network's engine lives: the shape range's folder for this network (engine + EPContext stub).
 #[derive(Clone, Debug, PartialEq)]
 pub struct TrtSettings {
-    pub cache: PathBuf,
-    pub fp16: bool,
-    pub bf16: bool,
-    pub min: String,
-    pub opt: String,
-    pub max: String,
-    /// op types left to the CUDA provider ("Attention": TensorRT 10.16 builds the opset-23 Attention op only in
-    /// a strongly typed network, which ORT's TensorRT provider does not make)
-    pub exclude: String,
-}
-
-/// CK_ENGINE_TRT_EXCLUDE, else "Attention".
-pub fn trt_exclude() -> String {
-    std::env::var("CK_ENGINE_TRT_EXCLUDE").unwrap_or_else(|_| "Attention".into())
+    pub dir: PathBuf,
 }
 
 /// A loaded network: its session and how its inputs want to be fed.
@@ -501,10 +489,12 @@ mod tests {
         assert_eq!(m.file("stage2", Precision::Fp16), Some(dir.join("stage2_fp16.onnx"))); // the plain name first
         assert_eq!(m.file("rvm", Precision::Fp32), Some(dir.join("rvm_op23.onnx")));
         assert_eq!(m.missing(Precision::Fp16), vec!["cradio", "moge", "rvm"]);
-        std::fs::write(dir.join("models.json"), r#"{"fp16": {"rvm": "custom.onnx", "moge": "gone.onnx"}}"#).unwrap();
+        std::fs::write(dir.join("models.json"), r#"{"fp16": {"rvm": "custom.onnx", "moge": "gone.onnx"}, "tensorrt-fp16": {"rvm": "stage2_fp16.onnx", "moge": "gone.onnx"}}"#).unwrap();
         let m = ModelSet::open(&dir).unwrap();
         assert_eq!(m.file("rvm", Precision::Fp16), Some(dir.join("custom.onnx")));
         assert_eq!(m.file("moge", Precision::Fp16), None);
+        assert_eq!(m.trt_file("rvm", Precision::Fp16), Some(dir.join("stage2_fp16.onnx")));
+        assert_eq!((m.trt_file("moge", Precision::Fp16), m.trt_file("rvm", Precision::Fp32)), (None, None));
         assert_eq!(m.assets(Precision::Fp16)["stage1"], true);
         std::fs::remove_dir_all(&dir).unwrap();
     }
