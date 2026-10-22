@@ -1,5 +1,8 @@
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { engineOptions, Queue, type EngineHandle } from "../../electron/main/queue";
+import { clearJobTemps, engineOptions, Queue, type EngineHandle } from "../../electron/main/queue";
 import type { EngineReply } from "../../electron/main/engine";
 import { DEFAULT_OPTIONS, type Job } from "../../src/shared/types";
 
@@ -26,7 +29,7 @@ function job(id: string, extra: Partial<Job> = {}): Job {
   };
 }
 
-function harness(opts: { pongProtocol?: number; failStart?: boolean } = {}) {
+function harness(opts: { pongProtocol?: number; failStart?: boolean; slowStart?: boolean; tempRoot?: string } = {}) {
   const sent: Record<string, unknown>[] = [];
   let reply: (r: EngineReply) => void = () => {};
   let exit: (c: number | null, s: NodeJS.Signals | null, t: string[]) => void = () => {};
@@ -38,20 +41,29 @@ function harness(opts: { pongProtocol?: number; failStart?: boolean } = {}) {
     makeEngine: (onReply, onExit) => {
       reply = onReply;
       exit = onExit;
+      // slowStart: no pong yet; a kill ends the start as EngineProcess does ("exited before answering")
+      let rejectStart: (e: Error) => void = () => {};
       const h: EngineHandle = {
         running: true,
         pid: 4242,
         start: () =>
-          opts.failStart ? Promise.reject(new Error("no python")) : Promise.resolve({ type: "pong", protocol: opts.pongProtocol ?? 1, version: "0.1.0", engine: "pytorch", device: "cuda" }),
+          opts.slowStart
+            ? new Promise((_r, j) => (rejectStart = j))
+            : opts.failStart
+              ? Promise.reject(new Error("no python"))
+              : Promise.resolve({ type: "pong", protocol: opts.pongProtocol ?? 1, version: "0.1.0", engine: "pytorch", device: "cuda" }),
         send: (m) => sent.push(m),
         quit: () => quits++,
-        kill: () => killed++,
+        kill: () => {
+          killed++;
+          rejectStart(new Error("engine exited before answering (SIGKILL)"));
+        },
         stderrTail: () => ["trace line"],
       };
       engines.push(h);
       return h;
     },
-    tempDirFor: (id) => `/nonexistent-ck-test/${id}`,
+    tempDirFor: (id) => join(opts.tempRoot ?? "/nonexistent-ck-test", id),
     changed: () => {},
     finished: () => {},
     now: () => clock,
@@ -139,6 +151,57 @@ describe("Queue", () => {
     expect(h.q.jobs[0].status).toBe("failed");
     expect(h.q.engine.status).toBe("failed");
     expect(h.q.running).toBe(false);
+  });
+
+  it("stop while the engine is still starting: the job is cancelled, the engine stopped (not failed)", async () => {
+    const h = harness({ slowStart: true });
+    h.q.add(job("a"));
+    await h.q.start();
+    await h.flush();
+    h.q.stop();
+    await h.flush();
+    expect(h.q.jobs[0].status).toBe("cancelled");
+    expect(h.q.engine).toEqual({ status: "stopped", pong: null, error: null });
+    expect(h.q.running).toBe(false);
+    expect(h.sent).toEqual([]);
+  });
+
+  it("removes a job's temp folder when the job ends, however it ends", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ck-queue-"));
+    try {
+      const h = harness({ tempRoot: root });
+      // loop: NOT-WORTH — three test jobs
+      for (const id of ["a", "b", "c"]) {
+        mkdirSync(join(root, id));
+        writeFileSync(join(root, id, "left.f16"), "x");
+        h.q.add(job(id));
+      }
+      await h.q.start();
+      await h.flush();
+      h.reply({ type: "result", id: "a", outputs: [] });
+      await h.flush();
+      h.reply({ type: "error", id: "b", code: "input", message: "bad" });
+      await h.flush();
+      h.exit(null, "SIGSEGV");
+      await h.flush();
+      expect(readdirSync(root)).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("clears job temp folders left by an earlier run (a crash, a killed engine)", () => {
+    const root = mkdtempSync(join(tmpdir(), "ck-jobs-"));
+    try {
+      mkdirSync(join(root, "old-job"));
+      writeFileSync(join(root, "old-job", "baton.f16"), "x");
+      clearJobTemps(root);
+      expect(existsSync(root)).toBe(true);
+      expect(readdirSync(root)).toEqual([]);
+      clearJobTemps(join(root, "missing")); // nothing there: no error
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("only waiting jobs can be edited, failed ones can be retried", async () => {
