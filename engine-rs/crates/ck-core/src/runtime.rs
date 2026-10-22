@@ -158,6 +158,14 @@ impl Runtime {
     }
 
     fn new(ort_lib: Option<&Path>, want: &str) -> Result<Runtime, String> {
+        // Attention on ORT's own flash kernels, not cuDNN's (ORT reads this when the sessions are made). Measured
+        // (RTX 5080, ORT 1.31, 1280x1152): with cuDNN's, every switch between two sessions costs 250-400 ms of
+        // host time on the next run (stage 2 after a stage-1 window: 54 -> ~350 ms; stage 1 at T=8 ~250 -> ~530 ms),
+        // which normal mode does every window; ORT's kernels have no such cost and are as fast (stage 1 at T=24
+        // 907 vs 915 ms of GPU time). Set ORT_ENABLE_CUDNN_FLASH_ATTENTION yourself to choose.
+        if std::env::var_os("ORT_ENABLE_CUDNN_FLASH_ATTENTION").is_none() {
+            std::env::set_var("ORT_ENABLE_CUDNN_FLASH_ATTENTION", "0");
+        }
         #[allow(unused_mut, unused_assignments)]
         let mut version: Option<String> = None;
         #[cfg(feature = "ort-dynamic")]
