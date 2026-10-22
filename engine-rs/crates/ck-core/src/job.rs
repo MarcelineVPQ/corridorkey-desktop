@@ -113,6 +113,13 @@ pub fn parse(req: &Value) -> Result<JobConfig, Error> {
     if chunk < 1 || stride < 1 {
         return Err(Error::input(format!("hann_chunk and hann_stride must be at least 1 (got {chunk}, {stride})")));
     }
+    // a stride past the window leaves frames no window covers: measured (CPU, 8 frames at 2/4), normal mode wrote
+    // 6 of 8 frames and reported success; low-VRAM rendered the uncovered frames from never-written (zero) states
+    if stride > chunk {
+        return Err(Error::input(format!(
+            "hann_stride ({stride}) must not be larger than hann_chunk ({chunk}): frames between the windows would get no matte"
+        )));
+    }
     let output_format = string(o, "output_format").unwrap_or_else(|| "video".into());
     if output_format != "video" && output_format != "exr" {
         return Err(Error::input(format!("unsupported output format: {output_format}")));
@@ -207,6 +214,8 @@ mod tests {
         assert_eq!(parse(&req(json!({"output_format": "gif"}))).unwrap_err().code, "input");
         assert_eq!(parse(&req(json!({"exr_dtype": "int"}))).unwrap_err().code, "input");
         assert_eq!(parse(&req(json!({"vram_budget_gb": 0}))).unwrap_err().code, "input");
+        assert_eq!(parse(&req(json!({"hann_chunk": 2, "hann_stride": 4}))).unwrap_err().code, "input");
+        assert_eq!(parse(&req(json!({"hann_chunk": 4, "hann_stride": 4}))).unwrap().hann_stride, 4);
         assert_eq!(parse(&req(json!({"vram_budget_gb": 12}))).unwrap().vram_budget_gb, Some(12.0));
         let c = parse(&req(json!({"outputs": ["fg", "checker", "alpha"], "tensorrt": true}))).unwrap();
         assert_eq!((c.outputs.join(","), c.tensorrt), ("alpha,checker,fg".to_string(), true));
