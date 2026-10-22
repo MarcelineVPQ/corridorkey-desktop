@@ -703,7 +703,10 @@ impl Pipeline {
             }
         }
         let bdir = dir.join(bucket.key());
-        let built = ready.iter().all(|p| crate::tensorrt::built(&bdir.join(p), p));
+        let built = ready.iter().all(|p| {
+            let stamp = self.models.trt_file(p, trt_prec).map(|f| crate::tensorrt::source_stamp(&f)).unwrap_or_default();
+            crate::tensorrt::built(&bdir.join(p), p, &stamp)
+        });
         msg["provider"] = json!("tensorrt");
         msg["precision"] = json!("fp16");
         msg["range"] = json!(bucket.key());
@@ -726,7 +729,8 @@ impl Pipeline {
         let builder = crate::tensorrt::builder_path();
         // TensorRT's working memory while it builds: half the job's budget, at most 4 GiB
         let workspace_mb = key.vram_cap.map(|c| (c >> 21).min(4096)).unwrap_or(4096).max(512);
-        let todo: Vec<&'static str> = crate::runtime::PIECES.iter().copied().filter(|p| !crate::tensorrt::built(&dir.join(p), p)).collect();
+        let stamp = |p: &str| self.models.trt_file(p, key.precision).map(|f| crate::tensorrt::source_stamp(&f)).unwrap_or_default();
+        let todo: Vec<&'static str> = crate::runtime::PIECES.iter().copied().filter(|p| !crate::tensorrt::built(&dir.join(p), p, &stamp(p))).collect();
         // loop: NOT-WORTH — five networks
         for (i, piece) in crate::runtime::PIECES.iter().copied().enumerate() {
             let pdir = dir.join(piece);
@@ -734,7 +738,8 @@ impl Pipeline {
                 self.trt_fallbacks.insert(piece, format!("no TensorRT-ready export of {piece} in the models folder"));
                 continue;
             };
-            if crate::tensorrt::built(&pdir, piece) {
+            let source = crate::tensorrt::source_stamp(&onnx);
+            if crate::tensorrt::built(&pdir, piece, &source) {
                 continue;
             }
             let Some(b) = &builder else {
@@ -747,6 +752,7 @@ impl Pipeline {
             match crate::tensorrt::build_engine(b, &onnx, piece, bucket, &pdir, workspace_mb, &timing) {
                 Ok(secs) => {
                     std::fs::copy(&stub, crate::tensorrt::stub_path(&pdir, piece)).map_err(|e| Error::engine(format!("{}: {e}", pdir.display())))?;
+                    std::fs::write(crate::tensorrt::source_path(&pdir, piece), &source).map_err(|e| Error::engine(format!("{}: {e}", pdir.display())))?;
                     sink.log(&format!("  TensorRT: {} engine built in {secs:.1} s", piece_name(piece)));
                     self.trt_seconds.insert(piece, ((secs * 10.0).round() / 10.0, true));
                 }

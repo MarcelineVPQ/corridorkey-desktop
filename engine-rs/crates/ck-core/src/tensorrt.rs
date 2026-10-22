@@ -161,9 +161,30 @@ pub fn stale_dirs(root: &Path, current: &Path, gpu: &str) -> Vec<PathBuf> {
     v
 }
 
-/// Whether `piece`'s engine and its stub exist in `dir`.
-pub fn built(dir: &Path, piece: &str) -> bool {
-    engine_path(dir, piece).exists() && stub_path(dir, piece).exists()
+/// What an engine was built from: size and modification time of the TensorRT-ready export and its weights.
+/// A changed export (a new model set) no longer matches, so its engine is rebuilt.
+pub fn source_stamp(onnx: &Path) -> String {
+    let data = PathBuf::from(format!("{}.data", onnx.display()));
+    [onnx.to_path_buf(), data]
+        .iter()
+        .map(|p| match std::fs::metadata(p) {
+            Ok(m) => format!("{}:{}", m.len(), m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0)),
+            Err(_) => "-".into(),
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// `<dir>/<piece>.source`: the source stamp the engine was built from.
+pub fn source_path(dir: &Path, piece: &str) -> PathBuf {
+    dir.join(format!("{piece}.source"))
+}
+
+/// Whether `piece`'s engine and its stub exist in `dir`, built from the export with this `stamp`.
+pub fn built(dir: &Path, piece: &str, stamp: &str) -> bool {
+    engine_path(dir, piece).exists()
+        && stub_path(dir, piece).exists()
+        && std::fs::read_to_string(source_path(dir, piece)).map(|s| s.trim() == stamp).unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -222,11 +243,16 @@ mod tests {
             std::fs::create_dir_all(d).unwrap();
         }
         assert_eq!(stale_dirs(&root, &cur, "NVIDIA GeForce RTX 5080"), vec![old.clone()]);
-        assert!(!built(&cur, "rvm"));
+        assert!(!built(&cur, "rvm", "1:2,-"));
         std::fs::write(engine_path(&cur, "rvm"), b"").unwrap();
-        assert!(!built(&cur, "rvm"));
         std::fs::write(stub_path(&cur, "rvm"), b"").unwrap();
-        assert!(built(&cur, "rvm"));
+        assert!(!built(&cur, "rvm", "1:2,-"));
+        std::fs::write(source_path(&cur, "rvm"), b"1:2,-").unwrap();
+        assert!(built(&cur, "rvm", "1:2,-"));
+        assert!(!built(&cur, "rvm", "1:3,-"));
+        let onnx = cur.join("x.onnx");
+        std::fs::write(&onnx, b"abc").unwrap();
+        assert!(source_stamp(&onnx).starts_with("3:") && source_stamp(&onnx).ends_with(",-"));
         std::fs::remove_dir_all(&root).unwrap();
     }
 }

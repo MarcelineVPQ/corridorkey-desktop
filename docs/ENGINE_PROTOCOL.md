@@ -81,7 +81,8 @@ a kill.
    "models_dir":"/models","assets":{"cradio":true,"moge":true,"rvm":true,"stage1":true,"stage2":true},"python":null,"torch":null}
 ← {"type":"progress","id":"j1","stage":"load|optimize|probe|rvm|foundations|keying","p":0.42,"detail":"window 3/9"}
 ← {"type":"provider","id":"j1","provider":"cuda|tensorrt|tensorrt+cuda|cpu","precision":"fp16","tensorrt_requested":false,
-   "fallback_reason":"...","range":"h768-1152_w1280-2176_t9-24","cache":"build|reused","pieces":{...},"fallbacks":{...}}
+   "fallback_reason":"...","range":"h1024-1280_w1792-2176_t1-12","cache":"build|reused","pieces":{...},"fallbacks":{...},
+   "build_s":{"stage1":88.0,...}}
 ← {"type":"clip","id":"j1","width":1920,"height":1080,"fps":23.976,"frames":240}
 ← {"type":"memory","id":"j1","hann_chunk":24,"hann_stride":12,"low_vram":false,"auto":true,
    "budget_gb":13.1,"estimate_gb":9.8}
@@ -107,7 +108,12 @@ a kill.
   provider and precision, and for TensorRT the shape range, whether its
   engines are built or reused, and every network that fell back to CUDA, with why.
 - `optimize` (Rust engine, TensorRT only) is a one-time engine build for the
-  clip's shape range; ONNX Runtime reports no fraction for it, so it has no `p`.
+  clip's shape range, one `progress` per network built (`detail`: "stage 1 (4/5)");
+  the builder reports no fraction, so it has no `p`. `build_s` in the second
+  `provider` reply gives each build's seconds.
+- A TensorRT job with an automatic window gets the longest window its range was
+  built for: the `memory` reply then has `estimate_basis: "tensorrt-range"` and
+  `range` instead of the PyTorch table's estimate.
 - A request the engine can't read is answered with
   `{"type":"error","code":"bad-request","message":"..."}` and the engine keeps
   running. After a job's `error` the engine also keeps running and takes the
