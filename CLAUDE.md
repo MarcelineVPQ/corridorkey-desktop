@@ -4,10 +4,11 @@ A free Linux desktop app for CorridorKey 2.0 (Corridor Digital's AI keyer).
 Built to **Marcy's 15 basic rules for programming applications** (memory
 `marcys-15-basic-rules`); they are the standard here, with these specifics:
 
-- **Engine/app contract (rule 10):** the app never imports the model. `engine/ck_engine.py`
-  runs the upstream runtime unchanged from a CorridorKey2.0 checkout and speaks
-  `docs/ENGINE_PROTOCOL.md` (the Sonata helper pattern). Protocol changes: additive fields,
-  bump `PROTOCOL` only for what the app must know.
+- **Engine/app contract (rule 10):** the app never imports the model. Two engines speak
+  `docs/ENGINE_PROTOCOL.md` (the Sonata helper pattern): the Rust engine on ONNX Runtime
+  (`engine-rs/`, docs/ENGINE_RUST.md; the default when set up) and `engine/ck_engine.py`, which runs
+  the upstream runtime unchanged from a CorridorKey2.0 checkout (kept until Marcy retires it).
+  Protocol changes: additive fields, bump `PROTOCOL` only for what the app must know.
 - **Accuracy (rule 1):** every number on screen comes from an engine reply (frames handed to
   the writers, the window really used, the free memory it saw). Never estimate progress in the app.
 - **Share the machine (rule 11):** the engine lives only while the queue runs (`quit` frees the
