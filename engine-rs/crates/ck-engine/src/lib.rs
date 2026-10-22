@@ -54,13 +54,61 @@ fn str_field(req: &Value, k: &str) -> Option<String> {
     }
 }
 
+/// The requests read so far, in order. A reader thread fills it while a job runs, so a `cancel` sent for a
+/// job still waiting is seen before that job starts, wherever it sits in the stream (docs/ENGINE_PROTOCOL.md:
+/// "A cancel for a job still waiting removes it"). Read only between jobs, a cancel sent after the job's own
+/// `run` line came too late: measured with the fake backend, `run j1, run j2, cancel j2` ran all three.
+struct Inbox {
+    state: std::sync::Mutex<(std::collections::VecDeque<String>, bool)>,
+    more: std::sync::Condvar,
+}
+
+impl Inbox {
+    /// The next request line, waiting for one; None once the input has ended and every line was taken.
+    fn take(&self) -> Option<String> {
+        let mut g = self.state.lock().unwrap();
+        // loop: SERIAL-REQUIRED — waits for the next request line [bounded: the reader thread ends at the input's end and says so]
+        loop {
+            if let Some(l) = g.0.pop_front() {
+                return Some(l);
+            }
+            if g.1 {
+                return None;
+            }
+            g = self.more.wait(g).unwrap();
+        }
+    }
+
+    /// Whether a `cancel` for `id` is among the lines read but not yet taken.
+    fn cancel_queued(&self, id: &str) -> bool {
+        let g = self.state.lock().unwrap();
+        // loop: NOT-WORTH — the few requests queued behind a job, once per job start
+        g.0.iter().any(|l| {
+            serde_json::from_str::<Value>(l)
+                .is_ok_and(|v| v.get("cmd").and_then(|c| c.as_str()) == Some("cancel") && str_field(&v, "id").as_deref() == Some(id))
+        })
+    }
+}
+
 /// Serve requests until `quit` or the end of input. One job at a time, in order.
-pub fn serve<B: Backend, R: BufRead, W: Write>(backend: &mut B, input: R, out: W) {
+pub fn serve<B: Backend, R: BufRead + Send + 'static, W: Write>(backend: &mut B, input: R, out: W) {
+    let inbox = std::sync::Arc::new(Inbox { state: std::sync::Mutex::new((Default::default(), false)), more: std::sync::Condvar::new() });
+    let reader = inbox.clone();
+    // loop: SERIAL-REQUIRED — the request reader: lines in order into the inbox; ends at the input's end (the app closes the pipe or exits)
+    std::thread::spawn(move || {
+        // loop: SERIAL-REQUIRED — one line at a time, in order [bounded: ends at the input's end or a read error]
+        for line in input.lines() {
+            let Ok(l) = line else { break };
+            reader.state.lock().unwrap().0.push_back(l);
+            reader.more.notify_one();
+        }
+        reader.state.lock().unwrap().1 = true;
+        reader.more.notify_one();
+    });
     let mut r = Replies::new(out);
     let mut pending_cancel: HashSet<String> = HashSet::new();
     // loop: SERIAL-REQUIRED — one job at a time on one GPU; the app queues
-    for line in input.lines() {
-        let Ok(raw) = line else { break };
+    while let Some(raw) = inbox.take() {
         let raw = raw.trim();
         if raw.is_empty() {
             continue;
@@ -93,7 +141,7 @@ pub fn serve<B: Backend, R: BufRead, W: Write>(backend: &mut B, input: R, out: W
                     continue;
                 }
                 let jid = jid.unwrap();
-                if pending_cancel.remove(&jid) {
+                if pending_cancel.remove(&jid) || inbox.cancel_queued(&jid) {
                     r.send(json!({"type": "error", "id": jid, "code": "cancelled", "message": "cancelled"}));
                     continue;
                 }

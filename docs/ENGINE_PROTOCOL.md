@@ -31,11 +31,19 @@ while the queue does:
 3. When the queue is empty the app sends `quit`. The engine exits 0.
 
 Jobs run one at a time, in the order they arrive. A `cancel` for a job still
-waiting removes it (reply: error code `cancelled`). The running job cannot be
+waiting removes it (reply: error code `cancelled`), wherever it comes in the
+stream: the Rust engine reads requests on their own thread while a job runs,
+so a cancel sent after the job's `run` line still arrives in time (the PyTorch
+engine reads between jobs only: there the cancel must come before the `run`). The running job cannot be
 interrupted inside a window, so **cancelling the running job means the app
 kills the engine** (SIGKILL of its process group: the engine and its ffmpeg writers). Each job
-writes its temporary files into its own `temp_dir`, which the app deletes after
-a kill.
+writes its temporary files into its own `temp_dir`, which the app deletes when
+the job ends, however it ends (and at its start, any left by a crash).
+
+On Linux the Rust engine ends with the process that started it (parent-death
+signal): an engine whose app died doesn't keep the graphics card busy for a job
+nobody will see. Its ffmpeg children end with their pipes; its TensorRT builder
+gets the same signal.
 
 ## Requests
 

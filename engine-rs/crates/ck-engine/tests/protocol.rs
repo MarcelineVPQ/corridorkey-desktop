@@ -45,7 +45,7 @@ fn talk(lines: &[Value], raw: &[&str]) -> (Vec<Value>, Fake) {
     }
     let mut out = Vec::new();
     let mut fake = Fake::default();
-    serve(&mut fake, input.as_bytes(), &mut out);
+    serve(&mut fake, std::io::Cursor::new(input.into_bytes()), &mut out);
     let replies = String::from_utf8(out).unwrap().lines().map(|l| serde_json::from_str(l).expect("every stdout line is JSON")).collect();
     (replies, fake)
 }
@@ -111,6 +111,17 @@ fn cancel_removes_a_waiting_job() {
     let (r, fake) = talk(&[json!({"cmd": "cancel", "id": "j2"}), run("j2", "/a.mp4"), run("j3", "/a.mp4")], &[]);
     assert_eq!((r[0]["type"].as_str(), r[0]["code"].as_str(), r[0]["id"].as_str()), (Some("error"), Some("cancelled"), Some("j2")));
     assert_eq!(fake.ran, vec!["j3"]);
+}
+
+#[test]
+fn cancel_sent_after_the_run_line_removes_the_waiting_job() {
+    // the app (or any client) queued j2 behind j1, then cancelled it while j1 ran
+    let (r, fake) = talk(&[run("j1", "/a.mp4"), run("j2", "/a.mp4"), json!({"cmd": "cancel", "id": "j2"}), run("j3", "/a.mp4")], &[]);
+    assert_eq!(fake.ran, vec!["j1", "j3"]);
+    // loop: NOT-WORTH — a test's few replies
+    let j2: Vec<&Value> = r.iter().filter(|m| m["id"] == "j2").collect();
+    assert_eq!(j2.len(), 1);
+    assert_eq!((j2[0]["type"].as_str(), j2[0]["code"].as_str()), (Some("error"), Some("cancelled")));
 }
 
 #[test]

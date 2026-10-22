@@ -55,6 +55,28 @@ pub fn output_timeout(cmd: &mut Command, timeout: Duration) -> Result<Output, St
     }
 }
 
+/// Linux: the child is killed when the thread that started it ends (the engine's main thread: the engine).
+/// For a child with no pipe to lose: the TensorRT builder holds the graphics card for minutes, and would
+/// otherwise go on building after the engine was killed (the app's cancel or quit, or the app gone).
+pub fn die_with_parent(cmd: &mut Command) -> &mut Command {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::process::CommandExt;
+        extern "C" {
+            fn prctl(option: std::os::raw::c_int, arg2: std::os::raw::c_ulong, ...) -> std::os::raw::c_int;
+        }
+        // SAFETY: prctl(2) is async-signal-safe; it only sets this child's parent-death signal (1 = PR_SET_PDEATHSIG,
+        // 9 = SIGKILL) between fork and exec
+        unsafe {
+            cmd.pre_exec(|| {
+                prctl(1, 9);
+                Ok(())
+            });
+        }
+    }
+    cmd
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -67,5 +89,19 @@ mod tests {
         let t = Instant::now();
         let e = output_timeout(Command::new("sleep").arg("30"), Duration::from_millis(300)).unwrap_err();
         assert!(e.contains("no answer") && t.elapsed() < Duration::from_secs(5), "{e}");
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn a_child_started_to_die_with_its_parent_does() {
+        // started from a thread that then ends: the kernel kills the child with it
+        let pid = std::thread::spawn(|| die_with_parent(Command::new("sleep").arg("30")).spawn().unwrap().id()).join().unwrap();
+        let end = Instant::now() + Duration::from_secs(5);
+        let alive = || std::fs::read_to_string(format!("/proc/{pid}/stat")).map(|s| !s.contains(") Z ")).unwrap_or(false);
+        // loop: SERIAL-REQUIRED — a 20 ms poll [bounded: 5 s]
+        while alive() && Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!alive(), "sleep outlived the thread that started it");
     }
 }
