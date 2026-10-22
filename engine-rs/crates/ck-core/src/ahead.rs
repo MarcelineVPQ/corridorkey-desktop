@@ -17,6 +17,7 @@ impl<T: Send + 'static> Ahead<T> {
         let (tx, rx) = sync_channel(depth);
         let seconds = Arc::new(Mutex::new(0.0));
         let s2 = seconds.clone();
+        // loop: SERIAL-REQUIRED — one producer thread per sequence; it ends at the sequence's end, an error, or a dropped consumer
         std::thread::spawn(move || {
             // loop: SERIAL-REQUIRED — items in order; ends at the producer's end, an error, or a dropped consumer
             loop {
@@ -39,6 +40,7 @@ impl<T: Send + 'static> Ahead<T> {
 
     /// The next item, or None at the end.
     pub fn next(&mut self) -> Result<Option<T>, Error> {
+        // loop: SERIAL-REQUIRED — the consumer takes items in order [bounded: the producer ends at its sequence's end or first error, which closes the channel]
         match self.rx.recv() {
             Ok(Ok(v)) => Ok(Some(v)),
             Ok(Err(e)) => Err(e),

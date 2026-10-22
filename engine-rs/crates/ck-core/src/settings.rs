@@ -61,6 +61,7 @@ pub struct SettingsLog<'a> {
 }
 
 pub fn settings_text(s: &SettingsLog) -> String {
+    // loop: NOT-WORTH — ≤ four outputs, once per job
     let mut sorted: Vec<&String> = s.outputs.iter().collect();
     sorted.sort();
     let mut t = String::new();
@@ -70,6 +71,7 @@ pub fn settings_text(s: &SettingsLog) -> String {
     t.push_str(&format!("Output Directory: {}\n", s.output_dir));
     t.push_str(&format!("Resolution: {}x{}\n", s.w, s.h));
     t.push_str(&format!("FPS: {}\n", py_float(s.fps)));
+    // loop: NOT-WORTH — ≤ four outputs, once per job
     t.push_str(&format!("Outputs: {}\n", sorted.iter().map(|x| x.as_str()).collect::<Vec<_>>().join(", ")));
     t.push_str(&format!("Output Format: {}\n", s.output_format));
     if s.output_format == "exr" {

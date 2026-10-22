@@ -41,6 +41,7 @@ save("linear_to_asinh", cu.linear_to_asinh(x).astype(np.float32))
 save("asinh_to_linear", cu.asinh_to_linear(torch.from_numpy(x)).numpy())
 rgb = rng.uniform(-0.2, 1.4, size=(1, 3, 1, 64)).astype(np.float32)
 save("despill_in", rgb[0, :, 0, :])
+# loop: NOT-WORTH — three strengths (fixture generation, by hand)
 for s in (0.3, 0.5, 1.0):
     save(f"despill_{int(s * 100):03d}", rt._despill_average_srgb_torch(torch.from_numpy(rgb), s)[0, :, 0, :].numpy())
 
@@ -77,18 +78,24 @@ cases = []
 for tc, ov, first, last in [(4, 2, True, False), (4, 2, False, True), (4, 2, False, False), (24, 12, False, False),
                             (80, 40, True, False), (5, 9, False, False), (1, 3, False, False), (8, 0, False, False)]:
     w = vio.taper_weights(tc, ov, is_first=first, is_last=last, device="cpu", dtype=torch.float32).numpy()
+    # loop: NOT-WORTH — a window's weights (fixture generation)
     cases.append({"tc": tc, "overlap": ov, "first": first, "last": last, "w": [float(v) for v in w]})
 starts = [{"t": T, "chunk": c, "stride": s, "starts": vio.window_starts(T, c, s)}
           for T, c, s in [(8, 4, 2), (9, 4, 2), (3, 8, 4), (240, 80, 40), (349, 24, 12), (100, 48, 24), (7, 1, 1)]]
 
 # --- auto VRAM table
 vram = []
+# loop: NOT-WORTH — five sizes × the cases below: the 360-case VRAM table (fixture generation, seconds)
 for hw in [(256, 384), (768, 1280), (1152, 1920), (2176, 3840), (4352, 7680)]:
+    # loop: NOT-WORTH — four clip lengths (fixture generation)
     for frames in [1, 7, 30, 240]:
+        # loop: NOT-WORTH — eight budgets (fixture generation)
         for budget in [1.0, 3.0, 6.0, 8.0, 12.0, 15.5, 24.0, 80.0]:
             c, s, low, est = rt.select_vram_profile(hw, frames, budget)
             vram.append({"hw": hw, "frames": frames, "budget": budget, "chunk": c, "stride": s, "low_vram": low, "estimate": est})
+        # loop: NOT-WORTH — two modes (fixture generation)
         for low in (False, True):
+            # loop: NOT-WORTH — five frame counts (fixture generation)
             for f in (1, 4, 13, 50, 100):
                 vram.append({"hw": hw, "frames": f, "low_vram": low, "peak": rt.estimate_peak_vram_gb(hw[0] * hw[1] / 1e6, f, low)})
 (out / "windows_vram.json").write_text(json.dumps({"taper": cases, "starts": starts, "vram": vram}))
@@ -99,13 +106,16 @@ save("render_logits", logits)
 rmeta = {"model_native_hw": (30, 44), "output_hw": (30, 44), "pad": (6, 6, 5, 5), "despill_strength": 0.5}
 checker = torch.from_numpy(vio.make_checker(30, 44))
 outs = {"alpha", "fg", "checker", "cutout"}
+# loop: NOT-WORTH — two render modes (fixture generation)
 for lin in (False, True):
     rmeta["cutout_linear"] = lin
     r = rt._render_predictions_torch(rmeta, outs, checker, torch.from_numpy(logits)[None])
+    # loop: NOT-WORTH — four outputs (fixture generation)
     for k, v in r.items():
         if k == "cutout" or not lin:
             save(f"render_video_{k}{'_lin' if lin and k == 'cutout' else ''}", v[0])
 r = rt._render_predictions_exr_torch(rmeta, outs, checker, torch.from_numpy(logits)[None])
+# loop: NOT-WORTH — four outputs (fixture generation)
 for k, v in r.items():
     save(f"render_exr_{k}", v[0])
 
@@ -116,6 +126,7 @@ smooth = cv2.GaussianBlur(rng.integers(0, 65536, size=(24, 32, 3)).astype(np.uin
 cv2.imwrite(str(stills / "rgb16.png"), smooth)
 cv2.imwrite(str(stills / "rgb8.png"), (smooth >> 8).astype(np.uint8))
 cv2.imwrite(str(stills / "q90.jpg"), (smooth >> 8).astype(np.uint8), [cv2.IMWRITE_JPEG_QUALITY, 90])
+# loop: NOT-WORTH — three test images (fixture generation)
 for name in ("rgb16.png", "rgb8.png", "q90.jpg"):
     save("still_" + name.replace(".", "_"), vio.read_image_rgb(stills / name).transpose(2, 0, 1))
 gray16 = rng.integers(0, 65536, size=(24, 32), dtype=np.uint16)

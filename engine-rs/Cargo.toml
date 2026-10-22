@@ -16,7 +16,9 @@ license-file = "../LICENSE"
 ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "ndarray", "half", "api-31"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
-half = "2"
+# half: its bytemuck feature lets float16 buffers go to files as bytes without a copy
+half = { version = "2", features = ["bytemuck"] }
+bytemuck = "1"
 libloading = "0.8"
 rayon = "1"
 

@@ -32,6 +32,7 @@ struct ProcInfo {
 fn visible_index() -> Option<c_uint> {
     match std::env::var("CUDA_VISIBLE_DEVICES") {
         Ok(v) if v.trim().is_empty() || v.trim() == "-1" => None,
+        // loop: NOT-WORTH — one environment variable, once per NVML open
         Ok(v) => Some(v.split(',').next().and_then(|x| x.trim().parse().ok()).unwrap_or(0)),
         Err(_) => Some(0),
     }
@@ -95,10 +96,12 @@ impl Nvml {
             if procs(self.dev, &mut n, buf.as_mut_ptr()) != 0 {
                 return None;
             }
+            // loop: NOT-WORTH — ≤ 128 compute processes, once per budget read (job start, first session)
             let mine: Vec<u64> = buf[..(n as usize).min(buf.len())].iter().filter(|p| p.pid == pid).map(|p| p.used).collect();
             if mine.contains(&u64::MAX) {
                 return None; // NVML_VALUE_NOT_AVAILABLE
             }
+            // loop: NOT-WORTH — this process's entries (one or two)
             Some(mine.iter().sum())
         }
     }
@@ -143,6 +146,7 @@ pub fn trt_version_string(v: i32) -> String {
 /// Host memory the kernel says is available (MemAvailable, bytes): the CPU provider's budget.
 pub fn host_available() -> Option<u64> {
     let s = std::fs::read_to_string("/proc/meminfo").ok()?;
+    // loop: NOT-WORTH — /proc/meminfo's ~55 lines, once per CPU job
     s.lines().find_map(|l| l.strip_prefix("MemAvailable:")).and_then(|r| r.trim().trim_end_matches("kB").trim().parse::<u64>().ok()).map(|kb| kb * 1024)
 }
 

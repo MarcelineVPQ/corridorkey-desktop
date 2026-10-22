@@ -90,11 +90,13 @@ pub fn parse(req: &Value) -> Result<JobConfig, Error> {
         Some(v) => return Err(Error::input(format!("options must be an object, got {v}"))),
     };
     let mut outputs: Vec<String> = match o.get("outputs") {
+        // loop: NOT-WORTH — ≤ four output names, once per job
         Some(Value::Array(a)) if !a.is_empty() => a.iter().map(|v| v.as_str().map(|x| x.to_string()).unwrap_or_else(|| v.to_string())).collect(),
         _ => vec!["alpha".into(), "fg".into()],
     };
     outputs.sort();
     outputs.dedup();
+    // loop: NOT-WORTH — ≤ four output names, once per job
     let bad: Vec<&String> = outputs.iter().filter(|x| !crate::render::OUTPUTS.contains(&x.as_str())).collect();
     if !bad.is_empty() {
         return Err(Error::input(format!("unsupported outputs: {bad:?}")));

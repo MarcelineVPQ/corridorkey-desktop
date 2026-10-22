@@ -64,20 +64,29 @@ impl VideoDecoder {
 impl Drop for VideoDecoder {
     fn drop(&mut self) {
         let _ = self.child.kill();
+        // loop: NOT-WORTH — reaps the decoder after kill() [bounded: a killed child exits]
         let _ = self.child.wait();
     }
 }
 
 /// Interleaved RGB bytes -> (3, h, w) float32 in [0, 1] (`astype(float32) / 255`).
 pub fn rgb8_to_planar(rgb: &[u8], h: usize, w: usize) -> Planar {
+    use rayon::prelude::*;
     let mut p = Planar::new(3, h, w);
-    let n = h * w;
-    // loop: HOT-PATH-OK — one pass per frame over its pixels
-    for (i, px) in rgb.chunks_exact(3).enumerate() {
-        p.data[i] = px[0] as f32 / 255.0;
-        p.data[n + i] = px[1] as f32 / 255.0;
-        p.data[2 * n + i] = px[2] as f32 / 255.0;
-    }
+    let (r, gb) = p.data.split_at_mut(h * w);
+    let (g, b) = gb.split_at_mut(h * w);
+    // one pass per frame over its pixels, the rows in parallel
+    // loop: HOT-PATH-OK — one pass per decoded frame (~1.4 M pixels), rows in parallel (this pass: was one thread)
+    r.par_chunks_mut(w).zip(g.par_chunks_mut(w)).zip(b.par_chunks_mut(w)).zip(rgb.par_chunks(w * 3)).with_min_len(crate::image::ROWS_MIN).for_each(
+        |(((r, g), b), src)| {
+            // loop: HOT-PATH-OK — one row of pixels
+            for (x, px) in src.chunks_exact(3).enumerate() {
+                r[x] = px[0] as f32 / 255.0;
+                g[x] = px[1] as f32 / 255.0;
+                b[x] = px[2] as f32 / 255.0;
+            }
+        },
+    );
     p
 }
 
@@ -216,10 +225,12 @@ pub fn read_image_rgb(p: &Path) -> Result<Planar, Error> {
 /// One frame, ready for the networks: padded, both views rounded to bfloat16 as the runtime's tensors.
 ///  - `model`: signed-asinh scene-linear RGB (stage 1 and stage 2 input);
 ///  - `display`: display-coded RGB in [0, 1] (the foundation models' and RVM's input).
+///
+/// Shared (`Arc`): a frame sits in two overlapping windows and stage 2's queue without being copied.
 #[derive(Clone)]
 pub struct Prepped {
-    pub model: Vec<half::bf16>,
-    pub display: Vec<half::bf16>,
+    pub model: std::sync::Arc<Vec<half::bf16>>,
+    pub display: std::sync::Arc<Vec<half::bf16>>,
 }
 
 /// preprocess_video_frame_views / preprocess_frame_dir_path at model_scale 1.0 with no linear adjust:
@@ -232,12 +243,14 @@ pub fn prep_frame(display_or_linear: Planar, exr_linear: bool, meta: &ClipMeta, 
 /// as the runtime's need_model=False readers). Spread over the cores.
 pub fn prep_frame_views(display_or_linear: Planar, exr_linear: bool, meta: &ClipMeta, denom: f32, need_model: bool) -> Prepped {
     use rayon::prelude::*;
-    let padded = pad_reflect101(&display_or_linear, meta.pad);
+    let padded = if meta.pad == (crate::image::Pad { l: 0, r: 0, t: 0, b: 0 }) { display_or_linear } else { pad_reflect101(&display_or_linear, meta.pad) };
     let display_of = |v: f32| if exr_linear { linear_to_srgb(v.max(0.0)).clamp(0.0, 1.0) } else { v.clamp(0.0, 1.0) };
+    // loop: HOT-PATH-OK — one pass per frame, parallel; the frame's display view (bf16) is the output, one allocation per frame
     let display: Vec<half::bf16> = padded.data.par_iter().with_min_len(1 << 14).map(|&v| half::bf16::from_f32(display_of(v))).collect();
     let model: Vec<half::bf16> = if need_model {
         padded
             .data
+            // loop: HOT-PATH-OK — one pass per frame, parallel; the model view (bf16) is the output, one allocation per frame
             .par_iter()
             .with_min_len(1 << 14)
             .map(|&v| {
@@ -248,7 +261,7 @@ pub fn prep_frame_views(display_or_linear: Planar, exr_linear: bool, meta: &Clip
     } else {
         Vec::new()
     };
-    Prepped { model, display }
+    Prepped { model: std::sync::Arc::new(model), display: std::sync::Arc::new(display) }
 }
 
 /// Sequential frames of a clip (video or folder), decoded and preprocessed in order.
@@ -325,6 +338,7 @@ impl Prefetch {
         let (tx, rx) = std::sync::mpsc::sync_channel(depth);
         let seconds = std::sync::Arc::new(std::sync::Mutex::new(0.0));
         let s2 = seconds.clone();
+        // loop: SERIAL-REQUIRED — the prefetch thread: decodes in order; ends at the clip's end, an error, or a dropped receiver
         let thread = std::thread::spawn(move || {
             // loop: SERIAL-REQUIRED — frames decode in order; ends at the clip's end, an error, or a dropped receiver
             loop {
@@ -346,6 +360,7 @@ impl Prefetch {
 
     /// The next frame, or None at the end.
     pub fn next(&mut self) -> Result<Option<Prepped>, Error> {
+        // loop: SERIAL-REQUIRED — frames in order [bounded: the prefetch thread ends at the clip's end (ffmpeg closes its pipe) or an error]
         match self.rx.recv() {
             Ok(Ok(p)) => Ok(Some(p)),
             Ok(Err(e)) => Err(e),
@@ -395,6 +410,7 @@ pub fn prep_hint(still: Still, meta: &ClipMeta) -> Vec<f32> {
         }
         Still::F32 { ch, h, w, data } => {
             let g =
+                // loop: HOT-PATH-OK — per hint frame (float EXR hints only), one pass; hints are optional
                 (0..h * w).map(|i| if ch >= 3 { data[i * ch + 2] * 0.114 + data[i * ch + 1] * 0.587 + data[i * ch] * 0.299 } else { data[i * ch] }).collect();
             (h, w, g)
         }
@@ -413,6 +429,7 @@ pub fn prep_hint(still: Still, meta: &ClipMeta) -> Vec<f32> {
 /// folder). 4 channels: the alpha; 3: the first channel cv2 reads (blue); its size must be the clip's.
 pub fn load_initial_hint(path: &Path, meta: &ClipMeta) -> Result<Vec<f32>, Error> {
     let file = if path.is_dir() {
+        // loop: NOT-WORTH — a hint folder's file names, once per job
         crate::clip::frame_paths(path)?.into_iter().find(|p| p.is_file())
     } else if path.is_file() {
         Some(path.to_path_buf())
@@ -430,8 +447,11 @@ pub fn load_initial_hint(path: &Path, meta: &ClipMeta) -> Result<Vec<f32>, Error
         }
     }; // BGR(A) index 0 = blue = RGB index 2
     let (h, w, g): (usize, usize, Vec<f32>) = match read_still(&file)? {
+        // loop: NOT-WORTH — the first-frame hint: one image per job
         Still::U8 { ch, h, w, data } => (h, w, (0..h * w).map(|i| data[i * ch + pick(ch)] as f32 / 255.0).collect()),
+        // loop: NOT-WORTH — the first-frame hint: one image per job
         Still::U16 { ch, h, w, data } => (h, w, (0..h * w).map(|i| data[i * ch + pick(ch)] as f32 / 65535.0).collect()),
+        // loop: NOT-WORTH — the first-frame hint: one image per job
         Still::F32 { ch, h, w, data } => (h, w, (0..h * w).map(|i| data[i * ch + pick(ch)]).collect()),
     };
     if (h, w) != (meta.h, meta.w) {

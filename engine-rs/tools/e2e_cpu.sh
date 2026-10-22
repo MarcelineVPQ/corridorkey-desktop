@@ -48,6 +48,7 @@ python3 -I - "$WORK/replies.jsonl" <<'EOF'
 import json, sys
 rs = [json.loads(l) for l in open(sys.argv[1])]
 ok = True
+# loop: NOT-WORTH — four test jobs
 for j in ("p1", "p2", "v1", "v2"):
     end = [r for r in rs if r.get("id") == j and r["type"] in ("result", "error")]
     mem = [r for r in rs if r.get("id") == j and r["type"] == "memory"]
@@ -67,6 +68,7 @@ p2 = json.load(open(f"{w}/p2_vs_p1.json"))[0]
 checks = [("p1 alpha MAE < 1e-6", p1["alpha_mae"] < 1e-6), ("p1 alpha max < 1e-3", p1["alpha_max"] < 1e-3),
           ("p1 no pixel > 1/255", p1["alpha_pct_gt_1_255"] == 0), ("p1 fg PSNR > 90 dB", p1["fg_psnr_db"] > 90),
           ("p2 (low VRAM) alpha max < 1e-5", p2["alpha_max"] < 1e-5)]
+# loop: NOT-WORTH — five checks
 for name, good in checks:
     print(("PASS " if good else "FAIL ") + name)
 sys.exit(0 if all(g for _, g in checks) else 1)

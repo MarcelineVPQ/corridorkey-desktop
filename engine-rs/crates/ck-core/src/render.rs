@@ -1,7 +1,7 @@
 //! Stage-2 logits -> the output frames (runtime._render_predictions_torch for video,
 //! _render_predictions_exr_torch for EXR): crop the padding, alpha clamped, fg decoded from asinh to linear,
 //! despill, the checker composite, the cutout.
-use crate::color::{asinh_to_linear, despill, linear_to_srgb, srgb_to_linear, to_u16, LinearAdjust};
+use crate::color::{asinh_to_linear, despill, linear_to_srgb, srgb_to_linear, to_u16, LinearAdjust, ToF32};
 use crate::writers::Batch;
 
 pub const OUTPUTS: [&str; 4] = ["alpha", "fg", "checker", "cutout"];
@@ -34,122 +34,145 @@ pub fn make_checker(h: usize, w: usize) -> Vec<f32> {
 /// Render one frame. `logits`: (4, H, W) for the padded shape; crop (t, l) and the native (h, w).
 /// Returns (output name, one-frame batch) for each selected output, NHWC in BGR(A) / 1-channel order:
 /// video: uint16 (alpha as 3 equal channels); EXR: float32, scene-linear, unclamped colour.
-pub fn render(
+/// Rows render in parallel, each straight into its place in the outputs (no per-row buffers, no join copy).
+/// `logits` are read in stage 2's own type (float16 or float32), each value converted as it is used (exact).
+pub fn render<L: ToF32>(
     o: &RenderOpts,
-    logits: &[f32],
+    logits: &[L],
     shape: (usize, usize),
     crop: (usize, usize),
     hw: (usize, usize),
     checker_srgb: &[f32],
 ) -> Vec<(&'static str, Batch)> {
-    use rayon::prelude::*;
     let (h, w) = hw;
-    // rows in parallel, each into its own buffers, joined in order
-    let rows: Vec<RowOut> = (0..h).into_par_iter().map(|y| render_row(o, logits, shape, crop, w, y, checker_srgb)).collect();
-    let cat_u = |f: fn(&RowOut) -> &Vec<u16>| -> Vec<u16> { rows.iter().flat_map(|r| f(r).iter().copied()).collect() };
-    let cat_f = |f: fn(&RowOut) -> &Vec<f32>| -> Vec<f32> { rows.iter().flat_map(|r| f(r).iter().copied()).collect() };
-    let mut out = Vec::new();
+    let on = [o.alpha, o.fg, o.checker, o.cutout];
     if o.exr {
-        if o.alpha {
-            out.push(("alpha", Batch::F32(cat_f(|r| &r.alpha_f))));
-        }
-        if o.fg {
-            out.push(("fg", Batch::F32(cat_f(|r| &r.fg_f))));
-        }
-        if o.checker {
-            out.push(("checker", Batch::F32(cat_f(|r| &r.ck_f))));
-        }
-        if o.cutout {
-            out.push(("cutout", Batch::F32(cat_f(|r| &r.cu_f))));
-        }
+        let ch = [1, 3, 3, 4];
+        let mut bufs: [Vec<f32>; 4] = std::array::from_fn(|i| if on[i] { vec![0f32; h * w * ch[i]] } else { Vec::new() });
+        rows_parallel(&mut bufs, ch, h, w, |y, r| render_row_exr(o, logits, shape, crop, w, y, checker_srgb, r));
+        // loop: NOT-WORTH — four outputs per frame
+        OUTPUTS.iter().zip(bufs).zip(on).filter(|(_, on)| *on).map(|((n, b), _)| (*n, Batch::F32(b))).collect()
     } else {
-        if o.alpha {
-            out.push(("alpha", Batch::U16(cat_u(|r| &r.alpha_v))));
+        let ch = [3, 3, 3, 4];
+        let mut bufs: [Vec<u16>; 4] = std::array::from_fn(|i| if on[i] { vec![0u16; h * w * ch[i]] } else { Vec::new() });
+        rows_parallel(&mut bufs, ch, h, w, |y, r| render_row_video(o, logits, shape, crop, w, y, checker_srgb, r));
+        // loop: NOT-WORTH — four outputs per frame
+        OUTPUTS.iter().zip(bufs).zip(on).filter(|(_, on)| *on).map(|((n, b), _)| (*n, Batch::U16(b))).collect()
+    }
+}
+
+/// One output row of each output (None: not selected), in OUTPUTS order.
+type Row<'a, T> = [Option<&'a mut [T]>; 4];
+
+/// Split each selected output into its rows and run `f(y, rows)` for every row in parallel.
+fn rows_parallel<T: Send>(bufs: &mut [Vec<T>; 4], ch: [usize; 4], h: usize, w: usize, f: impl Fn(usize, Row<'_, T>) + Sync + Send) {
+    use rayon::prelude::*;
+    // loop: HOT-PATH-OK — one small array per output row (h ≤ 2160), per frame; the pixels go straight into the outputs (this pass: per-row vectors and a join copy)
+    let mut rows: Vec<Row<'_, T>> = (0..h).map(|_| [None, None, None, None]).collect();
+    // loop: HOT-PATH-OK — four outputs; each split into its h row slices (pointer work, no copies)
+    for (i, b) in bufs.iter_mut().enumerate() {
+        if b.is_empty() {
+            continue;
         }
-        if o.fg {
-            out.push(("fg", Batch::U16(cat_u(|r| &r.fg_v))));
-        }
-        if o.checker {
-            out.push(("checker", Batch::U16(cat_u(|r| &r.ck_v))));
-        }
-        if o.cutout {
-            out.push(("cutout", Batch::U16(cat_u(|r| &r.cu_v))));
+        // loop: HOT-PATH-OK — one slice per output row (h ≤ 2160)
+        for (y, chunk) in b.chunks_mut(w * ch[i]).enumerate() {
+            rows[y][i] = Some(chunk);
         }
     }
-    out
+    // loop: HOT-PATH-OK — output rows in parallel, per frame
+    rows.into_par_iter().enumerate().for_each(|(y, r)| f(y, r));
 }
 
-/// One output row of every selected output.
-#[derive(Default)]
-struct RowOut {
-    alpha_v: Vec<u16>,
-    alpha_f: Vec<f32>,
-    fg_v: Vec<u16>,
-    fg_f: Vec<f32>,
-    ck_v: Vec<u16>,
-    ck_f: Vec<f32>,
-    cu_v: Vec<u16>,
-    cu_f: Vec<f32>,
-}
-
-fn render_row(o: &RenderOpts, logits: &[f32], shape: (usize, usize), crop: (usize, usize), w: usize, y: usize, checker_srgb: &[f32]) -> RowOut {
+#[allow(clippy::too_many_arguments)]
+fn render_row_exr<L: ToF32>(
+    o: &RenderOpts,
+    logits: &[L],
+    shape: (usize, usize),
+    crop: (usize, usize),
+    w: usize,
+    y: usize,
+    checker_srgb: &[f32],
+    r: Row<'_, f32>,
+) {
     let (sh, sw) = shape;
     let (t, l) = crop;
     let plane = sh * sw;
     let denom = crate::color::asinh_denom();
-    let at = |c: usize, x: usize| logits[c * plane + (t + y) * sw + (l + x)];
+    let at = |c: usize, x: usize| logits[c * plane + (t + y) * sw + (l + x)].to_f32();
     let want_color = o.fg || o.checker || o.cutout;
-    let mut r = RowOut::default();
+    let [mut alpha, mut fg, mut ck, mut cu] = r;
     // loop: HOT-PATH-OK — one output row
     for x in 0..w {
         let pa = at(0, x).clamp(0.0, 1.0);
-        if o.exr {
-            if o.alpha {
-                r.alpha_f.push(pa);
-            }
-        } else if o.alpha {
-            let a = to_u16(pa);
-            r.alpha_v.extend([a, a, a]);
+        if let Some(a) = alpha.as_deref_mut() {
+            a[x] = pa;
         }
         if !want_color {
             continue;
         }
         let lin = [0, 1, 2].map(|c| o.adjust.invert(asinh_to_linear(at(1 + c, x), denom)));
-        let bg = checker_srgb[y * w + x];
-        if o.exr {
-            if o.fg {
-                r.fg_f.extend([lin[2], lin[1], lin[0]]);
+        if let Some(f) = fg.as_deref_mut() {
+            f[3 * x..3 * x + 3].copy_from_slice(&[lin[2], lin[1], lin[0]]);
+        }
+        if o.cutout || o.checker {
+            let d = despill(lin, o.despill);
+            if let Some(c) = cu.as_deref_mut() {
+                c[4 * x..4 * x + 4].copy_from_slice(&[d[2], d[1], d[0], pa]);
             }
-            if o.cutout || o.checker {
-                let d = despill(lin, o.despill);
-                if o.cutout {
-                    r.cu_f.extend([d[2], d[1], d[0], pa]);
-                }
-                if o.checker {
-                    let bl = srgb_to_linear(bg);
-                    let c = [0, 1, 2].map(|i| d[i] * pa + bl * (1.0 - pa));
-                    r.ck_f.extend([c[2], c[1], c[0]]);
-                }
+            if let Some(k) = ck.as_deref_mut() {
+                let bl = srgb_to_linear(checker_srgb[y * w + x]);
+                let c = [0, 1, 2].map(|i| d[i] * pa + bl * (1.0 - pa));
+                k[3 * x..3 * x + 3].copy_from_slice(&[c[2], c[1], c[0]]);
             }
-            continue;
-        }
-        let pos = lin.map(|v| v.max(0.0));
-        let pf = pos.map(|v| linear_to_srgb(v).clamp(0.0, 1.0));
-        if o.fg {
-            r.fg_v.extend([to_u16(pf[2]), to_u16(pf[1]), to_u16(pf[0])]);
-        }
-        if o.cutout {
-            let d = if o.cutout_linear { despill(pos, o.despill).map(|v| v.clamp(0.0, 1.0)) } else { despill(pf, o.despill) };
-            r.cu_v.extend([to_u16(d[2]), to_u16(d[1]), to_u16(d[0]), to_u16(pa)]);
-        }
-        if o.checker {
-            let bl = srgb_to_linear(bg);
-            let d = despill(pf, o.despill);
-            let c = [0, 1, 2].map(|i| linear_to_srgb((srgb_to_linear(d[i]) * pa + bl * (1.0 - pa)).max(0.0)).clamp(0.0, 1.0));
-            r.ck_v.extend([to_u16(c[2]), to_u16(c[1]), to_u16(c[0])]);
         }
     }
-    r
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_row_video<L: ToF32>(
+    o: &RenderOpts,
+    logits: &[L],
+    shape: (usize, usize),
+    crop: (usize, usize),
+    w: usize,
+    y: usize,
+    checker_srgb: &[f32],
+    r: Row<'_, u16>,
+) {
+    let (sh, sw) = shape;
+    let (t, l) = crop;
+    let plane = sh * sw;
+    let denom = crate::color::asinh_denom();
+    let at = |c: usize, x: usize| logits[c * plane + (t + y) * sw + (l + x)].to_f32();
+    let want_color = o.fg || o.checker || o.cutout;
+    let [mut alpha, mut fg, mut ck, mut cu] = r;
+    // loop: HOT-PATH-OK — one output row
+    for x in 0..w {
+        let pa = at(0, x).clamp(0.0, 1.0);
+        if let Some(a) = alpha.as_deref_mut() {
+            let v = to_u16(pa);
+            a[3 * x..3 * x + 3].copy_from_slice(&[v, v, v]);
+        }
+        if !want_color {
+            continue;
+        }
+        let lin = [0, 1, 2].map(|c| o.adjust.invert(asinh_to_linear(at(1 + c, x), denom)));
+        let pos = lin.map(|v| v.max(0.0));
+        let pf = pos.map(|v| linear_to_srgb(v).clamp(0.0, 1.0));
+        if let Some(f) = fg.as_deref_mut() {
+            f[3 * x..3 * x + 3].copy_from_slice(&[to_u16(pf[2]), to_u16(pf[1]), to_u16(pf[0])]);
+        }
+        if let Some(c) = cu.as_deref_mut() {
+            let d = if o.cutout_linear { despill(pos, o.despill).map(|v| v.clamp(0.0, 1.0)) } else { despill(pf, o.despill) };
+            c[4 * x..4 * x + 4].copy_from_slice(&[to_u16(d[2]), to_u16(d[1]), to_u16(d[0]), to_u16(pa)]);
+        }
+        if let Some(k) = ck.as_deref_mut() {
+            let bl = srgb_to_linear(checker_srgb[y * w + x]);
+            let d = despill(pf, o.despill);
+            let c = [0, 1, 2].map(|i| linear_to_srgb((srgb_to_linear(d[i]) * pa + bl * (1.0 - pa)).max(0.0)).clamp(0.0, 1.0));
+            k[3 * x..3 * x + 3].copy_from_slice(&[to_u16(c[2]), to_u16(c[1]), to_u16(c[0])]);
+        }
+    }
 }
 
 #[cfg(test)]

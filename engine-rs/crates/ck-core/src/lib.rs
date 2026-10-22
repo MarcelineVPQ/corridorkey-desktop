@@ -12,6 +12,7 @@ pub mod job;
 pub mod npy;
 pub mod outputs;
 pub mod pipeline;
+pub mod proc;
 pub mod render;
 pub mod runtime;
 pub mod settings;
@@ -64,6 +65,7 @@ impl Error {
 }
 
 fn first_line(s: &str) -> &str {
+    // loop: NOT-WORTH — first line of an error message
     s.lines().next().unwrap_or(s)
 }
 

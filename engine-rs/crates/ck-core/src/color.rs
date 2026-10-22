@@ -139,6 +139,25 @@ pub fn to_u16(x: f32) -> u16 {
     v as u16
 }
 
+/// A stored value read as float32 (exact for float16).
+pub trait ToF32: Copy + Send + Sync {
+    fn to_f32(self) -> f32;
+}
+
+impl ToF32 for f32 {
+    #[inline]
+    fn to_f32(self) -> f32 {
+        self
+    }
+}
+
+impl ToF32 for half::f16 {
+    #[inline]
+    fn to_f32(self) -> f32 {
+        half::f16::to_f32(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

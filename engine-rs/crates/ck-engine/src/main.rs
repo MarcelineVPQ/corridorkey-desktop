@@ -43,18 +43,22 @@ impl Backend for Ort {
 }
 
 fn arg_value(args: &[String], name: &str) -> Option<String> {
+    // loop: NOT-WORTH — the command line, once per process
     args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned()).or_else(|| {
         let p = format!("{name}=");
+        // loop: NOT-WORTH — the command line, once per process
         args.iter().find_map(|a| a.strip_prefix(&p).map(|s| s.to_string()))
     })
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // loop: NOT-WORTH — the command line, once per process
     if args.iter().any(|a| a == "--help" || a == "-h") {
         eprintln!("usage: corridorkey-engine --models DIR [--ort libonnxruntime.so] [--device auto|cuda|cpu]");
         return;
     }
+    // loop: NOT-WORTH — the command line, once per process
     if args.iter().any(|a| a == "--version") {
         println!("corridorkey-engine {ENGINE_VERSION} (protocol {PROTOCOL})");
         return;

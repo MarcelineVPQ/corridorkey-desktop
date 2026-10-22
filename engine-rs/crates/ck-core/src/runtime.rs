@@ -72,6 +72,7 @@ pub struct ModelSet {
 /// A model's size on disk: the .onnx file and its external weights (.onnx.data) next to it.
 pub fn model_bytes(file: &Path) -> u64 {
     let data = PathBuf::from(format!("{}.data", file.display()));
+    // loop: NOT-WORTH — two files' sizes
     [file.to_path_buf(), data].iter().filter_map(|p| std::fs::metadata(p).ok()).map(|m| m.len()).sum()
 }
 
@@ -93,6 +94,7 @@ impl ModelSet {
             let f = self.dir.join(name);
             return f.exists().then_some(f);
         }
+        // loop: NOT-WORTH — ≤ four default names per network
         default_names(piece, p).into_iter().map(|n| self.dir.join(n)).find(|f| f.exists())
     }
 
@@ -117,16 +119,19 @@ impl ModelSet {
 
     /// Which networks are there at `p` (the pong's "assets").
     pub fn assets(&self, p: Precision) -> BTreeMap<String, bool> {
+        // loop: NOT-WORTH — five networks, once per ping
         PIECES.iter().map(|k| (k.to_string(), self.file(k, p).is_some())).collect()
     }
 
     pub fn missing(&self, p: Precision) -> Vec<String> {
+        // loop: NOT-WORTH — five networks, once per job
         PIECES.iter().filter(|k| self.file(k, p).is_none()).map(|k| k.to_string()).collect()
     }
 }
 
 /// "1.31.0" from ORT's build info ("... git-branch=rel-1.31.0, ...").
 pub fn ort_version(info: &str) -> String {
+    // loop: NOT-WORTH — a short build-info string, once per process
     info.split(|c: char| c == ',' || c.is_whitespace()).find_map(|t| t.strip_prefix("git-branch=rel-")).unwrap_or(info).to_string()
 }
 
@@ -369,13 +374,100 @@ pub fn shrinks(piece: &str, setting: Option<&str>, shared: bool) -> bool {
     match setting.map(|s| s.trim()) {
         Some("all") | Some("1") => true,
         Some("0") | Some("none") => false,
+        // loop: NOT-WORTH — a short environment list, once per session load
         Some(list) if !list.is_empty() => list.split(',').any(|p| p.trim() == piece),
         _ => shared,
     }
 }
 
-/// A float32 input: name, shape, data.
-pub type Input<'a> = (&'a str, Vec<usize>, Vec<f32>);
+/// Tensor data in the type it already has: nothing is converted until a network needs another type, and
+/// then in one pass. Every conversion is exact where the old float32 path was (bfloat16 and float16 values
+/// are exact in float32; float32 -> float16 rounds once, as before).
+pub enum Data<'a> {
+    F32(Vec<f32>),
+    F16(Vec<half::f16>),
+    /// bfloat16 frames, concatenated in order (the decoded frames' model view: stage 1 and 2's rgb)
+    Bf16(Vec<&'a [half::bf16]>),
+}
+
+impl From<Vec<f32>> for Data<'_> {
+    fn from(v: Vec<f32>) -> Self {
+        Data::F32(v)
+    }
+}
+
+impl From<Vec<half::f16>> for Data<'_> {
+    fn from(v: Vec<half::f16>) -> Self {
+        Data::F16(v)
+    }
+}
+
+/// Parallel conversions over large tensors: at least this many values per rayon task.
+const PAR_MIN: usize = 1 << 14;
+
+impl Data<'_> {
+    pub fn len(&self) -> usize {
+        match self {
+            Data::F32(v) => v.len(),
+            Data::F16(v) => v.len(),
+            // loop: NOT-WORTH — ≤ 80 slices
+            Data::Bf16(parts) => parts.iter().map(|p| p.len()).sum(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// As float32 (exact for float16 / bfloat16).
+    pub fn into_f32(self) -> Vec<f32> {
+        use rayon::prelude::*;
+        match self {
+            Data::F32(v) => v,
+            // loop: HOT-PATH-OK — float16 -> float32 where a graph takes float32 (the CPU / fp32 path), one parallel pass
+            Data::F16(v) => v.par_iter().with_min_len(PAR_MIN).map(|x| x.to_f32()).collect(),
+            Data::Bf16(parts) => concat_parts(&parts, |x| x.to_f32()),
+        }
+    }
+
+    /// As float16 (float32 values round to nearest even, as `half::f16::from_f32`).
+    pub fn into_f16(self) -> Vec<half::f16> {
+        use rayon::prelude::*;
+        match self {
+            Data::F16(v) => v,
+            // loop: HOT-PATH-OK — float32 -> float16 for the fp16 graphs' float32-made inputs (hints, foundation inputs on CPU), one parallel pass
+            Data::F32(v) => v.par_iter().with_min_len(PAR_MIN).map(|&x| half::f16::from_f32(x)).collect(),
+            Data::Bf16(parts) => concat_parts(&parts, |x| half::f16::from_f32(x.to_f32())),
+        }
+    }
+
+    /// Values `range` as float32 (a copy).
+    pub fn range_f32(&self, range: std::ops::Range<usize>) -> Vec<f32> {
+        match self {
+            Data::F32(v) => v[range].to_vec(),
+            // loop: HOT-PATH-OK — carry hints: one small aux plane per frame the next window takes
+            Data::F16(v) => v[range].iter().map(|x| x.to_f32()).collect(),
+            // loop: NOT-WORTH — never used on a hot path (bf16 data is only an input)
+            Data::Bf16(parts) => parts.iter().flat_map(|p| p.iter()).skip(range.start).take(range.len()).map(|x| x.to_f32()).collect(),
+        }
+    }
+}
+
+/// The concatenated `parts` through `f`, written straight into one vector (each part in parallel).
+fn concat_parts<T: Send>(parts: &[&[half::bf16]], f: impl Fn(half::bf16) -> T + Sync + Send) -> Vec<T> {
+    use rayon::prelude::*;
+    // loop: NOT-WORTH — ≤ 80 slices
+    let mut out = Vec::with_capacity(parts.iter().map(|p| p.len()).sum());
+    // loop: HOT-PATH-OK — the window's frames (≤ 80); each frame converted in parallel chunks
+    for p in parts {
+        // loop: HOT-PATH-OK — each frame converted bf16 -> f16 / f32 straight into the input tensor, parallel (this pass: one pass, was two plus a float32 copy)
+        out.par_extend(p.par_iter().with_min_len(PAR_MIN).map(|&x| f(x)));
+    }
+    out
+}
+
+/// An input: name, shape, data.
+pub type Input<'a> = (&'a str, Vec<usize>, Data<'a>);
 
 impl Net {
     pub fn load(
@@ -389,6 +481,7 @@ impl Net {
     ) -> Result<Net, Error> {
         let session = rt.session(prov, file, trt, vram_cap).map_err(|e| Error::ort(&format!("loading {}", file.display()), e))?;
         let f16_inputs =
+            // loop: NOT-WORTH — ≤ six inputs, once per session load
             session.inputs().iter().filter(|i| i.dtype().tensor_type() == Some(ort::value::TensorElementType::Float16)).map(|i| i.name().to_string()).collect();
         // on the GPU a run can give its arena's working memory back (the five sessions have one arena each, so
         // without this their peaks would add up); the pipeline decides per phase, see `shrinks`
@@ -415,19 +508,23 @@ impl Net {
         })
     }
 
-    /// Run with float32 inputs (converted to float16 where the graph wants it); outputs as float32 in the
-    /// graph's output order: (shape, data).
-    pub fn run(&mut self, inputs: Vec<Input<'_>>) -> Result<Vec<(Vec<usize>, Vec<f32>)>, Error> {
+    /// Whether the graph takes input `name` as float16.
+    pub fn wants_f16(&self, name: &str) -> bool {
+        // loop: NOT-WORTH — ≤ six input names per input
+        self.f16_inputs.iter().any(|n| n == name)
+    }
+
+    /// Run; each input is converted (once) to the type the graph takes. Outputs in the graph's output order as
+    /// (shape, data) in the type the graph made them (float32 or float16), not converted.
+    pub fn run(&mut self, inputs: Vec<Input<'_>>) -> Result<Vec<(Vec<usize>, Data<'static>)>, Error> {
         let t0 = std::time::Instant::now();
         let mut feed: Vec<(std::borrow::Cow<'_, str>, ort::session::SessionInputValue<'_>)> = Vec::with_capacity(inputs.len());
         // loop: NOT-WORTH — at most six inputs
         for (name, shape, data) in inputs {
-            let v: ort::session::SessionInputValue<'_> = if self.f16_inputs.iter().any(|n| n == name) {
-                use rayon::prelude::*;
-                let h: Vec<half::f16> = data.par_iter().with_min_len(1 << 14).map(|&x| half::f16::from_f32(x)).collect();
-                Tensor::from_array((shape, h)).map_err(|e| Error::ort(self.piece, e))?.into()
+            let v: ort::session::SessionInputValue<'_> = if self.wants_f16(name) {
+                Tensor::from_array((shape, data.into_f16())).map_err(|e| Error::ort(self.piece, e))?.into()
             } else {
-                Tensor::from_array((shape, data)).map_err(|e| Error::ort(self.piece, e))?.into()
+                Tensor::from_array((shape, data.into_f32())).map_err(|e| Error::ort(self.piece, e))?.into()
             };
             feed.push((std::borrow::Cow::Borrowed(name), v));
         }
@@ -443,11 +540,12 @@ impl Net {
         // loop: NOT-WORTH — one or two outputs
         for (_, v) in outs.iter() {
             if let Ok((s, d)) = v.try_extract_tensor::<f32>() {
-                res.push((s.iter().map(|&x| x as usize).collect(), d.to_vec()));
+                // loop: HOT-PATH-OK — the output's shape (≤ 5 dims) + one copy out of ORT's buffer (the session's outputs are freed right after)
+                res.push((s.iter().map(|&x| x as usize).collect(), Data::F32(d.to_vec())));
             } else {
                 let (s, d) = v.try_extract_tensor::<half::f16>().map_err(|e| Error::ort(piece, e))?;
-                use rayon::prelude::*;
-                res.push((s.iter().map(|&x| x as usize).collect(), d.par_iter().with_min_len(1 << 14).map(|x| x.to_f32()).collect()));
+                // loop: HOT-PATH-OK — the output's shape (≤ 5 dims) + one copy out of ORT's buffer, kept as float16 (this pass: was converted to float32 here, on the card's thread)
+                res.push((s.iter().map(|&x| x as usize).collect(), Data::F16(d.to_vec())));
             }
         }
         drop(outs);
@@ -489,7 +587,11 @@ mod tests {
         assert_eq!(m.file("stage2", Precision::Fp16), Some(dir.join("stage2_fp16.onnx"))); // the plain name first
         assert_eq!(m.file("rvm", Precision::Fp32), Some(dir.join("rvm_op23.onnx")));
         assert_eq!(m.missing(Precision::Fp16), vec!["cradio", "moge", "rvm"]);
-        std::fs::write(dir.join("models.json"), r#"{"fp16": {"rvm": "custom.onnx", "moge": "gone.onnx"}, "tensorrt-fp16": {"rvm": "stage2_fp16.onnx", "moge": "gone.onnx"}}"#).unwrap();
+        std::fs::write(
+            dir.join("models.json"),
+            r#"{"fp16": {"rvm": "custom.onnx", "moge": "gone.onnx"}, "tensorrt-fp16": {"rvm": "stage2_fp16.onnx", "moge": "gone.onnx"}}"#,
+        )
+        .unwrap();
         let m = ModelSet::open(&dir).unwrap();
         assert_eq!(m.file("rvm", Precision::Fp16), Some(dir.join("custom.onnx")));
         assert_eq!(m.file("moge", Precision::Fp16), None);
