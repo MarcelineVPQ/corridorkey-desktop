@@ -82,6 +82,10 @@ pub struct Pipeline {
     trt_fallbacks: BTreeMap<&'static str, String>,
     /// measured once per process: graphics memory the CUDA context and libraries take (bytes), outside any arena
     gpu_overhead: Option<u64>,
+    /// this job's measured seconds per network (run, convert, calls), kept across low-VRAM unloads
+    stats: BTreeMap<&'static str, (f64, f64, usize)>,
+    /// this job's seconds spent loading sessions
+    load_s: f64,
 }
 
 pub struct JobResult {
@@ -223,14 +227,29 @@ fn f1(v: f64) -> String {
 
 impl Pipeline {
     pub fn new(rt: &'static Runtime, models: ModelSet) -> Pipeline {
-        Pipeline { rt, models, key: None, nets: HashMap::new(), trt_fallbacks: BTreeMap::new(), gpu_overhead: None }
+        Pipeline { rt, models, key: None, nets: HashMap::new(), trt_fallbacks: BTreeMap::new(), gpu_overhead: None, stats: BTreeMap::new(), load_s: 0.0 }
     }
 
     /// Drop every loaded network (frees the graphics memory their sessions hold).
     pub fn unload(&mut self) {
+        self.fold_stats();
         self.nets.clear();
         self.key = None;
         self.trt_fallbacks.clear();
+    }
+
+    /// Move the loaded networks' counters into `stats` (and zero them).
+    fn fold_stats(&mut self) {
+        // loop: NOT-WORTH — at most five networks
+        for (p, n) in self.nets.iter_mut() {
+            let e = self.stats.entry(*p).or_insert((0.0, 0.0, 0));
+            e.0 += n.run_s;
+            e.1 += n.convert_s;
+            e.2 += n.calls;
+            n.run_s = 0.0;
+            n.convert_s = 0.0;
+            n.calls = 0;
+        }
     }
 
     /// Make sure `pieces` are loaded for `key` (anything loaded for another key is dropped first).
@@ -280,7 +299,9 @@ impl Pipeline {
                 cap.map(|c| format!("{:.2} GiB", c as f64 / 1073741824.0)).unwrap_or_else(|| "none".into()),
                 file.display()
             );
+            self.load_s += t.elapsed().as_secs_f64();
             self.nets.insert(piece, net);
+            self.set_shrink();
             if self.gpu_overhead.is_none() && key.vram_cap.is_some() {
                 // the first session made the CUDA context: what this process holds beyond its weights
                 if let Some((_, _, own)) = crate::gpu::budget() {
@@ -294,6 +315,16 @@ impl Pipeline {
             }
         }
         Ok(())
+    }
+
+    /// Arena shrinkage for what is loaded now (`crate::runtime::shrinks`).
+    fn set_shrink(&mut self) {
+        let shared = self.nets.contains_key("stage1") && self.nets.contains_key("stage2");
+        let setting = std::env::var("CK_ENGINE_ARENA_SHRINK").ok();
+        // loop: NOT-WORTH — at most five networks
+        for (p, n) in self.nets.iter_mut() {
+            n.shrink = n.provider != Provider::Cpu && crate::runtime::shrinks(p, setting.as_deref(), shared);
+        }
     }
 
     /// The job's budget for one session's arena, so the whole process stays within it: the budget minus the
@@ -645,6 +676,11 @@ impl Pipeline {
             n.convert_s = 0.0;
             n.calls = 0;
         });
+        self.stats.clear();
+        self.load_s = 0.0;
+        // wall seconds per phase (the low-VRAM phases include loading their networks)
+        let mut phases: Vec<(&str, f64)> = Vec::new();
+        let mut phase_t = Instant::now();
         let (sh, sw) = (meta.shape_h, meta.shape_w);
         let (h64, w64, h16, w16) = (sh / 64, sw / 64, sh / 16, sw / 16);
         let initial_hint = match crate::clip::none_path(job.hint_first_frame.as_deref()) {
@@ -703,6 +739,8 @@ impl Pipeline {
             }
             decode_s += reader.seconds();
         }
+        phases.push(("rvm", phase_t.elapsed().as_secs_f64()));
+        phase_t = Instant::now();
 
         // foundations prepass (low-VRAM only)
         let mut found_files: Option<(F32File, F32File)> = None;
@@ -734,6 +772,8 @@ impl Pipeline {
             }
             decode_s += reader.seconds();
             found_files = Some((cf, mf));
+            phases.push(("foundations", phase_t.elapsed().as_secs_f64()));
+            phase_t = Instant::now();
             self.unload();
             self.ensure(key, &["stage1"], trt, sink, load_stage)?;
         }
@@ -767,8 +807,11 @@ impl Pipeline {
         let plane = sh * sw;
         let hq_full = bf16_round(job.hint_quality as f32);
         let hq_carry = bf16_round(job.carry_hint_quality as f32);
+        // measured host seconds around stage 1: inputs (decode wait, features, hints) and after (carry, blend, hand-off)
+        let (mut s1_in_s, mut s1_out_s) = (0.0f64, 0.0f64);
         // loop: SERIAL-REQUIRED — windows run in order: each one's carry hint feeds the next
         for (i, &t0) in starts.iter().enumerate() {
+            let tw = Instant::now();
             let t1 = (t0 + chunk).min(t_all);
             let tc = t1 - t0;
             let frames = reader.window(t0, t1)?;
@@ -823,6 +866,7 @@ impl Pipeline {
                 bf16_to_f32(&f.model, &mut rgb);
             }
             drop(frames);
+            s1_in_s += tw.elapsed().as_secs_f64();
             let outs = self.net("stage1")?.run(vec![
                 ("rgb", vec![1, tc, 3, sh, sw], rgb),
                 ("hint", vec![1, tc, 1, sh, sw], hint),
@@ -831,6 +875,7 @@ impl Pipeline {
                 ("cradio", vec![1, tc, CRADIO_CH, h64, w64], cradio),
                 ("rvm", vec![1, tc, RVM_CH, h64, w64], rvm),
             ])?;
+            let tw = Instant::now();
             let mut it = outs.into_iter();
             let (bs, baton) = it.next().ok_or_else(|| Error::engine("stage1: no baton".into()))?;
             let (as_, aux) = it.next().ok_or_else(|| Error::engine("stage1: no aux".into()))?;
@@ -857,6 +902,7 @@ impl Pipeline {
             }
             drop(baton);
             let ready = blend.flush_before(next_start);
+            s1_out_s += tw.elapsed().as_secs_f64();
             let tr = Instant::now();
             self.baton_frames(ready, &mut baton_file, &mut stage2_frames, meta, &ro, &checker, writers, report, sink)?;
             render_s += tr.elapsed().as_secs_f64();
@@ -867,6 +913,8 @@ impl Pipeline {
         self.baton_frames(ready, &mut baton_file, &mut stage2_frames, meta, &ro, &checker, writers, report, sink)?;
 
         decode_s += reader.reader.seconds();
+        phases.push((if low_vram { "stage1" } else { "windows+stage2" }, phase_t.elapsed().as_secs_f64()));
+        phase_t = Instant::now();
         // low-VRAM phase 2: stage 2 over the stored states
         if let Some(mut bf) = baton_file {
             self.unload();
@@ -880,16 +928,21 @@ impl Pipeline {
                 self.stage2_frame(&f.model, b, meta, &ro, &checker, writers, report, sink)?;
             }
             decode_s += reader.seconds();
+            phases.push(("stage2", phase_t.elapsed().as_secs_f64()));
         }
         // measured time per part (stage-2 time includes its render and hand-off to the writers)
-        let mut parts: Vec<String> = vec![format!("decode+prep {decode_s:.1} s")];
+        self.fold_stats();
+        let mut parts: Vec<String> = vec![format!("decode+prep {decode_s:.1} s"), format!("session loads {:.1} s", self.load_s)];
         // loop: NOT-WORTH — five networks
         for p in crate::runtime::PIECES {
-            if let Some(n) = self.nets.get(p) {
-                parts.push(format!("{p} {:.1} s run + {:.1} s convert ({} calls)", n.run_s, n.convert_s, n.calls));
+            if let Some((run_s, convert_s, calls)) = self.stats.get(p) {
+                parts.push(format!("{p} {run_s:.1} s run + {convert_s:.1} s convert ({calls} calls)"));
             }
         }
+        parts.push(format!("stage 1 host: inputs {s1_in_s:.1} s, after {s1_out_s:.1} s"));
         parts.push(format!("stage 2 + render + write {render_s:.1} s"));
+        let ph: Vec<String> = phases.iter().map(|(n, s)| format!("{n} {s:.1} s")).collect();
+        parts.push(format!("phases: {}", ph.join(", ")));
         sink.log(&format!("  timing: {}; wall {:.1} s", parts.join(", "), job_t0.elapsed().as_secs_f64()));
         Ok(())
     }

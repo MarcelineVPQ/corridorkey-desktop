@@ -217,7 +217,14 @@ impl Runtime {
 
     fn builder(&self) -> Result<ort::session::builder::SessionBuilder, String> {
         let mut b = Session::builder(&self.env).map_err(|e| e.to_string())?;
-        b = b.with_optimization_level(GraphOptimizationLevel::Level3).map_err(|e| e.to_string())?;
+        // the `ort` crate's Level3 is ORT_ENABLE_LAYOUT; All is ORT_ENABLE_ALL (what Python's default is).
+        // CK_ENGINE_GRAPH_OPT = all | layout | extended (a measurement knob)
+        let level = match std::env::var("CK_ENGINE_GRAPH_OPT").as_deref() {
+            Ok("layout") => GraphOptimizationLevel::Level3,
+            Ok("extended") => GraphOptimizationLevel::Level2,
+            _ => GraphOptimizationLevel::All,
+        };
+        b = b.with_optimization_level(level).map_err(|e| e.to_string())?;
         if self.threads > 0 {
             b = b.with_intra_threads(self.threads).map_err(|e| e.to_string())?;
         }
@@ -333,7 +340,10 @@ pub struct Net {
     pub precision: Precision,
     pub file: PathBuf,
     f16_inputs: Vec<String>,
-    run_options: Option<ort::session::RunOptions>,
+    /// run options that give the arena's working memory back after the run (GPU only)
+    shrink_options: Option<ort::session::RunOptions>,
+    /// whether runs use `shrink_options` (the pipeline sets it from `shrinks` for what is loaded)
+    pub shrink: bool,
     /// measured: seconds in session.run, seconds converting inputs/outputs, calls (reset per job)
     pub run_s: f64,
     pub convert_s: f64,
@@ -351,14 +361,16 @@ impl Drop for Net {
 }
 
 /// Whether `piece`'s arena gives its working memory back after each run. CK_ENGINE_ARENA_SHRINK: "all" / "1",
-/// "0" / "none", or a comma list of networks; default: all (measured: without it stage 2's arena can't fit its
-/// 5.77 GB ConvTranspose buffer at 1280x1152 next to the others, docs/ENGINE_RUST.md).
-pub fn shrinks(piece: &str, setting: Option<&str>) -> bool {
+/// "0" / "none", or a comma list of networks. Default: only while stage 1 and stage 2 are loaded together
+/// (`shared`, the normal mode), so their working memory doesn't add up. A network that has the card to itself
+/// (the low-VRAM phases) keeps its arena: measured, a shrunk arena allocates its buffers again on the next run,
+/// 159 ms per stage-2 call against 60 ms kept (1280x1152, docs/ENGINE_RUST.md).
+pub fn shrinks(piece: &str, setting: Option<&str>, shared: bool) -> bool {
     match setting.map(|s| s.trim()) {
         Some("all") | Some("1") => true,
         Some("0") | Some("none") => false,
         Some(list) if !list.is_empty() => list.split(',').any(|p| p.trim() == piece),
-        _ => true,
+        _ => shared,
     }
 }
 
@@ -379,16 +391,27 @@ impl Net {
         let f16_inputs =
             session.inputs().iter().filter(|i| i.dtype().tensor_type() == Some(ort::value::TensorElementType::Float16)).map(|i| i.name().to_string()).collect();
         // on the GPU a run can give its arena's working memory back (the five sessions have one arena each, so
-        // without this their peaks would add up); see `shrinks`
-        let shrink = prov != Provider::Cpu && shrinks(piece, std::env::var("CK_ENGINE_ARENA_SHRINK").ok().as_deref());
-        let run_options = if shrink {
+        // without this their peaks would add up); the pipeline decides per phase, see `shrinks`
+        let shrink_options = if prov != Provider::Cpu {
             let mut o = ort::session::RunOptions::new().map_err(|e| Error::ort(piece, e))?;
             o.set("memory.enable_memory_arena_shrinkage", "gpu:0").map_err(|e| Error::ort(piece, e))?;
             Some(o)
         } else {
             None
         };
-        Ok(Net { piece, session, provider: prov, precision, file: file.to_path_buf(), f16_inputs, run_options, run_s: 0.0, convert_s: 0.0, calls: 0 })
+        Ok(Net {
+            piece,
+            session,
+            provider: prov,
+            precision,
+            file: file.to_path_buf(),
+            f16_inputs,
+            shrink_options,
+            shrink: false,
+            run_s: 0.0,
+            convert_s: 0.0,
+            calls: 0,
+        })
     }
 
     /// Run with float32 inputs (converted to float16 where the graph wants it); outputs as float32 in the
@@ -409,9 +432,9 @@ impl Net {
         }
         let piece = self.piece;
         let t1 = std::time::Instant::now();
-        let outs = match &self.run_options {
-            Some(o) => self.session.run_with_options(feed, o),
-            None => self.session.run(feed),
+        let outs = match (&self.shrink_options, self.shrink) {
+            (Some(o), true) => self.session.run_with_options(feed, o),
+            _ => self.session.run(feed),
         }
         .map_err(|e| Error::ort(piece, e))?;
         let t2 = std::time::Instant::now();
@@ -440,9 +463,10 @@ mod tests {
 
     #[test]
     fn arena_shrink_setting() {
-        assert!(shrinks("stage1", None) && shrinks("stage2", None));
-        assert!(shrinks("stage2", Some("all")) && !shrinks("stage1", Some("0")));
-        assert!(shrinks("rvm", Some("rvm,stage1")) && !shrinks("moge", Some("rvm,stage1")));
+        assert!(shrinks("stage1", None, true) && shrinks("stage2", None, true));
+        assert!(!shrinks("stage2", None, false) && !shrinks("rvm", None, false));
+        assert!(shrinks("stage2", Some("all"), false) && !shrinks("stage1", Some("0"), true));
+        assert!(shrinks("rvm", Some("rvm,stage1"), false) && !shrinks("moge", Some("rvm,stage1"), true));
     }
 
     #[test]
