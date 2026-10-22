@@ -389,8 +389,11 @@ function createWindow(): void {
   else void mainWindow.loadFile(join(here, "../renderer/index.html"));
 }
 
-// One copy at a time: a second start brings the first window forward.
-if (!app.requestSingleInstanceLock()) app.quit();
+// One copy at a time: a second start brings the first window forward. app.quit() doesn't stop this module or
+// the ready event: measured (tools-style isolated test, two copies on one profile), the second copy still ran
+// whenReady and removed the first copy's running job folder. So the second copy does nothing at ready.
+const primary = app.requestSingleInstanceLock();
+if (!primary) app.quit();
 app.on("second-instance", () => {
   if (!mainWindow) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
@@ -398,6 +401,7 @@ app.on("second-instance", () => {
 });
 
 app.whenReady().then(() => {
+  if (!primary) return;
   if (WAYLAND_REQUIRED) {
     dialog.showErrorBox(
       "CorridorKey needs Wayland",
