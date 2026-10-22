@@ -1,11 +1,17 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { clipName, expandPaths, findFirstFrameHint, findHintVideo, isCompanionHint } from "../../electron/main/media";
+
+// every folder a test made goes at the end (each run used to leave five in /tmp, which is RAM on many desktops)
+const made: string[] = [];
+// loop: NOT-WORTH — the test folders, once after the file's tests
+afterAll(() => made.forEach((d) => rmSync(d, { recursive: true, force: true })));
 
 function dir(files: string[]): string {
   const d = mkdtempSync(join(tmpdir(), "ck-media-"));
+  made.push(d);
   for (const f of files) {
     mkdirSync(join(d, f, ".."), { recursive: true });
     writeFileSync(join(d, f), "");

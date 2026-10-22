@@ -32,6 +32,7 @@ mkdir -p "$STATE/home" "$STATE/iso/no-services"
 RUN="$(mktemp -d /tmp/ck-iso-XXXXXX)"   # a socket path must fit 108 bytes; tiny, removed at exit
 chmod 700 "$RUN"
 trap 'rm -rf "$RUN"' EXIT
+trap 'exit 143' INT TERM
 cat > "$STATE/iso/session.conf" <<CONF
 <!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN" "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
 <busconfig>
@@ -49,7 +50,9 @@ export WAYLAND_DISPLAY=ck-wl-$PORT
 exec "$APP/node_modules/electron/dist/electron" --no-sandbox --password-store=basic --remote-debugging-port=$PORT "$APP"
 RUN
 chmod +x "$STATE/iso/run-app.sh"
-exec systemd-run --user --scope --quiet --collect -p MemoryMax=4G -p MemorySwapMax=0 -- \
+# not exec: the EXIT trap above removes RUN only if this shell is still there when the app ends (with exec every run
+# left a /tmp/ck-iso-* folder behind)
+systemd-run --user --scope --quiet --collect -p MemoryMax=4G -p MemorySwapMax=0 -- \
   env -i HOME="$STATE/home" USER="$USER" PATH="/usr/local/bin:/usr/bin:/bin" LANG="${LANG:-C.UTF-8}" \
   XDG_RUNTIME_DIR="$RUN" XDG_CONFIG_HOME="$STATE/home/.config" XDG_CACHE_HOME="$STATE/home/.cache" XDG_DATA_HOME="$STATE/home/.local/share" \
   XDG_SESSION_TYPE=wayland GTK_USE_PORTAL=0 NO_AT_BRIDGE=1 GSETTINGS_BACKEND=memory GIO_USE_VFS=local "${ENVS[@]}" \
