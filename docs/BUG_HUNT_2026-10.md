@@ -92,7 +92,7 @@ the row counts once, as FIXED (the engine's clear refusal).
 | C3 | `pipeline.rs` preload / drop_pending | threaded session loads are joined when a job ends or restarts | code | | NOT-A-BUG | |
 | C4 | `pipeline.rs` low-VRAM stage 2 | the producer thread is joined after its receiver is dropped | code | | NOT-A-BUG | |
 | C5 | `pipeline.rs` trim_host_memory | `malloc_trim` only after unloads; preload CUDA-only (the efficiency pass's multijob: RSS flat) | efficiency pass measurement | | NOT-A-BUG | |
-| C6 | `gpu.rs` visible_index | multi-GPU: NVML's index (PCI order) for CUDA_VISIBLE_DEVICES' first entry may not be CUDA's device 0; UUIDs aren't read. One card is unaffected | code reading | LOW | BACKLOG (row 17) | |
+| C6 | `gpu.rs` visible_index | multi-GPU: NVML's index (PCI order) for CUDA_VISIBLE_DEVICES' first entry may not be CUDA's device 0; UUIDs aren't read. One card is unaffected | code reading | LOW | FIXED 2026-10-22 (backlog row 17): pick_card matches the CUDA driver's device 0 by UUID / PCI bus id; fallback reads UUID / MIG entries and CUDA_DEVICE_ORDER, and gives no card rather than a guessed one | `gpu.rs` cuda_device_0_is_matched_by_uuid_or_pci_not_by_nvml_index, without_a_cuda_driver_the_variable_is_read_as_cuda_reads_it (fakes; no multi-GPU machine) |
 | C7 | engine | orphan engine / builder | = E2, E3 | | FIXED | |
 
 ## 5. App

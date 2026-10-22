@@ -28,14 +28,149 @@ struct ProcInfo {
     compute_instance: c_uint,
 }
 
-/// The card index CUDA would use first: None when CUDA_VISIBLE_DEVICES hides every card.
-fn visible_index() -> Option<c_uint> {
-    match std::env::var("CUDA_VISIBLE_DEVICES") {
-        Ok(v) if v.trim().is_empty() || v.trim() == "-1" => None,
-        // loop: NOT-WORTH — one environment variable, once per NVML open
-        Ok(v) => Some(v.split(',').next().and_then(|x| x.trim().parse().ok()).unwrap_or(0)),
-        Err(_) => Some(0),
+/// One NVML card: NVML's index (PCI order), its PCI bus id and UUID ("GPU-…").
+#[derive(Clone, Debug, PartialEq)]
+pub struct Card {
+    pub index: u32,
+    pub pci: String,
+    pub uuid: String,
+}
+
+/// CUDA's device 0 as the CUDA driver itself reports it (cuInit applies CUDA_VISIBLE_DEVICES and
+/// CUDA_DEVICE_ORDER, UUID and MIG entries included).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CudaDevice {
+    pub pci: Option<String>,
+    pub uuid: Option<String>,
+}
+
+/// What CUDA's device 0 is as a card NVML can read.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Pick {
+    /// CUDA sees no card (CUDA_VISIBLE_DEVICES="" / "-1" / an invalid first entry).
+    Hidden,
+    /// this NVML index
+    Card(u32),
+    /// a MIG instance, read by its UUID
+    Mig(String),
+    /// several cards and no way to tell CUDA's order (no CUDA driver, default FASTEST_FIRST order):
+    /// no card rather than the wrong card's numbers
+    Unknown,
+}
+
+/// A PCI bus id in one spelling: NVML writes "00000000:01:00.0", CUDA "0000:01:00.0".
+fn pci_key(s: &str) -> Option<(u32, u32, u32, u32)> {
+    let s = s.trim().trim_end_matches('\0');
+    let (domain, rest) = s.split_once(':')?;
+    let (bus, rest) = rest.split_once(':')?;
+    let (dev, func) = rest.split_once('.').unwrap_or((rest, "0"));
+    let hex = |x: &str| u32::from_str_radix(x, 16).ok();
+    Some((hex(domain)?, hex(bus)?, hex(dev)?, hex(func)?))
+}
+
+/// The NVML card that is CUDA's device 0 (bug hunt 2026-10 C6, backlog row 17): the CUDA driver's own answer,
+/// matched by UUID or PCI bus id; without a CUDA driver, CUDA_VISIBLE_DEVICES' first entry read as CUDA reads it
+/// (an index in CUDA's order, a GPU-/MIG- UUID or a unique UUID prefix). CUDA's default order (FASTEST_FIRST) is
+/// not NVML's (PCI), so an index maps to an NVML card only under CUDA_DEVICE_ORDER=PCI_BUS_ID or with one card.
+pub fn pick_card(visible: Option<&str>, order: Option<&str>, cuda0: Option<&CudaDevice>, cards: &[Card]) -> Pick {
+    let first = match visible {
+        None => "0".to_string(),
+        // CUDA reads the list up to its first invalid entry: an empty list or "-1" first hides every card
+        // loop: NOT-WORTH — the first entry of one environment variable
+        Some(v) => v.split(',').next().unwrap_or("").trim().to_string(),
+    };
+    if first.is_empty() || first.starts_with('-') {
+        return Pick::Hidden;
     }
+    if first.len() > 4 && first[..4].eq_ignore_ascii_case("MIG-") {
+        return Pick::Mig(first);
+    }
+    if let Some(c) = cuda0 {
+        // loop: NOT-WORTH — the machine's few cards, once per NVML open
+        let by_uuid = c.uuid.as_ref().and_then(|u| cards.iter().find(|k| k.uuid.eq_ignore_ascii_case(u)));
+        let key = c.pci.as_deref().and_then(pci_key);
+        // loop: NOT-WORTH — the machine's few cards, once per NVML open
+        let by_pci = key.and_then(|k| cards.iter().find(|card| pci_key(&card.pci) == Some(k)));
+        if let Some(card) = by_uuid.or(by_pci) {
+            return Pick::Card(card.index);
+        }
+    }
+    if first.len() > 4 && first[..4].eq_ignore_ascii_case("GPU-") {
+        let want = first.to_ascii_lowercase();
+        // loop: NOT-WORTH — the machine's few cards, once per NVML open
+        let hits: Vec<&Card> = cards.iter().filter(|k| k.uuid.to_ascii_lowercase().starts_with(&want)).collect();
+        return if hits.len() == 1 { Pick::Card(hits[0].index) } else { Pick::Hidden };
+    }
+    let Ok(i) = first.parse::<usize>() else { return Pick::Hidden };
+    // loop: NOT-WORTH — the machine's few cards
+    let mut by_pci: Vec<&Card> = cards.iter().collect();
+    // loop: NOT-WORTH — sorting the machine's few cards
+    by_pci.sort_by_key(|k| pci_key(&k.pci));
+    let pci_order = order.is_some_and(|o| o.trim().eq_ignore_ascii_case("PCI_BUS_ID"));
+    match by_pci.get(i) {
+        None => Pick::Hidden,
+        Some(card) if pci_order || cards.len() == 1 => Pick::Card(card.index),
+        Some(_) => Pick::Unknown,
+    }
+}
+
+/// UUID bytes as NVML spells them: GPU-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.
+pub fn uuid_string(b: &[u8; 16]) -> String {
+    // loop: NOT-WORTH — 16 bytes
+    let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    format!("GPU-{}-{}-{}-{}-{}", &h[..8], &h[8..12], &h[12..16], &h[16..20], &h[20..])
+}
+
+/// CUDA's device 0 from the CUDA driver (libcuda.so.1). cuInit creates no context (no graphics memory).
+/// Some(None): the driver is there and sees no device; None: no CUDA driver to ask.
+/// Asked once per process (the variables can't change for an initialised driver), and the library stays loaded:
+/// an initialised driver keeps its own threads, so unloading it under them is unsafe.
+fn cuda_device0() -> Option<Option<CudaDevice>> {
+    static ONCE: std::sync::OnceLock<Option<Option<CudaDevice>>> = std::sync::OnceLock::new();
+    ONCE.get_or_init(ask_cuda_device0).clone()
+}
+
+fn ask_cuda_device0() -> Option<Option<CudaDevice>> {
+    // SAFETY: the CUDA driver API's documented C signatures; buffers sized as passed
+    unsafe {
+        let lib = std::mem::ManuallyDrop::new(Library::new("libcuda.so.1").ok()?);
+        let init: Symbol<unsafe extern "C" fn(c_uint) -> c_int> = lib.get(b"cuInit\0").ok()?;
+        let get: Symbol<unsafe extern "C" fn(*mut c_int, c_int) -> c_int> = lib.get(b"cuDeviceGet\0").ok()?;
+        match init(0) {
+            0 => {}
+            100 => return Some(None), // CUDA_ERROR_NO_DEVICE: CUDA_VISIBLE_DEVICES hides every card
+            _ => return None,
+        }
+        let mut dev: c_int = 0;
+        if get(&mut dev, 0) != 0 {
+            return Some(None);
+        }
+        let mut out = CudaDevice::default();
+        if let Ok(pci) = lib.get::<unsafe extern "C" fn(*mut c_char, c_int, c_int) -> c_int>(b"cuDeviceGetPCIBusId\0") {
+            let mut buf = [0 as c_char; 32];
+            if pci(buf.as_mut_ptr(), buf.len() as c_int, dev) == 0 {
+                out.pci = Some(CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned());
+            }
+        }
+        if let Ok(uuid) = lib.get::<unsafe extern "C" fn(*mut [u8; 16], c_int) -> c_int>(b"cuDeviceGetUuid_v2\0") {
+            let mut b = [0u8; 16];
+            if uuid(&mut b, dev) == 0 {
+                out.uuid = Some(uuid_string(&b));
+            }
+        }
+        Some(Some(out))
+    }
+}
+
+#[repr(C)]
+struct PciInfo {
+    bus_id_legacy: [c_char; 16],
+    domain: c_uint,
+    bus: c_uint,
+    device: c_uint,
+    pci_device_id: c_uint,
+    pci_sub_system_id: c_uint,
+    bus_id: [c_char; 32],
 }
 
 struct Nvml {
@@ -45,7 +180,6 @@ struct Nvml {
 
 impl Nvml {
     fn open() -> Option<Nvml> {
-        let index = visible_index()?;
         // SAFETY: NVML's documented C signatures; the handle stays valid while `lib` is loaded
         unsafe {
             let lib = Library::new("libnvidia-ml.so.1").ok()?;
@@ -53,12 +187,71 @@ impl Nvml {
             if init() != 0 {
                 return None;
             }
-            let get: Symbol<unsafe extern "C" fn(c_uint, *mut *mut c_void) -> c_int> = lib.get(b"nvmlDeviceGetHandleByIndex_v2\0").ok()?;
-            let mut dev = std::ptr::null_mut();
-            if get(index, &mut dev) != 0 {
-                return None;
-            }
+            let cuda0 = match cuda_device0() {
+                Some(None) => return None,
+                Some(Some(d)) => Some(d),
+                None => None,
+            };
+            let visible = std::env::var("CUDA_VISIBLE_DEVICES").ok();
+            let order = std::env::var("CUDA_DEVICE_ORDER").ok();
+            let dev = match pick_card(visible.as_deref(), order.as_deref(), cuda0.as_ref(), &Self::cards(&lib)) {
+                Pick::Card(i) => {
+                    let get: Symbol<unsafe extern "C" fn(c_uint, *mut *mut c_void) -> c_int> = lib.get(b"nvmlDeviceGetHandleByIndex_v2\0").ok()?;
+                    let mut dev = std::ptr::null_mut();
+                    if get(i, &mut dev) != 0 {
+                        return None;
+                    }
+                    dev
+                }
+                Pick::Mig(uuid) => {
+                    let get: Symbol<unsafe extern "C" fn(*const c_char, *mut *mut c_void) -> c_int> = lib.get(b"nvmlDeviceGetHandleByUUID\0").ok()?;
+                    let c = std::ffi::CString::new(uuid).ok()?;
+                    let mut dev = std::ptr::null_mut();
+                    if get(c.as_ptr(), &mut dev) != 0 {
+                        return None;
+                    }
+                    dev
+                }
+                Pick::Hidden | Pick::Unknown => return None,
+            };
             Some(Nvml { lib, dev })
+        }
+    }
+
+    /// Every card NVML sees, with its PCI bus id and UUID.
+    fn cards(lib: &Library) -> Vec<Card> {
+        // SAFETY: NVML's documented C signatures; buffers sized as passed
+        unsafe {
+            let (Ok(count), Ok(get), Ok(pci), Ok(uuid)) = (
+                lib.get::<unsafe extern "C" fn(*mut c_uint) -> c_int>(b"nvmlDeviceGetCount_v2\0"),
+                lib.get::<unsafe extern "C" fn(c_uint, *mut *mut c_void) -> c_int>(b"nvmlDeviceGetHandleByIndex_v2\0"),
+                lib.get::<unsafe extern "C" fn(*mut c_void, *mut PciInfo) -> c_int>(b"nvmlDeviceGetPciInfo_v3\0"),
+                lib.get::<unsafe extern "C" fn(*mut c_void, *mut c_char, c_uint) -> c_int>(b"nvmlDeviceGetUUID\0"),
+            ) else {
+                return Vec::new();
+            };
+            let mut n: c_uint = 0;
+            if count(&mut n) != 0 {
+                return Vec::new();
+            }
+            let mut out = Vec::new();
+            // loop: NOT-WORTH — the machine's few cards, once per NVML open
+            for index in 0..n.min(64) {
+                let mut dev = std::ptr::null_mut();
+                if get(index, &mut dev) != 0 {
+                    continue;
+                }
+                let mut info: PciInfo = std::mem::zeroed();
+                let p = if pci(dev, &mut info) == 0 { CStr::from_ptr(info.bus_id.as_ptr()).to_string_lossy().into_owned() } else { String::new() };
+                let mut ub = [0 as c_char; 96];
+                let u = if uuid(dev, ub.as_mut_ptr(), ub.len() as c_uint) == 0 {
+                    CStr::from_ptr(ub.as_ptr()).to_string_lossy().into_owned()
+                } else {
+                    String::new()
+                };
+                out.push(Card { index, pci: p, uuid: u });
+            }
+            out
         }
     }
 
@@ -107,7 +300,8 @@ impl Nvml {
     }
 }
 
-/// The first visible NVIDIA card, or None (no driver library, no card, or CUDA_VISIBLE_DEVICES="").
+/// The card CUDA uses as device 0, or None (no driver library, no card, CUDA_VISIBLE_DEVICES hides every card, or
+/// several cards in an order this can't tell).
 pub fn nvidia() -> Option<GpuInfo> {
     Nvml::open()?.info()
 }
@@ -152,6 +346,54 @@ pub fn host_available() -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
+    use super::{pick_card, uuid_string, Card, CudaDevice, Pick};
+
+    // Two cards as NVML lists them (PCI order); CUDA's default order puts the faster one, NVML's 1, first.
+    fn cards() -> Vec<Card> {
+        vec![
+            Card { index: 0, pci: "00000000:01:00.0".into(), uuid: "GPU-aaaaaaaa-1111-2222-3333-444444444444".into() },
+            Card { index: 1, pci: "00000000:41:00.0".into(), uuid: "GPU-bbbbbbbb-1111-2222-3333-444444444444".into() },
+        ]
+    }
+
+    #[test]
+    fn cuda_device_0_is_matched_by_uuid_or_pci_not_by_nvml_index() {
+        let c = cards();
+        // the CUDA driver says device 0 is the card at 41:00.0 (FASTEST_FIRST): NVML's index 1, not 0
+        let by_pci = CudaDevice { pci: Some("0000:41:00.0".into()), uuid: None };
+        assert_eq!(pick_card(None, None, Some(&by_pci), &c), Pick::Card(1));
+        assert_eq!(pick_card(Some("0"), None, Some(&by_pci), &c), Pick::Card(1));
+        let by_uuid = CudaDevice { pci: None, uuid: Some("GPU-BBBBBBBB-1111-2222-3333-444444444444".into()) };
+        assert_eq!(pick_card(Some("1,0"), None, Some(&by_uuid), &c), Pick::Card(1));
+    }
+
+    #[test]
+    fn without_a_cuda_driver_the_variable_is_read_as_cuda_reads_it() {
+        let c = cards();
+        // UUID entries (also a unique prefix), never parsed as index 0
+        assert_eq!(pick_card(Some("GPU-bbbbbbbb-1111-2222-3333-444444444444"), None, None, &c), Pick::Card(1));
+        assert_eq!(pick_card(Some("GPU-bb,0"), None, None, &c), Pick::Card(1));
+        assert_eq!(pick_card(Some("GPU-"), None, None, &c), Pick::Hidden);
+        assert_eq!(pick_card(Some("MIG-0a1b2c3d-1111-2222-3333-444444444444"), None, None, &c), Pick::Mig("MIG-0a1b2c3d-1111-2222-3333-444444444444".into()));
+        // an index is CUDA's order: NVML's PCI order only under CUDA_DEVICE_ORDER=PCI_BUS_ID (or one card)
+        assert_eq!(pick_card(Some("1"), Some("PCI_BUS_ID"), None, &c), Pick::Card(1));
+        assert_eq!(pick_card(None, Some("PCI_BUS_ID"), None, &c), Pick::Card(0));
+        assert_eq!(pick_card(Some("1"), None, None, &c), Pick::Unknown);
+        assert_eq!(pick_card(None, Some("FASTEST_FIRST"), None, &c), Pick::Unknown);
+        assert_eq!(pick_card(None, None, None, &c[..1]), Pick::Card(0));
+        // hidden: empty, -1, an invalid or out-of-range first entry
+        assert_eq!(pick_card(Some(""), None, None, &c), Pick::Hidden);
+        assert_eq!(pick_card(Some("-1"), None, None, &c), Pick::Hidden);
+        assert_eq!(pick_card(Some("x,0"), None, None, &c), Pick::Hidden);
+        assert_eq!(pick_card(Some("5"), Some("PCI_BUS_ID"), None, &c), Pick::Hidden);
+    }
+
+    #[test]
+    fn cuda_uuid_bytes_read_as_nvml_spells_them() {
+        let b = [0xaa, 0xaa, 0xaa, 0xaa, 0x11, 0x11, 0x22, 0x22, 0x33, 0x33, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44];
+        assert_eq!(uuid_string(&b), "GPU-aaaaaaaa-1111-2222-3333-444444444444");
+    }
+
     #[test]
     fn trt_versions() {
         assert_eq!(super::trt_version_string(101600), "10.16.0");
