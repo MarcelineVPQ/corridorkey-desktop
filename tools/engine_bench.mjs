@@ -4,7 +4,8 @@
 //   engine, version, provider/precision; load-to-first-frame (spawn → first `frames` reply with done > 0);
 //   steady frames/s from the engine's own `frames` replies after the first window; total wall time;
 //   peak VRAM (nvidia-smi every 250 ms, the engine's process tree); peak RSS (/proc, the same tree);
-//   the memory window used (`memory` reply). Writes <out>/bench.json and <out>/bench.md; outputs go to
+//   the memory window used (`memory` reply). Writes <out>/bench.json, <out>/bench.md and every reply to
+//   <out>/<clip>.replies.jsonl (the engine's own logs, e.g. the Rust engine's timing line); outputs go to
 //   <out>/out/<clip>/ for tools/matte_compare.py --roots.
 //
 //   node tools/engine_bench.mjs rust   --bin BIN --models DIR [--ort LIB] [--device cuda|cpu] --out DIR [opts] CLIP...
@@ -17,7 +18,7 @@
 // GPU guard: refuses to start, and stops between clips, while Sonata runs or another process holds > 1 GiB.
 import { spawn, execFileSync } from "node:child_process";
 import { createInterface } from "node:readline";
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
 
 const SAMPLE_MS = 250;
@@ -156,7 +157,10 @@ async function runClip(a, clip) {
     r.peakRssMb = Math.max(r.peakRssMb, Math.round(rssMb(p)));
   }, SAMPLE_MS);
   const done = new Promise((res) => {
+    const replies = join(a.out, `${name}.replies.jsonl`);
+    writeFileSync(replies, "");
     createInterface({ input: child.stdout }).on("line", (line) => {
+      appendFileSync(replies, line + "\n");
       let m;
       try {
         m = JSON.parse(line);

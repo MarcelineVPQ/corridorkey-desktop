@@ -118,7 +118,12 @@ fn windows_and_vram_table() {
     let j: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(fx("windows_vram.json")).unwrap()).unwrap();
     // loop: NOT-WORTH — eight cases
     for c in j["taper"].as_array().unwrap() {
-        let w = taper_weights(c["tc"].as_u64().unwrap() as usize, c["overlap"].as_u64().unwrap() as usize, c["first"].as_bool().unwrap(), c["last"].as_bool().unwrap());
+        let w = taper_weights(
+            c["tc"].as_u64().unwrap() as usize,
+            c["overlap"].as_u64().unwrap() as usize,
+            c["first"].as_bool().unwrap(),
+            c["last"].as_bool().unwrap(),
+        );
         let want: Vec<f32> = c["w"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap() as f32).collect();
         diff(&format!("taper {c}"), &w, &want, 1e-7);
     }
@@ -135,7 +140,11 @@ fn windows_and_vram_table() {
         let frames = c["frames"].as_u64().unwrap() as usize;
         if let Some(b) = c["budget"].as_f64() {
             let p = select_vram_profile(hw, frames, b);
-            assert_eq!((p.chunk, p.stride, p.low_vram), (c["chunk"].as_u64().unwrap() as usize, c["stride"].as_u64().unwrap() as usize, c["low_vram"].as_bool().unwrap()), "{c}");
+            assert_eq!(
+                (p.chunk, p.stride, p.low_vram),
+                (c["chunk"].as_u64().unwrap() as usize, c["stride"].as_u64().unwrap() as usize, c["low_vram"].as_bool().unwrap()),
+                "{c}"
+            );
             assert!((p.estimate_gb - c["estimate"].as_f64().unwrap()).abs() < 1e-9, "{c}");
         } else {
             let e = estimate_peak_vram_gb((hw.0 * hw.1) as f64 / 1e6, frames, c["low_vram"].as_bool().unwrap());
@@ -166,7 +175,13 @@ fn render_paths() {
             if lin && *name != "cutout" {
                 continue;
             }
-            let fname = if exr { format!("render_exr_{name}") } else if lin { format!("render_video_{name}_lin") } else { format!("render_video_{name}") };
+            let fname = if exr {
+                format!("render_exr_{name}")
+            } else if lin {
+                format!("render_video_{name}_lin")
+            } else {
+                format!("render_video_{name}")
+            };
             // video: 16-bit samples, truncated: one step when a float32 product lands on the other side
             let tol = if exr { 2e-5 } else { 1.0 };
             let got = batch_f32(b);

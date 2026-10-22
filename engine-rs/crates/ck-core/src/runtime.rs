@@ -69,6 +69,12 @@ pub struct ModelSet {
     manifest: BTreeMap<String, BTreeMap<String, String>>,
 }
 
+/// A model's size on disk: the .onnx file and its external weights (.onnx.data) next to it.
+pub fn model_bytes(file: &Path) -> u64 {
+    let data = PathBuf::from(format!("{}.data", file.display()));
+    [file.to_path_buf(), data].iter().filter_map(|p| std::fs::metadata(p).ok()).map(|m| m.len()).sum()
+}
+
 impl ModelSet {
     pub fn open(dir: &Path) -> Result<ModelSet, String> {
         let mpath = dir.join("models.json");
@@ -224,6 +230,11 @@ impl Runtime {
     pub fn session(&self, prov: Provider, file: &Path, trt: Option<&TrtSettings>, vram_cap: Option<u64>) -> Result<Session, String> {
         let _ = vram_cap;
         let mut b = self.builder()?;
+        // CK_ENGINE_PROFILE=<folder>: ONNX Runtime's per-node profile of each session (a measurement knob)
+        if let Ok(dir) = std::env::var("CK_ENGINE_PROFILE") {
+            let stem = file.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            b = b.with_profiling(Path::new(&dir).join(stem)).map_err(|e| e.to_string())?;
+        }
         match prov {
             Provider::Cpu => {}
             Provider::Cuda => {
@@ -273,13 +284,21 @@ impl Runtime {
 
 #[cfg(feature = "cuda")]
 fn cuda_ep(vram_cap: Option<u64>) -> ort::ep::CUDA {
-    let ep = ort::ep::CUDA::default();
-    let ep = match vram_cap {
-        Some(c) => ep.with_memory_limit(c as usize),
-        None => ep,
-    };
-    ep
-        .with_device_id(0)
+    let mut ep = ort::ep::CUDA::default();
+    if let Some(c) = vram_cap {
+        ep = ep.with_memory_limit(c as usize);
+    }
+    // cuDNN's convolution algorithm search and workspace (ORT's defaults: exhaustive, as much workspace as it
+    // wants): CK_ENGINE_CUDNN_SEARCH = exhaustive | heuristic | default, CK_ENGINE_CUDNN_MAX_WORKSPACE = 0 | 1
+    match std::env::var("CK_ENGINE_CUDNN_SEARCH").as_deref() {
+        Ok("heuristic") => ep = ep.with_conv_algorithm_search(ort::ep::cuda::ConvAlgorithmSearch::Heuristic),
+        Ok("default") => ep = ep.with_conv_algorithm_search(ort::ep::cuda::ConvAlgorithmSearch::Default),
+        _ => {}
+    }
+    if let Ok(v) = std::env::var("CK_ENGINE_CUDNN_MAX_WORKSPACE") {
+        ep = ep.with_conv_max_workspace(v != "0");
+    }
+    ep.with_device_id(0)
         // the arena grows by what is asked: less held graphics memory
         .with_arena_extend_strategy(ort::ep::ArenaExtendStrategy::SameAsRequested)
         // TF32 off: an fp32 model on CUDA computes in fp32
@@ -308,29 +327,60 @@ pub fn trt_exclude() -> String {
 /// A loaded network: its session and how its inputs want to be fed.
 pub struct Net {
     pub piece: &'static str,
+    // (end_profiling on drop when CK_ENGINE_PROFILE is set)
     pub session: Session,
     pub provider: Provider,
     pub precision: Precision,
     pub file: PathBuf,
     f16_inputs: Vec<String>,
     run_options: Option<ort::session::RunOptions>,
+    /// measured: seconds in session.run, seconds converting inputs/outputs, calls (reset per job)
+    pub run_s: f64,
+    pub convert_s: f64,
+    pub calls: usize,
+}
+
+impl Drop for Net {
+    fn drop(&mut self) {
+        if std::env::var("CK_ENGINE_PROFILE").is_ok() {
+            if let Ok(f) = self.session.end_profiling() {
+                eprintln!("  profile of {}: {f}", self.piece);
+            }
+        }
+    }
+}
+
+/// Whether `piece`'s arena gives its working memory back after each run. CK_ENGINE_ARENA_SHRINK: "all" / "1",
+/// "0" / "none", or a comma list of networks; default: all (measured: without it stage 2's arena can't fit its
+/// 5.77 GB ConvTranspose buffer at 1280x1152 next to the others, docs/ENGINE_RUST.md).
+pub fn shrinks(piece: &str, setting: Option<&str>) -> bool {
+    match setting.map(|s| s.trim()) {
+        Some("all") | Some("1") => true,
+        Some("0") | Some("none") => false,
+        Some(list) if !list.is_empty() => list.split(',').any(|p| p.trim() == piece),
+        _ => true,
+    }
 }
 
 /// A float32 input: name, shape, data.
 pub type Input<'a> = (&'a str, Vec<usize>, Vec<f32>);
 
 impl Net {
-    pub fn load(rt: &Runtime, piece: &'static str, prov: Provider, precision: Precision, file: &Path, trt: Option<&TrtSettings>, vram_cap: Option<u64>) -> Result<Net, Error> {
+    pub fn load(
+        rt: &Runtime,
+        piece: &'static str,
+        prov: Provider,
+        precision: Precision,
+        file: &Path,
+        trt: Option<&TrtSettings>,
+        vram_cap: Option<u64>,
+    ) -> Result<Net, Error> {
         let session = rt.session(prov, file, trt, vram_cap).map_err(|e| Error::ort(&format!("loading {}", file.display()), e))?;
-        let f16_inputs = session
-            .inputs()
-            .iter()
-            .filter(|i| i.dtype().tensor_type() == Some(ort::value::TensorElementType::Float16))
-            .map(|i| i.name().to_string())
-            .collect();
-        // on the GPU each run gives its arena's working memory back (the five sessions have one arena each, so
-        // without this their peaks would add up); CK_ENGINE_ARENA_SHRINK=0 keeps it
-        let shrink = prov != Provider::Cpu && std::env::var("CK_ENGINE_ARENA_SHRINK").map(|v| v != "0").unwrap_or(true);
+        let f16_inputs =
+            session.inputs().iter().filter(|i| i.dtype().tensor_type() == Some(ort::value::TensorElementType::Float16)).map(|i| i.name().to_string()).collect();
+        // on the GPU a run can give its arena's working memory back (the five sessions have one arena each, so
+        // without this their peaks would add up); see `shrinks`
+        let shrink = prov != Provider::Cpu && shrinks(piece, std::env::var("CK_ENGINE_ARENA_SHRINK").ok().as_deref());
         let run_options = if shrink {
             let mut o = ort::session::RunOptions::new().map_err(|e| Error::ort(piece, e))?;
             o.set("memory.enable_memory_arena_shrinkage", "gpu:0").map_err(|e| Error::ort(piece, e))?;
@@ -338,17 +388,19 @@ impl Net {
         } else {
             None
         };
-        Ok(Net { piece, session, provider: prov, precision, file: file.to_path_buf(), f16_inputs, run_options })
+        Ok(Net { piece, session, provider: prov, precision, file: file.to_path_buf(), f16_inputs, run_options, run_s: 0.0, convert_s: 0.0, calls: 0 })
     }
 
     /// Run with float32 inputs (converted to float16 where the graph wants it); outputs as float32 in the
     /// graph's output order: (shape, data).
     pub fn run(&mut self, inputs: Vec<Input<'_>>) -> Result<Vec<(Vec<usize>, Vec<f32>)>, Error> {
+        let t0 = std::time::Instant::now();
         let mut feed: Vec<(std::borrow::Cow<'_, str>, ort::session::SessionInputValue<'_>)> = Vec::with_capacity(inputs.len());
         // loop: NOT-WORTH — at most six inputs
         for (name, shape, data) in inputs {
             let v: ort::session::SessionInputValue<'_> = if self.f16_inputs.iter().any(|n| n == name) {
-                let h: Vec<half::f16> = data.iter().map(|&x| half::f16::from_f32(x)).collect();
+                use rayon::prelude::*;
+                let h: Vec<half::f16> = data.par_iter().with_min_len(1 << 14).map(|&x| half::f16::from_f32(x)).collect();
                 Tensor::from_array((shape, h)).map_err(|e| Error::ort(self.piece, e))?.into()
             } else {
                 Tensor::from_array((shape, data)).map_err(|e| Error::ort(self.piece, e))?.into()
@@ -356,11 +408,13 @@ impl Net {
             feed.push((std::borrow::Cow::Borrowed(name), v));
         }
         let piece = self.piece;
+        let t1 = std::time::Instant::now();
         let outs = match &self.run_options {
             Some(o) => self.session.run_with_options(feed, o),
             None => self.session.run(feed),
         }
         .map_err(|e| Error::ort(piece, e))?;
+        let t2 = std::time::Instant::now();
         let mut res = Vec::new();
         // loop: NOT-WORTH — one or two outputs
         for (_, v) in outs.iter() {
@@ -368,9 +422,14 @@ impl Net {
                 res.push((s.iter().map(|&x| x as usize).collect(), d.to_vec()));
             } else {
                 let (s, d) = v.try_extract_tensor::<half::f16>().map_err(|e| Error::ort(piece, e))?;
-                res.push((s.iter().map(|&x| x as usize).collect(), d.iter().map(|x| x.to_f32()).collect()));
+                use rayon::prelude::*;
+                res.push((s.iter().map(|&x| x as usize).collect(), d.par_iter().with_min_len(1 << 14).map(|x| x.to_f32()).collect()));
             }
         }
+        drop(outs);
+        self.calls += 1;
+        self.run_s += (t2 - t1).as_secs_f64();
+        self.convert_s += (t1 - t0).as_secs_f64() + t2.elapsed().as_secs_f64();
         Ok(res)
     }
 }
@@ -378,6 +437,13 @@ impl Net {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arena_shrink_setting() {
+        assert!(shrinks("stage1", None) && shrinks("stage2", None));
+        assert!(shrinks("stage2", Some("all")) && !shrinks("stage1", Some("0")));
+        assert!(shrinks("rvm", Some("rvm,stage1")) && !shrinks("moge", Some("rvm,stage1")));
+    }
 
     #[test]
     fn version_from_build_info() {

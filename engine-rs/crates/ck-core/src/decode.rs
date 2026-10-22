@@ -225,27 +225,41 @@ pub struct Prepped {
 /// preprocess_video_frame_views / preprocess_frame_dir_path at model_scale 1.0 with no linear adjust:
 /// `display` (3, h, w) in display coding (clipped to [0, 1]), or for scene-linear EXR folders `linear`.
 pub fn prep_frame(display_or_linear: Planar, exr_linear: bool, meta: &ClipMeta, denom: f32) -> Prepped {
+    prep_frame_views(display_or_linear, exr_linear, meta, denom, true)
+}
+
+/// `prep_frame`; without `need_model` only the display view (the RVM and foundation passes need no more,
+/// as the runtime's need_model=False readers). Spread over the cores.
+pub fn prep_frame_views(display_or_linear: Planar, exr_linear: bool, meta: &ClipMeta, denom: f32, need_model: bool) -> Prepped {
+    use rayon::prelude::*;
     let padded = pad_reflect101(&display_or_linear, meta.pad);
-    let mut display = Vec::with_capacity(padded.data.len());
-    let mut model = Vec::with_capacity(padded.data.len());
-    // loop: HOT-PATH-OK — one pass per frame over its padded samples
-    for &v in &padded.data {
-        let (disp, lin) = if exr_linear { (linear_to_srgb(v.max(0.0)).clamp(0.0, 1.0), v) } else {
-            let d = v.clamp(0.0, 1.0);
-            (d, srgb_to_linear(d))
-        };
-        display.push(half::bf16::from_f32(disp));
-        model.push(half::bf16::from_f32(linear_to_asinh(lin, denom)));
-    }
+    let display_of = |v: f32| if exr_linear { linear_to_srgb(v.max(0.0)).clamp(0.0, 1.0) } else { v.clamp(0.0, 1.0) };
+    let display: Vec<half::bf16> = padded.data.par_iter().with_min_len(1 << 14).map(|&v| half::bf16::from_f32(display_of(v))).collect();
+    let model: Vec<half::bf16> = if need_model {
+        padded
+            .data
+            .par_iter()
+            .with_min_len(1 << 14)
+            .map(|&v| {
+                let lin = if exr_linear { v } else { srgb_to_linear(v.clamp(0.0, 1.0)) };
+                half::bf16::from_f32(linear_to_asinh(lin, denom))
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     Prepped { model, display }
 }
 
 /// Sequential frames of a clip (video or folder), decoded and preprocessed in order.
 pub struct FrameReader {
+    /// measured: seconds decoding + preprocessing
+    pub seconds: f64,
     meta: ClipMeta,
     video: Option<VideoDecoder>,
     next: usize,
     denom: f32,
+    need_model: bool,
 }
 
 impl FrameReader {
@@ -254,7 +268,13 @@ impl FrameReader {
             crate::clip::Source::Video(p) => Some(VideoDecoder::open(p, meta.w, meta.h, meta.num_frames)?),
             crate::clip::Source::Frames(_) => None,
         };
-        Ok(FrameReader { meta: meta.clone(), video, next: 0, denom: crate::color::asinh_denom() })
+        Ok(FrameReader { seconds: 0.0, meta: meta.clone(), video, next: 0, denom: crate::color::asinh_denom(), need_model: true })
+    }
+
+    /// Only the display view (the RVM / foundation passes).
+    pub fn display_only(mut self) -> FrameReader {
+        self.need_model = false;
+        self
     }
 
     /// The next frame (None after num_frames).
@@ -262,6 +282,7 @@ impl FrameReader {
         if self.next >= self.meta.num_frames {
             return Ok(None);
         }
+        let t0 = std::time::Instant::now();
         let img = match (&mut self.video, &self.meta.source) {
             (Some(v), _) => {
                 let rgb = v.next_rgb()?;
@@ -271,14 +292,70 @@ impl FrameReader {
                 let p = &paths[self.next];
                 let img = read_image_rgb(p)?;
                 if (img.h, img.w) != (self.meta.h, self.meta.w) {
-                    return Err(Error::input(format!("{}: frame size {}x{} differs from the first frame's {}x{}", p.display(), img.w, img.h, self.meta.w, self.meta.h)));
+                    return Err(Error::input(format!(
+                        "{}: frame size {}x{} differs from the first frame's {}x{}",
+                        p.display(),
+                        img.w,
+                        img.h,
+                        self.meta.w,
+                        self.meta.h
+                    )));
                 }
                 img
             }
             _ => unreachable!(),
         };
         self.next += 1;
-        Ok(Some(prep_frame(img, self.meta.exr_linear, &self.meta, self.denom)))
+        let p = prep_frame_views(img, self.meta.exr_linear, &self.meta, self.denom, self.need_model);
+        self.seconds += t0.elapsed().as_secs_f64();
+        Ok(Some(p))
+    }
+}
+
+/// A FrameReader on its own thread, a few frames ahead (the runtime prefetches its prepass chunks the same way):
+/// decoding overlaps the networks.
+pub struct Prefetch {
+    rx: std::sync::mpsc::Receiver<Result<Prepped, Error>>,
+    seconds: std::sync::Arc<std::sync::Mutex<f64>>,
+    _thread: std::thread::JoinHandle<()>,
+}
+
+impl Prefetch {
+    pub fn new(mut reader: FrameReader, depth: usize) -> Prefetch {
+        let (tx, rx) = std::sync::mpsc::sync_channel(depth);
+        let seconds = std::sync::Arc::new(std::sync::Mutex::new(0.0));
+        let s2 = seconds.clone();
+        let thread = std::thread::spawn(move || {
+            // loop: SERIAL-REQUIRED — frames decode in order; ends at the clip's end, an error, or a dropped receiver
+            loop {
+                let item = reader.next();
+                *s2.lock().unwrap() = reader.seconds;
+                let stop = !matches!(item, Ok(Some(_)));
+                let msg = match item {
+                    Ok(Some(p)) => Ok(p),
+                    Ok(None) => break,
+                    Err(e) => Err(e),
+                };
+                if tx.send(msg).is_err() || stop {
+                    break;
+                }
+            }
+        });
+        Prefetch { rx, seconds, _thread: thread }
+    }
+
+    /// The next frame, or None at the end.
+    pub fn next(&mut self) -> Result<Option<Prepped>, Error> {
+        match self.rx.recv() {
+            Ok(Ok(p)) => Ok(Some(p)),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Ok(None),
+        }
+    }
+
+    /// Seconds the decoding thread spent (decode + preprocessing).
+    pub fn seconds(&self) -> f64 {
+        *self.seconds.lock().unwrap()
     }
 }
 
@@ -294,18 +371,31 @@ pub fn prep_hint(still: Still, meta: &ClipMeta) -> Vec<f32> {
     let (h, w, g): (usize, usize, Vec<f32>) = match still {
         Still::U8 { ch, h, w, data } => {
             let g = (0..h * w)
-                .map(|i| if ch >= 3 { gray_int(data[i * ch] as u32, data[i * ch + 1] as u32, data[i * ch + 2] as u32) as f32 / 255.0 } else { data[i * ch] as f32 / 255.0 })
+                .map(|i| {
+                    if ch >= 3 {
+                        gray_int(data[i * ch] as u32, data[i * ch + 1] as u32, data[i * ch + 2] as u32) as f32 / 255.0
+                    } else {
+                        data[i * ch] as f32 / 255.0
+                    }
+                })
                 .collect();
             (h, w, g)
         }
         Still::U16 { ch, h, w, data } => {
             let g = (0..h * w)
-                .map(|i| if ch >= 3 { gray_int(data[i * ch] as u32, data[i * ch + 1] as u32, data[i * ch + 2] as u32) as f32 / 65535.0 } else { data[i * ch] as f32 / 65535.0 })
+                .map(|i| {
+                    if ch >= 3 {
+                        gray_int(data[i * ch] as u32, data[i * ch + 1] as u32, data[i * ch + 2] as u32) as f32 / 65535.0
+                    } else {
+                        data[i * ch] as f32 / 65535.0
+                    }
+                })
                 .collect();
             (h, w, g)
         }
         Still::F32 { ch, h, w, data } => {
-            let g = (0..h * w).map(|i| if ch >= 3 { data[i * ch + 2] * 0.114 + data[i * ch + 1] * 0.587 + data[i * ch] * 0.299 } else { data[i * ch] }).collect();
+            let g =
+                (0..h * w).map(|i| if ch >= 3 { data[i * ch + 2] * 0.114 + data[i * ch + 1] * 0.587 + data[i * ch] * 0.299 } else { data[i * ch] }).collect();
             (h, w, g)
         }
     };
@@ -330,7 +420,15 @@ pub fn load_initial_hint(path: &Path, meta: &ClipMeta) -> Result<Vec<f32>, Error
         None
     };
     let file = file.ok_or_else(|| Error::input(format!("No hint frame found at {}", path.display())))?;
-    let pick = |ch: usize| if ch == 4 { 3 } else if ch == 3 { 2 } else { 0 }; // BGR(A) index 0 = blue = RGB index 2
+    let pick = |ch: usize| {
+        if ch == 4 {
+            3
+        } else if ch == 3 {
+            2
+        } else {
+            0
+        }
+    }; // BGR(A) index 0 = blue = RGB index 2
     let (h, w, g): (usize, usize, Vec<f32>) = match read_still(&file)? {
         Still::U8 { ch, h, w, data } => (h, w, (0..h * w).map(|i| data[i * ch + pick(ch)] as f32 / 255.0).collect()),
         Still::U16 { ch, h, w, data } => (h, w, (0..h * w).map(|i| data[i * ch + pick(ch)] as f32 / 65535.0).collect()),

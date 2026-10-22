@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# End-to-end check of corridorkey-engine on ONNX Runtime's CPU provider at tiny size (no GPU), memory-capped.
+# End-to-end check of corridorkey-engine on ONNX Runtime's CPU provider at tiny size (no GPU), memory-capped
+# by a guard that stops the engine itself before the kernel would (CK_MEMRUN: `memrun.sh <GB> <cmd...>`;
+# Marcy's machine: ~/.cache/claude-scratch/tools/memrun.sh).
 #
 #   engine-rs/tools/e2e_cpu.sh MODELS_DIR CLIP_DIR REF_NPZ [WORK_DIR]
 #
@@ -35,9 +37,11 @@ job() { # id input options-json
   echo '{"cmd":"quit"}'
 } > "$WORK/requests.jsonl"
 
-systemd-run --user --scope --quiet --collect -p MemoryMax=8G -p MemorySwapMax=0 -- \
-  env CUDA_VISIBLE_DEVICES= /usr/bin/time -v -o "$WORK/time.txt" \
-  "$BIN" --models "$MODELS" --device cpu < "$WORK/requests.jsonl" > "$WORK/replies.jsonl" 2> "$WORK/stderr.log"
+MEMRUN=${CK_MEMRUN:-$HOME/.cache/claude-scratch/tools/memrun.sh}
+[ -x "$MEMRUN" ] || { echo "no memory guard: set CK_MEMRUN to a memrun.sh-style wrapper" >&2; exit 2; }
+# the redirections happen inside the guarded command (a background job's own stdin is /dev/null)
+"$MEMRUN" 8 bash -c 'exec env CUDA_VISIBLE_DEVICES= /usr/bin/time -v -o "$1/time.txt" "$2" --models "$3" --device cpu < "$1/requests.jsonl" > "$1/replies.jsonl" 2> "$1/stderr.log"' \
+  _ "$WORK" "$BIN" "$MODELS"
 grep -E "Maximum resident|Elapsed" "$WORK/time.txt"
 
 python3 -I - "$WORK/replies.jsonl" <<'EOF'

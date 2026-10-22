@@ -10,7 +10,7 @@
 //! stage 2, with only that phase's networks loaded.
 use crate::clip::{probe_frame_dir, probe_video, raw_clip_name, ClipMeta, Source};
 use crate::color::{bf16_round, f16_round, LinearAdjust};
-use crate::decode::{load_initial_hint, FrameReader, HintReader, Prepped};
+use crate::decode::{load_initial_hint, FrameReader, HintReader, Prefetch, Prepped};
 use crate::hann::{taper_weights, window_starts, BatonBlend};
 use crate::image::{resize_area, resize_bilinear, Planar};
 use crate::job::{suffix, JobConfig};
@@ -80,6 +80,8 @@ pub struct Pipeline {
     nets: HashMap<&'static str, Net>,
     /// TensorRT jobs: networks TensorRT could not build, and why (they run on CUDA)
     trt_fallbacks: BTreeMap<&'static str, String>,
+    /// measured once per process: graphics memory the CUDA context and libraries take (bytes), outside any arena
+    gpu_overhead: Option<u64>,
 }
 
 pub struct JobResult {
@@ -105,7 +107,13 @@ struct F16File {
 
 impl F16File {
     fn create(p: &Path, frame: usize) -> Result<F16File, Error> {
-        let f = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(p).map_err(|e| Error::engine(format!("{}: {e}", p.display())))?;
+        let f = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(p)
+            .map_err(|e| Error::engine(format!("{}: {e}", p.display())))?;
         Ok(F16File { f, frame })
     }
     fn put(&mut self, t: usize, v: &[f32]) -> Result<(), Error> {
@@ -115,7 +123,10 @@ impl F16File {
     /// frames t0..t1 as float32, appended to `out`
     fn get(&mut self, t0: usize, t1: usize, out: &mut Vec<f32>) -> Result<(), Error> {
         let mut buf = vec![0u8; (t1 - t0) * self.frame * 2];
-        self.f.seek(SeekFrom::Start((t0 * self.frame * 2) as u64)).and_then(|_| self.f.read_exact(&mut buf)).map_err(|e| Error::engine(format!("temp file: {e}")))?;
+        self.f
+            .seek(SeekFrom::Start((t0 * self.frame * 2) as u64))
+            .and_then(|_| self.f.read_exact(&mut buf))
+            .map_err(|e| Error::engine(format!("temp file: {e}")))?;
         out.extend(buf.chunks_exact(2).map(|c| half::f16::from_le_bytes([c[0], c[1]]).to_f32()));
         Ok(())
     }
@@ -129,7 +140,13 @@ struct F32File {
 
 impl F32File {
     fn create(p: &Path, frame: usize) -> Result<F32File, Error> {
-        let f = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(p).map_err(|e| Error::engine(format!("{}: {e}", p.display())))?;
+        let f = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(p)
+            .map_err(|e| Error::engine(format!("{}: {e}", p.display())))?;
         Ok(F32File { f, frame })
     }
     fn put(&mut self, t: usize, v: &[f32]) -> Result<(), Error> {
@@ -138,26 +155,32 @@ impl F32File {
     }
     fn get(&mut self, t0: usize, t1: usize, out: &mut Vec<f32>) -> Result<(), Error> {
         let mut buf = vec![0u8; (t1 - t0) * self.frame * 4];
-        self.f.seek(SeekFrom::Start((t0 * self.frame * 4) as u64)).and_then(|_| self.f.read_exact(&mut buf)).map_err(|e| Error::engine(format!("temp file: {e}")))?;
+        self.f
+            .seek(SeekFrom::Start((t0 * self.frame * 4) as u64))
+            .and_then(|_| self.f.read_exact(&mut buf))
+            .map_err(|e| Error::engine(format!("temp file: {e}")))?;
         out.extend(buf.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])));
         Ok(())
     }
 }
 
 fn bf16_to_f32(v: &[half::bf16], out: &mut Vec<f32>) {
-    out.extend(v.iter().map(|x| x.to_f32()));
+    use rayon::prelude::*;
+    let start = out.len();
+    out.resize(start + v.len(), 0.0);
+    out[start..].par_iter_mut().with_min_len(1 << 14).zip(v.par_iter()).for_each(|(o, x)| *o = x.to_f32());
 }
 
 /// Sequential window access to the decoded frames (SequentialVideoWindowReader / ...FrameDirWindowReader).
 struct WindowReader {
-    reader: FrameReader,
+    reader: Prefetch,
     cache: BTreeMap<usize, Prepped>,
     next: usize,
 }
 
 impl WindowReader {
     fn open(meta: &ClipMeta) -> Result<WindowReader, Error> {
-        Ok(WindowReader { reader: FrameReader::open(meta)?, cache: BTreeMap::new(), next: 0 })
+        Ok(WindowReader { reader: Prefetch::new(FrameReader::open(meta)?, 8), cache: BTreeMap::new(), next: 0 })
     }
     /// Frames t0..t1 (decoding up to t1); frames before t0 are dropped.
     fn window(&mut self, t0: usize, t1: usize) -> Result<Vec<Prepped>, Error> {
@@ -200,7 +223,7 @@ fn f1(v: f64) -> String {
 
 impl Pipeline {
     pub fn new(rt: &'static Runtime, models: ModelSet) -> Pipeline {
-        Pipeline { rt, models, key: None, nets: HashMap::new(), trt_fallbacks: BTreeMap::new() }
+        Pipeline { rt, models, key: None, nets: HashMap::new(), trt_fallbacks: BTreeMap::new(), gpu_overhead: None }
     }
 
     /// Drop every loaded network (frees the graphics memory their sessions hold).
@@ -211,7 +234,14 @@ impl Pipeline {
     }
 
     /// Make sure `pieces` are loaded for `key` (anything loaded for another key is dropped first).
-    fn ensure(&mut self, key: &ModelKey, pieces: &[&'static str], trt: Option<&dyn Fn(&str) -> TrtSettings>, sink: &mut dyn Sink, job_stage: &str) -> Result<(), Error> {
+    fn ensure(
+        &mut self,
+        key: &ModelKey,
+        pieces: &[&'static str],
+        trt: Option<&dyn Fn(&str) -> TrtSettings>,
+        sink: &mut dyn Sink,
+        job_stage: &str,
+    ) -> Result<(), Error> {
         if self.key.as_ref() != Some(key) {
             self.nets.clear();
             self.trt_fallbacks.clear();
@@ -230,21 +260,57 @@ impl Pipeline {
                 .ok_or_else(|| Error::assets(format!("missing ONNX model {piece} ({}) in {}", key.precision.name(), self.models.dir.display())))?;
             let t = Instant::now();
             let settings = trt.map(|f| f(piece));
-            let net = match Net::load(self.rt, piece, key.provider, key.precision, &file, settings.as_ref(), key.vram_cap) {
+            let cap = self.arena_limit(key, piece);
+            let net = match Net::load(self.rt, piece, key.provider, key.precision, &file, settings.as_ref(), cap) {
                 Ok(n) => n,
                 // a network TensorRT can't build runs on CUDA (the same file and precision); the reply says so
                 Err(e) if key.provider == Provider::TensorRt => {
                     let why = e.message.lines().next().unwrap_or("").to_string();
                     sink.log(&format!("  TensorRT could not build {piece}; it runs on CUDA: {why}"));
                     self.trt_fallbacks.insert(piece, why);
-                    Net::load(self.rt, piece, Provider::Cuda, key.precision, &file, None, key.vram_cap)?
+                    Net::load(self.rt, piece, Provider::Cuda, key.precision, &file, None, cap)?
                 }
                 Err(e) => return Err(e),
             };
-            eprintln!("  loaded {piece} ({}, {}) in {:.1} s: {}", net.provider.name(), key.precision.name(), t.elapsed().as_secs_f64(), file.display());
+            eprintln!(
+                "  loaded {piece} ({}, {}) in {:.1} s, arena limit {}: {}",
+                net.provider.name(),
+                key.precision.name(),
+                t.elapsed().as_secs_f64(),
+                cap.map(|c| format!("{:.2} GiB", c as f64 / 1073741824.0)).unwrap_or_else(|| "none".into()),
+                file.display()
+            );
             self.nets.insert(piece, net);
+            if self.gpu_overhead.is_none() && key.vram_cap.is_some() {
+                // the first session made the CUDA context: what this process holds beyond its weights
+                if let Some((_, _, own)) = crate::gpu::budget() {
+                    let w = crate::runtime::model_bytes(&file);
+                    self.gpu_overhead = Some(own.saturating_sub(w));
+                    eprintln!(
+                        "  graphics memory outside the arenas (CUDA context, libraries): {:.2} GiB measured",
+                        own.saturating_sub(w) as f64 / 1073741824.0
+                    );
+                }
+            }
         }
         Ok(())
+    }
+
+    /// The job's budget for one session's arena, so the whole process stays within it: the budget minus the
+    /// CUDA context (measured after the first session; 0.5 GiB assumed until then), minus every other network's
+    /// weights (their size on disk), minus a 0.5 GiB reserve (measured: without it the process peaked 0.17-0.22 GiB
+    /// over a 12 GiB budget: memory the arenas don't account for). The arenas give their working memory back after
+    /// each run.
+    fn arena_limit(&self, key: &ModelKey, piece: &str) -> Option<u64> {
+        let cap = key.vram_cap?;
+        let others: u64 = crate::runtime::PIECES
+            .iter()
+            .filter(|p| **p != piece)
+            .filter_map(|p| self.models.file(p, key.precision))
+            .map(|f| crate::runtime::model_bytes(&f))
+            .sum();
+        let overhead = self.gpu_overhead.unwrap_or(512 << 20);
+        Some(cap.saturating_sub(overhead).saturating_sub(others).saturating_sub(512 << 20).max(256 << 20))
     }
 
     fn net(&mut self, piece: &str) -> Result<&mut Net, Error> {
@@ -386,7 +452,13 @@ impl Pipeline {
         for name in &job.outputs {
             let sfx = suffix(name, job.despill_strength);
             let wr: Box<dyn Writer> = if job.exr {
-                let ch = if name == "cutout" { 4 } else if name == "alpha" { 1 } else { 3 };
+                let ch = if name == "cutout" {
+                    4
+                } else if name == "alpha" {
+                    1
+                } else {
+                    3
+                };
                 let ty = if job.exr_float { ExrType::Float } else { ExrType::Half };
                 Box::new(ExrWriter::new(&job.output_dir.join(format!("{clip}_{sfx}_exr")), w, h, ch, ty, &sfx)?)
             } else {
@@ -398,34 +470,61 @@ impl Pipeline {
             writers.push((name.clone(), wr));
         }
         let settings_path = job.output_dir.join(format!("{clip}_settings.txt"));
-        let text = crate::settings::settings_text(&crate::settings::SettingsLog {
-            input: &job.input,
-            output_dir: &job.output_dir.to_string_lossy(),
-            w,
-            h,
-            fps,
-            outputs: &job.outputs,
-            output_format: if job.exr { "exr" } else { "video" },
-            exr_dtype: if job.exr_float { "float" } else { "half" },
-            hint_first_frame: job.hint_first_frame.as_deref(),
-            hint_video: job.hint_video.as_deref(),
-            hint_quality: job.hint_quality,
-            carry_hint: job.carry_hint,
-            carry_hint_quality: job.carry_hint_quality,
-            despill_strength: job.despill_strength,
-            cutout_linear: job.cutout_linear,
-            frame_dir_linear: job.frame_dir_linear,
-            hann_chunk: chunk,
-            hann_stride: stride,
-            low_vram,
-            num_frames: job.num_frames,
-        });
-        if let Err(e) = std::fs::write(&settings_path, text) {
-            sink.log(&format!("[WARNING] Failed to write settings file: {e}"));
-        }
+        let write_settings = |chunk: usize, stride: usize, low_vram: bool, sink: &mut dyn Sink| {
+            let text = crate::settings::settings_text(&crate::settings::SettingsLog {
+                input: &job.input,
+                output_dir: &job.output_dir.to_string_lossy(),
+                w,
+                h,
+                fps,
+                outputs: &job.outputs,
+                output_format: if job.exr { "exr" } else { "video" },
+                exr_dtype: if job.exr_float { "float" } else { "half" },
+                hint_first_frame: job.hint_first_frame.as_deref(),
+                hint_video: job.hint_video.as_deref(),
+                hint_quality: job.hint_quality,
+                carry_hint: job.carry_hint,
+                carry_hint_quality: job.carry_hint_quality,
+                despill_strength: job.despill_strength,
+                cutout_linear: job.cutout_linear,
+                frame_dir_linear: job.frame_dir_linear,
+                hann_chunk: chunk,
+                hann_stride: stride,
+                low_vram,
+                num_frames: job.num_frames,
+            });
+            if let Err(e) = std::fs::write(&settings_path, text) {
+                sink.log(&format!("[WARNING] Failed to write settings file: {e}"));
+            }
+        };
+        write_settings(chunk, stride, low_vram, sink);
 
         let mut report = FrameReport { total: t_all, last_sent: None, last_done: None };
-        let res = self.keying(job, &meta, &key, trt_ref, load_stage, chunk, stride, low_vram, &clip, &mut writers, &mut report, sink);
+        let mut res;
+        // An automatic window that runs out of graphics memory before any frame reached the writers is halved and
+        // the job restarted (the PyTorch table the window comes from is not ONNX Runtime's measured memory,
+        // docs/ENGINE_RUST.md).
+        // loop: SERIAL-REQUIRED — one attempt at a time; at most log2(80) ≈ 7 rounds
+        loop {
+            res = self.keying(job, &meta, &key, trt_ref, load_stage, chunk, stride, low_vram, &clip, &mut writers, &mut report, sink);
+            let nothing_written = writers.iter().all(|(_, w)| w.frames() == 0);
+            match &res {
+                Err(e) if e.code == "oom" && !job.manual && nothing_written && chunk > 1 => {
+                    let (old_chunk, old_stride) = (chunk, stride);
+                    chunk = (chunk / 2).max(1);
+                    stride = (chunk / 2).max(1);
+                    sink.log(&format!("  out of graphics memory at window {old_chunk}/{old_stride}: retrying at {chunk}/{stride}"));
+                    sink.send(json!({
+                        "type": "memory", "hann_chunk": chunk, "hann_stride": stride, "low_vram": low_vram, "auto": true,
+                        "provider": key.provider.name(), "retry_after_oom": {"hann_chunk": old_chunk, "hann_stride": old_stride, "message": e.message},
+                        "budget_cap_gb": job.vram_budget_gb
+                    }));
+                    write_settings(chunk, stride, low_vram, sink);
+                    self.unload();
+                }
+                _ => break,
+            }
+        }
         // release every writer (its encoder finishes the file), the first failure wins
         let mut rel: Result<(), Error> = Ok(());
         // loop: NOT-WORTH — at most four writers
@@ -443,13 +542,25 @@ impl Pipeline {
         rel?;
         report.report(&writers, sink, true);
         sink.log(&format!("  wrote {} output video(s) for {clip} ({t_all} frames @ {w}x{h})", writers.len()));
-        Ok(JobResult { outputs: writers.iter().map(|(_, w)| w.path().to_string_lossy().into_owned()).collect(), settings_file: settings_path.to_string_lossy().into_owned() })
+        Ok(JobResult {
+            outputs: writers.iter().map(|(_, w)| w.path().to_string_lossy().into_owned()).collect(),
+            settings_file: settings_path.to_string_lossy().into_owned(),
+        })
     }
 
     /// The networks' key for this job and, for TensorRT, (cache folder, already built). Sends the
     /// `provider` reply.
     #[allow(clippy::too_many_arguments)]
-    fn job_key(&mut self, job: &JobConfig, base: &ModelKey, sh: usize, sw: usize, tc: usize, _low_vram: bool, sink: &mut dyn Sink) -> Result<(ModelKey, Option<(PathBuf, bool)>), Error> {
+    fn job_key(
+        &mut self,
+        job: &JobConfig,
+        base: &ModelKey,
+        sh: usize,
+        sw: usize,
+        tc: usize,
+        _low_vram: bool,
+        sink: &mut dyn Sink,
+    ) -> Result<(ModelKey, Option<(PathBuf, bool)>), Error> {
         let mut msg = json!({"type": "provider", "provider": base.provider.name(), "precision": base.precision.name(), "tensorrt_requested": job.tensorrt});
         if !job.tensorrt {
             sink.send(msg);
@@ -459,7 +570,11 @@ impl Pipeline {
             msg["fallback_reason"] = json!(why);
         };
         if base.provider != Provider::Cuda || !self.rt.tensorrt_ep {
-            let why = if base.provider != Provider::Cuda { "TensorRT needs the graphics card".to_string() } else { "this ONNX Runtime has no TensorRT provider".to_string() };
+            let why = if base.provider != Provider::Cuda {
+                "TensorRT needs the graphics card".to_string()
+            } else {
+                "this ONNX Runtime has no TensorRT provider".to_string()
+            };
             fallback(why, &mut msg);
             sink.send(msg);
             return Ok((base.clone(), None));
@@ -522,6 +637,14 @@ impl Pipeline {
         sink: &mut dyn Sink,
     ) -> Result<(), Error> {
         let t_all = meta.num_frames;
+        let job_t0 = Instant::now();
+        let mut decode_s = 0.0;
+        let mut render_s = 0.0;
+        self.nets.values_mut().for_each(|n| {
+            n.run_s = 0.0;
+            n.convert_s = 0.0;
+            n.calls = 0;
+        });
         let (sh, sw) = (meta.shape_h, meta.shape_w);
         let (h64, w64, h16, w16) = (sh / 64, sw / 64, sh / 16, sw / 16);
         let initial_hint = match crate::clip::none_path(job.hint_first_frame.as_deref()) {
@@ -558,7 +681,7 @@ impl Pipeline {
             sink.log(&format!("    RVM continuous prepass: T={t_all}, chunk={}, input={we}x{he}, grid={}x{}", chunk.clamp(1, 8), we / 16, he / 16));
             let ntok = 1 + (he / 16) * (we / 16);
             let mut state = vec![0f32; ntok * RVM_CH];
-            let mut reader = FrameReader::open(meta)?;
+            let mut reader = Prefetch::new(FrameReader::open(meta)?.display_only(), 8);
             let mut t = 0;
             let net = self.net("rvm")?;
             // loop: SERIAL-REQUIRED — RVM is recurrent: each frame's step takes the previous state
@@ -578,6 +701,7 @@ impl Pipeline {
             if t != t_all {
                 return Err(Error::input(format!("{}: decoded only {t}/{t_all} requested frames", job.input)));
             }
+            decode_s += reader.seconds();
         }
 
         // foundations prepass (low-VRAM only)
@@ -590,7 +714,7 @@ impl Pipeline {
             sink.log(&format!("    frozen VFM prepass: T={t_all}, grid={w64}x{h64}, chunk={fchunk}"));
             let mut cf = F32File::create(&cradio_path, CRADIO_CH * h64 * w64)?;
             let mut mf = F32File::create(&moge_path, MOGE_CH * h64 * w64)?;
-            let mut reader = FrameReader::open(meta)?;
+            let mut reader = Prefetch::new(FrameReader::open(meta)?.display_only(), 8);
             let mut t0 = 0;
             // loop: SERIAL-REQUIRED — chunks of 4 frames, decoded in order
             while t0 < t_all {
@@ -608,6 +732,7 @@ impl Pipeline {
                 }
                 t0 += n;
             }
+            decode_s += reader.seconds();
             found_files = Some((cf, mf));
             self.unload();
             self.ensure(key, &["stage1"], trt, sink, load_stage)?;
@@ -732,18 +857,21 @@ impl Pipeline {
             }
             drop(baton);
             let ready = blend.flush_before(next_start);
+            let tr = Instant::now();
             self.baton_frames(ready, &mut baton_file, &mut stage2_frames, meta, &ro, &checker, writers, report, sink)?;
+            render_s += tr.elapsed().as_secs_f64();
             sink.log(&format!("      window {}/{} [{t0}:{t1}]", i + 1, starts.len()));
             sink.send(json!({"type": "progress", "stage": "keying", "p": ((i + 1) as f64 / starts.len() as f64 * 1e4).round() / 1e4, "detail": format!("window {}/{} done", i + 1, starts.len())}));
         }
         let ready = blend.flush_before(t_all + 1);
         self.baton_frames(ready, &mut baton_file, &mut stage2_frames, meta, &ro, &checker, writers, report, sink)?;
 
+        decode_s += reader.reader.seconds();
         // low-VRAM phase 2: stage 2 over the stored states
         if let Some(mut bf) = baton_file {
             self.unload();
             self.ensure(key, &["stage2"], trt, sink, load_stage)?;
-            let mut reader = FrameReader::open(meta)?;
+            let mut reader = Prefetch::new(FrameReader::open(meta)?, 8);
             // loop: SERIAL-REQUIRED — frames in order to the writers
             for t in 0..t_all {
                 let f = reader.next()?.ok_or_else(|| Error::input("short read".into()))?;
@@ -751,7 +879,18 @@ impl Pipeline {
                 bf.get(t, t + 1, &mut b)?;
                 self.stage2_frame(&f.model, b, meta, &ro, &checker, writers, report, sink)?;
             }
+            decode_s += reader.seconds();
         }
+        // measured time per part (stage-2 time includes its render and hand-off to the writers)
+        let mut parts: Vec<String> = vec![format!("decode+prep {decode_s:.1} s")];
+        // loop: NOT-WORTH — five networks
+        for p in crate::runtime::PIECES {
+            if let Some(n) = self.nets.get(p) {
+                parts.push(format!("{p} {:.1} s run + {:.1} s convert ({} calls)", n.run_s, n.convert_s, n.calls));
+            }
+        }
+        parts.push(format!("stage 2 + render + write {render_s:.1} s"));
+        sink.log(&format!("  timing: {}; wall {:.1} s", parts.join(", "), job_t0.elapsed().as_secs_f64()));
         Ok(())
     }
 
@@ -770,7 +909,8 @@ impl Pipeline {
             radio.extend(resize_area(&p, hr, wr).data);
             moge.extend(resize_area(&p, hm, wm).data);
         }
-        let c = self.net("cradio")?.run(vec![("rgb", vec![n, 3, hr, wr], radio)])?.into_iter().next().ok_or_else(|| Error::engine("cradio: no output".into()))?;
+        let c =
+            self.net("cradio")?.run(vec![("rgb", vec![n, 3, hr, wr], radio)])?.into_iter().next().ok_or_else(|| Error::engine("cradio: no output".into()))?;
         let m = self.net("moge")?.run(vec![("rgb", vec![n, 3, hm, wm], moge)])?.into_iter().next().ok_or_else(|| Error::engine("moge: no output".into()))?;
         if c.0 != vec![n, CRADIO_CH, sh / 64, sw / 64] || m.0 != vec![n, MOGE_CH, sh / 64, sw / 64] {
             return Err(Error::engine(format!("foundation shapes {:?} / {:?}", c.0, m.0)));
@@ -846,6 +986,10 @@ pub fn trt_root() -> PathBuf {
             return PathBuf::from(p);
         }
     }
-    let base = std::env::var("XDG_CACHE_HOME").ok().filter(|s| !s.is_empty()).map(PathBuf::from).unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into())).join(".cache"));
+    let base = std::env::var("XDG_CACHE_HOME")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into())).join(".cache"));
     base.join("corridorkey-desktop").join("tensorrt")
 }

@@ -48,7 +48,12 @@ impl Error {
     pub fn ort(what: &str, e: impl std::fmt::Display) -> Error {
         let m = e.to_string();
         let low = m.to_lowercase();
-        if low.contains("out of memory") || low.contains("failed to allocate") || low.contains("cudaerrormemoryallocation") || low.contains("bad_alloc") {
+        if low.contains("out of memory")
+            || low.contains("failed to allocate")
+            || low.contains("cudaerrormemoryallocation")
+            || low.contains("bad_alloc")
+            || low.contains("smaller than requested bytes")
+        {
             Error::oom(format!("The graphics card ran out of memory ({what}): {}", first_line(&m)))
         } else {
             Error::engine(format!("{what}: {m}"))

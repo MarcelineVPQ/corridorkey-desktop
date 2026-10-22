@@ -10,9 +10,11 @@ talk in **JSON lines**, one JSON object per line, UTF-8.
 - **stderr:** logs, tracebacks and library warnings. The app keeps the last
   lines for an error report and never parses them.
 
-Any engine that speaks this protocol works with the app: the PyTorch engine
-today (`engine/ck_engine.py`, run with the CorridorKey2.0 checkout's venv and `--package-root`), an ONNX Runtime engine if the spike
-(`docs/ONNX_SPIKE.md` on the `spike/onnx` branch of the CorridorKey2.0 clone) says it is worth it.
+Any engine that speaks this protocol works with the app: the Rust engine on
+ONNX Runtime (`engine-rs/`, `corridorkey-engine --models DIR`, docs/ENGINE_RUST.md;
+the default when it is set up) and the PyTorch engine (`engine/ck_engine.py`,
+run with the CorridorKey2.0 checkout's venv and `--package-root`), kept until
+the Rust engine replaces it.
 
 **Versions.** The pong carries `"protocol"`. New fields are additive, and the
 app ignores fields it doesn't know. The app refuses an engine whose protocol it
@@ -31,7 +33,7 @@ while the queue does:
 Jobs run one at a time, in the order they arrive. A `cancel` for a job still
 waiting removes it (reply: error code `cancelled`). The running job cannot be
 interrupted inside a window, so **cancelling the running job means the app
-kills the engine** (SIGKILL; this is a Python process, not Electron). Each job
+kills the engine** (SIGKILL of its process group: the engine and its ffmpeg writers). Each job
 writes its temporary files into its own `temp_dir`, which the app deletes after
 a kill.
 
@@ -56,6 +58,8 @@ a kill.
 | `carry_hint_quality` | 0–1 | 0.95 |
 | `hann_chunk`, `hann_stride` | int | a manual window; neither set and no `low_vram` = automatic from free graphics memory |
 | `low_vram` | bool | staged low-memory mode |
+| `vram_budget_gb` | number | cap on the graphics memory this job may use (the automatic window is chosen within it; the engine refuses to go past it). Absent = the free memory |
+| `tensorrt` | bool | Rust engine: run on TensorRT (opt-in, false). Engines are built once per resolution range and cached; a network TensorRT can't build runs on CUDA, and the `provider` reply says so |
 | `outputs` | list | any of `alpha fg checker cutout` (`alpha fg`) |
 | `output_format` | `video` \| `exr` | `video` |
 | `exr_dtype` | `half` \| `float` | `half` |
@@ -72,7 +76,12 @@ a kill.
 ← {"type":"pong","version":"0.1.0","protocol":1,"engine":"pytorch","device":"cuda",
    "gpu":"NVIDIA GeForce RTX 5080","vram_total_mb":16303,"python":"3.12.13","torch":"2.9.1+cu128",
    "assets":{"weights":true,"foundation_stats":true,"rvm":true,"moge":true,"cradio":true}}
-← {"type":"progress","id":"j1","stage":"load|probe|rvm|foundations|keying","p":0.42,"detail":"window 3/9"}
+← {"type":"pong","version":"0.2.0","protocol":1,"engine":"onnxruntime","device":"cuda","gpu":"NVIDIA GeForce RTX 5080",
+   "vram_total_mb":16303,"provider":"cuda","precision":"fp16","ort":"1.31.0","tensorrt_available":true,
+   "models_dir":"/models","assets":{"cradio":true,"moge":true,"rvm":true,"stage1":true,"stage2":true},"python":null,"torch":null}
+← {"type":"progress","id":"j1","stage":"load|optimize|probe|rvm|foundations|keying","p":0.42,"detail":"window 3/9"}
+← {"type":"provider","id":"j1","provider":"cuda|tensorrt|tensorrt+cuda|cpu","precision":"fp16","tensorrt_requested":false,
+   "fallback_reason":"...","range":"h768-1152_w1280-2176_t9-24","cache":"build|reused","pieces":{...},"fallbacks":{...}}
 ← {"type":"clip","id":"j1","width":1920,"height":1080,"fps":23.976,"frames":240}
 ← {"type":"memory","id":"j1","hann_chunk":24,"hann_stride":12,"low_vram":false,"auto":true,
    "budget_gb":13.1,"estimate_gb":9.8}
@@ -89,7 +98,16 @@ a kill.
   (the slowest one). The writers encode on their own threads with a queue of
   at most 2 batches, so it trails the file on disk by at most 2 frames at the
   default batch of 1. At most 4 per second, plus the last frame.
-- `memory` is the window this job really uses, sent before stage 1 starts.
+- `memory` is the window this job really uses, sent before stage 1 starts. The
+  Rust engine adds `provider`, `free_gb` (what it saw), `budget_cap_gb` (the
+  job's `vram_budget_gb`), `budget_source` (`gpu`, or `host` on the CPU
+  provider) and `estimate_basis` (`pytorch-bf16-table`: the estimate is the
+  upstream runtime's PyTorch table, not an ONNX Runtime measurement).
+- `provider` (Rust engine, additive) says what really runs the job: the
+  provider and precision, and for TensorRT the shape range, whether its
+  engines are built or reused, and every network that fell back to CUDA, with why.
+- `optimize` (Rust engine, TensorRT only) is a one-time engine build for the
+  clip's shape range; ONNX Runtime reports no fraction for it, so it has no `p`.
 - A request the engine can't read is answered with
   `{"type":"error","code":"bad-request","message":"..."}` and the engine keeps
   running. After a job's `error` the engine also keeps running and takes the

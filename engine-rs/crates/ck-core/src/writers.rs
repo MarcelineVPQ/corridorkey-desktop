@@ -106,7 +106,16 @@ impl VideoWriter {
                 }
             }
         });
-        Ok(VideoWriter { path: path.to_path_buf(), channels, frame_len: w * h * channels, tx: Some(tx), thread: Some(thread), child: Some(child), err, frames: 0 })
+        Ok(VideoWriter {
+            path: path.to_path_buf(),
+            channels,
+            frame_len: w * h * channels,
+            tx: Some(tx),
+            thread: Some(thread),
+            child: Some(child),
+            err,
+            frames: 0,
+        })
     }
 }
 
@@ -273,7 +282,9 @@ mod tests {
                     -color_trc iec61966-2-1 -movflags +write_colr /o/shot_alpha.mp4";
         assert_eq!(a.join(" "), want.split_whitespace().collect::<Vec<_>>().join(" "));
         let c = ffmpeg_args(Path::new("/o/c.mov"), 24.0, 8, 8, &WriterConfig::default(), 4, "linear").join(" ");
-        assert!(c.contains("-pix_fmt bgra64le") && c.contains("-c:v prores_ks -profile:v 4 -pix_fmt yuva444p10le -threads 2") && c.contains("-color_trc linear"));
+        assert!(
+            c.contains("-pix_fmt bgra64le") && c.contains("-c:v prores_ks -profile:v 4 -pix_fmt yuva444p10le -threads 2") && c.contains("-color_trc linear")
+        );
     }
 
     #[test]

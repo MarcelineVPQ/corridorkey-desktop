@@ -6,7 +6,8 @@ pub fn read(path: &std::path::Path) -> Result<(Vec<usize>, Vec<f32>), String> {
     if buf.len() < 10 || &buf[..6] != b"\x93NUMPY" {
         return Err(format!("{}: not a .npy file", path.display()));
     }
-    let (hlen, start) = if buf[6] == 1 { (u16::from_le_bytes([buf[8], buf[9]]) as usize, 10) } else { (u32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]) as usize, 12) };
+    let (hlen, start) =
+        if buf[6] == 1 { (u16::from_le_bytes([buf[8], buf[9]]) as usize, 10) } else { (u32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]) as usize, 12) };
     let header = std::str::from_utf8(&buf[start..start + hlen]).map_err(|e| e.to_string())?;
     if header.contains("'fortran_order': True") {
         return Err("fortran order not supported".into());

@@ -72,9 +72,14 @@ impl Nvml {
                 return None;
             }
             let mut buf = [0 as c_char; 96];
-            let nm = if name(self.dev, buf.as_mut_ptr(), buf.len() as c_uint) == 0 { CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned() } else { "NVIDIA".into() };
+            let nm = if name(self.dev, buf.as_mut_ptr(), buf.len() as c_uint) == 0 {
+                CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned()
+            } else {
+                "NVIDIA".into()
+            };
             let mut dbuf = [0 as c_char; 96];
-            let dv = if drv(dbuf.as_mut_ptr(), dbuf.len() as c_uint) == 0 { CStr::from_ptr(dbuf.as_ptr()).to_string_lossy().into_owned() } else { String::new() };
+            let dv =
+                if drv(dbuf.as_mut_ptr(), dbuf.len() as c_uint) == 0 { CStr::from_ptr(dbuf.as_ptr()).to_string_lossy().into_owned() } else { String::new() };
             Some(GpuInfo { name: nm, total: m.total, free: m.free, driver: dv })
         }
     }
