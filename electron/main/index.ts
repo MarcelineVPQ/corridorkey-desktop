@@ -7,14 +7,15 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { EngineProcess } from "./engine";
 import { GPU_POLL_MS, readGpu } from "./gpu";
 import { expandPaths, probeClip, still, STILL_WIDTH, VIDEO_EXT } from "./media";
-import { Queue } from "./queue";
+import { clearJobTemps, Queue } from "./queue";
 import { checkCheckout, checkRustEngine, chooseEngine, loadSettings, saveSettings } from "./settings";
 import { readDesktopPalette, watchDesktopPalette } from "./desktopTheme";
 import { Updater } from "./updater";
 import { holdAppImageMountUntilExit } from "./appImageQuit";
-import type { Appearance, AppState, GpuInfo, Job, JobOptions, OutputName } from "../../src/shared/types";
+import type { AppState, GpuInfo, Job, JobOptions, OutputName } from "../../src/shared/types";
 import type { DesktopPalette } from "../../src/ui/theme/palette";
 import { IPC } from "./ipc";
+import { idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir } from "./validate";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const devServerUrl = process.env.ELECTRON_RENDERER_URL;
@@ -213,7 +214,8 @@ async function addPaths(paths: string[]): Promise<void> {
       id: randomUUID(),
       clip,
       options,
-      outputDir: outputDirFor(parent, clip.name),
+      // never a folder another queued clip of the same name writes to (its files have the same names)
+      outputDir: uniqueOutputDir(outputDirFor(parent, clip.name), path, queue.jobs),
       status: "waiting",
       stage: null,
       stageDetail: null,
@@ -242,8 +244,8 @@ function persist(): void {
 
 function registerIpc(): void {
   ipcMain.handle(IPC.getState, () => state());
-  // loop: NOT-WORTH — the dropped paths, once per drop
-  ipcMain.handle(IPC.addPaths, (_e, paths: string[]) => addPaths(paths.filter((p) => typeof p === "string")));
+  // Every handler checks its arguments (validate.ts): the page is sandboxed, but what it sends is still input.
+  ipcMain.handle(IPC.addPaths, (_e, paths: unknown) => addPaths(pathsArg(paths)));
   ipcMain.handle(IPC.pickClips, async () => {
     const r = await dialog.showOpenDialog(mainWindow!, {
       title: "Add clips",
@@ -253,7 +255,8 @@ function registerIpc(): void {
     });
     if (!r.canceled) await addPaths(r.filePaths);
   });
-  ipcMain.handle(IPC.pickFile, async (_e, kind: "hint-image" | "hint-video") => {
+  ipcMain.handle(IPC.pickFile, async (_e, kindArg: unknown) => {
+    const kind = kindArg === "hint-video" ? "hint-video" : "hint-image";
     const r = await dialog.showOpenDialog(mainWindow!, {
       title: kind === "hint-image" ? "First-frame hint (matte image)" : "Hint video or frame folder",
       properties: kind === "hint-image" ? ["openFile"] : ["openFile", "openDirectory"],
@@ -270,7 +273,9 @@ function registerIpc(): void {
     persist();
     scheduleSend();
   });
-  ipcMain.handle(IPC.pickRustEngine, async (_e, what: "binary" | "models" | "ort") => {
+  ipcMain.handle(IPC.pickRustEngine, async (_e, whatArg: unknown) => {
+    if (whatArg !== "binary" && whatArg !== "models" && whatArg !== "ort") return;
+    const what = whatArg;
     const opts = {
       binary: { title: "The CorridorKey engine program (corridorkey-engine)", properties: ["openFile"] as const },
       models: { title: "The folder with the CorridorKey ONNX models", properties: ["openDirectory"] as const },
@@ -285,22 +290,35 @@ function registerIpc(): void {
     persist();
     scheduleSend();
   });
-  ipcMain.handle(IPC.setJobOptions, (_e, id: string, options: JobOptions) => {
+  ipcMain.handle(IPC.setJobOptions, (_e, idIn: unknown, optionsIn: unknown) => {
+    const id = idArg(idIn);
+    if (!id) return;
+    const options: JobOptions = sanitizeOptions(optionsIn);
     queue.setOptions(id, options);
     settings = { ...settings, lastOptions: { ...options, hintFirstFrame: null, hintVideo: null, hintMode: "none" } };
     persist();
   });
-  ipcMain.handle(IPC.removeJob, (_e, id: string) => queue.remove(id));
-  ipcMain.handle(IPC.retryJob, (_e, id: string) => queue.retry(id));
+  ipcMain.handle(IPC.removeJob, (_e, id: unknown) => {
+    const v = idArg(id);
+    if (v) queue.remove(v);
+  });
+  ipcMain.handle(IPC.retryJob, (_e, id: unknown) => {
+    const v = idArg(id);
+    if (v) queue.retry(v);
+  });
   ipcMain.handle(IPC.startQueue, () => {
     recheckEngines();
     if (!chooseEngine(rustEngine, checkout)) return scheduleSend();
     return queue.start();
   });
   ipcMain.handle(IPC.stopQueue, () => queue.stop());
-  ipcMain.handle(IPC.showInFolder, (_e, path: string) => shell.showItemInFolder(path));
-  ipcMain.handle(IPC.setAppearance, (_e, a: Appearance) => {
-    settings = { ...settings, appearance: { theme: a.theme, accent: a.accent, glass: Boolean(a.glass) } };
+  ipcMain.handle(IPC.showInFolder, (_e, pathIn: unknown) => {
+    const p = pathArg(pathIn);
+    if (p) shell.showItemInFolder(p);
+  });
+  ipcMain.handle(IPC.setAppearance, (_e, aIn: unknown) => {
+    const a = sanitizeAppearance(aIn);
+    settings = { ...settings, appearance: a };
     nativeTheme.themeSource = a.theme === "light" ? "light" : a.theme === "dark" ? "dark" : "system";
     persist();
     updatePaletteWatch();
@@ -319,15 +337,15 @@ function registerIpc(): void {
     scheduleSend();
   });
   ipcMain.handle(IPC.checkForUpdates, () => updater.check(true));
-  ipcMain.handle(IPC.setUpdateChannel, (_e, c: "stable" | "dev") => updater.setChannel(c === "dev" ? "dev" : "stable"));
-  ipcMain.handle(IPC.setAutoUpdate, (_e, on: boolean) => updater.setAutomatic(Boolean(on)));
+  ipcMain.handle(IPC.setUpdateChannel, (_e, c: unknown) => updater.setChannel(c === "dev" ? "dev" : "stable"));
+  ipcMain.handle(IPC.setAutoUpdate, (_e, on: unknown) => updater.setAutomatic(on === true));
   ipcMain.handle(IPC.installUpdate, () => updater.download());
   // Never restart into an update while the queue runs (it would kill a job).
   ipcMain.handle(IPC.restartToUpdate, () => {
     if (!queue.running) updater.restart();
   });
   ipcMain.handle(IPC.backToStable, () => updater.backToStable());
-  ipcMain.on(IPC.setVisible, (_e, visible: boolean) => setShown(Boolean(visible)));
+  ipcMain.on(IPC.setVisible, (_e, visible: unknown) => setShown(visible === true));
 }
 
 function createWindow(): void {
@@ -371,8 +389,11 @@ function createWindow(): void {
   else void mainWindow.loadFile(join(here, "../renderer/index.html"));
 }
 
-// One copy at a time: a second start brings the first window forward.
-if (!app.requestSingleInstanceLock()) app.quit();
+// One copy at a time: a second start brings the first window forward. app.quit() doesn't stop this module or
+// the ready event: measured (tools-style isolated test, two copies on one profile), the second copy still ran
+// whenReady and removed the first copy's running job folder. So the second copy does nothing at ready.
+const primary = app.requestSingleInstanceLock();
+if (!primary) app.quit();
 app.on("second-instance", () => {
   if (!mainWindow) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
@@ -380,6 +401,7 @@ app.on("second-instance", () => {
 });
 
 app.whenReady().then(() => {
+  if (!primary) return;
   if (WAYLAND_REQUIRED) {
     dialog.showErrorBox(
       "CorridorKey needs Wayland",
@@ -394,6 +416,8 @@ app.whenReady().then(() => {
     // loop: NOT-WORTH — one local file per media request (thumbnails / stills from the app's cache) [bounded: a local file: URL]
     return net.fetch(pathToFileURL(file).toString());
   });
+  // one copy runs (single-instance lock) and no engine yet: any job folder is left over from a crash
+  clearJobTemps(join(cacheDir, "jobs"));
   nativeTheme.themeSource = settings.appearance.theme === "light" ? "light" : settings.appearance.theme === "dark" ? "dark" : "system";
   updatePaletteWatch();
   registerIpc();

@@ -30,7 +30,12 @@ pub fn ffmpeg_args(path: &Path, fps: f64, w: usize, h: usize, cfg: &WriterConfig
     // loop: NOT-WORTH — ffmpeg arguments, once per writer
     let mut a: Vec<String> = ["-y", "-hide_banner", "-loglevel", "error", "-nostats", "-f", "rawvideo", "-pix_fmt"].iter().map(|s| s.to_string()).collect();
     a.push(if channels == 4 { "bgra64le" } else { "bgr48le" }.into());
-    a.extend(["-s:v".into(), format!("{w}x{h}"), "-r".into(), format!("{fps:.8}"), "-i".into(), "pipe:0".into(), "-an".into()]);
+    a.extend(["-s:v".into(), format!("{w}x{h}"), "-r".into(), format!("{fps:.8}")]);
+    // The colour tags on the input too: ffmpeg 8 keeps a raw input's (unset) primaries and transfer and drops the
+    // output-side ones below (measured: every output read color_transfer=unknown, color_primaries=unknown; a linear
+    // cutout wasn't tagged linear). Tagged here, they reach the file; the pixels are the same (frame md5 equal).
+    a.extend(["-colorspace".into(), "bt709".into(), "-color_primaries".into(), "bt709".into(), "-color_trc".into(), color_trc.into()]);
+    a.extend(["-i".into(), "pipe:0".into(), "-an".into()]);
     if channels == 4 {
         // loop: NOT-WORTH — ffmpeg arguments, once per writer
         a.extend(["-c:v", "prores_ks", "-profile:v", "4", "-pix_fmt", "yuva444p10le"].iter().map(|s| s.to_string()));
@@ -315,7 +320,8 @@ mod tests {
     #[test]
     fn ffmpeg_command_matches_the_runtime() {
         let a = ffmpeg_args(Path::new("/o/shot_alpha.mp4"), 23.976023976023978, 1920, 1080, &WriterConfig::default(), 3, "iec61966-2-1");
-        let want = "-y -hide_banner -loglevel error -nostats -f rawvideo -pix_fmt bgr48le -s:v 1920x1080 -r 23.97602398 -i pipe:0 -an \
+        let want = "-y -hide_banner -loglevel error -nostats -f rawvideo -pix_fmt bgr48le -s:v 1920x1080 -r 23.97602398 \
+                    -colorspace bt709 -color_primaries bt709 -color_trc iec61966-2-1 -i pipe:0 -an \
                     -c:v libx264 -preset medium -pix_fmt yuv444p10le -crf 12 -threads 2 -colorspace bt709 -color_primaries bt709 \
                     -color_trc iec61966-2-1 -movflags +write_colr /o/shot_alpha.mp4";
         assert_eq!(a.join(" "), want.split_whitespace().collect::<Vec<_>>().join(" "));
@@ -323,6 +329,32 @@ mod tests {
         assert!(
             c.contains("-pix_fmt bgra64le") && c.contains("-c:v prores_ks -profile:v 4 -pix_fmt yuva444p10le -threads 2") && c.contains("-color_trc linear")
         );
+    }
+
+    #[test]
+    fn video_files_carry_their_colour_tags() {
+        if Command::new("ffprobe").arg("-version").output().is_err() {
+            eprintln!("no ffmpeg: skipped");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("ck-colr-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut tags = Vec::new();
+        // loop: NOT-WORTH — two test files
+        for (name, ch, trc) in [("a.mp4", 3, "iec61966-2-1"), ("c.mov", 4, "linear")] {
+            let p = dir.join(name);
+            let mut wr = VideoWriter::new(&p, 24.0, 16, 8, &WriterConfig::default(), ch, trc).unwrap();
+            wr.write_many(Batch::U16(vec![30000; 16 * 8 * ch * 2]), 2).unwrap();
+            wr.release().unwrap();
+            let out = Command::new("ffprobe")
+                .args(["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=color_transfer,color_primaries,color_space", "-of", "csv=p=0"])
+                .arg(&p)
+                .output()
+                .unwrap();
+            tags.push(String::from_utf8_lossy(&out.stdout).trim().to_string());
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(tags, vec!["bt709,iec61966-2-1,bt709", "bt709,linear,bt709"]);
     }
 
     #[test]

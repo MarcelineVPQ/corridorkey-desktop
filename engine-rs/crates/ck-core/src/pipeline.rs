@@ -82,6 +82,9 @@ pub struct ModelKey {
     pub vram_cap: Option<u64>,
 }
 
+/// A network loading ahead on its own thread: (network, the key it is for, the load: the session and its seconds).
+type PendingLoad = (&'static str, ModelKey, std::thread::JoinHandle<Result<(Net, f64), Error>>);
+
 pub struct Pipeline {
     pub rt: &'static Runtime,
     pub models: ModelSet,
@@ -100,7 +103,7 @@ pub struct Pipeline {
     load_each: BTreeMap<&'static str, f64>,
     /// low-VRAM phases: the next phase's networks loading on their own thread while this phase runs, with the
     /// key they are for; `ensure` takes them (waiting if they aren't done)
-    pending: Vec<(&'static str, ModelKey, std::thread::JoinHandle<Result<(Net, f64), Error>>)>,
+    pending: Vec<PendingLoad>,
     /// this job's seconds of session loads done ahead on their own thread
     preload_s: f64,
     /// this job's main-thread seconds around stage 2: [inputs, waiting for the render thread]
@@ -224,7 +227,7 @@ impl WindowReader {
     fn window(&mut self, t0: usize, t1: usize) -> Result<Vec<Prepped>, Error> {
         // loop: SERIAL-REQUIRED — frames decode in order
         while self.next < t1 {
-            let f = self.reader.next()?.ok_or_else(|| Error::input(format!("decoded only {} frames", self.next)))?;
+            let f = self.reader.next_frame()?.ok_or_else(|| Error::input(format!("decoded only {} frames", self.next)))?;
             self.cache.insert(self.next, f);
             self.next += 1;
         }
@@ -246,7 +249,7 @@ impl HintWindows {
     fn window(&mut self, t0: usize, t1: usize) -> Result<Vec<Arc<Vec<f32>>>, Error> {
         // loop: SERIAL-REQUIRED — hint frames decode in order
         while self.next < t1 {
-            let h = self.reader.next()?;
+            let h = self.reader.next_frame()?;
             self.cache.insert(self.next, Arc::new(h));
             self.next += 1;
         }
@@ -548,6 +551,7 @@ impl Pipeline {
             sink.send(json!({"type": "memory", "hann_chunk": chunk, "hann_stride": stride, "low_vram": low_vram, "auto": false, "provider": provider.name()}));
         }
         sink.send(json!({"type": "clip", "width": meta.w, "height": meta.h, "fps": meta.fps, "frames": meta.num_frames}));
+        crate::clip::model_shape_supported(meta.shape_h, meta.shape_w, meta.w, meta.h)?;
         let t_all = meta.num_frames;
         let (sh, sw) = (meta.shape_h, meta.shape_w);
         // TensorRT jobs with an automatic window: the longest window the clip's TensorRT range was built for (its
@@ -950,7 +954,7 @@ impl Pipeline {
             let dec = std::sync::Arc::new(std::sync::Mutex::new(0.0));
             let dec2 = dec.clone();
             let mut small_frames = Ahead::spawn(4, move || {
-                let Some(f) = reader.next()? else {
+                let Some(f) = reader.next_frame()? else {
                     *dec2.lock().unwrap() = reader.seconds();
                     return Ok(None);
                 };
@@ -963,7 +967,7 @@ impl Pipeline {
             let mut t = 0;
             let net = self.net("rvm")?;
             // loop: SERIAL-REQUIRED — RVM is recurrent: each frame's step takes the previous state
-            while let Some(small) = small_frames.next()? {
+            while let Some(small) = small_frames.next_item()? {
                 let outs = net.run(vec![("frame", vec![1, 3, he, we], small.into()), ("state", vec![1, ntok, RVM_CH], state)])?;
                 // loop: NOT-WORTH — two outputs per RVM step
                 let mut it = outs.into_iter();
@@ -1003,7 +1007,7 @@ impl Pipeline {
                 let mut frames = Vec::new();
                 // loop: NOT-WORTH — up to four frames
                 while frames.len() < fchunk && done_frames < t_all {
-                    frames.push(reader.next()?.ok_or_else(|| Error::input("short read".into()))?);
+                    frames.push(reader.next_frame()?.ok_or_else(|| Error::input("short read".into()))?);
                     done_frames += 1;
                 }
                 if frames.is_empty() {
@@ -1014,7 +1018,7 @@ impl Pipeline {
             });
             let mut t0 = 0;
             // loop: SERIAL-REQUIRED — chunks of 4 frames, in order
-            while let Some((n, (radio, moge))) = chunks.next()? {
+            while let Some((n, (radio, moge))) = chunks.next_item()? {
                 let (c, m) = self.foundation_run(n, radio, moge, sh, sw)?;
                 cf.put(t0, &c)?;
                 mf.put(t0, &m)?;
@@ -1105,7 +1109,8 @@ impl Pipeline {
             let tw = Instant::now();
             let t1 = (t0 + chunk).min(t_all);
             let tc = t1 - t0;
-            let WindowInputs { frames, hint_video, found, rvm } = windows.next()?.ok_or_else(|| Error::engine("the window input thread ended early".into()))?;
+            let WindowInputs { frames, hint_video, found, rvm } =
+                windows.next_item()?.ok_or_else(|| Error::engine("the window input thread ended early".into()))?;
             let mut hint = vec![0f32; tc * plane];
             let mut hq = vec![0f32; tc];
             let mut present = vec![false; tc];
@@ -1234,7 +1239,7 @@ impl Pipeline {
                 // loop: SERIAL-REQUIRED — frames in order; ends at the clip's end, an error, or a dropped receiver
                 for t in 0..t_all {
                     let tp = Instant::now();
-                    let item = reader.next().and_then(|f| f.ok_or_else(|| Error::input("short read".into()))).and_then(|f| {
+                    let item = reader.next_frame().and_then(|f| f.ok_or_else(|| Error::input("short read".into()))).and_then(|f| {
                         let b = bf.get(t, t + 1)?;
                         let rgb = Data::Bf16(vec![&f.model[..]]);
                         Ok((if rgb_f16 { Data::F16(rgb.into_f16()) } else { Data::F32(rgb.into_f32()) }, Data::F16(b)))

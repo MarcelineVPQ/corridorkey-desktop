@@ -6,7 +6,7 @@
 //! BT.709-tagged H.264 clip and a 10-bit 4:4:4 clip (docs/ENGINE_RUST.md). Frame folders are read as
 //! cv2.imread does: 8-bit RGB for PNG/JPEG (16-bit PNGs keep their high byte), float RGB for EXR.
 use crate::clip::ClipMeta;
-use crate::color::{bf16_round, linear_to_asinh, linear_to_srgb, srgb_to_linear};
+use crate::color::{bf16_round, finite_input, linear_to_asinh, linear_to_srgb, srgb_to_linear};
 use crate::image::{pad_reflect101, resize_lanczos4, Planar};
 use crate::Error;
 use std::io::{BufReader, Read};
@@ -244,7 +244,15 @@ pub fn prep_frame(display_or_linear: Planar, exr_linear: bool, meta: &ClipMeta, 
 pub fn prep_frame_views(display_or_linear: Planar, exr_linear: bool, meta: &ClipMeta, denom: f32, need_model: bool) -> Prepped {
     use rayon::prelude::*;
     let padded = if meta.pad == (crate::image::Pad { l: 0, r: 0, t: 0, b: 0 }) { display_or_linear } else { pad_reflect101(&display_or_linear, meta.pad) };
-    let display_of = |v: f32| if exr_linear { linear_to_srgb(v.max(0.0)).clamp(0.0, 1.0) } else { v.clamp(0.0, 1.0) };
+    // EXR frames can hold NaN / infinity: made finite first (`finite_input`), a no-op for every finite value
+    let display_of = |v: f32| {
+        let v = finite_input(v);
+        if exr_linear {
+            linear_to_srgb(v.max(0.0)).clamp(0.0, 1.0)
+        } else {
+            v.clamp(0.0, 1.0)
+        }
+    };
     // loop: HOT-PATH-OK — one pass per frame, parallel; the frame's display view (bf16) is the output, one allocation per frame
     let display: Vec<half::bf16> = padded.data.par_iter().with_min_len(1 << 14).map(|&v| half::bf16::from_f32(display_of(v))).collect();
     let model: Vec<half::bf16> = if need_model {
@@ -254,6 +262,7 @@ pub fn prep_frame_views(display_or_linear: Planar, exr_linear: bool, meta: &Clip
             .par_iter()
             .with_min_len(1 << 14)
             .map(|&v| {
+                let v = finite_input(v);
                 let lin = if exr_linear { v } else { srgb_to_linear(v.clamp(0.0, 1.0)) };
                 half::bf16::from_f32(linear_to_asinh(lin, denom))
             })
@@ -291,7 +300,7 @@ impl FrameReader {
     }
 
     /// The next frame (None after num_frames).
-    pub fn next(&mut self) -> Result<Option<Prepped>, Error> {
+    pub fn next_frame(&mut self) -> Result<Option<Prepped>, Error> {
         if self.next >= self.meta.num_frames {
             return Ok(None);
         }
@@ -342,7 +351,7 @@ impl Prefetch {
         let thread = std::thread::spawn(move || {
             // loop: SERIAL-REQUIRED — frames decode in order; ends at the clip's end, an error, or a dropped receiver
             loop {
-                let item = reader.next();
+                let item = reader.next_frame();
                 *s2.lock().unwrap() = reader.seconds;
                 let stop = !matches!(item, Ok(Some(_)));
                 let msg = match item {
@@ -359,7 +368,7 @@ impl Prefetch {
     }
 
     /// The next frame, or None at the end.
-    pub fn next(&mut self) -> Result<Option<Prepped>, Error> {
+    pub fn next_frame(&mut self) -> Result<Option<Prepped>, Error> {
         // loop: SERIAL-REQUIRED — frames in order [bounded: the prefetch thread ends at the clip's end (ffmpeg closes its pipe) or an error]
         match self.rx.recv() {
             Ok(Ok(p)) => Ok(Some(p)),
@@ -419,7 +428,7 @@ pub fn prep_hint(still: Still, meta: &ClipMeta) -> Vec<f32> {
     if (h, w) != (meta.h, meta.w) {
         p = resize_lanczos4(&p, meta.h, meta.w);
     }
-    p.map(|v| v.clamp(0.0, 1.0));
+    p.map(|v| finite_input(v).clamp(0.0, 1.0));
     let mut out = pad_reflect101(&p, meta.pad);
     out.map(bf16_round);
     out.data
@@ -458,7 +467,7 @@ pub fn load_initial_hint(path: &Path, meta: &ClipMeta) -> Result<Vec<f32>, Error
         return Err(Error::input(format!("{}: hint shape ({h}, {w}) does not match the clip ({}, {})", file.display(), meta.h, meta.w)));
     }
     let mut p = Planar::from_vec(1, h, w, g);
-    p.map(|v| v.clamp(0.0, 1.0));
+    p.map(|v| finite_input(v).clamp(0.0, 1.0));
     let mut out = pad_reflect101(&p, meta.pad);
     out.map(bf16_round);
     Ok(out.data)
@@ -493,7 +502,7 @@ impl HintReader {
         Ok(HintReader { meta: meta.clone(), video: Some(VideoDecoder::open(path, p.w, p.h, meta.num_frames)?), paths: vec![], next: 0 })
     }
 
-    pub fn next(&mut self) -> Result<Vec<f32>, Error> {
+    pub fn next_frame(&mut self) -> Result<Vec<f32>, Error> {
         let still = match &mut self.video {
             Some(v) => {
                 let (w, h) = (v.w, v.h);
@@ -517,6 +526,28 @@ mod tests {
         assert_eq!(gray_int(255, 0, 0), 76); // cv2: BGR(0,0,255) -> 76
         assert_eq!(gray_int(0, 255, 0), 150);
         assert_eq!(gray_int(0, 0, 255), 29);
+    }
+
+    #[test]
+    fn non_finite_frame_values_reach_the_networks_finite() {
+        let meta = ClipMeta {
+            source: crate::clip::Source::Frames(vec![]),
+            fps: 24.0,
+            h: 1,
+            w: 4,
+            shape_h: 1,
+            shape_w: 4,
+            pad: crate::image::Pad { l: 0, r: 0, t: 0, b: 0 },
+            num_frames: 1,
+            exr_linear: true,
+        };
+        // loop: NOT-WORTH — both EXR codings
+        for linear in [true, false] {
+            let v = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.5];
+            let p = prep_frame(Planar::from_vec(3, 1, 4, v.repeat(3)), linear, &meta, crate::color::asinh_denom());
+            // loop: NOT-WORTH — twelve values
+            assert!(p.model.iter().chain(p.display.iter()).all(|x| x.to_f32().is_finite()), "linear={linear}: {:?} {:?}", p.model, p.display);
+        }
     }
 
     #[test]

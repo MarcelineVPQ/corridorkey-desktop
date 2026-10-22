@@ -76,8 +76,31 @@ export function systemdRunArgs(o: { target: string; args?: string[]; env?: Recor
   return ["--user", "--collect", `--unit=${o.unit}`, "-p", o.exitTypeCgroup === false ? "KillMode=process" : "ExitType=cgroup", ...setenv, "--", o.target, ...(o.args ?? [])];
 }
 
-// No systemd: a detached shell that waits for us to go, then becomes the new copy.
-// The target and flags go as arguments ("$0" "$@"), never pasted into the script.
-export function shellArgs(target: string, args: string[] = []): string[] {
-  return ["-c", 'sleep 0.5; exec "$0" "$@"', target, ...args];
+// No systemd: a detached shell that waits for this copy to be gone, then becomes the new copy.
+// Measured with tools/update_e2e.sh (2026-10-22), two faults of the old "sleep 0.5; exec":
+//  - Node's spawn passes on every descriptor without close-on-exec, and one is this AppImage
+//    runtime's keepalive pipe: the new copy held the old mount up for its whole life (the old
+//    runtime blocked in anon_pipe_write; the new copy's fd 3 -> the old runtime's pipe), with the
+//    old copy's Chromium pipes beside it. So the shell closes every descriptor above stderr first
+//    (bash: dash, /bin/sh on Debian/Ubuntu, can't name descriptors above 9).
+//  - 0.5 s is shorter than a quit: the new copy started while the old one still ran (its DevTools
+//    port still bound: "bind() failed: Address already in use"; both on one profile). So it waits
+//    for this process to end, at most WAIT_OLD_S (the old copy's own exit fallback is 10 s).
+// The pid, target and flags go as arguments, never pasted into the script.
+export const WAIT_OLD_S = 15;
+export const FALLBACK_SCRIPT = [
+  "p=$1; shift",
+  'if [ -n "$BASH_VERSION" ]; then for f in /proc/$$/fd/*; do n=${f##*/}; [ "$n" -gt 2 ] 2>/dev/null && eval "exec $n>&-" 2>/dev/null; done; fi',
+  `end=$(($(date +%s) + ${WAIT_OLD_S}))`,
+  'while kill -0 "$p" 2>/dev/null && [ "$(date +%s)" -lt "$end" ]; do sleep 0.1; done',
+  'exec "$@"',
+].join("; ");
+export function shellArgs(oldPid: number, target: string, args: string[] = []): string[] {
+  return ["-c", FALLBACK_SCRIPT, "corridorkey-relaunch", String(oldPid), target, ...args];
+}
+
+/** The fallback's program: bash when there is one (it closes the inherited descriptors), else sh. */
+export function fallbackShell(exists: (p: string) => boolean): string {
+  // loop: NOT-WORTH — two paths, once per restart
+  return ["/bin/bash", "/usr/bin/bash"].find(exists) ?? "/bin/sh";
 }

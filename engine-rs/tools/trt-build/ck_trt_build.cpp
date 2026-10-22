@@ -85,7 +85,7 @@ bool parse_shapes(const std::string& s, std::map<std::string, nvinfer1::Dims>& o
 
 }  // namespace
 
-int main(int argc, char** argv) {
+int run(int argc, char** argv) {
     std::map<std::string, std::string> a;
     bool weak = false;
     // loop: NOT-WORTH — the command line
@@ -158,4 +158,14 @@ int main(int argc, char** argv) {
     double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     std::printf("{\"ok\":true,\"seconds\":%.1f,\"bytes\":%zu}\n", secs, plan->size());
     return 0;
+}
+
+// Every failure is the one JSON line: a bad number (std::stoll and friends throw) used to end in std::terminate,
+// an abort and a core dump with no answer for the engine (measured: --min "a:1xZ" -> exit 134).
+int main(int argc, char** argv) {
+    try {
+        return run(argc, argv);
+    } catch (const std::exception& e) {
+        return fail(std::string("bad argument: ") + e.what());
+    }
 }

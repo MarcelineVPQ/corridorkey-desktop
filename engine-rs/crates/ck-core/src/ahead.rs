@@ -39,7 +39,7 @@ impl<T: Send + 'static> Ahead<T> {
     }
 
     /// The next item, or None at the end.
-    pub fn next(&mut self) -> Result<Option<T>, Error> {
+    pub fn next_item(&mut self) -> Result<Option<T>, Error> {
         // loop: SERIAL-REQUIRED — the consumer takes items in order [bounded: the producer ends at its sequence's end or first error, which closes the channel]
         match self.rx.recv() {
             Ok(Ok(v)) => Ok(Some(v)),
@@ -66,7 +66,7 @@ mod tests {
         });
         let mut got = Vec::new();
         // loop: NOT-WORTH — five items
-        while let Some(v) = a.next().unwrap() {
+        while let Some(v) = a.next_item().unwrap() {
             got.push(v);
         }
         assert_eq!(got, vec![1, 2, 3, 4, 5]);
@@ -83,9 +83,9 @@ mod tests {
                 Ok(Some(i))
             }
         });
-        assert_eq!(a.next().unwrap(), Some(1));
-        assert_eq!(a.next().unwrap(), Some(2));
-        assert_eq!(a.next().unwrap_err().message, "bad frame");
-        assert_eq!(a.next().unwrap(), None);
+        assert_eq!(a.next_item().unwrap(), Some(1));
+        assert_eq!(a.next_item().unwrap(), Some(2));
+        assert_eq!(a.next_item().unwrap_err().message, "bad frame");
+        assert_eq!(a.next_item().unwrap(), None);
     }
 }

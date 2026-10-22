@@ -8,7 +8,7 @@ import { chmodSync, existsSync, lstatSync, readdirSync, realpathSync, renameSync
 import { join } from "node:path";
 import { holdAppImageMountUntilExit } from "./appImageQuit";
 import type { FetchFn } from "./download";
-import { relaunchArgs, relaunchEnv, shellArgs, systemdRunArgs } from "./relaunch";
+import { fallbackShell, relaunchArgs, relaunchEnv, shellArgs, systemdRunArgs } from "./relaunch";
 import { feedSource } from "./updateFeed";
 import { UpdateFlow, type FileOps, type UpdatePlatform } from "./updateFlow";
 
@@ -63,6 +63,10 @@ function relaunch(target: string): void {
   const env = relaunchEnv(process.env);
   const args = relaunchArgs(process.argv);
   const unit = `corridorkey-relaunch-${Date.now()}`;
+  // The mount guard first: it waits for this copy's processes as they are now. Started after the new copy, it
+  // counted the fallback shell (which becomes the new copy) as ours and held the old mount, and every descriptor
+  // it inherited (the DevTools port in tools/update_e2e.sh), for its whole 5 s.
+  holdAppImageMountUntilExit();
   let started = false;
   // loop: SERIAL-REQUIRED — retry: the second form only when systemd refused the first (2 tries)
   for (const exitTypeCgroup of [true, false]) {
@@ -81,13 +85,12 @@ function relaunch(target: string): void {
   if (!started) {
     try {
       // lifetime: OK — detached and unref'd: the new copy outlives this one on purpose (app.quit next)
-      spawn("/bin/sh", shellArgs(target, args), { detached: true, stdio: "ignore", env }).unref();
+      spawn(fallbackShell(existsSync), shellArgs(process.pid, target, args), { detached: true, stdio: "ignore", env }).unref();
     } catch (e) {
       // error: LOGGED-OK — the app quits either way; the next start from the menu runs the new version
       console.error("[updater] could not start the new copy:", e);
     }
   }
-  holdAppImageMountUntilExit();
   app.quit();
   // lifetime: OK — fires once; the process is gone before it unless the quit was held up
   // loop: SERIAL-REQUIRED — the exit fallback 10 s after a relaunch was handed off, once

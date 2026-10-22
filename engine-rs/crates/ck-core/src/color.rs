@@ -119,6 +119,21 @@ pub fn despill(rgb: [f32; 3], strength: f32) -> [f32; 3] {
     [r * (1.0 - strength) + full[0] * strength, g * (1.0 - strength) + full[1] * strength, b * (1.0 - strength) + full[2] * strength]
 }
 
+/// The largest input value kept as it is: `x / knee` (the asinh encoding) stays finite in float32 up to here.
+pub const INPUT_MAX: f32 = 1e30;
+
+/// A decoded input value the networks can take: NaN -> 0, +-infinity (and beyond +-INPUT_MAX) -> +-INPUT_MAX;
+/// every other value unchanged. Measured: three non-finite pixels in a linear EXR plate (NaN, +inf, -inf) made
+/// every pixel of every output frame NaN (the networks' attention spreads one NaN everywhere).
+#[inline]
+pub fn finite_input(v: f32) -> f32 {
+    if v.is_nan() {
+        0.0
+    } else {
+        v.clamp(-INPUT_MAX, INPUT_MAX)
+    }
+}
+
 /// torch's float32 -> bfloat16 (round to nearest even), back to float32: the runtime keeps decoded frames,
 /// hints and hint quality as bfloat16 tensors.
 #[inline]
@@ -155,6 +170,23 @@ impl ToF32 for half::f16 {
     #[inline]
     fn to_f32(self) -> f32 {
         half::f16::to_f32(self)
+    }
+}
+
+#[cfg(test)]
+mod finite_tests {
+    use super::*;
+
+    #[test]
+    fn non_finite_inputs_become_finite_and_finite_ones_stay() {
+        assert_eq!(finite_input(f32::NAN), 0.0);
+        assert_eq!(finite_input(f32::INFINITY), INPUT_MAX);
+        assert_eq!(finite_input(f32::NEG_INFINITY), -INPUT_MAX);
+        // loop: NOT-WORTH — a few test values
+        for v in [0.0f32, -0.5, 1.0, 40.0, 70000.0, 1e20] {
+            assert_eq!(finite_input(v), v);
+        }
+        assert!(linear_to_asinh(finite_input(f32::INFINITY), asinh_denom()).is_finite());
     }
 }
 

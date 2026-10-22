@@ -106,6 +106,8 @@ pub fn build_engine(builder: &Path, onnx: &Path, piece: &str, b: &Bucket, dir: &
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let t = std::time::Instant::now();
     let mut cmd = std::process::Command::new(builder);
+    // a killed engine takes its builder with it (it holds the card for minutes)
+    crate::proc::die_with_parent(&mut cmd);
     cmd.arg("--onnx")
         .arg(onnx)
         .arg("--engine")

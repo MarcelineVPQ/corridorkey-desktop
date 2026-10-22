@@ -1,7 +1,8 @@
 // Settings file (userData/settings.json) and the CorridorKey checkout check.
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { DEFAULT_APPEARANCE, DEFAULT_OPTIONS, type CheckoutCheck, type EngineKind, type Settings } from "../../src/shared/types";
+import type { CheckoutCheck, EngineKind, Settings } from "../../src/shared/types";
+import { sanitizeAppearance, sanitizeOptions } from "./validate";
 
 export function loadSettings(file: string, env: NodeJS.ProcessEnv): Settings {
   let saved: Partial<Settings> = {};
@@ -11,14 +12,17 @@ export function loadSettings(file: string, env: NodeJS.ProcessEnv): Settings {
   } catch {
     // error: NOT-WORTH — no file yet (first start) or unreadable: start from the defaults
   }
+  // an older or hand-edited file: every value checked (an unknown output name or a bad window would fail every job)
+  if (!saved || typeof saved !== "object" || Array.isArray(saved)) saved = {};
+  const path = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
   return {
-    corridorKeyRoot: env.CK_PACKAGE_ROOT || saved.corridorKeyRoot || null,
-    lastOptions: { ...DEFAULT_OPTIONS, ...(saved.lastOptions ?? {}) },
-    appearance: { ...DEFAULT_APPEARANCE, ...(saved.appearance ?? {}) },
-    outputRoot: saved.outputRoot ?? null,
-    engineBinary: env.CK_ENGINE_BIN || saved.engineBinary || null,
-    modelsDir: env.CK_ENGINE_MODELS || saved.modelsDir || null,
-    ortLibrary: env.CK_ENGINE_ORT || saved.ortLibrary || null,
+    corridorKeyRoot: env.CK_PACKAGE_ROOT || path(saved.corridorKeyRoot),
+    lastOptions: sanitizeOptions(saved.lastOptions),
+    appearance: sanitizeAppearance(saved.appearance),
+    outputRoot: path(saved.outputRoot),
+    engineBinary: env.CK_ENGINE_BIN || path(saved.engineBinary),
+    modelsDir: env.CK_ENGINE_MODELS || path(saved.modelsDir),
+    ortLibrary: env.CK_ENGINE_ORT || path(saved.ortLibrary),
   };
 }
 

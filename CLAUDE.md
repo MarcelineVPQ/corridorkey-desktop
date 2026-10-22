@@ -18,7 +18,7 @@ Built to **Marcy's 15 basic rules for programming applications** (memory
 - **Loop pass (rule 7):** `// loop: VERDICT — reason` on every loop, iterator chain, timer, wait, thread and
   main-process sync call (app, engine-rs, tools); a wait without a deadline says `[bounded: …]`. Gate
   `tools/list_loops.mjs --check`; the pass: docs/LOOP_PASS_2026-10.md, docs/EFFICIENCY_PASS_2026-10.md.
-- **Isolated test copies (rule 12):** `tools/isolated.sh` (own HOME, private D-Bus, Xvfb,
+- **Isolated test copies (rule 12):** `tools/isolated.sh` (own HOME, private D-Bus, headless KWin,
   basic password store, 4 GB cap) + `tools/drive.mjs` (CDP steps + screenshots). Never the user's screen.
 - **Memory caps:** every test/build/run under `systemd-run --user --scope -p MemoryMax=…`.
 - **Backlog (rule 8):** `docs/BACKLOG.md`; ideas wait for Marcy's "now".
@@ -27,4 +27,5 @@ Built to **Marcy's 15 basic rules for programming applications** (memory
 - **npm:** the system npm 9 (and npm 10) crash in peer resolution on this set; `.npmrc` has
   `legacy-peer-deps=true`. Run Electron's `node node_modules/electron/install.js` if the binary is missing.
 
-Commands: `npm run dev` · `npm run build` · `npm run check` (typecheck, format, gates, unit + engine tests).
+Commands: `npm run dev` · `npm run build` · `npm run check` (typecheck, format, gates, unit + engine tests) ·
+`npm run check:engine` (engine-rs: cargo fmt --check, clippy -D warnings, cargo test).

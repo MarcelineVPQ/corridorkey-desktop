@@ -64,6 +64,9 @@ cargo build --release -p ck-engine --no-default-features --features ort-dynamic,
 corridorkey-engine --models DIR [--ort libonnxruntime.so] [--device auto|cuda|cpu]
 ```
 
+`npm run check:engine` (from the repository root) is the engine's gate: `cargo fmt --check`, `cargo clippy --all-targets
+-- -D warnings` (no warning passes) and `cargo test`.
+
 - Default features: pyke's static CPU ONNX Runtime (downloaded at build time), for tests.
 - GPU build: ONNX Runtime loaded at run time (`--ort`, `CK_ENGINE_ORT`, `ORT_DYLIB_PATH`), measured with the
   `onnxruntime-gpu` 1.31 wheel's library (CUDA 13, needs NVIDIA driver ≥ 580). The CUDA, cuDNN and TensorRT
@@ -342,3 +345,6 @@ PyTorch against itself at 80/40 vs 20/10 (2.15e-2, above).
 4. **Packaging**: the GPU build plus ORT's CUDA libraries and the models in the AppImage, the driver check.
 5. A TensorRT job whose window is halved keeps its original range.
 6. EXIF orientation of JPEG frames (cv2 applies it, this engine doesn't); grayscale EXR frames.
+7. Portrait clips: every C-RADIO export fails on frames taller than wide, so the engine refuses them (an `input`
+   error), as it does frames with a side of 128 px or less (stage 1's reflect pad); docs/BACKLOG.md row 14,
+   docs/BUG_HUNT_2026-10.md I3 / I4.
