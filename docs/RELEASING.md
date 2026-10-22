@@ -30,10 +30,13 @@ The repository is one constant, `REPO` in `electron/main/updateFeed.ts`; every f
   repointed at it (a real file with that name is never replaced). The running file is never touched (it is
   FUSE-mounted). The previous version stays for rollback; at the next start, cut-short `.part` files and
   versions older than the previous one are removed.
-- **Restart now** (`restart()`, gated by the main process while the queue runs) starts the new version
-  through `systemd-run --user` with only the session's variables and PATH without AppImage mounts (Sonata's
-  relaunch), then quits normally (the engine is stopped by `before-quit`) while a small helper holds the
-  AppImage mount until Chromium's processes are gone (DS5's `appImageQuit.ts`).
+- **Restart now** (`restart()`, gated by the main process while the queue runs) first starts a small helper that
+  holds the AppImage mount until this copy's processes are gone (DS5's `appImageQuit.ts`), then starts the new
+  version through `systemd-run --user` with only the session's variables and PATH without AppImage mounts
+  (Sonata's relaunch), then quits normally (the engine is stopped by `before-quit`). Without systemd the new copy
+  starts from a detached shell (bash) that first closes every descriptor it inherited (one is the running
+  AppImage's keepalive pipe: kept open, the old mount lived as long as the new copy) and waits for this copy to
+  end (at most 15 s). Measured with `tools/update_e2e.sh` (docs/BUG_HUNT_2026-10.md, U1-U3).
 - **Unsupported** (`status: "unsupported"`, the reason in `error`): running from source, not as an AppImage,
   or a build without a trusted key. Nothing goes online.
 - The channel and *Check automatically* are kept in `<userData>/updates.json` (atomic write). A development
@@ -115,6 +118,7 @@ CK_UPDATE_MANIFEST=http://127.0.0.1:8765/latest.json CK_UPDATE_PUBKEY="$(cat tes
 
 `CK_UPDATE_MANIFEST` is honoured only for loopback `http://` (127.0.0.1 / localhost); downloads must then come
 from the same server, and the test key is trusted only together with it. Run a test AppImage from a scratch
-folder (it repoints the symlink and prunes old versions beside itself), in an isolated copy (`tools/isolated.sh`
-style: own HOME, Xvfb, private D-Bus), never on Marcy's screen. `tests/unit/updateFlow.test.ts` runs the same
-flow automatically.
+folder (it repoints the symlink and prunes old versions beside itself), in an isolated copy (own HOME, headless
+KWin, private D-Bus), never on Marcy's screen: `tools/update_e2e.sh --dir DIR --old OLD.AppImage --new
+NEW.AppImage --version X.Y.Z-dev.N` does the whole update that way (memory-capped) and dumps each test process's
+state on a failure. `tests/unit/updateFlow.test.ts` runs the same flow automatically.
