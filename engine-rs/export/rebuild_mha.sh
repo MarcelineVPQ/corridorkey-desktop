@@ -1,0 +1,9 @@
+#!/bin/bash
+# Re-run only the to_mha step + manifest on the existing exports (no re-export).
+set -e
+S=$HOME/.cache/claude-scratch/corridorkey-onnx
+D=$(dirname "$0"); RUN="$D/run.sh"
+for p in cradio moge rvm stage1 stage2; do for prec in fp32 fp16; do
+  "$RUN" 16G to_mha.py $S/onnx/${p}_prod_${prec}.onnx $S/models/ck2-${p}-${prec}.onnx $p | grep -E "^TO_MHA (dropped|${p})"
+done; done
+"$RUN" 8G make_manifest.py "${CK_ONNX_VERSION:-2.0.0-onnx.1}" | grep written

@@ -48,12 +48,12 @@ counted when handed to the writers; the replies, error codes and settings file a
 folder names them (`{"fp16": {"stage1": "stage1_op23fp16.onnx", …}, "fp32": {…}}`); without one, the first
 existing default name is used: `<piece>_fp16.onnx`, `<piece>_op23fp16.onnx`, `<piece>.fp16.onnx` (fp32:
 `<piece>_fp32.onnx`, `<piece>_op23.onnx`, `<piece>.fp32.onnx`, `<piece>.onnx`). Pieces: `cradio`, `moge`,
-`rvm`, `stage1`, `stage2` (the ONNX spike's exports, `scripts/onnx_spike` on the CorridorKey2.0 clone's
-`spike/onnx` branch). Precision: fp16 on the GPU, fp32 on the CPU; `CK_ENGINE_PRECISION` overrides.
+`rvm`, `stage1`, `stage2` (the ONNX spike's exports, `engine-rs/export`,
+built from the CorridorKey2.0 clone). Precision: fp16 on the GPU, fp32 on the CPU; `CK_ENGINE_PRECISION` overrides.
 
 Use the **`2.0.0-onnx.3`** set: `2.0.0-onnx.2` (stage 1 and stage 2 with three exact graph rewrites: window
-pads, depatchify ConvTranspose, grouped 7×7 convs; `scripts/onnx_spike/speed_patches.py`) with C-RADIO
-re-exported so it takes portrait frames (CorridorKey2.0 branch `onnx/portrait`, `docs/ONNX_SPIKE.md` "Portrait").
+pads, depatchify ConvTranspose, grouped 7×7 convs; `engine-rs/export/speed_patches.py`) with C-RADIO
+re-exported so it takes portrait frames (`docs/ONNX_EXPORT.md` "Portrait").
 Same inputs and outputs as `2.0.0-onnx.1`. The engine runs all three; the speed numbers below are onnx.2, and
 onnx.3 gives identical landscape output at the same speed ("Portrait" below). The engine reads the set's version
 from `manifest.json` and refuses portrait clips up front (an `input` error) only for onnx.1 / onnx.2.
@@ -193,7 +193,7 @@ Matte agreement (`tools/matte_compare.py`, alpha and fg videos against PyTorch's
 
 Agreement with PyTorch is unchanged to the third digit. Now against before is the size of fp16 summation-order
 changes (attention kernels, the rewritten convolutions) plus x264 at CRF 12 on both sides; the models' own
-fp16 error against fp32 is unchanged (CorridorKey2.0 `docs/ONNX_SPIKE.md`, "Speed rewrites"). The CPU fp32
+fp16 error against fp32 is unchanged (CorridorKey2.0 `docs/ONNX_EXPORT.md`, "Speed rewrites"). The CPU fp32
 end-to-end check (`tools/e2e_cpu.sh`, onnx.2 set) passes: alpha MAE 2.48e-7 against PyTorch fp32, low-VRAM
 identical to normal mode.
 
@@ -215,8 +215,8 @@ session per process; ORT's own per-node profile on CUDA times only kernel launch
 
 The onnx.1 stage-2 time went to ORT's generic N-d Pad kernel (15.2 ms, the Swin window pads), cuDNN's
 grouped 7×7 conv (7.7 ms) and MatMul (20 ms, compute-bound); stage 1's the same way (Pad 181 ms, grouped convs
-105 ms at T=24). The ConvTranspose itself was 1.2 ms. The onnx.2 rewrites are in the CorridorKey2.0 clone's
-`docs/ONNX_SPIKE.md` ("Speed rewrites"). What is left in stage 1 at T=24: attention 213 ms, MatMul 153 ms,
+105 ms at T=24). The ConvTranspose itself was 1.2 ms. The onnx.2 rewrites are in
+`docs/ONNX_EXPORT.md` ("Speed rewrites"). What is left in stage 1 at T=24: attention 213 ms, MatMul 153 ms,
 convolutions 91 ms, and 1701 small element-wise / data-movement nodes 364 ms (none over 2 ms).
 
 **In the engine** (locked_backdrop, 80 frames, 48/24 low-VRAM; the engine's `timing` log line):
@@ -303,7 +303,7 @@ OFF by default; CUDA fp16 stays the normal path. Measured 2026-10-21 (RTX 5080, 
 ORT 1.31).
 
 **How it runs.** The models folder carries a TensorRT-ready fp16 set next to the normal one (`models.json` keys
-`tensorrt-fp16` and `tensorrt-fp16-ctx`; CorridorKey2.0 `scripts/onnx_spike/build_trt_models.sh`, ONNX_SPIKE.md
+`tensorrt-fp16` and `tensorrt-fp16-ctx`; CorridorKey2.0 `engine-rs/export/build_trt_models.sh`, docs/ONNX_EXPORT.md
 "TensorRT set"): plain attention instead of `com.microsoft::MultiHeadAttention` (no TensorRT plugin), MoGe's
 antialiased resize as weight matrices, Swin regions in 7 dimensions (TensorRT allows 8), the `onnx.2` speed
 rewrites, and FP32 islands for weight GEMMs and convolutions. For a clip's range, `trt_prepare` builds each
@@ -312,7 +312,7 @@ headers), one network at a time in a child process before any network is loaded,
 engine through the EPContext stub copied next to it. Why not ORT's own TensorRT build: it makes weakly typed
 networks, where TensorRT ignores the FP32 islands; its FP16 kernels measured 2-4× the CUDA fp16 error in every
 network (stage 2 alpha MAE 1.24e-4 vs 1.58e-5). Strongly typed with the islands: 1.38e-5 (per-network table in
-ONNX_SPIKE.md).
+docs/ONNX_EXPORT.md).
 
 **Ranges.** Padded H and W each fall in one of 128-512, 640-896, 1024-1280, 1408-1664, 1792-2176, 2304-2816,
 2944-3456, 3584-4096 (720p → h640-896 w1024-1280, 1080p → h1024-1280 w1792-2176, 1280×1080 → h1024-1280

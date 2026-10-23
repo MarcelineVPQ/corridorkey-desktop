@@ -7,7 +7,7 @@ same commit as the work.
 |---|---|---|---|
 | 1 | Electron shell: clip queue, per-clip settings, run with real progress, results | plan | building |
 | 2 | Engine install from inside the app (venv + weights, licence + progress), Sonata pattern | plan, rule 10 | planned |
-| 3 | ONNX Runtime engine, decided on the spike's numbers | `spike/onnx` | measuring |
+| 3 | ONNX Runtime engine, decided on the spike's numbers | `engine-rs/export` | measuring |
 | 4 | Make hints in the app: mark the subject on a frame (no Resolve Magic Mask needed) | launch video 2026-10-21 | idea |
 | 5 | Window control with a live VRAM estimate (runtime's own table), labelled as an estimate | launch video | idea |
 | 6 | Quick single-frame preview before the full temporal render | launch video | idea |
