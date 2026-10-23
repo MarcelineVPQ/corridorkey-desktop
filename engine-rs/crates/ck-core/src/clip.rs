@@ -41,17 +41,22 @@ impl ClipMeta {
 }
 
 /// Whether the ONNX networks take this padded model shape; an `input` error that says why when they don't.
-/// Measured (CPU fp32 and CUDA fp16, the 2.0.0-onnx.1 and onnx.2 sets): every frame taller than wide failed in
-/// C-RADIO (its export adds a square position grid: 240 tokens against 400 at 768x1280 padded), every landscape
-/// and square one ran; a side of 128 px failed in stage 1 (a reflect pad of 3 on a 2-cell grid). Refused before
-/// any work, in words, instead of an ONNX Runtime message after the RVM pass.
-pub fn model_shape_supported(shape_h: usize, shape_w: usize, w: usize, h: usize) -> Result<(), Error> {
+/// `portrait`: the model set's C-RADIO takes frames taller than wide (`ModelSet::takes_portrait`). Measured:
+/// - the 2.0.0-onnx.1 / onnx.2 C-RADIO failed on every frame taller than wide (its export dropped the position
+///   grid's column crop: 400 position tokens against 240 patches at 1280x768 padded, H x W); 2.0.0-onnx.3's grid
+///   follows the frame's rows and columns (CPU fp32 against PyTorch: max 1.2e-5 to 3.3e-5 on features up to 25,
+///   384x256 to 1920x1152).
+/// - a side of 128 px fails in stage 1 with every set (onnx.3 too, CPU fp32): a reflect pad of 3 on a 2-cell
+///   grid, where upstream PyTorch switches to a replicate pad (blocks.py; the export fixed the trace's branch).
+///
+/// Refused before any work, in words, instead of an ONNX Runtime message after the RVM pass.
+pub fn model_shape_supported(shape_h: usize, shape_w: usize, w: usize, h: usize, portrait: bool) -> Result<(), Error> {
     if shape_h <= SHAPE_QUANTUM || shape_w <= SHAPE_QUANTUM {
         return Err(Error::input(format!("This clip is too small ({w}x{h}): CorridorKey's networks need more than {SHAPE_QUANTUM} pixels in each direction.")));
     }
-    if shape_h > shape_w {
+    if shape_h > shape_w && !portrait {
         return Err(Error::input(format!(
-            "Portrait clips (taller than wide, here {w}x{h}) can't be keyed by the ONNX engine yet: its C-RADIO model only takes landscape or square frames."
+            "Portrait clips (taller than wide, here {w}x{h}) need the 2.0.0-onnx.3 models or newer: this models folder's C-RADIO only takes landscape or square frames."
         )));
     }
     Ok(())
@@ -330,15 +335,22 @@ mod tests {
 
     #[test]
     fn shapes_the_networks_take() {
-        // measured: these ran (CPU fp32 / CUDA fp16)
+        // measured: these ran with every set (CPU fp32 / CUDA fp16)
         // loop: NOT-WORTH — a few test shapes
         for (sh, sw) in [(256, 384), (256, 256), (384, 384), (768, 1280), (2176, 3840)] {
-            assert_eq!(model_shape_supported(sh, sw, sw, sh), Ok(()), "{sh}x{sw}");
+            assert_eq!(model_shape_supported(sh, sw, sw, sh, false), Ok(()), "{sh}x{sw}");
+            assert_eq!(model_shape_supported(sh, sw, sw, sh, true), Ok(()), "{sh}x{sw}");
         }
-        // measured: these failed inside C-RADIO (portrait) or stage 1 (a 128 px side)
+        // portrait: refused for the landscape-only sets (failed inside C-RADIO), taken from 2.0.0-onnx.3 on
         // loop: NOT-WORTH — a few test shapes
-        for (sh, sw) in [(384, 256), (384, 128), (1280, 768), (128, 384)] {
-            assert_eq!(model_shape_supported(sh, sw, sw, sh).unwrap_err().code, "input", "{sh}x{sw}");
+        for (sh, sw) in [(384, 256), (1280, 768), (1920, 1152), (3840, 2176)] {
+            assert_eq!(model_shape_supported(sh, sw, sw, sh, false).unwrap_err().code, "input", "{sh}x{sw}");
+            assert_eq!(model_shape_supported(sh, sw, sw, sh, true), Ok(()), "{sh}x{sw}");
+        }
+        // a 128 px side failed in stage 1 with every set, onnx.3 included
+        // loop: NOT-WORTH — a few test shapes
+        for (sh, sw) in [(384, 128), (128, 384), (128, 128)] {
+            assert_eq!(model_shape_supported(sh, sw, sw, sh, true).unwrap_err().code, "input", "{sh}x{sw}");
         }
     }
 

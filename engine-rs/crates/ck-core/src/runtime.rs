@@ -67,7 +67,14 @@ fn default_names(piece: &str, p: Precision) -> Vec<String> {
 pub struct ModelSet {
     pub dir: PathBuf,
     manifest: BTreeMap<String, BTreeMap<String, String>>,
+    /// manifest.json's "version" (CorridorKey2.0 make_manifest.py), when the folder has one
+    pub version: Option<String>,
 }
+
+/// Model sets whose C-RADIO only takes landscape or square frames (measured: an ONNX Runtime broadcast error
+/// on every frame taller than wide: its export dropped the position grid's column crop). 2.0.0-onnx.3 on takes
+/// portrait.
+const LANDSCAPE_ONLY_SETS: [&str; 2] = ["2.0.0-onnx.1", "2.0.0-onnx.2"];
 
 /// A model's size on disk: the .onnx file and its external weights (.onnx.data) next to it.
 pub fn model_bytes(file: &Path) -> u64 {
@@ -85,7 +92,16 @@ impl ModelSet {
         } else {
             BTreeMap::new()
         };
-        Ok(ModelSet { dir: dir.to_path_buf(), manifest })
+        let version = std::fs::read_to_string(dir.join("manifest.json"))
+            .ok()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .and_then(|v| v.get("version")?.as_str().map(str::to_string));
+        Ok(ModelSet { dir: dir.to_path_buf(), manifest, version })
+    }
+
+    /// Whether this set's C-RADIO takes frames taller than wide (false only for the sets measured to fail).
+    pub fn takes_portrait(&self) -> bool {
+        !self.version.as_deref().is_some_and(|v| LANDSCAPE_ONLY_SETS.contains(&v))
     }
 
     /// The file of `piece` at `p`, if there is one.
@@ -598,6 +614,14 @@ mod tests {
         assert_eq!(m.trt_file("rvm", Precision::Fp16), Some(dir.join("stage2_fp16.onnx")));
         assert_eq!((m.trt_file("moge", Precision::Fp16), m.trt_file("rvm", Precision::Fp32)), (None, None));
         assert!(m.assets(Precision::Fp16)["stage1"]);
+        // portrait: refused only for the sets whose C-RADIO was measured to fail on it
+        assert!(m.version.is_none() && m.takes_portrait());
+        // loop: NOT-WORTH — three versions
+        for (v, ok) in [("2.0.0-onnx.2", false), ("2.0.0-onnx.1", false), ("2.0.0-onnx.3", true)] {
+            std::fs::write(dir.join("manifest.json"), format!(r#"{{"format": "corridorkey-onnx-models/1", "version": "{v}"}}"#)).unwrap();
+            let m = ModelSet::open(&dir).unwrap();
+            assert_eq!((m.version.as_deref(), m.takes_portrait()), (Some(v), ok));
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
