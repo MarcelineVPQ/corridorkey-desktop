@@ -66,17 +66,30 @@ cuSPARSELt, for multi-GPU and training), and the fp16 models are a third smaller
 
 ## Speed
 
-The same clips through the original CorridorKey 2.0 (PyTorch, its shipping bf16 mode) and CorridorKey
-Desktop's engine (Rust + ONNX Runtime, fp16, model set `2.0.0-onnx.3`; the engine and GPU runtime the app ships),
-one engine process per clip, with the same settings: 12 GB graphics memory budget, automatic temporal window
-(both engines picked the same one every time), alpha + foreground outputs, no hint. Measured 2026-10-24 on an
-RTX 5080 (driver 615.71.09), Ryzen 9 9950X3D, Kubuntu 26.04, with `tools/engine_bench.mjs`.
+The same clips through the original CorridorKey 2.0 and CorridorKey Desktop's engine, on the same machine, back to
+back, with the same settings. Measured 2026-10-24 with `tools/engine_bench.mjs`.
 
-- **Total**: engine start to exit (the number that matters).
-- **First frames**: start until the first frames are written (model load + the first temporal window).
-- **Steady**: frames per second after the first window, as the engine reports them.
-- **Memory**: peak of the engine's processes (graphics memory from nvidia-smi, RAM from `/proc`, sampled every
-  250 ms), in GiB.
+**Test machine and software**
+
+| | |
+| --- | --- |
+| Graphics card | NVIDIA GeForce RTX 5080, 16 GB, driver 615.71.09 |
+| Processor, memory | AMD Ryzen 9 9950X3D (16 cores), 60 GB RAM |
+| System | Kubuntu 26.04, Linux 7.0.0, KDE Plasma (Wayland) |
+| Original CorridorKey 2.0 | PyTorch 2.9.1 (CUDA 12.8, cuDNN 9.10), Python 3.12, its shipping mode: bf16 autocast |
+| CorridorKey Desktop | Rust engine on ONNX Runtime 1.31.0 (CUDA 13.4, cuDNN 9.27), fp16, model set `2.0.0-onnx.3`: the engine and GPU runtime the app ships and downloads |
+
+**Method**
+
+- One engine process per clip, so every run includes loading the models (what a user waits for).
+- The same settings for both: a 12 GB graphics-memory budget, the automatic temporal window (both engines picked the
+  same one on every clip), alpha + foreground outputs, no hint.
+- Nothing else on the graphics card: the bench refuses to start, and pauses between clips, while another program
+  holds more than 1 GiB of it.
+- **Total**: engine start to exit (the number that matters). **First frames**: start until the first frames are
+  written (model load plus the first temporal window). **Steady**: frames per second after the first window, as the
+  engine reports them. **Memory**: peak of the engine's processes (graphics memory from nvidia-smi, RAM from
+  `/proc`, sampled every 250 ms), in GiB.
 
 ### HD (Hollywood Camera Work plates)
 
@@ -100,6 +113,41 @@ RTX 5080 (driver 615.71.09), Ryzen 9 9950X3D, Kubuntu 26.04, with `tools/engine_
 
 The bigger the frame, the bigger the lead: 1.5-1.8× at HD, 2.4-2.7× at 4K (3.2-4× once running). Both engines
 use the low-memory temporal window here (80/40 or 48/24 at HD, 8/4 at 4K), chosen from the same table.
+
+### Repeatability and how we got here
+
+The same HD bench, run on different days as the engine improved (totals, seconds; Original = PyTorch):
+
+| Clip | 2026-10-21 Original | 2026-10-21 first Rust engine (`onnx.1`) | 2026-10-21 after the speed work (`onnx.2`), two runs | 2026-10-24 Original | 2026-10-24 CorridorKey Desktop (`onnx.3`, as shipped) |
+| --- | --- | --- | --- | --- | --- |
+| godiva_close | 68.4 | 54.9 | 39.7 / 42.7 | 61.1 | **39.6** |
+| locked_backdrop | 40.3 | 36.9 | 20.6 / 21.9 | 31.3 | **19.5** |
+| metal_glasses | 44.7 | 55.5 | 30.0 / 29.9 | 42.3 | **26.7** |
+| smoke | 76.5 | 96.8 | 51.8 / 51.7 | 74.7 | **46.8** |
+| walking_sitting | 94.2 | 116.2 | 63.2 / 63.1 | 91.5 | **56.1** |
+| with_motion_blur | 19.0 | 22.7 | 12.4 / 12.3 | 20.8 | **11.4** |
+
+- A straight port (`onnx.1`) was *slower* than the original on four of six clips. The speed came from measuring
+  where the time went and rewriting those parts of the graphs exactly (same output): window padding, the depatchify
+  step, grouped 7×7 convolutions, and keeping memory pools warm between calls (docs/ENGINE_RUST.md, "Speed").
+- Two runs of the same build agree within 1 % on four clips, 6 % on locked_backdrop and 8 % on godiva_close. The
+  original varied more between days (godiva 68.4 → 61.1 s), so every comparison here is a back-to-back pair on the
+  same day.
+
+### TensorRT (measured, not in 1.0)
+
+TensorRT is built into the engine as an opt-in and was measured on 2026-10-21 (`onnx.2` models, the same HD bench).
+It is the next release's headline; it needs a one-time optimization per resolution (about 3.5 minutes) and is not
+available at 4K yet (its 4K build needs more than 12 GB of graphics memory).
+
+| Clip | TensorRT total | CUDA total (same day) | Original (same day) | TensorRT vs original |
+| --- | --- | --- | --- | --- |
+| godiva_close | 28.8 s | 42.7 s | 68.4 s | 0.42× the time |
+| locked_backdrop | 14.4 s | 21.9 s | 40.3 s | 0.36× |
+| metal_glasses | 22.4 s | 29.9 s | 44.7 s | 0.50× |
+| smoke | 37.0 s | 51.7 s | 76.5 s | 0.48× |
+| walking_sitting | 44.6 s | 63.1 s | 94.2 s | 0.47× |
+| with_motion_blur | 10.1 s | 12.3 s | 19.0 s | 0.53× |
 
 ## Quality: the same mattes
 
@@ -151,21 +199,55 @@ node tools/engine_bench.mjs rust --bin <corridorkey-engine> --models <models>/2.
 
 ## How it's tested
 
-Every result above is reproducible with the tools in this repository. The full run of 2026-10-24:
+Every result in this README is reproducible with the tools in this repository. The full run of 2026-10-24:
 
 | Test | What it checks | Result |
 | --- | --- | --- |
-| `npm run check` | TypeScript types, formatting, the theme gate (colours only from one place), the loop gate (every loop, timer and wait carries a written verdict: 621 rows), 131 unit tests, the PyTorch engine's own tests | pass |
-| `npm run check:engine` | Rust formatting, clippy with every warning an error, 66 engine tests | pass |
-| CPU end to end (`e2e_cpu.sh`) | the Rust engine against PyTorch, both fp32, frame folder + H.264 + hint inputs, EXR + video outputs, low-memory mode | pass (numbers in Quality) |
-| GPU speed + quality, HD and 4K | `engine_bench.mjs` + `matte_compare.py`, ten clips, both engines | pass (the tables above) |
+| `npm run check` | TypeScript types, formatting, the theme gate (colours only from one place), the loop gate (every loop, timer and wait in the app and engine carries a written verdict: 653 rows), 141 unit tests, the PyTorch engine's own tests | pass |
+| `npm run check:engine` | Rust formatting, clippy with every warning an error, 67 engine tests | pass |
+| CPU end to end (`e2e_cpu.sh`) | the Rust engine against PyTorch, both fp32: frame folder, H.264 and hint inputs, EXR and video outputs, low-memory mode | pass: alpha MAE 1.7e-7, low-memory mode identical |
+| GPU speed and quality, HD and 4K | `engine_bench.mjs` + `matte_compare.py`, ten clips, both engines | pass (the tables above) |
+| Memory soak | an isolated copy keys the six HD clips three times in a row (18 jobs) while every process's memory is sampled every 5 s | pass: no growth (below) |
 | Fresh install | an isolated copy with an empty data folder downloads the 4.9 GB runtime and models, is stopped partway and resumed, then finds the engine | pass |
+| Windows, in a VM | install, setup, ffmpeg through winget, the 4.6 GB Windows download, adding a clip, uninstall (below) | pass (no keying: no NVIDIA card in the VM) |
 | Single instance (`two_copies_e2e.sh`) | a second copy quits without touching the first copy's running job | pass |
 | Self-update (`update_e2e.sh`) | an older AppImage updates itself from a signed local feed | not run this time: AppImages can't mount from inside the test session (FUSE); it passed on 2026-10-22 |
 | Bug hunt + audit | every function and failure path in the new code given a verdict; 5 bugs found and fixed, each with a test | done |
+| Leak and efficiency audit | everything that could grow per frame, per job or per state push, in the app and the engine | no leak found; its fixes are in |
+| The original's pull requests | each open PR on CorridorKey 2.0 checked against this app (below) | one shared bug found and fixed (frame order) |
 
 Test copies always run isolated: their own home folder, a headless compositor, a private D-Bus and a memory cap.
 They never touch the desktop, its keyring or its settings.
+
+### Memory soak (no leaks)
+
+Three full queues of the six HD clips (18 jobs, all done) in one app session, sampled every 5 s:
+
+| | Round 1 | Round 2 | Round 3 |
+| --- | --- | --- | --- |
+| Engine RAM, peak | 5,891 MB | 5,789 MB | 5,877 MB |
+| Engine open files, max | 138 | 135 | 138 |
+| Graphics memory, peak | 14.4 GB | 14.9 GB | 14.9 GB |
+| After the round: app main / window / GPU process | 195 / 114 / 297 MB | 196 / 115 / 297 MB | 197 / 115 / 297 MB |
+| After the round: graphics memory used | 2.89 GB | 2.81 GB | 2.85 GB |
+
+The engine quits after every queue and gives all its memory back (it holds no graphics memory while the app is
+idle); the app itself stays flat.
+
+### Windows (virtual machine)
+
+Windows 11 in a virtual machine without an NVIDIA card, driven like a user would (the installer, the window, file
+dialogs):
+
+| Step | Result |
+| --- | --- |
+| Installer: per user, no administrator, desktop shortcut | pass |
+| First start opens the setup; Windows folders (`%LOCALAPPDATA%`) | pass |
+| ffmpeg through `winget`, found without restarting the app | pass |
+| The first-run download (4.6 GB, the Windows packages): every byte, temp files cleaned | pass |
+| Adding a clip: thumbnail and details read through ffmpeg | pass |
+| Uninstall: asks first, then removes the app, the 6 GB of data and the settings; clips untouched | pass |
+| Keying on an NVIDIA card | not tested (no NVIDIA card in the VM) |
 
 ## The original's open pull requests
 
