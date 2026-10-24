@@ -33,7 +33,8 @@ pub fn make_checker(h: usize, w: usize) -> Vec<f32> {
 
 /// Render one frame. `logits`: (4, H, W) for the padded shape; crop (t, l) and the native (h, w).
 /// Returns (output name, one-frame batch) for each selected output, NHWC in BGR(A) / 1-channel order:
-/// video: uint16 (alpha as 3 equal channels); EXR: float32, scene-linear, unclamped colour.
+/// video: uint16 (alpha as 3 equal channels), the cutout straight (unpremultiplied) as ProRes 4444 carries it;
+/// EXR: float32, scene-linear, unclamped colour, the cutout premultiplied (RGB x alpha) as EXR and Nuke expect.
 /// Rows render in parallel, each straight into its place in the outputs (no per-row buffers, no join copy).
 /// `logits` are read in stage 2's own type (float16 or float32), each value converted as it is used (exact).
 pub fn render<L: ToF32>(
@@ -117,7 +118,8 @@ fn render_row_exr<L: ToF32>(
         if o.cutout || o.checker {
             let d = despill(lin, o.despill);
             if let Some(c) = cu.as_deref_mut() {
-                c[4 * x..4 * x + 4].copy_from_slice(&[d[2], d[1], d[0], pa]);
+                // premultiplied, the EXR / Nuke convention (backlog row 30 c; the original writes straight colour)
+                c[4 * x..4 * x + 4].copy_from_slice(&[d[2] * pa, d[1] * pa, d[0] * pa, pa]);
             }
             if let Some(k) = ck.as_deref_mut() {
                 let bl = srgb_to_linear(checker_srgb[y * w + x]);
@@ -181,6 +183,31 @@ mod tests {
 
     fn opts(exr: bool) -> RenderOpts {
         RenderOpts { alpha: true, fg: true, checker: true, cutout: true, despill: 0.5, cutout_linear: false, exr, adjust: LinearAdjust::default() }
+    }
+
+    #[test]
+    fn exr_cutout_is_premultiplied() {
+        // one pixel, alpha logit 0.25; colour logits that decode to a known linear colour
+        let mut lg = vec![0f32; 4];
+        lg[0] = 0.25;
+        lg[1] = 0.4;
+        lg[2] = 0.9;
+        lg[3] = 0.1;
+        let mut o = opts(true);
+        o.despill = 0.0;
+        let out = render(&o, &lg, (1, 1), (0, 0), (1, 1), &[0.75]);
+        let Batch::F32(fg) = &out[1].1 else { panic!() };
+        let Batch::F32(cu) = &out[3].1 else { panic!() };
+        assert_eq!(out[3].0, "cutout");
+        // straight colour (fg, despill 0) x alpha, exactly; alpha itself unchanged
+        assert_eq!(cu.as_slice(), &[fg[0] * 0.25, fg[1] * 0.25, fg[2] * 0.25, 0.25]);
+        assert!(fg[0] > 0.0 && cu[0] < fg[0]);
+        // the video cutout stays straight: its colour is the foreground's, not scaled by alpha
+        let mut v = opts(false);
+        v.despill = 0.0;
+        let vid = render(&v, &lg, (1, 1), (0, 0), (1, 1), &[0.75]);
+        let (Batch::U16(vf), Batch::U16(vc)) = (&vid[1].1, &vid[3].1) else { panic!() };
+        assert_eq!(&vc[..3], &vf[..3]);
     }
 
     #[test]

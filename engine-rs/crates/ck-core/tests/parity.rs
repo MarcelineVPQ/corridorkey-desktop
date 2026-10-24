@@ -199,7 +199,19 @@ fn render_paths() {
             // video: 16-bit samples, truncated: one step when a float32 product lands on the other side
             let tol = if exr { 2e-5 } else { 1.0 };
             let got = batch_f32(b);
-            let want = load(&fname).1;
+            let mut want = load(&fname).1;
+            if exr && *name == "cutout" {
+                // the original writes the EXR cutout straight; ours is premultiplied on purpose (backlog row 30 c):
+                // the reference's BGR x its own alpha
+                // loop: HOT-PATH-OK — a 30x44 fixture, once
+                for px in want.chunks_mut(4) {
+                    let a = px[3];
+                    // loop: NOT-WORTH — three channels
+                    for v in &mut px[..3] {
+                        *v *= a;
+                    }
+                }
+            }
             if exr {
                 let rel: Vec<f32> = got.iter().zip(&want).map(|(a, w)| (a - w) / w.abs().max(1.0)).collect();
                 diff(&format!("{fname} (relative)"), &rel, &vec![0.0; rel.len()], tol);
