@@ -2,21 +2,22 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, net, protocol, shell } from "electron";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, delimiter, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { EngineProcess } from "./engine";
 import { GPU_POLL_MS, readGpu } from "./gpu";
 import { expandPaths, probeClip, still, STILL_WIDTH, VIDEO_EXT } from "./media";
 import { clearJobTemps, Queue } from "./queue";
 import { checkCheckout, checkRustEngine, chooseEngine, loadSettings, saveSettings } from "./settings";
-import { dataDir, effectivePath, findEngineFiles, isInsideApp } from "./engineFind";
-import { checkFfmpeg, ffmpegState, installFfmpeg, installPlan, readOsRelease } from "./ffmpeg";
+import { dataDir, effectivePath, findEngineFiles, isInsideApp, modelSetVersion, windowTitle } from "./engineFind";
+import { checkFfmpeg, ffmpegState, installFfmpeg, planFor, readOsRelease, wingetFfmpegDirs } from "./ffmpeg";
 import { PROGRESS_EVERY_MS } from "./updateFlow";
 import { MODELS_BYTES, RUNTIME_BYTES, freeBytes, installNeeds, runInstall } from "./install";
+import { pruneCache, removeStorage, storageItems } from "./storage";
 import { readDesktopPalette, watchDesktopPalette } from "./desktopTheme";
 import { Updater } from "./updater";
 import { holdAppImageMountUntilExit } from "./appImageQuit";
-import type { AppState, FfmpegState, GpuInfo, InstallState, Job, JobOptions, OutputName } from "../../src/shared/types";
+import type { AppState, FfmpegState, GpuInfo, InstallState, StorageItem, Job, JobOptions, OutputName } from "../../src/shared/types";
 import type { DesktopPalette } from "../../src/ui/theme/palette";
 import { IPC } from "./ipc";
 import { idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir } from "./validate";
@@ -44,16 +45,19 @@ applyLinuxWorkarounds();
 protocol.registerSchemesAsPrivileged([{ scheme: MEDIA_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: false } }]);
 
 const settingsFile = join(app.getPath("userData"), "settings.json");
-// Disk, not /tmp (it is RAM on many Linux desktops): XDG cache, else ~/.cache.
-const cacheDir = join(process.env.XDG_CACHE_HOME || join(app.getPath("home"), ".cache"), "corridorkey-desktop");
+const IS_WIN = process.platform === "win32";
+// Disk, not /tmp (it is RAM on many Linux desktops): XDG cache, else ~/.cache; on Windows %LOCALAPPDATA%.
+const cacheDir = IS_WIN
+  ? join(process.env.LOCALAPPDATA || join(app.getPath("home"), "AppData", "Local"), "corridorkey-desktop", "cache")
+  : join(process.env.XDG_CACHE_HOME || join(app.getPath("home"), ".cache"), "corridorkey-desktop");
 const mediaDir = join(cacheDir, "media");
 let settings = loadSettings(settingsFile, process.env);
 let checkout = checkCheckout(settings.corridorKeyRoot);
 /** Where the Engine page's lists look (engineFind.ts): the app's own engine, a dev build, the in-app install's folder. */
 function enginePlaces() {
   return {
-    bundledBinary: app.isPackaged ? join(process.resourcesPath, "engine", "corridorkey-engine") : null,
-    devBinary: app.isPackaged ? null : resolve(app.getAppPath(), "engine-rs", "target", "release", "corridorkey-engine"),
+    bundledBinary: app.isPackaged ? join(process.resourcesPath, "engine", `corridorkey-engine${IS_WIN ? ".exe" : ""}`) : null,
+    devBinary: app.isPackaged ? null : resolve(app.getAppPath(), "engine-rs", "target", "release", `corridorkey-engine${IS_WIN ? ".exe" : ""}`),
     data: dataDir(process.env, app.getPath("home")),
   };
 }
@@ -75,12 +79,13 @@ function enginePaths() {
 }
 let rustEngine = checkRustEngine(null, null);
 // ffmpeg: "checking" until the first check (started at ready); then after an install or before a queue
-let ffmpeg: FfmpegState = { checked: false, ok: false, problem: null, command: "", canInstall: false, note: null, installing: false, installError: null };
+let ffmpeg: FfmpegState = { checked: false, ok: false, problem: null, command: "", canInstall: false, asksPassword: true, note: null, installing: false, installError: null };
 // the first-run install: what is missing, and its progress while it runs
 function installIdle(): InstallState {
   const need = installNeeds(enginePlaces().data);
   // loop: NOT-WORTH — one stat of the NVIDIA driver's proc file per check
-  const nvidia = existsSync("/proc/driver/nvidia/version");
+  // the NVIDIA driver: its proc file on Linux, its NVML library in System32 on Windows
+  const nvidia = IS_WIN ? existsSync(join(process.env.SystemRoot || "C:\\Windows", "System32", "nvml.dll")) : existsSync("/proc/driver/nvidia/version");
   return {
     dir: enginePlaces().data,
     needRuntime: need.runtime,
@@ -98,10 +103,18 @@ function installIdle(): InstallState {
 }
 let install = installIdle();
 let installAbort: AbortController | null = null;
+let storage: StorageItem[] | null = null;
 let lastInstallProgress = 0;
 async function recheckFfmpeg(): Promise<void> {
+  // Windows: winget's ffmpeg folders onto this process's PATH (a running program never sees PATH changes)
+  if (IS_WIN && process.env.LOCALAPPDATA) {
+    const have = (process.env.PATH ?? "").split(delimiter);
+    // loop: NOT-WORTH — a couple of folders per check
+    const add = wingetFfmpegDirs(process.env.LOCALAPPDATA).filter((d) => !have.includes(d));
+    if (add.length) process.env.PATH = [...add, ...have].join(delimiter);
+  }
   // an install still running stays running (a check while it runs must not bring the Install button back)
-  ffmpeg = { ...ffmpegState(await checkFfmpeg(), installPlan(readOsRelease())), installing: ffmpeg.installing, installError: ffmpeg.installError };
+  ffmpeg = { ...ffmpegState(await checkFfmpeg(), planFor(process.platform, readOsRelease())), installing: ffmpeg.installing, installError: ffmpeg.installError };
   scheduleSend();
 }
 /** Re-check both engines' files (after a setting changed, or before the queue starts). */
@@ -110,9 +123,14 @@ function recheckEngines(): void {
   engineFiles = findEngineFiles(enginePlaces());
   const paths = enginePaths();
   rustEngine = checkRustEngine(paths.binary, paths.models, paths.ort);
+  mainWindow?.setTitle(currentTitle());
 }
-recheckEngines();
+/** The window title for what is set up now (engineFind.ts windowTitle). */
+function currentTitle(): string {
+  return windowTitle(chooseEngine(rustEngine, checkout), modelSetVersion(enginePaths().models));
+}
 let mainWindow: BrowserWindow | null = null;
+recheckEngines();
 let windowShown = false;
 let gpu: GpuInfo | null = null;
 let gpuError: string | null = null;
@@ -160,6 +178,7 @@ function state(): AppState {
     enginePaths: enginePaths(),
     ffmpeg,
     install,
+    storage,
     desktopPalette,
     update: updater.state,
   };
@@ -313,13 +332,21 @@ function registerIpc(): void {
   ipcMain.handle(IPC.getState, () => state());
   // Every handler checks its arguments (validate.ts): the page is sandboxed, but what it sends is still input.
   ipcMain.handle(IPC.addPaths, (_e, paths: unknown) => addPaths(pathsArg(paths)));
-  ipcMain.handle(IPC.pickClips, async () => {
-    const r = await dialog.showOpenDialog(mainWindow!, {
-      title: "Add clips",
-      properties: ["openFile", "openDirectory", "multiSelections"],
-      // loop: NOT-WORTH — seven extensions, once per file dialog
-      filters: [{ name: "Video", extensions: [...VIDEO_EXT].map((e) => e.slice(1)) }],
-    });
+  // Two dialogs: on Windows and Linux one dialog can't pick both files and folders (it falls back to a folder
+  // picker, so video files couldn't be chosen at all: found in the Windows VM 2026-10-24; Electron's own note).
+  ipcMain.handle(IPC.pickClips, async (_e, kindIn: unknown) => {
+    const folder = kindIn === "folder";
+    const r = await dialog.showOpenDialog(
+      mainWindow!,
+      folder
+        ? { title: "Add a frame folder or a folder of clips", properties: ["openDirectory", "multiSelections"] }
+        : {
+            title: "Add clips",
+            properties: ["openFile", "multiSelections"],
+            // loop: NOT-WORTH — seven extensions, once per file dialog
+            filters: [{ name: "Video", extensions: [...VIDEO_EXT].map((e) => e.slice(1)) }],
+          },
+    );
     if (!r.canceled) await addPaths(r.filePaths);
   });
   ipcMain.handle(IPC.pickFile, async (_e, kindArg: unknown) => {
@@ -346,7 +373,7 @@ function registerIpc(): void {
     const opts = {
       binary: { title: "The CorridorKey engine program (corridorkey-engine)", properties: ["openFile"] as const },
       models: { title: "The folder with the CorridorKey ONNX models", properties: ["openDirectory"] as const },
-      ort: { title: "ONNX Runtime's library (libonnxruntime.so) for the graphics card", properties: ["openFile"] as const },
+      ort: { title: `ONNX Runtime's library (${IS_WIN ? "onnxruntime.dll" : "libonnxruntime.so"}) for the graphics card`, properties: ["openFile"] as const },
     }[what];
     const r = await dialog.showOpenDialog(mainWindow!, { title: opts.title, properties: [...opts.properties] });
     if (r.canceled) return;
@@ -399,18 +426,48 @@ function registerIpc(): void {
     scheduleSend();
   });
   ipcMain.handle(IPC.stopInstall, () => installAbort?.abort());
+  ipcMain.handle(IPC.measureStorage, () => {
+    storage = storageItems(enginePlaces().data, cacheDir);
+    scheduleSend();
+  });
+  ipcMain.handle(IPC.removeStorage, async (_e, idIn: unknown) => {
+    // loop: NOT-WORTH — three items, once per click
+    const item = storageItems(enginePlaces().data, cacheDir).find((i) => i.id === idIn);
+    if (!item || !mainWindow) return;
+    if (queue.running || install.status === "running") {
+      await dialog.showMessageBox(mainWindow, { type: "info", message: "Not while the queue or the download runs", detail: "Stop it first, then remove." });
+      return;
+    }
+    const again = item.id === "cache" ? "It is rebuilt as needed." : "The setup downloads it again when you need it.";
+    const r = await dialog.showMessageBox(mainWindow, {
+      type: "question",
+      buttons: ["Remove", "Cancel"],
+      defaultId: 1,
+      cancelId: 1,
+      message: `Remove the ${item.label.toLowerCase()}?`,
+      detail: `This deletes ${item.path} (${(item.bytes / 1e9).toFixed(2)} GB). ${again}`,
+    });
+    if (r.response !== 0) return;
+    removeStorage(item);
+    storage = storageItems(enginePlaces().data, cacheDir);
+    install = installIdle();
+    recheckEngines();
+    scheduleSend();
+  });
   ipcMain.handle(IPC.installFfmpeg, async () => {
     if (ffmpeg.ok || ffmpeg.installing) return;
     ffmpeg = { ...ffmpeg, installing: true, installError: null };
     scheduleSend();
     try {
-      await installFfmpeg(installPlan(readOsRelease()));
+      await installFfmpeg(planFor(process.platform, readOsRelease()));
       ffmpeg = { ...ffmpeg, installing: false };
     } catch (e) {
       // error: SHOWN — the Engine page's ffmpeg section shows it next to the command
       ffmpeg = { ...ffmpeg, installing: false, installError: (e as Error).message };
     }
     await recheckFfmpeg();
+    // found after all (e.g. winget: "already installed"): no error to show
+    if (ffmpeg.ok) ffmpeg = { ...ffmpeg, installError: null };
   });
   ipcMain.handle(IPC.setJobOptions, (_e, idIn: unknown, optionsIn: unknown) => {
     const id = idArg(idIn);
@@ -480,7 +537,7 @@ function createWindow(): void {
     minHeight: 600,
     show: false,
     autoHideMenuBar: true,
-    title: "CorridorKey",
+    title: currentTitle(),
     backgroundColor: "#16181d", // theme-exempt: first paint before the page's tokens load (matches --bg-0 dark)
     webPreferences: {
       preload: join(here, "../preload/index.cjs"),
@@ -493,6 +550,8 @@ function createWindow(): void {
   });
   mainWindow.once("ready-to-show", () => mainWindow?.show());
   const shown = (v: boolean) => () => setShown(v);
+  // the title is the app's own (CorridorKey 2.0 — Rust + ONNX), not the page's <title>
+  mainWindow.on("page-title-updated", (e) => e.preventDefault());
   mainWindow.on("show", shown(true));
   mainWindow.on("restore", shown(true));
   mainWindow.on("hide", shown(false));
@@ -536,12 +595,14 @@ app.whenReady().then(() => {
   void recheckFfmpeg();
   protocol.handle(MEDIA_SCHEME, (req) => {
     const file = decodeURIComponent(new URL(req.url).pathname.slice(1));
-    if (!resolve(file).startsWith(mediaDir + "/")) return new Response("not found", { status: 404 });
+    if (!resolve(file).startsWith(mediaDir + sep)) return new Response("not found", { status: 404 });
     // loop: NOT-WORTH — one local file per media request (thumbnails / stills from the app's cache) [bounded: a local file: URL]
     return net.fetch(pathToFileURL(file).toString());
   });
   // one copy runs (single-instance lock) and no engine yet: any job folder is left over from a crash
   clearJobTemps(join(cacheDir, "jobs"));
+  // stills older than 30 days, or past 500 MB, go (storage.ts)
+  pruneCache(mediaDir);
   nativeTheme.themeSource = settings.appearance.theme === "light" ? "light" : settings.appearance.theme === "dark" ? "dark" : "system";
   updatePaletteWatch();
   registerIpc();

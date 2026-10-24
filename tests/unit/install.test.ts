@@ -59,6 +59,12 @@ describe("first-run install", () => {
     expect(keepFromWheel("nvidia/cu13/lib/libcublasLt.so.13")).toBe(true);
     expect(keepFromWheel("nvidia/cudnn/include/cudnn.h")).toBe(false);
     expect(keepFromWheel("nvidia_cudnn_cu13-9.27.0.42.dist-info/licenses/License.txt")).toBe(true);
+    // Windows wheels
+    expect(keepFromWheel("onnxruntime/capi/onnxruntime.dll")).toBe(true);
+    expect(keepFromWheel("onnxruntime/capi/onnxruntime_providers_tensorrt.dll")).toBe(false);
+    expect(keepFromWheel("nvidia/cu13/bin/x86_64/cublasLt64_13.dll")).toBe(true);
+    expect(keepFromWheel("nvidia/cudnn/bin/cudnn64_9.dll")).toBe(true);
+    expect(keepFromWheel("onnxruntime_gpu-1.31.0.dist-info/METADATA")).toBe(true);
   });
 
   it("unpacks the chosen entries and refuses paths outside the folder", async () => {

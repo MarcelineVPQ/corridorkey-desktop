@@ -25,7 +25,9 @@ const realDeps: FindDeps = {
   read: (p) => readFileSync(p, "utf8"),
 };
 
-export function dataDir(env: NodeJS.ProcessEnv, home: string): string {
+/** The app's data folder: $XDG_DATA_HOME (else ~/.local/share) on Linux, %LOCALAPPDATA% on Windows. */
+export function dataDir(env: NodeJS.ProcessEnv, home: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform === "win32") return join(env.LOCALAPPDATA || join(home, "AppData", "Local"), "corridorkey-desktop");
   return join(env.XDG_DATA_HOME || join(home, ".local", "share"), "corridorkey-desktop");
 }
 
@@ -54,7 +56,7 @@ function newerFirst(a: number[], b: number[]): number {
   return 0;
 }
 
-export function findEngineFiles(places: { bundledBinary: string | null; devBinary: string | null; data: string }, d: FindDeps = realDeps): EngineFiles {
+export function findEngineFiles(places: { bundledBinary: string | null; devBinary: string | null; data: string }, d: FindDeps = realDeps, platform: NodeJS.Platform = process.platform): EngineFiles {
   const binary: EngineFileChoice[] = [];
   if (places.bundledBinary && d.exists(places.bundledBinary)) binary.push({ path: places.bundledBinary, label: "Included with the app" });
   if (places.devBinary && d.exists(places.devBinary)) binary.push({ path: places.devBinary, label: "Development build (engine-rs)" });
@@ -87,11 +89,25 @@ export function findEngineFiles(places: { bundledBinary: string | null; devBinar
   // loop: NOT-WORTH — one folder per installed runtime (one or two)
   for (const name of dirs(runtimeRoot, d)) {
     const capi = join(runtimeRoot, name, "onnxruntime", "capi");
-    // loop: NOT-WORTH — a dozen files in ONNX Runtime's capi folder
-    const lib = dirs(capi, d).find((f) => /^libonnxruntime\.so\.\d/.test(f));
-    if (!lib) continue;
-    const version = lib.slice("libonnxruntime.so.".length);
-    const gpu = d.exists(join(capi, "libonnxruntime_providers_cuda.so"));
+    let lib: string | undefined;
+    let version: string | undefined;
+    let gpu: boolean;
+    if (platform === "win32") {
+      // Windows: onnxruntime.dll, its version from the wheel's kept dist-info folder (onnxruntime_gpu-1.31.0.dist-info)
+      if (!d.exists(join(capi, "onnxruntime.dll"))) continue;
+      lib = "onnxruntime.dll";
+      // loop: NOT-WORTH — a few folders in one runtime
+      version = dirs(join(runtimeRoot, name), d)
+        .map((f) => /^onnxruntime(?:_gpu)?-([\d.]+)\.dist-info$/.exec(f)?.[1])
+        .find(Boolean);
+      gpu = d.exists(join(capi, "onnxruntime_providers_cuda.dll"));
+    } else {
+      // loop: NOT-WORTH — a dozen files in ONNX Runtime's capi folder
+      lib = dirs(capi, d).find((f) => /^libonnxruntime\.so\.\d/.test(f));
+      version = lib?.slice("libonnxruntime.so.".length);
+      gpu = d.exists(join(capi, "libonnxruntime_providers_cuda.so"));
+    }
+    if (!lib || !version) continue;
     ort.push({ path: join(capi, lib), label: `ONNX Runtime ${version}${gpu ? " (graphics card)" : " (CPU only)"}`, key: versionKey(version) });
   }
   // loop: NOT-WORTH — sorts one or two runtimes
@@ -103,7 +119,29 @@ export function findEngineFiles(places: { bundledBinary: string | null; devBinar
 
 /** A path inside the running AppImage's mount (resources/…): it changes every launch, so it is never saved. */
 export function isInsideApp(path: unknown, resourcesPath: string | null): boolean {
-  return typeof path === "string" && ((!!resourcesPath && path.startsWith(resourcesPath + "/")) || /\/\.mount_[^/]+\//.test(path));
+  return typeof path === "string" && ((!!resourcesPath && (path.startsWith(resourcesPath + "/") || path.startsWith(resourcesPath + "\\"))) || /\/\.mount_[^/]+\//.test(path));
+}
+
+/** The model set's version from its manifest.json ("2.0.0-onnx.3"), or null. */
+export function modelSetVersion(dir: string | null, d: FindDeps = realDeps): string | null {
+  if (!dir) return null;
+  try {
+    return (JSON.parse(d.read(join(dir, "manifest.json"))) as { version?: string }).version ?? null;
+  } catch {
+    // error: NOT-WORTH — no readable manifest: the title leaves the version out
+    return null;
+  }
+}
+
+/**
+ * The window title: CorridorKey's own version (the model set's major.minor: 2.0.0-onnx.3 is CorridorKey 2.0, and it
+ * follows when Corridor updates the model) and the engine, so it is clear this isn't the PyTorch original (Marcy
+ * 2026-10-24: "CorridorKey 2.0 — Rust + ONNX").
+ */
+export function windowTitle(kind: "rust" | "python" | null, modelsVersion: string | null): string {
+  if (kind === "python") return "CorridorKey — PyTorch (reference)";
+  const v = modelsVersion ? /^(\d+\.\d+)/.exec(modelsVersion)?.[1] : undefined;
+  return `CorridorKey${v ? ` ${v}` : ""} — Rust + ONNX`;
 }
 
 /** What the engine runs with: the chosen path, else (Automatic) the first one found. */

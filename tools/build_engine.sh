@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Build the engine that ships inside the AppImage: engine-rs/target/dist/corridorkey-engine.
 #
-#   tools/build_engine.sh
+#   tools/build_engine.sh              the Linux engine (engine-rs/target/dist/corridorkey-engine)
+#   tools/build_engine.sh --windows    the Windows engine, cross-built here (…/dist/corridorkey-engine.exe; MinGW-w64,
+#                                      `rustup target add x86_64-pc-windows-gnu`; it needs only DLLs every Windows has)
 #
 # Linked against glibc 2.28 (the oldest Electron itself supports), so it runs on every Linux the app
 # runs on; a plain cargo build links against this desktop's glibc 2.43, newer than Ubuntu 24.04 or
@@ -11,6 +13,20 @@
 # loaded at run time (the in-app install downloads it), CUDA, TensorRT. Memory-capped (its own 12 G scope:
 # when release.sh runs it, this cap and release.sh's sit side by side, they don't nest).
 set -euo pipefail
+if [ "${1:-}" = --windows ]; then
+  ENG="$(cd "$(dirname "$0")/.." && pwd)/engine-rs"
+  mkdir -p "$ENG/target/dist"
+  cd "$ENG"
+  systemd-run --user --scope --quiet --collect -p MemoryMax=12G -p MemorySwapMax=0 -- \
+    cargo build --release --locked -p ck-engine --no-default-features --features ort-dynamic,cuda,tensorrt --target x86_64-pc-windows-gnu
+  cp "$ENG/target/x86_64-pc-windows-gnu/release/corridorkey-engine.exe" "$ENG/target/dist/corridorkey-engine.exe.new"
+  mv -f "$ENG/target/dist/corridorkey-engine.exe.new" "$ENG/target/dist/corridorkey-engine.exe"
+  # only Windows' own DLLs: a MinGW runtime DLL here would be missing on users' PCs
+  extra=$(x86_64-w64-mingw32-objdump -p "$ENG/target/dist/corridorkey-engine.exe" | awk '/DLL Name/ {print tolower($3)}' | grep -vE '^(kernel32|ntdll|msvcrt|bcryptprimitives|advapi32|ws2_32|userenv|api-ms-win-.*)\.dll$' || true)
+  [ -z "$extra" ] || { echo "build_engine: the Windows engine needs DLLs Windows doesn't have: $extra" >&2; exit 1; }
+  echo "built $ENG/target/dist/corridorkey-engine.exe"
+  exit 0
+fi
 APP="$(cd "$(dirname "$0")/.." && pwd)"
 ENG="$APP/engine-rs"
 GLIBC=2.28

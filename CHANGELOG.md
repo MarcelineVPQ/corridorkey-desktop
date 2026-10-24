@@ -25,3 +25,12 @@ screen keyer, on its own Rust + ONNX Runtime engine.
   and SHA-512 checked; installs beside the running copy, the previous version kept; never a
   downgrade except Back to stable). Packaging as `CorridorKey-Desktop-<version>.AppImage`.
 - CorridorKey's own icon (corridorkey.com).
+- Windows 10/11: an installer (per user, no administrator), the same setup (the Windows runtime
+  packages, ffmpeg through winget) and an uninstaller that asks whether to remove the downloaded data.
+  Tested in a Windows 11 virtual machine without an NVIDIA card: keying on Windows is untested
+  (README, Requirements).
+- App settings, Storage: each folder the app keeps, its size, and Remove; the thumbnail cache prunes
+  itself (30 days, 500 MB). README, Uninstall lists every folder the app writes.
+- Add clips (video files) and Add folder (frame sequences, folders of clips) are two buttons: one
+  dialog can't pick both on Windows or Linux.
+- The window title says which CorridorKey and which engine: CorridorKey 2.0 — Rust + ONNX.

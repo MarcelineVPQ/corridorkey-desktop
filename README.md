@@ -9,9 +9,15 @@ Status: in development, Linux first.
 
 ## Requirements
 
-- An NVIDIA graphics card (RTX 30-series or newer) and `ffmpeg`.
-- Nothing else to set up: the engine comes with the app, and on first start the Engine page downloads
-  the GPU runtime and the CorridorKey models (a 4.9 GB download, once). If `ffmpeg` is missing, it offers to install it.
+- Linux (the AppImage) or Windows 10/11 (the installer), x64, with an NVIDIA graphics card (RTX 30-series or newer).
+- Nothing else to set up: the engine comes with the app, and on first start the setup downloads the GPU runtime and
+  the CorridorKey models (a 4.9 GB download, once). If `ffmpeg` is missing, it offers to install it (apt or pacman on
+  Linux, `winget` on Windows).
+
+**Windows, honestly:** the Windows build is tested in a Windows 11 virtual machine: it installs, opens, runs its setup
+(the downloads, ffmpeg through winget) and works through its pages. That machine has no NVIDIA graphics card, so
+**keying on an NVIDIA card under Windows has not been tested yet**: we don't have a real Windows PC with one. Every
+speed and quality number in this README was measured on Linux. If you try it on Windows, please tell us how it goes.
 
 ## Install size
 
@@ -148,6 +154,25 @@ They never touch the desktop, its keyring or its settings.
   needs (H.264 and ProRes 4444) and offers the install where it can.
 - **The original kept as the reference:** the PyTorch engine stays in the app (Engine page), so every speed and
   quality claim here can be checked against it on the same machine.
+
+## Uninstall
+
+CorridorKey writes only these folders (plus the results you ask for, next to your clips or in the folder you chose):
+
+| What | Linux | Windows |
+| --- | --- | --- |
+| The app | the AppImage you downloaded (and, after updates, the previous version next to it) | the install folder (Apps & features) |
+| GPU runtime and models (~5.7 GB) | `~/.local/share/corridorkey-desktop` | `%LOCALAPPDATA%\corridorkey-desktop` |
+| Thumbnails, stills, job temp files | `~/.cache/corridorkey-desktop` | `%LOCALAPPDATA%\corridorkey-desktop\cache` |
+| Settings (a few KB) | `~/.config/corridorkey-desktop` | `%APPDATA%\corridorkey-desktop` |
+
+- **App settings → Storage** shows each folder's real size and removes the runtime, the models or the cache (it asks
+  first; the setup downloads them again when needed).
+- The cache cleans itself: stills older than 30 days go, and it never grows past 500 MB. Job temp files are removed
+  when a job ends, and anything left by a crash at the next start.
+- **Windows:** uninstalling from Apps & features asks whether to remove the downloaded runtime, models, cache and
+  settings too.
+- **Linux:** delete the AppImage, then the three folders above.
 
 ## Develop
 

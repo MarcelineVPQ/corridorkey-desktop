@@ -9,7 +9,9 @@ import { basename, dirname, extname, join } from "node:path";
 import { promisify } from "node:util";
 import type { ClipInfo } from "../../src/shared/types";
 
-const run = promisify(execFile);
+const execFileP = promisify(execFile);
+// windowsHide: on Windows a console program started from the app would flash a terminal window
+const run = (cmd: string, args: string[], opts: { timeout?: number; maxBuffer?: number }) => execFileP(cmd, args, { ...opts, windowsHide: true, encoding: "utf8" });
 
 export const VIDEO_EXT = new Set([".mp4", ".mov", ".mkv", ".avi", ".mxf", ".webm", ".m4v"]);
 export const FRAME_EXT = new Set([".exr", ".png", ".jpg", ".jpeg"]);

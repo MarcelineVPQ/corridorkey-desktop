@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkFfmpeg, installFfmpeg, installPlan } from "../../electron/main/ffmpeg";
+import { checkFfmpeg, installFfmpeg, installPlan, planFor, wingetFfmpegDirs } from "../../electron/main/ffmpeg";
 
 const ENCODERS = " V....D libx264              libx264 H.264\n V....D prores_ks            Apple ProRes (iCodec Pro)\n";
 const runs = (answers: Record<string, string | Error>) => async (cmd: string) => {
@@ -50,6 +50,31 @@ describe("ffmpeg install", () => {
     expect(f.argv).toBeNull();
     expect(f.note).toContain("RPM Fusion");
     expect(installPlan('ID="opensuse-tumbleweed"\nID_LIKE="opensuse suse"\n').note).toContain("Packman");
+  });
+  it("installs with winget on Windows, without pkexec", async () => {
+    const plan = planFor("win32", "");
+    const calls: string[][] = [];
+    await installFfmpeg(plan, async (cmd, args) => {
+      calls.push([cmd, ...args]);
+      return "";
+    });
+    expect(calls[0].slice(0, 5)).toEqual(["winget", "install", "--id", "Gyan.FFmpeg", "-e"]);
+  });
+  it("finds the ffmpeg winget installed on Windows (its package's bin folder, not only Links)", () => {
+    const tree: Record<string, string[]> = {
+      "/L/Microsoft/WinGet/Packages": ["Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe", "Other.Tool"],
+      "/L/Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe": ["ffmpeg-9.0.2-full_build"],
+      "/L/Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe/ffmpeg-9.0.2-full_build": ["bin", "doc"],
+    };
+    const list = (p: string) => {
+      if (!(p in tree)) throw new Error("ENOENT");
+      return tree[p];
+    };
+    expect(wingetFfmpegDirs("/L", list)).toEqual(["/L/Microsoft/WinGet/Links", "/L/Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe/ffmpeg-9.0.2-full_build/bin"]);
+  });
+  it("shows the package manager's own last line when an install fails", async () => {
+    const fail = async () => Promise.reject(Object.assign(new Error("x"), { code: 1, stdout: "Found Gyan.FFmpeg\r\nNo sources available.\r\n" }));
+    await expect(installFfmpeg(planFor("win32", ""), fail)).rejects.toThrow('the install failed (No sources available.): run "winget install --id Gyan.FFmpeg -e" in a terminal to see more');
   });
   it("falls back to plain advice on an unknown system", () => {
     expect(installPlan("")).toEqual({ command: "Install ffmpeg with your distribution's package manager", argv: null, note: null });

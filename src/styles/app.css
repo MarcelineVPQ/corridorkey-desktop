@@ -567,3 +567,12 @@ select {
 .selectable {
   user-select: text;
 }
+/* two buttons side by side (Add clips / Add folder) */
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.queue-empty .btn-row {
+  justify-content: center;
+}

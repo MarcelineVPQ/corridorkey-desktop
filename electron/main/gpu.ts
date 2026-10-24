@@ -7,7 +7,9 @@ import { readFileSync } from "node:fs";
 import { promisify } from "node:util";
 import type { GpuInfo, GpuProcess } from "../../src/shared/types";
 
-const run = promisify(execFile);
+const execFileP = promisify(execFile);
+// windowsHide: on Windows a console program started from the app would flash a terminal window
+const run = (cmd: string, args: string[], opts: { timeout?: number; maxBuffer?: number }) => execFileP(cmd, args, { ...opts, windowsHide: true, encoding: "utf8" });
 export const GPU_POLL_MS = 2000;
 // nvidia-smi answers in ~50 ms; a driver in trouble can hang it: the read gives up (and says so) instead.
 export const GPU_READ_TIMEOUT_MS = 5000;

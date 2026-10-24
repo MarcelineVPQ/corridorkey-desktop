@@ -13,7 +13,7 @@ const api: CorridorKeyApi = {
     return () => ipcRenderer.removeListener(IPC.state, handler);
   },
   addPaths: (paths) => ipcRenderer.invoke(IPC.addPaths, paths),
-  pickClips: () => ipcRenderer.invoke(IPC.pickClips),
+  pickClips: (kind) => ipcRenderer.invoke(IPC.pickClips, kind),
   pickFile: (kind) => ipcRenderer.invoke(IPC.pickFile, kind),
   pickCheckout: () => ipcRenderer.invoke(IPC.pickCheckout),
   pickRustEngine: (what) => ipcRenderer.invoke(IPC.pickRustEngine, what),
@@ -21,6 +21,8 @@ const api: CorridorKeyApi = {
   installFfmpeg: () => ipcRenderer.invoke(IPC.installFfmpeg),
   startInstall: () => ipcRenderer.invoke(IPC.startInstall),
   stopInstall: () => ipcRenderer.invoke(IPC.stopInstall),
+  measureStorage: () => ipcRenderer.invoke(IPC.measureStorage),
+  removeStorage: (id) => ipcRenderer.invoke(IPC.removeStorage, id),
   pathForFile: (file) => webUtils.getPathForFile(file),
   setJobOptions: (id, options) => ipcRenderer.invoke(IPC.setJobOptions, id, options),
   removeJob: (id) => ipcRenderer.invoke(IPC.removeJob, id),

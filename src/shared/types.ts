@@ -217,6 +217,14 @@ export interface InstallState {
   error: string | null;
 }
 
+// What the app keeps on disk (electron/main/storage.ts), measured when App settings shows Storage.
+export interface StorageItem {
+  id: "runtime" | "models" | "cache";
+  label: string;
+  path: string;
+  bytes: number;
+}
+
 // The system's ffmpeg (electron/main/ffmpeg.ts): ok = ffmpeg + ffprobe with the encoders the engine writes with.
 export interface FfmpegState {
   // false until the first check has answered (the page says "Checking", never "installed", before that)
@@ -226,6 +234,8 @@ export interface FfmpegState {
   // the install for this distro, to read or copy; canInstall = the app can run it (pkexec), else `note` says what first
   command: string;
   canInstall: boolean;
+  // Linux: pkexec's password prompt; Windows: winget may ask for permission itself
+  asksPassword: boolean;
   note: string | null;
   installing: boolean;
   installError: string | null;
@@ -252,6 +262,8 @@ export interface AppState {
   engineFiles: EngineFiles;
   ffmpeg: FfmpegState;
   install: InstallState;
+  // null until App settings asks for it (measuring walks the folders)
+  storage: StorageItem[] | null;
   enginePaths: { binary: string | null; models: string | null; ort: string | null };
   // the desktop's colors (Desktop theme / desktop accent); null = couldn't be read or not asked
   desktopPalette: DesktopPalette | null;
@@ -262,7 +274,8 @@ export interface CorridorKeyApi {
   getState(): Promise<AppState>;
   onState(listener: (state: AppState) => void): () => void;
   addPaths(paths: string[]): Promise<void>;
-  pickClips(): Promise<void>;
+  // "files": video files; "folder": frame sequences and folders of clips (one dialog can't pick both)
+  pickClips(kind: "files" | "folder"): Promise<void>;
   pickFile(kind: "hint-image" | "hint-video"): Promise<string | null>;
   pickCheckout(): Promise<void>;
   pickRustEngine(what: "binary" | "models" | "ort"): Promise<void>;
@@ -271,6 +284,9 @@ export interface CorridorKeyApi {
   installFfmpeg(): Promise<void>;
   startInstall(): Promise<void>;
   stopInstall(): Promise<void>;
+  measureStorage(): Promise<void>;
+  // asks for confirmation first (a system dialog); refused while the queue or the install runs
+  removeStorage(id: StorageItem["id"]): Promise<void>;
   pathForFile(file: File): string;
   setJobOptions(id: string, options: JobOptions): Promise<void>;
   removeJob(id: string): Promise<void>;

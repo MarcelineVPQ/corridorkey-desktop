@@ -84,9 +84,78 @@ export const RUNTIME = {
   ] as Download[],
 };
 
+// The same set for Windows (the win_amd64 wheels; DLLs in onnxruntime/capi, nvidia/cudnn/bin, nvidia/cu13/bin/x86_64).
+// cuBLAS 13.8.1.7 has no Windows wheel: 13.8.0.4, the same CUDA 13 line.
+export const RUNTIME_WIN = {
+  name: "ort-1.31.0-cuda13",
+  wheels: [
+    {
+      label: "ONNX Runtime",
+      file: "onnxruntime_gpu-1.31.0-cp312-cp312-win_amd64.whl",
+      url: `${PYPI}/7e/ff/035730b399eea860df5952a76cc489cb34a663e5341eb6f53d892a5f7f2c/onnxruntime_gpu-1.31.0-cp312-cp312-win_amd64.whl`,
+      size: 168098204,
+      sha256: "e6bd756a3022a1a5a0217f35814e40e6e04fd1e497a5be78f991f6bfefad2fba",
+    },
+    {
+      label: "NVIDIA cuBLAS",
+      file: "nvidia_cublas-13.8.0.4-py3-none-win_amd64.whl",
+      url: `${PYPI}/a3/df/f1246959833e2c437db8be3e5b477f66b87f8817821ed40de6c7561c9a36/nvidia_cublas-13.8.0.4-py3-none-win_amd64.whl`,
+      size: 423266897,
+      sha256: "8c5494423bb8a46822cb6b0cb95d7fa4be2d7b96a31155dff083839ec8297910",
+    },
+    {
+      label: "NVIDIA CUDA compiler (NVRTC)",
+      file: "nvidia_cuda_nvrtc-13.4.92-py3-none-win_amd64.whl",
+      url: `${PYPI}/64/5b/aa91896f64444eff1dd7f189f4db05046c7f0ba08c0f531283c1c1aac581/nvidia_cuda_nvrtc-13.4.92-py3-none-win_amd64.whl`,
+      size: 46972283,
+      sha256: "6af7ac5372920f6a7a560d0699348560fe44cb52c1d722d6afd3119f8af948c4",
+    },
+    {
+      label: "NVIDIA CUDA runtime",
+      file: "nvidia_cuda_runtime-13.4.92-py3-none-win_amd64.whl",
+      url: `${PYPI}/86/00/d5436004268f049214193659ebc36550b5ef3925c3d13b4cc980e13be6f5/nvidia_cuda_runtime-13.4.92-py3-none-win_amd64.whl`,
+      size: 2778543,
+      sha256: "08dca5e4aba480c2fd5b55075c0fa71b84ef9dcf0521f2d58baa14a803a7311c",
+    },
+    {
+      label: "NVIDIA cuDNN",
+      file: "nvidia_cudnn_cu13-9.27.0.42-py3-none-win_amd64.whl",
+      url: `${PYPI}/87/6a/e55ff0ac26a5c6e2b21f41c9d04ad096b4ed6da593fba7e25845c61b0532/nvidia_cudnn_cu13-9.27.0.42-py3-none-win_amd64.whl`,
+      size: 436469905,
+      sha256: "7d96f634adafd55c72231eb0500ca77ab109ec8ebff7b33000b76e081bc4558e",
+    },
+    {
+      label: "NVIDIA cuFFT",
+      file: "nvidia_cufft-12.4.0.43-py3-none-win_amd64.whl",
+      url: `${PYPI}/7b/cc/be7fe31058127336a66c88414a2ecc6beecf680baf85994a43eaf292b202/nvidia_cufft-12.4.0.43-py3-none-win_amd64.whl`,
+      size: 160953139,
+      sha256: "4ff7075f2d0b5f69291f70938d37a86ec632cbe5747184c74ba1f50f17accacc",
+    },
+    {
+      label: "NVIDIA cuRAND",
+      file: "nvidia_curand-10.4.4.72-py3-none-win_amd64.whl",
+      url: `${PYPI}/e2/d4/f59ab342b82ff05ff27d674acd470ba625d788bf71338f7da6c89669d6b9/nvidia_curand-10.4.4.72-py3-none-win_amd64.whl`,
+      size: 56731059,
+      sha256: "e0bce83e083ef25976ee74f59e8f067c15149a74538f1be6c2462e286e7c9c68",
+    },
+    {
+      label: "NVIDIA nvJitLink",
+      file: "nvidia_nvjitlink-13.4.92-py3-none-win_amd64.whl",
+      url: `${PYPI}/72/7c/c44bd7277afafed9de262a23baec4dc8dcf7ecbb1b9ecb228821442d1e9b/nvidia_nvjitlink-13.4.92-py3-none-win_amd64.whl`,
+      size: 39053950,
+      sha256: "b286f3a4f227a9363efdec263c7b91788cef1478d2b8a5fa8bab7f3e82ff82fd",
+    },
+  ] as Download[],
+};
+
 /** What to keep from a wheel: ONNX Runtime's libraries, NVIDIA's libraries, and every licence file. */
 export function keepFromWheel(name: string): boolean {
   if (/^onnxruntime\/capi\/libonnxruntime(\.so\.|_providers_(cuda|shared)\.so$)/.test(name)) return true;
+  // Windows: the DLLs (the TensorRT provider stays out, as on Linux)
+  if (/^onnxruntime\/capi\/onnxruntime(_providers_(cuda|shared))?\.dll$/.test(name)) return true;
+  if (/^nvidia\/[^/]+\/bin\/(x86_64\/)?[^/]+\.dll$/.test(name)) return true;
+  // the package's metadata: the Engine page reads ONNX Runtime's version from its dist-info folder on Windows
+  if (/^onnxruntime(_gpu)?-[\d.]+\.dist-info\/METADATA$/.test(name)) return true;
   if (/^nvidia\/[^/]+\/lib\/[^/]+\.so[.\d]*$/.test(name)) return true;
   return /\.dist-info\/(licenses\/.+|LICENSE[^/]*)$/i.test(name);
 }
@@ -113,7 +182,7 @@ export const MODELS = {
 
 // loop: NOT-WORTH — sums a dozen sizes, once per plan
 const total = (d: Download[]) => d.reduce((n, x) => n + x.size, 0);
-export const RUNTIME_BYTES = total(RUNTIME.wheels);
+export const RUNTIME_BYTES = total(process.platform === "win32" ? RUNTIME_WIN.wheels : RUNTIME.wheels);
 export const MODELS_BYTES = total(MODELS.files);
 
 /** What gets installed: the pinned runtime and model set (tests pass a small one). */
@@ -121,7 +190,7 @@ export interface Catalog {
   runtime: { name: string; wheels: Download[] };
   models: { name: string; files: Download[] };
 }
-const CATALOG: Catalog = { runtime: RUNTIME, models: MODELS };
+const CATALOG: Catalog = { runtime: process.platform === "win32" ? RUNTIME_WIN : RUNTIME, models: MODELS };
 
 /** What is still to install: each set is there once its folder is (the rename is the last step). */
 export function installNeeds(data: string, exists: (p: string) => boolean = existsSync, c: Catalog = CATALOG): { runtime: boolean; models: boolean; bytes: number } {
@@ -190,7 +259,7 @@ export async function runInstall(data: string, deps: InstallDeps, c: Catalog = C
       const unpacked = await unzip(join(downloads, w.file), partial, keepFromWheel, deps.abort);
       // licence files alone don't count: a wheel must give at least one library
       // loop: NOT-WORTH — the few names one wheel unpacked
-      if (!unpacked.some((n) => /\.so[.\d]*$/.test(n))) throw new Error(`${w.file} had none of the expected libraries`);
+      if (!unpacked.some((n) => /\.(so[.\d]*|dll)$/.test(n))) throw new Error(`${w.file} had none of the expected libraries`);
     }
     // loop: NOT-WORTH — one rename: the runtime appears whole
     renameSync(partial, join(data, "runtime", RUNTIME.name));

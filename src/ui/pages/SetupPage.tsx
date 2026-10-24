@@ -1,7 +1,7 @@
 // Setup: the first start's three steps, each with its control and a tick when done (Marcy 2026-10-24: "no
 // setup wizard or install guide, I don't even know how to use my own app"). Opens by itself at start while
 // setup has something to do; the Engine page reopens it. Every tick comes from the app state, never a guess.
-import { Check, FolderOpen, ListVideo } from "lucide-react";
+import { Check, FolderOpen, FolderPlus, ListVideo } from "lucide-react";
 import type { ReactNode } from "react";
 import type { AppState } from "../../shared/types";
 import { MainBlock } from "../panel/SplitView";
@@ -45,9 +45,14 @@ export function SetupPage(props: { state: AppState; openQueue: () => void; openG
           {!hasClips && (
             <>
               <p className="hint-text">A video file, a folder of frames (EXR, PNG, TIFF…) or a folder of clips. Drop them anywhere on this window, or:</p>
-              <button type="button" className="btn small primary" onClick={() => void window.ck.pickClips()}>
-                <FolderOpen size={14} /> Add clips…
-              </button>
+              <div className="btn-row">
+                <button type="button" className="btn small primary" onClick={() => void window.ck.pickClips("files")}>
+                  <FolderOpen size={14} /> Add clips…
+                </button>
+                <button type="button" className="btn small" onClick={() => void window.ck.pickClips("folder")}>
+                  <FolderPlus size={14} /> Add folder…
+                </button>
+              </div>
             </>
           )}
         </Step>

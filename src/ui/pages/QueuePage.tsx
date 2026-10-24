@@ -1,6 +1,6 @@
 // Queue: the clips (left), the selected clip's readouts (main view), its
 // settings in the panel. Start/Stop and Add clips sit in the page's own bar.
-import { Play, Plus, Square, Trash2 } from "lucide-react";
+import { FolderPlus, Play, Plus, Square, Trash2 } from "lucide-react";
 import type { AppState, Job } from "../../shared/types";
 import { missingInput } from "../../shared/tasks";
 import { JobSettings } from "../JobSettings";
@@ -30,8 +30,11 @@ export function QueuePage(props: {
       <div className="page-bar">
         <h1>Queue</h1>
         <span className="spacer" />
-        <button type="button" className="btn" onClick={() => window.ck.pickClips()}>
+        <button type="button" className="btn" onClick={() => window.ck.pickClips("files")}>
           <Plus size={16} /> Add clips
+        </button>
+        <button type="button" className="btn" onClick={() => window.ck.pickClips("folder")}>
+          <FolderPlus size={16} /> Add folder
         </button>
         {state.queueRunning ? (
           <button type="button" className="btn danger" onClick={() => window.ck.stopQueue()}>
@@ -65,9 +68,14 @@ export function QueuePage(props: {
           {state.jobs.length === 0 ? (
             <div className="queue-empty">
               <div>Drop clips, frame folders or a folder of clips here</div>
-              <button type="button" className="btn" onClick={() => window.ck.pickClips()}>
-                <Plus size={16} /> Add clips
-              </button>
+              <div className="btn-row">
+                <button type="button" className="btn" onClick={() => window.ck.pickClips("files")}>
+                  <Plus size={16} /> Add clips
+                </button>
+                <button type="button" className="btn" onClick={() => window.ck.pickClips("folder")}>
+                  <FolderPlus size={16} /> Add folder
+                </button>
+              </div>
             </div>
           ) : (
             // loop: HOT-PATH-OK — one row per job per render (≤ 10/s while shown; rows are cheap, measured pushes ~2/s during a job)

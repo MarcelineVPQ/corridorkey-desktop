@@ -58,7 +58,14 @@ export function engineEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
  * it (site-packages/onnxruntime/capi → site-packages/nvidia/<x>/lib, site-packages/tensorrt_libs).
  */
 // loop: NOT-WORTH — a few stats + one readdir per engine spawn (the CUDA library folders)
-export function rustEngineEnv(env: NodeJS.ProcessEnv, ort: string | null, exists: (p: string) => boolean = existsSync, list: (p: string) => string[] = (p) => readdirSync(p)): NodeJS.ProcessEnv {
+export function rustEngineEnv(
+  env: NodeJS.ProcessEnv,
+  ort: string | null,
+  exists: (p: string) => boolean = existsSync,
+  list: (p: string) => string[] = (p) => readdirSync(p),
+  platform: NodeJS.Platform = process.platform,
+): NodeJS.ProcessEnv {
+  const win = platform === "win32";
   const out: NodeJS.ProcessEnv = { ...env };
   // loop: NOT-WORTH — three names, once per engine spawn
   for (const k of ["LD_PRELOAD", "ELECTRON_RUN_AS_NODE", "LD_LIBRARY_PATH"]) delete out[k];
@@ -70,14 +77,21 @@ export function rustEngineEnv(env: NodeJS.ProcessEnv, ort: string | null, exists
     const nvidia = join(site, "nvidia");
     if (exists(nvidia)) {
       // loop: NOT-WORTH — a handful of CUDA library folders
-      for (const d of list(nvidia).sort()) if (exists(join(nvidia, d, "lib"))) dirs.push(join(nvidia, d, "lib"));
+      // Linux: nvidia/<x>/lib; Windows: nvidia/<x>/bin (CUDA 13 one level deeper, bin/x86_64)
+      for (const d of list(nvidia).sort()) {
+        // loop: NOT-WORTH — two candidate folders per CUDA package
+        for (const sub of win ? [join("bin", "x86_64"), "bin"] : ["lib"]) if (exists(join(nvidia, d, sub))) dirs.push(join(nvidia, d, sub));
+      }
     }
     if (exists(join(site, "tensorrt_libs"))) dirs.push(join(site, "tensorrt_libs"));
     out.CK_ENGINE_ORT = ort;
   }
   // loop: NOT-WORTH — a user's extra library folders, once per engine spawn
-  if (env.CK_ENGINE_LD_LIBRARY_PATH) dirs.push(...env.CK_ENGINE_LD_LIBRARY_PATH.split(":").filter(Boolean));
-  if (dirs.length) out.LD_LIBRARY_PATH = dirs.join(":");
+  if (env.CK_ENGINE_LD_LIBRARY_PATH) dirs.push(...env.CK_ENGINE_LD_LIBRARY_PATH.split(win ? ";" : ":").filter(Boolean));
+  // Windows finds DLLs on PATH (the folders go first); Linux on LD_LIBRARY_PATH
+  // loop: NOT-WORTH — a few folders joined, once per engine spawn
+  if (dirs.length && win) out.PATH = [...dirs, env.PATH ?? env.Path ?? ""].filter(Boolean).join(";");
+  else if (dirs.length) out.LD_LIBRARY_PATH = dirs.join(":");
   return out;
 }
 
@@ -107,8 +121,10 @@ export class EngineProcess {
   /** Spawn and ping. Resolves with the pong; rejects (and kills) on a bad protocol or no answer. */
   start(): Promise<EngineReply> {
     const { cmd, args, env } = launchCommand(this.launch);
-    // detached: its own process group, so a cancel also ends the ffmpeg writers it started
-    const child = this.spawnFn(cmd, args, { env, stdio: ["pipe", "pipe", "pipe"], detached: true });
+    // detached: its own process group, so a cancel also ends the ffmpeg writers it started (Linux; on Windows
+    // detached would open a console window, and taskkill /T ends the tree instead)
+    const win = process.platform === "win32";
+    const child = this.spawnFn(cmd, args, { env, stdio: ["pipe", "pipe", "pipe"], detached: !win, windowsHide: true });
     this.child = child;
     // lifetime: OK — both readers end with the child's streams
     createInterface({ input: child.stdout! }).on("line", (line) => this.line(line));
@@ -163,10 +179,15 @@ export class EngineProcess {
     }, QUIT_GRACE_MS).unref();
   }
 
-  /** SIGKILL the whole process group (engine + ffmpeg). */
+  /** SIGKILL the whole process group (engine + ffmpeg); on Windows, taskkill the process tree. */
   kill(): void {
     const pid = this.child?.pid;
     if (!pid || this.exited) return;
+    if (process.platform === "win32") {
+      // loop: NOT-WORTH — one taskkill per cancel [bounded: taskkill ends by itself]
+      nodeSpawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true }).on("error", () => this.child?.kill());
+      return;
+    }
     try {
       process.kill(-pid, "SIGKILL");
     } catch {

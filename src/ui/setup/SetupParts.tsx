@@ -71,7 +71,10 @@ export function FfmpegBox({ ff }: { ff: FfmpegState }) {
     <>
       <p className="hint-text">CorridorKey reads and writes video with ffmpeg. {ff.problem}.</p>
       {ff.note && <p className="hint-text">{ff.note}</p>}
-      <Row label="Install command" hint={ff.canInstall ? "The app runs it for you; your desktop asks for your password" : "Run it in a terminal"}>
+      <Row
+        label="Install command"
+        hint={!ff.canInstall ? "Run it in a terminal" : ff.asksPassword ? "The app runs it for you; your desktop asks for your password" : "The app runs it for you (Windows may ask for permission)"}
+      >
         <div className="path selectable">{ff.command}</div>
       </Row>
       {ff.canInstall && (

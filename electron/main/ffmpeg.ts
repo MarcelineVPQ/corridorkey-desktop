@@ -5,7 +5,8 @@
 // desktop's own password prompt); where the stock package lacks libx264 (Fedora, openSUSE) the app shows
 // what to enable instead of installing a build that can't write the results.
 import { execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { FfmpegState } from "../../src/shared/types";
 
 export type RunFn = (cmd: string, args: string[], timeoutMs: number) => Promise<string>;
@@ -17,15 +18,30 @@ export const INSTALL_TIMEOUT_MS = 0;
 export const runFile: RunFn = (cmd, args, timeoutMs) =>
   new Promise((resolve, reject) => {
     // loop: SERIAL-REQUIRED — one ffmpeg/ffprobe check or one install at a time, with its own timeout
-    execFile(cmd, args, { timeout: timeoutMs, maxBuffer: 4 << 20 }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
+    // a failure carries the program's output, so the app can show its last line
+    execFile(cmd, args, { timeout: timeoutMs, maxBuffer: 4 << 20, windowsHide: true }, (err, stdout, stderr) => (err ? reject(Object.assign(err, { stdout, stderr })) : resolve(stdout)));
   });
 
 export interface InstallPlan {
   // what the user reads (and can copy), e.g. "sudo apt install ffmpeg"
   command: string;
-  // what the app runs through pkexec; null = the app can't install a usable ffmpeg here, `note` says what to do
+  // what the app runs (through pkexec when `elevate`); null = the app can't install a usable ffmpeg here, `note` says what to do
   argv: string[] | null;
+  elevate?: boolean;
   note: string | null;
+}
+
+/** Windows: winget's full ffmpeg build (it has libx264); winget asks for permission itself, no pkexec. */
+export const WINDOWS_PLAN: InstallPlan = {
+  command: "winget install --id Gyan.FFmpeg -e",
+  argv: ["winget", "install", "--id", "Gyan.FFmpeg", "-e", "--accept-source-agreements", "--accept-package-agreements"],
+  elevate: false,
+  note: null,
+};
+
+/** The install for this system: Windows, or the Linux distro from /etc/os-release's ID and ID_LIKE. */
+export function planFor(platform: NodeJS.Platform, osRelease: string): InstallPlan {
+  return platform === "win32" ? WINDOWS_PLAN : installPlan(osRelease);
 }
 
 /** The install for this distro, from /etc/os-release's ID and ID_LIKE. */
@@ -96,7 +112,40 @@ export async function checkFfmpeg(run: RunFn = runFile): Promise<{ ok: boolean; 
 
 /** The state the Engine page shows, before any install is tried. */
 export function ffmpegState(check: { ok: boolean; problem: string | null }, plan: InstallPlan): FfmpegState {
-  return { checked: true, ok: check.ok, problem: check.problem, command: plan.command, canInstall: plan.argv !== null, note: plan.note, installing: false, installError: null };
+  return {
+    checked: true,
+    ok: check.ok,
+    problem: check.problem,
+    command: plan.command,
+    canInstall: plan.argv !== null,
+    asksPassword: plan.elevate !== false,
+    note: plan.note,
+    installing: false,
+    installError: null,
+  };
+}
+
+/**
+ * Windows: where winget puts ffmpeg. Its Links folder when it can make links; else the package's own bin folder,
+ * which it adds to the user's PATH, but a program already running never sees a PATH change, so the app looks there.
+ */
+// loop: NOT-WORTH — a few readdirs of winget's folders, once per ffmpeg check on Windows
+export function wingetFfmpegDirs(localAppData: string, list: (p: string) => string[] = (p) => readdirSync(p)): string[] {
+  const root = join(localAppData, "Microsoft", "WinGet");
+  const out = [join(root, "Links")];
+  const ls = (p: string) => {
+    try {
+      return list(p);
+    } catch {
+      // error: NOT-WORTH — no such folder (winget never installed ffmpeg): nothing to add
+      return [];
+    }
+  };
+  // loop: NOT-WORTH — winget's package folders (a few), once per ffmpeg check on Windows
+  for (const pkg of ls(join(root, "Packages")).filter((n) => n.startsWith("Gyan.FFmpeg")))
+    // loop: NOT-WORTH — the one ffmpeg-<version> folder inside
+    for (const sub of ls(join(root, "Packages", pkg))) if (ls(join(root, "Packages", pkg, sub)).includes("bin")) out.push(join(root, "Packages", pkg, sub, "bin"));
+  return out;
 }
 
 export function readOsRelease(): string {
@@ -114,12 +163,19 @@ export async function installFfmpeg(plan: InstallPlan, run: RunFn = runFile): Pr
   if (!plan.argv) throw new Error("the app can't install ffmpeg on this system");
   try {
     // loop: SERIAL-REQUIRED — one install at a time [bounded: the user's password prompt and the package manager; never killed mid-install]
-    await run("pkexec", plan.argv, INSTALL_TIMEOUT_MS);
+    await (plan.elevate === false ? run(plan.argv[0], plan.argv.slice(1), INSTALL_TIMEOUT_MS) : run("pkexec", plan.argv, INSTALL_TIMEOUT_MS));
   } catch (e) {
     // error: PASSES-ON — the Engine page shows it next to the command to run by hand
     const code = (e as { code?: unknown }).code;
-    if (code === "ENOENT") throw new Error(`pkexec isn't available: run "${plan.command}" in a terminal`);
+    if (code === "ENOENT") throw new Error(`${plan.elevate === false ? plan.argv[0] : "pkexec"} isn't available: run "${plan.command}" in a terminal`);
     if (code === 126) throw new Error("the password prompt was cancelled");
-    throw new Error(`the install failed: run "${plan.command}" in a terminal to see why`);
+    // the package manager's own last line says why (e.g. no network, a source error)
+    // loop: NOT-WORTH — the failed install's output lines, once per failure
+    const said = `${(e as { stderr?: string }).stderr ?? ""}\n${(e as { stdout?: string }).stdout ?? ""}`
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .pop();
+    throw new Error(`the install failed${said ? ` (${said.slice(0, 200)})` : ""}: run "${plan.command}" in a terminal to see more`);
   }
 }

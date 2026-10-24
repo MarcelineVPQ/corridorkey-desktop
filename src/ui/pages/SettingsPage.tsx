@@ -1,11 +1,14 @@
 // App settings: this PC's choices, saved as you change them (no save bar).
 // Main view: what they add up to (readouts). Panel: Appearance, Results,
-// Updates. Every control changes something you can see (rule 4).
-import { Download, FolderOpen, FolderOutput, Palette, RefreshCw, RotateCcw } from "lucide-react";
+// Updates, Storage (what the app keeps on disk, each folder removable). Every
+// control changes something you can see (rule 4).
+import { useEffect } from "react";
+import { Download, FolderOpen, FolderOutput, HardDrive, Palette, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import type { Appearance, AppState, UpdateState } from "../../shared/types";
 import { Accordion, Row, Section, Segmented } from "../panel/Section";
 import { MainBlock, SplitView } from "../panel/SplitView";
 import { Stat } from "../JobView";
+import { gbBytes } from "../format";
 
 const THEME_TEXT = { system: "System", light: "Light", dark: "Dark", desktop: "Desktop" } as const;
 
@@ -23,6 +26,11 @@ export function SettingsPage(props: { state: AppState; panelShown: boolean; narr
         : "Your desktop's accent color"
       : "The desktop's colors couldn't be read; the built-in theme is used";
   const u = state.update;
+  // Storage is measured when this page opens (walking the folders), and again after a removal
+  useEffect(() => void window.ck.measureStorage(), []);
+  const storage = state.storage;
+  // loop: NOT-WORTH — three folders per render
+  const storageTotal = storage ? storage.reduce((n, i) => n + i.bytes, 0) : null;
 
   const main = (
     <div className="page-body">
@@ -94,6 +102,31 @@ export function SettingsPage(props: { state: AppState; panelShown: boolean; narr
 
       <Section id="updates" icon={Download} title="Updates" status={updateStatus(u)}>
         {() => <Updates u={u} queueRunning={state.queueRunning} />}
+      </Section>
+      <Section id="storage" icon={HardDrive} title="Storage" status={storageTotal === null ? "measuring…" : `${gbBytes(storageTotal)} on this PC`}>
+        {() =>
+          !storage ? (
+            <p className="hint-text">Measuring…</p>
+          ) : (
+            <>
+              {/* loop: NOT-WORTH — three folders per render */}
+              {storage.map((i) => (
+                <Row key={i.id} label={`${i.label} · ${i.bytes ? gbBytes(i.bytes) : "empty"}`} hint={i.path}>
+                  <button
+                    type="button"
+                    className="btn small"
+                    disabled={!i.bytes || state.queueRunning || state.install.status === "running"}
+                    title={state.queueRunning || state.install.status === "running" ? "Not while the queue or the download runs" : undefined}
+                    onClick={() => void window.ck.removeStorage(i.id)}
+                  >
+                    <Trash2 size={14} /> Remove…
+                  </button>
+                </Row>
+              ))}
+              <p className="hint-text">Removing asks first. The runtime and models come back through the setup when you need them; your settings and results are never touched here.</p>
+            </>
+          )
+        }
       </Section>
     </Accordion>
   );

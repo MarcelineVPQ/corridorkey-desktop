@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dataDir, effectivePath, findEngineFiles, isInsideApp } from "../../electron/main/engineFind";
+import { dataDir, effectivePath, findEngineFiles, isInsideApp, windowTitle } from "../../electron/main/engineFind";
 
 const tree = (files: Record<string, string>) => {
   const paths = Object.keys(files);
@@ -61,6 +61,24 @@ describe("finding the engine's files", () => {
     expect(isInsideApp("/tmp/.mount_CorridXyZ/resources/engine/corridorkey-engine", null)).toBe(true);
     expect(isInsideApp("/home/m/engine/corridorkey-engine", "/tmp/.mount_CorridAbC123/resources")).toBe(false);
     expect(isInsideApp(null, null)).toBe(false);
+  });
+
+  it("finds the Windows runtime (onnxruntime.dll, its version from the kept dist-info)", () => {
+    const t = tree({
+      "/d/runtime/ort-1.31.0-cuda13/onnxruntime/capi/onnxruntime.dll": "",
+      "/d/runtime/ort-1.31.0-cuda13/onnxruntime/capi/onnxruntime_providers_cuda.dll": "",
+      "/d/runtime/ort-1.31.0-cuda13/onnxruntime_gpu-1.31.0.dist-info/METADATA": "",
+    });
+    const f = findEngineFiles({ bundledBinary: null, devBinary: null, data: "/d" }, t, "win32");
+    expect(f.ort).toEqual([{ path: "/d/runtime/ort-1.31.0-cuda13/onnxruntime/capi/onnxruntime.dll", label: "ONNX Runtime 1.31.0 (graphics card)" }]);
+    expect(dataDir({ LOCALAPPDATA: "C:/Users/m/AppData/Local" }, "C:/Users/m", "win32")).toBe("C:/Users/m/AppData/Local/corridorkey-desktop");
+  });
+
+  it("titles the window with CorridorKey's own version and the engine", () => {
+    expect(windowTitle("rust", "2.0.0-onnx.3")).toBe("CorridorKey 2.0 — Rust + ONNX");
+    expect(windowTitle("rust", "2.1.0-onnx.1")).toBe("CorridorKey 2.1 — Rust + ONNX");
+    expect(windowTitle(null, null)).toBe("CorridorKey — Rust + ONNX");
+    expect(windowTitle("python", "2.0.0-onnx.3")).toBe("CorridorKey — PyTorch (reference)");
   });
 
   it("finds nothing when nothing is installed", () => {

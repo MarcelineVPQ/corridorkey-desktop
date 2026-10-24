@@ -82,4 +82,18 @@ describe("engine launch", () => {
     expect(env.LD_LIBRARY_PATH).toBe([`${site}/onnxruntime/capi`, `${site}/nvidia/cu13/lib`, `${site}/nvidia/cudnn/lib`, `${site}/tensorrt_libs`, "/extra"].join(":"));
     expect(env.CK_ENGINE_ORT).toBe(`${site}/onnxruntime/capi/libonnxruntime.so.1.31.0`);
   });
+
+  it("puts the Windows DLL folders (bin, CUDA 13's bin/x86_64) first on PATH", () => {
+    const rt = "/data/runtime/ort-1.31.0-cuda13";
+    const have = new Set([`${rt}/nvidia`, `${rt}/nvidia/cu13/bin/x86_64`, `${rt}/nvidia/cudnn/bin`]);
+    const env = rustEngineEnv(
+      { PATH: "C:/Windows" },
+      `${rt}/onnxruntime/capi/onnxruntime.dll`,
+      (p) => have.has(p),
+      () => ["cu13", "cudnn"],
+      "win32",
+    );
+    expect(env.PATH).toBe([`${rt}/onnxruntime/capi`, `${rt}/nvidia/cu13/bin/x86_64`, `${rt}/nvidia/cudnn/bin`, "C:/Windows"].join(";"));
+    expect(env.LD_LIBRARY_PATH).toBeUndefined();
+  });
 });

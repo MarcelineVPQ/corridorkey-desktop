@@ -11,6 +11,8 @@ export const IPC = {
   installFfmpeg: "ck:install-ffmpeg",
   startInstall: "ck:start-install",
   stopInstall: "ck:stop-install",
+  measureStorage: "ck:measure-storage",
+  removeStorage: "ck:remove-storage",
   setJobOptions: "ck:set-job-options",
   removeJob: "ck:remove-job",
   retryJob: "ck:retry-job",
