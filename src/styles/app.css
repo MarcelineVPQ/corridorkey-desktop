@@ -94,7 +94,7 @@ select {
   text-decoration: underline;
 }
 .doc {
-  max-width: 760px;
+  /* fills the page (Marcy 2026-10-24: no blank half-window beside a capped column) */
   line-height: 1.6;
 }
 .doc h1 {
