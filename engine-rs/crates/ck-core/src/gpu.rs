@@ -130,10 +130,22 @@ fn cuda_device0() -> Option<Option<CudaDevice>> {
     ONCE.get_or_init(ask_cuda_device0).clone()
 }
 
+/// The NVIDIA driver's libraries by their per-system names: the driver installs nvcuda.dll and nvml.dll into
+/// System32 on Windows (found 2026-10-24 by the hardcoded-values pass: with only the Linux names, the Windows
+/// engine saw no card and every job failed `no-gpu`).
+#[cfg(windows)]
+const CUDA_DRIVER_LIB: &str = "nvcuda.dll";
+#[cfg(not(windows))]
+const CUDA_DRIVER_LIB: &str = "libcuda.so.1";
+#[cfg(windows)]
+const NVML_LIB: &str = "nvml.dll";
+#[cfg(not(windows))]
+const NVML_LIB: &str = "libnvidia-ml.so.1";
+
 fn ask_cuda_device0() -> Option<Option<CudaDevice>> {
     // SAFETY: the CUDA driver API's documented C signatures; buffers sized as passed
     unsafe {
-        let lib = std::mem::ManuallyDrop::new(Library::new("libcuda.so.1").ok()?);
+        let lib = std::mem::ManuallyDrop::new(Library::new(CUDA_DRIVER_LIB).ok()?);
         let init: Symbol<unsafe extern "C" fn(c_uint) -> c_int> = lib.get(b"cuInit\0").ok()?;
         let get: Symbol<unsafe extern "C" fn(*mut c_int, c_int) -> c_int> = lib.get(b"cuDeviceGet\0").ok()?;
         match init(0) {
@@ -182,7 +194,7 @@ impl Nvml {
     fn open() -> Option<Nvml> {
         // SAFETY: NVML's documented C signatures; the handle stays valid while `lib` is loaded
         unsafe {
-            let lib = Library::new("libnvidia-ml.so.1").ok()?;
+            let lib = Library::new(NVML_LIB).ok()?;
             let init: Symbol<unsafe extern "C" fn() -> c_int> = lib.get(b"nvmlInit_v2\0").ok()?;
             if init() != 0 {
                 return None;

@@ -78,6 +78,7 @@ describe("engine launch", () => {
       `${site}/onnxruntime/capi/libonnxruntime.so.1.31.0`,
       (p) => have.has(p),
       () => ["cudnn", "cu13", "readme"],
+      "linux",
     );
     expect(env.LD_LIBRARY_PATH).toBe([`${site}/onnxruntime/capi`, `${site}/nvidia/cu13/lib`, `${site}/nvidia/cudnn/lib`, `${site}/tensorrt_libs`, "/extra"].join(":"));
     expect(env.CK_ENGINE_ORT).toBe(`${site}/onnxruntime/capi/libonnxruntime.so.1.31.0`);

@@ -31,7 +31,7 @@ describe("finding the engine's files", () => {
       "/d/runtime/ort-1.31.0/onnxruntime/capi/libonnxruntime.so.1.31.0": "",
       "/d/runtime/ort-1.31.0/onnxruntime/capi/libonnxruntime_providers_cuda.so": "",
     });
-    const f = findEngineFiles({ bundledBinary: "/app/engine/corridorkey-engine", devBinary: "/dev/missing", data: "/d" }, t);
+    const f = findEngineFiles({ bundledBinary: "/app/engine/corridorkey-engine", devBinary: "/dev/missing", data: "/d" }, t, "linux");
     expect(f.binary).toEqual([{ path: "/app/engine/corridorkey-engine", label: "Included with the app" }]);
     // a folder without models.json is not a model set; 1.31 sorts above 1.9 (numbers, not text)
     expect(f.models).toEqual([
@@ -50,7 +50,7 @@ describe("finding the engine's files", () => {
       "/d/runtime/.partial-ort-1.31.0-cuda13/onnxruntime/capi/libonnxruntime_providers_cuda.so": "",
       "/d/models/.partial-2.0.0-onnx.3/models.json": "",
     });
-    const f = findEngineFiles({ bundledBinary: null, devBinary: null, data: "/d" }, t);
+    const f = findEngineFiles({ bundledBinary: null, devBinary: null, data: "/d" }, t, "linux");
     expect(f.ort).toEqual([]);
     expect(f.models).toEqual([]);
     expect(effectivePath(null, f.ort)).toBeNull();
@@ -89,11 +89,11 @@ describe("finding the engine's files", () => {
   });
 
   it("finds nothing when nothing is installed", () => {
-    expect(findEngineFiles({ bundledBinary: null, devBinary: null, data: "/none" }, tree({}))).toEqual({ binary: [], models: [], ort: [] });
+    expect(findEngineFiles({ bundledBinary: null, devBinary: null, data: "/none" }, tree({}), "linux")).toEqual({ binary: [], models: [], ort: [] });
   });
 
   it("lists a model set with an unreadable manifest under its folder name", () => {
-    const f = findEngineFiles({ bundledBinary: null, devBinary: null, data: "/d" }, tree({ "/d/models/mine/models.json": "" }));
+    const f = findEngineFiles({ bundledBinary: null, devBinary: null, data: "/d" }, tree({ "/d/models/mine/models.json": "" }), "linux");
     expect(f.models).toEqual([{ path: "/d/models/mine", label: "mine" }]);
   });
 
@@ -108,7 +108,7 @@ describe("finding the engine's files", () => {
   });
 
   it("keeps the data folder in XDG_DATA_HOME, else ~/.local/share", () => {
-    expect(dataDir({ XDG_DATA_HOME: "/x" }, "/home/m")).toBe("/x/corridorkey-desktop");
-    expect(dataDir({}, "/home/m")).toBe("/home/m/.local/share/corridorkey-desktop");
+    expect(dataDir({ XDG_DATA_HOME: "/x" }, "/home/m", "linux")).toBe("/x/corridorkey-desktop");
+    expect(dataDir({}, "/home/m", "linux")).toBe("/home/m/.local/share/corridorkey-desktop");
   });
 });

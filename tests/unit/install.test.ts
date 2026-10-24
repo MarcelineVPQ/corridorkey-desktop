@@ -95,8 +95,9 @@ describe("first-run install", () => {
 
   it("knows what is missing from the data folder", () => {
     const has = (p: string[]) => (x: string) => p.includes(x);
-    expect(installNeeds("/d", has([])).bytes).toBe(RUNTIME.wheels.reduce((n, w) => n + w.size, 0) + MODELS.files.reduce((n, f) => n + f.size, 0));
-    expect(installNeeds("/d", has([`/d/runtime/${RUNTIME.name}`, `/d/models/${MODELS.name}`]))).toEqual({ runtime: false, models: false, bytes: 0 });
+    const linux: Catalog = { runtime: RUNTIME, models: MODELS };
+    expect(installNeeds("/d", has([]), linux).bytes).toBe(RUNTIME.wheels.reduce((n, w) => n + w.size, 0) + MODELS.files.reduce((n, f) => n + f.size, 0));
+    expect(installNeeds("/d", has([`/d/runtime/${RUNTIME.name}`, `/d/models/${MODELS.name}`]), linux)).toEqual({ runtime: false, models: false, bytes: 0 });
   });
 });
 
@@ -193,6 +194,18 @@ describe("runInstall", () => {
     expect(asked).toEqual(["b.onnx"]);
     expect(readFileSync(join(data, "models", "m1", "a.onnx")).equals(files["a.onnx"])).toBe(true);
     expect(existsSync(join(data, "models", ".partial-m1"))).toBe(false);
+    rmSync(data, { recursive: true, force: true });
+  });
+
+  it("installs a macOS runtime (a wheel whose only library is a .dylib)", async () => {
+    const wheel = makeZip({ "onnxruntime/capi/libonnxruntime.1.31.0.dylib": "lib", "onnxruntime/LICENSE": "MIT" });
+    files["ort-mac.whl"] = wheel;
+    const data = mkdtempSync(join(tmpdir(), "ck-run-"));
+    mkdirSync(join(data, "models", "m1"), { recursive: true });
+    const mac: Catalog = { runtime: { name: "ort-coreml", wheels: [{ file: "ort-mac.whl", url: `${base}/ort-mac.whl`, size: wheel.length, sha256: sha(wheel) }] }, models: catalog().models };
+    await runInstall(data, deps(), mac);
+    expect(existsSync(join(data, "runtime", "ort-coreml", "onnxruntime", "capi", "libonnxruntime.1.31.0.dylib"))).toBe(true);
+    delete files["ort-mac.whl"];
     rmSync(data, { recursive: true, force: true });
   });
 

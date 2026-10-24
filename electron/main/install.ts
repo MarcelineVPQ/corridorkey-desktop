@@ -312,7 +312,7 @@ export async function runInstall(data: string, deps: InstallDeps, c: Catalog = C
       const unpacked = await unzip(join(downloads, w.file), partial, keepFromWheel, deps.abort);
       // licence files alone don't count: a wheel must give at least one library
       // loop: NOT-WORTH — the few names one wheel unpacked
-      if (!unpacked.some((n) => /\.(so[.\d]*|dll)$/.test(n))) throw new Error(`${w.file} had none of the expected libraries`);
+      if (!unpacked.some((n) => /\.(so[.\d]*|dll|dylib)$/.test(n))) throw new Error(`${w.file} had none of the expected libraries`);
     }
     // loop: NOT-WORTH — one rename: the runtime appears whole
     renameSync(partial, join(data, "runtime", RUNTIME.name));

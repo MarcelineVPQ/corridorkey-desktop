@@ -77,7 +77,8 @@ describe("relaunch", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   }
-  it("the shell fallback (bash) waits for the old copy and drops the descriptors it inherited", async () => {
+  // the AppImage self-restart is Linux-only (it reads /proc to list inherited descriptors)
+  it.runIf(process.platform === "linux")("the shell fallback (bash) waits for the old copy and drops the descriptors it inherited", async () => {
     const r = await runFallback(viaShell(fallbackShell((p) => p === "/bin/bash")));
     expect(r.fds).toContain(0);
     expect(r.fds).not.toContain(3);

@@ -241,7 +241,9 @@ describe("a job's started files (staging, partial.ts)", () => {
     writeFileSync(join(out, `${id}_settings.txt`), `Output Directory: ${out}\n`);
     return out;
   }
-  const earlierIntact = (dir: string, id: string) => {
+  // after discardsSettled(): a discarded job's files are renamed aside, then deleted in the background
+  const earlierIntact = async (dir: string, id: string) => {
+    await discardsSettled();
     expect(readFileSync(join(dir, `${id}_alpha.mp4`), "utf8")).toBe("earlier result");
     expect(readFileSync(join(dir, `${id}_alpha_exr`, "000000.exr"), "utf8")).toBe("earlier frame");
     expect(readFileSync(join(dir, "notes.txt"), "utf8")).toBe("the user's");
@@ -258,7 +260,7 @@ describe("a job's started files (staging, partial.ts)", () => {
     h.reply({ type: "error", id: "f1", code: "engine", message: "decode failed" });
     await h.flush();
     expect(h.q.jobs[0].status).toBe("failed");
-    earlierIntact(dir, "f1");
+    await earlierIntact(dir, "f1");
     expect(h.q.jobs[0].partial).toBe("Removed the 3 files it had started; earlier results in the folder are untouched.");
   });
 
@@ -273,7 +275,7 @@ describe("a job's started files (staging, partial.ts)", () => {
     expect(h.killed()).toBe(1);
     expect(h.q.jobs[0].status).toBe("cancelled");
     await discardsSettled();
-    earlierIntact(dir, "c1");
+    await earlierIntact(dir, "c1");
     expect(h.q.jobs[0].partial).toMatch(/^Removed the 3 files/);
   });
 
