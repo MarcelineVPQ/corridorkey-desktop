@@ -340,6 +340,11 @@ memory-capped windows (12-24 frames, against CUDA's 48/80) the mattes differed f
 of the job's budget (else of the card's free memory), at most 8 GiB: stage 1 for 48 frames at 1152×1280 needs a
 6.1 GB tactic (a 4 GiB cap found none; 7 GiB built it in 138 s, peak 13.9 GB on the card, context 6.3 GiB), so it
 builds on 16 GB cards; a network whose build finds no tactic runs on CUDA at the same window (`fallbacks`).
+Only such deterministic failures (no tactic, a parse error, bad arguments) are remembered in `<piece>.failed`; a
+timeout, a lack of memory or a busy card is tried again by the next job. One engine process builds a range at a
+time (`build.lock` in the range folder; another engine waits, at most five build deadlines, and takes over a lock
+not refreshed for a build deadline). ck-trt-build writes the engine and the timing cache through per-process
+temporary files and replaces the old file on every system (MoveFileEx on Windows).
 Before step 2: a range's longest window was the longest of 24/16/12/8/4 with window × largest frame ≤
 24 × 1152 × 1280, all networks loaded together.
 

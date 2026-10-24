@@ -202,6 +202,70 @@ pub(crate) fn deterministic_failure(why: &str) -> bool {
     DETERMINISTIC.iter().any(|m| low.contains(m))
 }
 
+/// One engine process builds a range's engines at a time: `<range folder>/build.lock`, made with create_new (the
+/// file system's own exclusive create, on every system), removed when the guard drops. Two engines (two app copies,
+/// a bench next to the app) building the same range at once would each spend minutes of the card on the same
+/// engines and replace each other's files.
+pub(crate) struct BuildLock {
+    path: PathBuf,
+}
+
+/// How often a waiting engine looks at another engine's build lock.
+const LOCK_POLL: std::time::Duration = std::time::Duration::from_millis(500);
+
+impl BuildLock {
+    /// Take `dir`'s build lock. Held by another engine: wait for it (`waiting` is called once), at most `deadline`; a
+    /// lock not refreshed for `stale_after` (its engine was killed or crashed) is taken over, as is one still held
+    /// at the deadline (its builds have run past their own deadlines by then). Ok((lock, waited)); Err: the lock
+    /// file can't be made (the folder isn't writable: the build then fails on its own and says why).
+    pub(crate) fn acquire(
+        dir: &Path,
+        stale_after: std::time::Duration,
+        deadline: std::time::Duration,
+        mut waiting: impl FnMut(),
+    ) -> std::io::Result<(BuildLock, bool)> {
+        std::fs::create_dir_all(dir)?;
+        let path = dir.join("build.lock");
+        let end = std::time::Instant::now() + deadline;
+        let mut waited = false;
+        // loop: SERIAL-REQUIRED — waits for another engine's build of the same range, a poll every LOCK_POLL [bounded: `deadline`, then the lock is taken over]
+        loop {
+            match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(mut f) => {
+                    use std::io::Write;
+                    let _ = writeln!(f, "{}", std::process::id());
+                    return Ok((BuildLock { path }, waited));
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(e) => return Err(e),
+            }
+            let age = std::fs::metadata(&path).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok());
+            if age.is_some_and(|a| a > stale_after) || std::time::Instant::now() >= end {
+                // gone stale, or past the deadline: take it over (a removal that loses a race just loops again)
+                let _ = std::fs::remove_file(&path);
+                continue;
+            }
+            if !waited {
+                waited = true;
+                waiting();
+            }
+            // loop: SERIAL-REQUIRED — the lock poll's sleep (not a spin), until `deadline`
+            std::thread::sleep(LOCK_POLL);
+        }
+    }
+
+    /// Show the lock is still held (before each build, so a waiting engine doesn't take it over as stale).
+    pub(crate) fn touch(&self) {
+        let _ = std::fs::write(&self.path, format!("{}\n", std::process::id()));
+    }
+}
+
+impl Drop for BuildLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
 /// `<dir>/<piece>.engine`
 pub(crate) fn engine_path(dir: &Path, piece: &str) -> PathBuf {
     dir.join(format!("{piece}.engine"))
@@ -424,6 +488,43 @@ mod tests {
         let tactic = BuildError { why: "build: Could not find any implementation for node X".into(), deterministic: true };
         assert!(note_failure(&dir, "stage1", "s1", 7000, &tactic).unwrap());
         assert!(failed_before(&dir, "stage1", "s1", Some(7000)).is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn one_engine_builds_a_range_at_a_time() {
+        use std::time::{Duration, Instant};
+        let dir = std::env::temp_dir().join(format!("ck-trt-lock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let long = Duration::from_secs(30);
+        let (first, waited) = BuildLock::acquire(&dir, long, long, || {}).unwrap();
+        assert!(!waited && dir.join("build.lock").exists());
+        // a second engine waits until the first lets go
+        let d2 = dir.clone();
+        let t = Instant::now();
+        let second = std::thread::spawn(move || {
+            let mut said = 0;
+            let (l, waited) = BuildLock::acquire(&d2, long, long, || said += 1).unwrap();
+            drop(l);
+            (waited, said)
+        });
+        std::thread::sleep(Duration::from_millis(700));
+        first.touch();
+        drop(first);
+        // loop: NOT-WORTH — joins the waiting test thread [bounded: the lock was just released]
+        assert_eq!(second.join().unwrap(), (true, 1));
+        assert!(t.elapsed() >= Duration::from_millis(700));
+        assert!(!dir.join("build.lock").exists(), "released on drop");
+        // a stale lock (its engine died) is taken over at once; one held past the deadline too
+        std::fs::write(dir.join("build.lock"), "1\n").unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        let t = Instant::now();
+        let (l, _) = BuildLock::acquire(&dir, Duration::from_millis(10), long, || {}).unwrap();
+        assert!(t.elapsed() < Duration::from_secs(1));
+        let t = Instant::now();
+        let (l2, waited) = BuildLock::acquire(&dir, long, Duration::from_millis(300), || {}).unwrap();
+        assert!(waited && t.elapsed() < Duration::from_secs(3));
+        drop((l, l2));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

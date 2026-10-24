@@ -824,14 +824,36 @@ impl Pipeline {
         let budget = key.vram_cap.or_else(|| crate::gpu::budget().map(|b| b.0)).unwrap_or(8 << 30);
         let workspace_mb = ((budget >> 20) * 6 / 10).clamp(512, 8192);
         let stamp = |p: &str| self.models.trt_file(p, key.precision).map(|f| crate::tensorrt::source_stamp(&f)).unwrap_or_default();
-        // loop: NOT-WORTH — five networks, once per TensorRT job
-        let todo: Vec<&'static str> = crate::runtime::PIECES
-            .iter()
-            .copied()
-            .filter(|p| {
-                !crate::tensorrt::built(&dir.join(p), p, &stamp(p)) && crate::tensorrt::failed_before(&dir.join(p), p, &stamp(p), Some(workspace_mb)).is_none()
-            })
-            .collect();
+        let missing = || -> Vec<&'static str> {
+            crate::runtime::PIECES
+                // loop: NOT-WORTH — five networks, once per TensorRT job
+                .iter()
+                .copied()
+                .filter(|p| {
+                    !crate::tensorrt::built(&dir.join(p), p, &stamp(p))
+                        && crate::tensorrt::failed_before(&dir.join(p), p, &stamp(p), Some(workspace_mb)).is_none()
+                })
+                .collect()
+        };
+        let mut todo = missing();
+        // one engine process builds this range at a time; one that waited finds what the other built
+        let mut lock = None;
+        if !todo.is_empty() && builder.is_some() {
+            let per_build = crate::tensorrt::build_timeout() + std::time::Duration::from_secs(120);
+            let waiting = || {
+                sink.send(json!({"type": "progress", "stage": "optimize", "detail": "waiting for another CorridorKey engine building this range"}));
+                sink.log("  TensorRT: another CorridorKey engine is building this range's engines; waiting for it");
+            };
+            match crate::tensorrt::BuildLock::acquire(&dir, per_build, per_build * crate::runtime::PIECES.len() as u32, waiting) {
+                Ok((l, waited)) => {
+                    if waited {
+                        todo = missing();
+                    }
+                    lock = Some(l);
+                }
+                Err(e) => sink.log(&format!("  TensorRT: no build lock in {} ({e}); building without it", dir.display())),
+            }
+        }
         // loop: NOT-WORTH — five networks
         for (i, piece) in crate::runtime::PIECES.iter().copied().enumerate() {
             let pdir = dir.join(piece);
@@ -856,6 +878,9 @@ impl Pipeline {
             let n = todo.iter().position(|p| *p == piece).map(|k| k + 1).unwrap_or(i + 1);
             sink.send(json!({"type": "progress", "stage": "optimize", "detail": format!("{} ({n}/{})", piece_name(piece), todo.len())}));
             sink.log(&format!("  TensorRT: building the {} engine for {} (one time)", piece_name(piece), bucket.key()));
+            if let Some(l) = &lock {
+                l.touch();
+            }
             match crate::tensorrt::build_engine(b, &onnx, piece, bucket, &pdir, workspace_mb, &timing) {
                 Ok(secs) => {
                     std::fs::copy(&stub, crate::tensorrt::stub_path(&pdir, piece)).map_err(|e| Error::engine(format!("{}: {e}", pdir.display())))?;

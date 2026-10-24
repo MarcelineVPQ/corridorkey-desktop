@@ -23,6 +23,12 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
+
 #include "NvInfer.h"
 #include "NvOnnxParser.h"
 
@@ -60,6 +66,46 @@ std::string json_escape(const std::string& s) {
 int fail(const std::string& why) {
     std::printf("{\"ok\":false,\"error\":\"%s\"}\n", json_escape(why).c_str());
     return 1;
+}
+
+// "<path>.tmp.<pid>": a temporary name no other builder process uses (two engines may build at once)
+std::string tmp_name(const std::string& path) {
+#ifdef _WIN32
+    unsigned long pid = GetCurrentProcessId();
+#else
+    unsigned long pid = static_cast<unsigned long>(getpid());
+#endif
+    return path + ".tmp." + std::to_string(pid);
+}
+
+// Move `from` over `to`, replacing it: std::rename doesn't replace an existing file on Windows (it fails there,
+// and a rebuilt engine or the timing cache would keep its old file); MoveFileEx with REPLACE_EXISTING does.
+bool replace_file(const std::string& from, const std::string& to) {
+#ifdef _WIN32
+    return MoveFileExA(from.c_str(), to.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+    return std::rename(from.c_str(), to.c_str()) == 0;
+#endif
+}
+
+// Write `size` bytes to `path` through a per-process temporary file, then put it in place. Empty on success,
+// else what went wrong (the temporary file is removed).
+std::string write_file(const std::string& path, const void* data, size_t size) {
+    std::string tmp = tmp_name(path);
+    {
+        std::ofstream f(tmp, std::ios::binary);
+        f.write(static_cast<const char*>(data), static_cast<std::streamsize>(size));
+        f.close();
+        if (!f) {
+            std::remove(tmp.c_str());
+            return "write " + tmp;
+        }
+    }
+    if (!replace_file(tmp, path)) {
+        std::remove(tmp.c_str());
+        return "replace " + path;
+    }
+    return "";
 }
 
 // "a:1x2x3,b:4x5" -> {a: [1,2,3], b: [4,5]}
@@ -143,18 +189,13 @@ int run(int argc, char** argv) {
     std::unique_ptr<nvinfer1::IHostMemory> plan(builder->buildSerializedNetwork(*net, *cfg));
     if (!plan || plan->size() == 0) return fail("build: " + log.last);
     if (tc && a.count("timing-cache")) {
+        // the timing cache only speeds up later builds: a failed write is a warning, the engine is still good
         std::unique_ptr<nvinfer1::IHostMemory> t(cfg->getTimingCache()->serialize());
-        std::string tmp = a["timing-cache"] + ".tmp";
-        std::ofstream(tmp, std::ios::binary).write(static_cast<const char*>(t->data()), t->size());
-        std::rename(tmp.c_str(), a["timing-cache"].c_str());
+        std::string err = t ? write_file(a["timing-cache"], t->data(), t->size()) : std::string("serialize the timing cache");
+        if (!err.empty()) std::fprintf(stderr, "[ck-trt-build warning] timing cache not saved: %s\n", err.c_str());
     }
-    std::string tmp = a["engine"] + ".tmp";
-    {
-        std::ofstream f(tmp, std::ios::binary);
-        f.write(static_cast<const char*>(plan->data()), plan->size());
-        if (!f) return fail("write " + tmp);
-    }
-    if (std::rename(tmp.c_str(), a["engine"].c_str()) != 0) return fail("rename to " + a["engine"]);
+    std::string err = write_file(a["engine"], plan->data(), plan->size());
+    if (!err.empty()) return fail(err);
     double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     std::printf("{\"ok\":true,\"seconds\":%.1f,\"bytes\":%zu}\n", secs, plan->size());
     return 0;
