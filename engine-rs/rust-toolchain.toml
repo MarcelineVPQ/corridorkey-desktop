@@ -4,5 +4,6 @@
 [toolchain]
 channel = "1.93.0"
 components = ["clippy", "rustfmt"]
-# the Windows engine is cross-built here (tools/build_engine.sh --windows)
-targets = ["x86_64-pc-windows-gnu"]
+# Windows is cross-built here (tools/build_engine.sh --windows); macOS is checked here before a push (clippy only,
+# no link: tools/check_targets.sh), so a macOS-only compile or lint error never reaches the runner
+targets = ["x86_64-pc-windows-gnu", "aarch64-apple-darwin"]

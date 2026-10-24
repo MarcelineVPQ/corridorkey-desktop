@@ -1,5 +1,7 @@
 //! The engine process ends with its parent (the app): the real binary, started by a shell that then exits.
 //! Before this, an engine whose app had died stayed up (idle here; in a job, until the job's end).
+// Linux only (it reads /proc): the whole file, so its imports and helper don't count as unused on macOS/Windows
+#![cfg(target_os = "linux")]
 use std::io::BufRead;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -10,7 +12,6 @@ fn alive(pid: u32) -> bool {
 }
 
 #[test]
-#[cfg(target_os = "linux")]
 fn the_engine_ends_when_its_parent_does() {
     let models = std::env::temp_dir().join(format!("ck-lifetime-{}", std::process::id()));
     std::fs::create_dir_all(&models).unwrap();
