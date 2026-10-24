@@ -14,7 +14,8 @@ false finding; tools/side_by_side.py reads them the same way). EXR fg is scene-l
 video path's display encoding (clip(srgb(max(x, 0)), 0, 1)), so EXR and video outputs land on the same scale.
 Before a clip is reported, REF's first frame is decoded twice and compared with itself: anything but exactly zero
 stops the run (a broken decode can't pass as a result). Needs numpy and ffmpeg; OpenCV for EXR (with
-OPENCV_IO_ENABLE_OPENEXR, set here).
+OPENCV_IO_ENABLE_OPENEXR, set here), and the OpenEXR package (pip) for an alpha-only EXR, whose channel A OpenCV
+can't read.
 
 Per clip: alpha MAE, max |diff|, SAD per frame, % of pixels off by more than 1/255 and 4/255, alpha PSNR;
 fg PSNR over all pixels and over the subject (reference alpha > 0.5); the worst frame by alpha MAE; in the JSON
@@ -26,6 +27,7 @@ import glob
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 
@@ -88,14 +90,22 @@ def exr_seq(folder, limit):
     os.environ.setdefault("OPENCV_IO_ENABLE_OPENEXR", "1")
     import cv2  # only EXR needs OpenCV
 
-    files = sorted(glob.glob(os.path.join(glob.escape(folder), "*.exr")))
+    # frame order by the frame number before ".exr" (name.1001.exr, or the original's name_000000.exr)
+    files = sorted(glob.glob(os.path.join(glob.escape(folder), "*.exr")), key=lambda p: (int(m.group(1)) if (m := re.search(r"(\d+)\.exr$", p)) else -1, p))
     if not files:
         raise SystemExit(f"no EXR frames in {folder}")
     # loop: SERIAL-REQUIRED — one EXR file at a time, in order (a frame in memory) [bounded: the folder's files]
     for f in files[: limit or None]:
         img = cv2.imread(f, cv2.IMREAD_UNCHANGED)
         if img is None:
-            raise SystemExit(f"{f}: OpenCV couldn't read it")
+            # a matte alone in channel A (the engine's alpha EXR, backlog row 30 b): OpenCV can't read it
+            import OpenEXR
+
+            with OpenEXR.File(f) as x:
+                ch = x.channels()
+                if list(ch) != ["A"]:
+                    raise SystemExit(f"{f}: OpenCV couldn't read it")
+                img = np.asarray(ch["A"].pixels, dtype=np.float32)
         if img.dtype != np.float32:
             raise SystemExit(f"{f}: read as {img.dtype}, not float (an EXR must decode to float)")
         yield img[..., ::-1] if img.ndim == 3 else img  # OpenCV reads BGR
