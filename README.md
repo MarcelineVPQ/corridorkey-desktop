@@ -16,8 +16,8 @@ and wrapped it in a desktop app that installs itself.
 On my RTX 5080 it keys 4K at about two frames a second: 2.4-2.7× faster than the original on the same machine
 (1.5-1.8× at HD), with the same mattes, less graphics memory and RAM, and less than half the install. Every number
 is below, with the clips and the commands to check them yourself. On Linux, an optional TensorRT mode takes HD to
-about 2× the original's speed. Rust and ONNX Runtime
-also mean one engine for every platform: NVIDIA on Linux and Windows, and Apple Silicon through Core ML.
+about 2× the original's speed. Rust and ONNX Runtime also mean one engine for every platform: NVIDIA on Linux and
+Windows, and Apple Silicon through Core ML.
 
 It's free, it stays free, and it's Corridor's model. Huge thanks to Niko, Zachary Harris and the Corridor crew.
 Windows testers wanted: see Requirements.
@@ -58,9 +58,10 @@ speed and quality number in this README was measured on Linux. If you try it on 
 
 **macOS, honestly:** a great many VFX artists work on Macs, so macOS is part of 1.0. The app runs on Apple Silicon,
 with the engine on ONNX Runtime's Core ML backend (Apple's GPU and Neural Engine), and it's built, installed and
-driven page by page on GitHub's Apple Silicon runners. The Core ML engine is being finished now. Those runners are
-virtual machines without the GPU or the Neural Engine, so **Mac keying speed will come from testers**, like Windows
-keying. The disk image is signed (Developer ID) and notarized by Apple: Gatekeeper accepts it as "Notarized Developer ID".
+driven page by page on GitHub's Apple Silicon runners. The Core ML engine is in progress: all five networks reach
+full Core ML coverage after exact graph rewrites; the Core ML provider comes next. GitHub's runners are virtual machines without
+the GPU or the Neural Engine, so **Mac keying is measured on a real Apple Silicon Mac** (an M6 Mac mini,
+`tools/mac_gate.sh`: mattes against CUDA and speed); 1.0 includes macOS only if that gate passes. The disk image is signed (Developer ID) and notarized by Apple: Gatekeeper accepts it as "Notarized Developer ID".
 
 ## Install size
 
@@ -360,8 +361,8 @@ Every result in this README is reproducible with the tools in this repository. T
 
 | Test | What it checks | Result |
 | --- | --- | --- |
-| `npm run check` | TypeScript types, formatting, the theme gate (colours only from one place), the loop gate (every loop, timer and wait in the app and engine carries a written verdict: 748 rows listed, 679 with a required verdict; trivial Rust iterators are exempt), 141 unit tests (151 since the platform passes the same day), the PyTorch engine's own tests | pass |
-| `npm run check:engine` | Rust formatting, clippy with every warning an error, 67 engine tests | pass |
+| `npm run check` | TypeScript types, formatting, the theme gate (colours only from one place), the loop gate (every loop, timer and wait in the app and engine carries a written verdict: 788 rows listed, 718 with a required verdict; plain Rust loops over small collections are exempt), 172 unit tests, the PyTorch engine's own tests | pass |
+| `npm run check:engine` | Rust formatting, clippy with every warning an error, 119 engine tests | pass |
 | CPU end to end (`e2e_cpu.sh`) | the Rust engine against PyTorch, both fp32: frame folder, H.264 and hint inputs, EXR and video outputs, low-memory mode | pass: alpha MAE 1.7e-7, low-memory mode identical |
 | GPU speed and quality, HD and 4K | `engine_bench.mjs` + `matte_compare.py`, ten clips, both engines | pass (the tables above) |
 | Memory soak | an isolated copy keys the six HD clips three times in a row (18 jobs) while every process's memory is sampled every 5 s | pass: no growth (below) |
@@ -409,7 +410,7 @@ dialogs):
 ## The original's open pull requests
 
 We follow [CorridorKey 2.0's pull requests](https://github.com/nikopueringer/CorridorKey2.0/pulls) and check each one
-against this app's own engine. As of 2026-10-24:
+against this app's own engine. As of the evening of 2026-10-24:
 
 | PR | What it fixes in the original | In CorridorKey Desktop |
 | --- | --- | --- |
@@ -418,11 +419,12 @@ against this app's own engine. As of 2026-10-24:
 | [#9](https://github.com/nikopueringer/CorridorKey2.0/pull/9) | Halves the original's graphics memory (bf16 weights, no gradients), same output | **Not needed:** the engine already runs fp16 weights. If it is merged, the original's memory numbers in the Speed tables will drop; we will re-measure |
 | [#8](https://github.com/nikopueringer/CorridorKey2.0/pull/8) | A desktop GUI (Qt) on top of the original's Python pipeline | A different approach: this app installs itself and runs its own engine, no Python |
 | [#10](https://github.com/nikopueringer/CorridorKey2.0/pull/10), [#6](https://github.com/nikopueringer/CorridorKey2.0/pull/6), [#7](https://github.com/nikopueringer/CorridorKey2.0/pull/7) | Apple Silicon (MPS), AMD (ROCm) support | **macOS (Apple Silicon) is part of 1.0**, on ONNX Runtime's Core ML backend instead of PyTorch's MPS. AMD isn't in 1.0; it would use ONNX Runtime's MIGraphX (Linux) or DirectML (Windows) build |
-| [#3](https://github.com/nikopueringer/CorridorKey2.0/pull/3) | Python version requirements | Not applicable (no Python) |
+| [#13](https://github.com/nikopueringer/CorridorKey2.0/pull/13) | Attention runs out of memory on GPUs without fused attention kernels (AMD RX 5700 XT): the math fallback builds the whole score matrix at once | **Not on NVIDIA:** the engine runs ONNX Runtime's CUDA kernels. The same question matters for the Core ML engine (Apple GPUs); its design includes attention in bounded chunks, to be measured on the Mac |
+| [#3](https://github.com/nikopueringer/CorridorKey2.0/pull/3), [#14](https://github.com/nikopueringer/CorridorKey2.0/pull/14) | Python version requirements; dependency management with uv | Not applicable (no Python) |
 
 ## Why it's built this way
 
-- **Rust + ONNX Runtime instead of Python + PyTorch:** the tables above. One small program (3.6 MB) with no Python,
+- **Rust + ONNX Runtime instead of Python + PyTorch:** the tables above. One small program (3.8 MB) with no Python,
   half the RAM, less graphics memory, 1.5-2.7× faster, same mattes.
 - **fp16 on the graphics card:** the original runs bf16; fp16 is what NVIDIA's tensor cores and ONNX Runtime's CUDA
   kernels do fastest, and the Quality table shows it agrees with the original as closely as the original's own
