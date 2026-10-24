@@ -70,6 +70,13 @@ mac:
     - from: engine-rs/target/dist/corridorkey-engine
       to: engine/corridorkey-engine
   artifactName: CorridorKey-Desktop-${version}-arm64.${ext}
-  # Unsigned until Marcy's Apple Developer ID is approved (2026-10-24); then: Developer ID Application signing,
-  # hardened runtime and notarization on the runner (docs/RELEASING.md).
-  identity: null
+  # Signed with the Developer ID Application certificate (team FTQ95W942L) when the macOS workflow passes it in
+  # (CSC_LINK / CSC_KEY_PASSWORD, GitHub secrets, only in the build step), hardened runtime, notarized with the App
+  # Store Connect API key (APPLE_API_KEY / _ID / _ISSUER) and stapled. Without those variables the build is unsigned
+  # (a local npm run dist:mac, CSC_IDENTITY_AUTO_DISCOVERY=false). docs/RELEASING.md.
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  # the engine and Electron's helpers get the same exceptions (the engine loads ONNX Runtime's library)
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: true
