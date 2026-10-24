@@ -66,9 +66,10 @@ export function rustEngineEnv(
   platform: NodeJS.Platform = process.platform,
 ): NodeJS.ProcessEnv {
   const win = platform === "win32";
+  const mac = platform === "darwin";
   const out: NodeJS.ProcessEnv = { ...env };
-  // loop: NOT-WORTH — three names, once per engine spawn
-  for (const k of ["LD_PRELOAD", "ELECTRON_RUN_AS_NODE", "LD_LIBRARY_PATH"]) delete out[k];
+  // loop: NOT-WORTH — five names, once per engine spawn
+  for (const k of ["LD_PRELOAD", "ELECTRON_RUN_AS_NODE", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES"]) delete out[k];
   const dirs: string[] = [];
   if (ort) {
     const capi = dirname(ort);
@@ -88,9 +89,10 @@ export function rustEngineEnv(
   }
   // loop: NOT-WORTH — a user's extra library folders, once per engine spawn
   if (env.CK_ENGINE_LD_LIBRARY_PATH) dirs.push(...env.CK_ENGINE_LD_LIBRARY_PATH.split(win ? ";" : ":").filter(Boolean));
-  // Windows finds DLLs on PATH (the folders go first); Linux on LD_LIBRARY_PATH
+  // Windows finds DLLs on PATH (the folders go first); Linux on LD_LIBRARY_PATH; macOS on DYLD_LIBRARY_PATH
   // loop: NOT-WORTH — a few folders joined, once per engine spawn
   if (dirs.length && win) out.PATH = [...dirs, env.PATH ?? env.Path ?? ""].filter(Boolean).join(";");
+  else if (dirs.length && mac) out.DYLD_LIBRARY_PATH = dirs.join(":");
   else if (dirs.length) out.LD_LIBRARY_PATH = dirs.join(":");
   return out;
 }

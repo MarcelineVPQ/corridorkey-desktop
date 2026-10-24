@@ -29,6 +29,8 @@ export interface InstallPlan {
   argv: string[] | null;
   elevate?: boolean;
   note: string | null;
+  // what the install button's hint says (default: Linux's pkexec password prompt)
+  runHint?: string;
 }
 
 /** Windows: winget's full ffmpeg build (it has libx264); winget asks for permission itself, no pkexec. */
@@ -37,11 +39,24 @@ export const WINDOWS_PLAN: InstallPlan = {
   argv: ["winget", "install", "--id", "Gyan.FFmpeg", "-e", "--accept-source-agreements", "--accept-package-agreements"],
   elevate: false,
   note: null,
+  runHint: "The app runs it for you (Windows may ask for permission)",
 };
 
-/** The install for this system: Windows, or the Linux distro from /etc/os-release's ID and ID_LIKE. */
+/** macOS: Homebrew's ffmpeg (it has libx264 and ProRes); brew needs no password. Needs Homebrew itself. */
+export const MAC_PLAN: InstallPlan = {
+  command: "brew install ffmpeg",
+  argv: ["brew", "install", "ffmpeg"],
+  elevate: false,
+  note: "The app installs ffmpeg with Homebrew. If you don't have Homebrew yet, install it first from brew.sh.",
+  runHint: "The app runs it for you with Homebrew",
+};
+
+/** Folders Homebrew installs programs into (Apple Silicon, then Intel). Mac apps don't get the shell's PATH. */
+export const HOMEBREW_DIRS = ["/opt/homebrew/bin", "/usr/local/bin"];
+
+/** The install for this system: Windows, macOS, or the Linux distro from /etc/os-release's ID and ID_LIKE. */
 export function planFor(platform: NodeJS.Platform, osRelease: string): InstallPlan {
-  return platform === "win32" ? WINDOWS_PLAN : installPlan(osRelease);
+  return platform === "win32" ? WINDOWS_PLAN : platform === "darwin" ? MAC_PLAN : installPlan(osRelease);
 }
 
 /** The install for this distro, from /etc/os-release's ID and ID_LIKE. */
@@ -118,7 +133,7 @@ export function ffmpegState(check: { ok: boolean; problem: string | null }, plan
     problem: check.problem,
     command: plan.command,
     canInstall: plan.argv !== null,
-    asksPassword: plan.elevate !== false,
+    runHint: plan.runHint ?? "The app runs it for you; your desktop asks for your password",
     note: plan.note,
     installing: false,
     installError: null,

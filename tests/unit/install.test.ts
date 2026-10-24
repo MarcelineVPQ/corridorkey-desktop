@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { deflateRawSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { downloadVerified } from "../../electron/main/download";
-import { installNeeds, keepFromWheel, MODELS, RUNTIME, runInstall, type Catalog } from "../../electron/main/install";
+import { installNeeds, keepFromWheel, MODELS, RUNTIME, RUNTIME_MAC, RUNTIME_WIN, runInstall, runtimeFor, systemSupport, type Catalog } from "../../electron/main/install";
 import { unzip } from "../../electron/main/unzip";
 
 /** A minimal zip (deflated entries) as a wheel looks, for the unpacker. */
@@ -201,5 +201,34 @@ describe("runInstall", () => {
     mkdirSync(join(data, "runtime", "rt"), { recursive: true });
     await expect(runInstall(data, deps(100), catalog())).rejects.toThrow("not enough free disk space");
     rmSync(data, { recursive: true, force: true });
+  });
+});
+
+describe("each system's runtime and graphics check", () => {
+  it("downloads Core ML's ONNX Runtime on macOS, CUDA's elsewhere", () => {
+    expect(runtimeFor("darwin")).toBe(RUNTIME_MAC);
+    expect(runtimeFor("win32")).toBe(RUNTIME_WIN);
+    expect(runtimeFor("linux")).toBe(RUNTIME);
+    expect(RUNTIME_MAC.wheels.map((w) => w.file)).toEqual(["onnxruntime-1.31.0-cp312-cp312-macosx_14_0_arm64.whl"]);
+  });
+  it("keeps the macOS library and ONNX Runtime's licence files", () => {
+    expect(keepFromWheel("onnxruntime/capi/libonnxruntime.1.31.0.dylib")).toBe(true);
+    expect(keepFromWheel("onnxruntime/capi/onnxruntime_pybind11_state.so")).toBe(false);
+    expect(keepFromWheel("onnxruntime/LICENSE")).toBe(true);
+    expect(keepFromWheel("onnxruntime/ThirdPartyNotices.txt")).toBe(true);
+  });
+  it("runs on Apple Silicon Macs and says why not on Intel ones", () => {
+    const none = () => false;
+    expect(systemSupport("darwin", "arm64", none, {})).toMatchObject({ ok: true, problem: null });
+    expect(systemSupport("darwin", "arm64", none, {}).runtime).toContain("Core ML");
+    const intel = systemSupport("darwin", "x64", none, {});
+    expect(intel.ok).toBe(false);
+    expect(intel.problem).toContain("Apple Silicon");
+  });
+  it("needs the NVIDIA driver on Linux and Windows", () => {
+    expect(systemSupport("linux", "x64", (p) => p === "/proc/driver/nvidia/version", {}).ok).toBe(true);
+    expect(systemSupport("linux", "x64", () => false, {})).toMatchObject({ ok: false });
+    expect(systemSupport("win32", "x64", (p) => p.endsWith("nvml.dll"), { SystemRoot: "C:\\Windows" }).ok).toBe(true);
+    expect(systemSupport("win32", "x64", () => false, {}).problem).toContain("NVIDIA");
   });
 });

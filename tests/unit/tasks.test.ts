@@ -24,8 +24,23 @@ const state = (extra: Partial<AppState>): AppState =>
     rustEngine: { ok: false, problems: ["Choose the CorridorKey engine program (corridorkey-engine)."] },
     engineKind: "python",
     desktopPalette: null,
-    install: { dir: "/d", needRuntime: false, needModels: false, bytes: 0, runtimeBytes: 0, modelsBytes: 0, nvidia: true, status: "idle", step: null, done: 0, total: 0, error: null },
-    ffmpeg: { checked: true, ok: true, problem: null, command: "", canInstall: false, asksPassword: true, note: null, installing: false, installError: null },
+    install: {
+      dir: "/d",
+      needRuntime: false,
+      needModels: false,
+      bytes: 0,
+      runtimeBytes: 0,
+      modelsBytes: 0,
+      gpuOk: true,
+      gpuProblem: null,
+      runtimeWhat: "",
+      status: "idle",
+      step: null,
+      done: 0,
+      total: 0,
+      error: null,
+    },
+    ffmpeg: { checked: true, ok: true, problem: null, command: "", canInstall: false, runHint: "", note: null, installing: false, installError: null },
     ...extra,
   }) as AppState;
 
@@ -36,7 +51,9 @@ const installing = (status: "idle" | "running" | "error", error: string | null =
   bytes: 5,
   runtimeBytes: 2,
   modelsBytes: 3,
-  nvidia: true,
+  gpuOk: true,
+  gpuProblem: null,
+  runtimeWhat: "",
   status,
   step: null,
   done: 0,
@@ -51,7 +68,7 @@ describe("first-run install and ffmpeg tasks", () => {
     expect(tasksOf(state({ engineKind: null, install: installing("error", "no space") }))[0]).toMatchObject({ level: "error", text: "The install stopped: no space" });
   });
   it("says nothing about ffmpeg before the first check has answered", () => {
-    const ff = { checked: false, ok: false, problem: null, command: "", canInstall: false, asksPassword: true, note: null, installing: false, installError: null };
+    const ff = { checked: false, ok: false, problem: null, command: "", canInstall: false, runHint: "", note: null, installing: false, installError: null };
     expect(tasksOf(state({ ffmpeg: ff }))).toEqual([]);
     expect(tasksOf(state({ ffmpeg: { ...ff, checked: true, problem: "ffmpeg isn't installed (ffprobe not found)" } }))[0]).toMatchObject({ id: "ffmpeg" });
   });

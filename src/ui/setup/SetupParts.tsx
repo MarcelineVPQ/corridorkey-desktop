@@ -22,7 +22,9 @@ export function InstallBox({ inst }: { inst: InstallState }) {
       <p className="hint-text">CorridorKey downloads what it runs on, once, into {inst.dir}:</p>
       <ul className="check-list">
         {inst.needRuntime && (
-          <li className="hint-text">GPU runtime, {gbBytes(inst.runtimeBytes)} download: ONNX Runtime (Microsoft, MIT licence) and NVIDIA's CUDA and cuDNN libraries (NVIDIA licence), from pypi.org</li>
+          <li className="hint-text">
+            GPU runtime, {gbBytes(inst.runtimeBytes)} download: {inst.runtimeWhat}
+          </li>
         )}
         {inst.needModels && (
           <li className="hint-text">
@@ -30,7 +32,7 @@ export function InstallBox({ inst }: { inst: InstallState }) {
           </li>
         )}
       </ul>
-      {!inst.nvidia && <p className="hint-text">No NVIDIA graphics driver is loaded. CorridorKey Desktop runs on NVIDIA graphics cards.</p>}
+      {inst.gpuProblem && <p className="hint-text">{inst.gpuProblem}</p>}
       {inst.status === "running" ? (
         <>
           <div className="hint-text">
@@ -44,7 +46,7 @@ export function InstallBox({ inst }: { inst: InstallState }) {
           </button>
         </>
       ) : (
-        <button type="button" className="btn small primary" disabled={!inst.nvidia} onClick={() => void window.ck.startInstall()}>
+        <button type="button" className="btn small primary" disabled={!inst.gpuOk} onClick={() => void window.ck.startInstall()}>
           <Download size={14} /> {inst.error ? "Try again (resumes)" : `Download and install (${gbBytes(inst.bytes)})`}
         </button>
       )}
@@ -71,10 +73,7 @@ export function FfmpegBox({ ff }: { ff: FfmpegState }) {
     <>
       <p className="hint-text">CorridorKey reads and writes video with ffmpeg. {ff.problem}.</p>
       {ff.note && <p className="hint-text">{ff.note}</p>}
-      <Row
-        label="Install command"
-        hint={!ff.canInstall ? "Run it in a terminal" : ff.asksPassword ? "The app runs it for you; your desktop asks for your password" : "The app runs it for you (Windows may ask for permission)"}
-      >
+      <Row label="Install command" hint={!ff.canInstall ? "Run it in a terminal" : ff.runHint}>
         <div className="path selectable">{ff.command}</div>
       </Row>
       {ff.canInstall && (

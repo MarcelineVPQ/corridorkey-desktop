@@ -17,6 +17,7 @@ const FEED_TIMEOUT_MS = 15_000;
 // Why this copy can't replace itself, or null.
 function unsupportedReason(keys: readonly string[]): string | null {
   if (process.platform === "win32") return "On Windows, new versions are on GitHub: github.com/MarcelineVPQ/corridorkey-desktop/releases (self-update is Linux only for now).";
+  if (process.platform === "darwin") return "On macOS, new versions are on GitHub: github.com/MarcelineVPQ/corridorkey-desktop/releases (self-update is Linux only for now).";
   if (process.platform !== "linux") return "Updates are built for the Linux AppImage only.";
   if (!app.isPackaged) return "Updates come with the AppImage build; this copy runs from source.";
   if (!process.env.APPIMAGE) return "Updates work only in the AppImage build; this copy isn't running as an AppImage.";

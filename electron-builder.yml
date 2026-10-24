@@ -1,4 +1,4 @@
-# Packaging: a Linux AppImage and a Windows installer (x64). `npm run dist:linux` / `npm run dist:win` build them
+# Packaging: a Linux AppImage, a Windows installer (x64) and a macOS disk image (Apple Silicon). `npm run dist:linux` / `npm run dist:win` build them
 # into release/ (the engine and electron-vite build first). Releases are built on Marcy's PC by
 # tools/release.sh; docs/RELEASING.md.
 appId: io.github.MarcelineVPQ.CorridorKeyDesktop
@@ -56,3 +56,19 @@ nsis:
   shortcutName: CorridorKey
   # the uninstaller asks whether to remove the downloaded runtime, models, cache and settings (build/installer.nsh)
   include: build/installer.nsh
+
+mac:
+  target:
+    - target: dmg
+      arch: [arm64]
+  category: public.app-category.video
+  # ONNX Runtime's macOS wheel (the first-run download) is built for macOS 14 and newer
+  minimumSystemVersion: "14.0"
+  # tools/build_engine.sh --mac builds it on a Mac (GitHub's macOS runner)
+  extraResources:
+    - from: engine-rs/target/dist/corridorkey-engine
+      to: engine/corridorkey-engine
+  artifactName: CorridorKey-Desktop-${version}-arm64.${ext}
+  # Unsigned until Marcy's Apple Developer ID is approved (2026-10-24); then: Developer ID Application signing,
+  # hardened runtime and notarization on the runner (docs/RELEASING.md).
+  identity: null

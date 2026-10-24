@@ -4,6 +4,8 @@
 #   tools/build_engine.sh              the Linux engine (engine-rs/target/dist/corridorkey-engine)
 #   tools/build_engine.sh --windows    the Windows engine, cross-built here (…/dist/corridorkey-engine.exe; MinGW-w64,
 #                                      `rustup target add x86_64-pc-windows-gnu`; it needs only DLLs every Windows has)
+#   tools/build_engine.sh --mac        the macOS engine (Apple Silicon), built ON a Mac (GitHub's macOS runner): there
+#                                      is no cross-build from Linux without Apple's SDK
 #
 # Linked against glibc 2.28 (the oldest Electron itself supports), so it runs on every Linux the app
 # runs on; a plain cargo build links against this desktop's glibc 2.43, newer than Ubuntu 24.04 or
@@ -13,6 +15,17 @@
 # loaded at run time (the in-app install downloads it), CUDA, TensorRT. Memory-capped (its own 12 G scope:
 # when release.sh runs it, this cap and release.sh's sit side by side, they don't nest).
 set -euo pipefail
+if [ "${1:-}" = --mac ]; then
+  # macOS has no systemd-run: the runner's own limits apply
+  ENG="$(cd "$(dirname "$0")/.." && pwd)/engine-rs"
+  mkdir -p "$ENG/target/dist"
+  cd "$ENG"
+  cargo build --release --locked -p ck-engine --no-default-features --features ort-dynamic --target aarch64-apple-darwin
+  cp "$ENG/target/aarch64-apple-darwin/release/corridorkey-engine" "$ENG/target/dist/corridorkey-engine.new"
+  mv -f "$ENG/target/dist/corridorkey-engine.new" "$ENG/target/dist/corridorkey-engine"
+  echo "built $ENG/target/dist/corridorkey-engine (macOS arm64)"
+  exit 0
+fi
 if [ "${1:-}" = --windows ]; then
   ENG="$(cd "$(dirname "$0")/.." && pwd)/engine-rs"
   mkdir -p "$ENG/target/dist"

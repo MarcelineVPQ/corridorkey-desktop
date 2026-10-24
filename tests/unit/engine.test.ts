@@ -83,6 +83,20 @@ describe("engine launch", () => {
     expect(env.CK_ENGINE_ORT).toBe(`${site}/onnxruntime/capi/libonnxruntime.so.1.31.0`);
   });
 
+  it("puts the macOS library folder on DYLD_LIBRARY_PATH and drops inherited DYLD variables", () => {
+    const rt = "/data/runtime/ort-1.31.0-coreml";
+    const env = rustEngineEnv(
+      { DYLD_INSERT_LIBRARIES: "/x.dylib", DYLD_LIBRARY_PATH: "/old" },
+      `${rt}/onnxruntime/capi/libonnxruntime.1.31.0.dylib`,
+      () => false,
+      () => [],
+      "darwin",
+    );
+    expect(env.DYLD_LIBRARY_PATH).toBe(`${rt}/onnxruntime/capi`);
+    expect(env.DYLD_INSERT_LIBRARIES).toBeUndefined();
+    expect(env.LD_LIBRARY_PATH).toBeUndefined();
+  });
+
   it("puts the Windows DLL folders (bin, CUDA 13's bin/x86_64) first on PATH", () => {
     const rt = "/data/runtime/ort-1.31.0-cuda13";
     const have = new Set([`${rt}/nvidia`, `${rt}/nvidia/cu13/bin/x86_64`, `${rt}/nvidia/cudnn/bin`]);

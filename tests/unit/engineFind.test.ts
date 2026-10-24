@@ -74,6 +74,13 @@ describe("finding the engine's files", () => {
     expect(dataDir({ LOCALAPPDATA: "C:/Users/m/AppData/Local" }, "C:/Users/m", "win32")).toBe("C:/Users/m/AppData/Local/corridorkey-desktop");
   });
 
+  it("finds the macOS runtime (libonnxruntime.<version>.dylib, Core ML built in) in Application Support", () => {
+    const t = tree({ "/d/runtime/ort-1.31.0-coreml/onnxruntime/capi/libonnxruntime.1.31.0.dylib": "" });
+    const f = findEngineFiles({ bundledBinary: null, devBinary: null, data: "/d" }, t, "darwin");
+    expect(f.ort).toEqual([{ path: "/d/runtime/ort-1.31.0-coreml/onnxruntime/capi/libonnxruntime.1.31.0.dylib", label: "ONNX Runtime 1.31.0 (graphics card)" }]);
+    expect(dataDir({ XDG_DATA_HOME: "/ignored" }, "/Users/m", "darwin")).toBe("/Users/m/Library/Application Support/corridorkey-desktop");
+  });
+
   it("titles the window with CorridorKey's own version and the engine", () => {
     expect(windowTitle("rust", "2.0.0-onnx.3")).toBe("CorridorKey 2.0 — Rust + ONNX");
     expect(windowTitle("rust", "2.1.0-onnx.1")).toBe("CorridorKey 2.1 — Rust + ONNX");

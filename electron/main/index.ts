@@ -10,9 +10,9 @@ import { expandPaths, probeClip, still, STILL_WIDTH, VIDEO_EXT } from "./media";
 import { clearJobTemps, Queue } from "./queue";
 import { checkCheckout, checkRustEngine, chooseEngine, loadSettings, saveSettings } from "./settings";
 import { dataDir, effectivePath, findEngineFiles, isInsideApp, modelSetVersion, windowTitle } from "./engineFind";
-import { checkFfmpeg, ffmpegState, installFfmpeg, planFor, readOsRelease, wingetFfmpegDirs } from "./ffmpeg";
+import { HOMEBREW_DIRS, checkFfmpeg, ffmpegState, installFfmpeg, planFor, readOsRelease, wingetFfmpegDirs } from "./ffmpeg";
 import { PROGRESS_EVERY_MS } from "./updateFlow";
-import { MODELS_BYTES, RUNTIME_BYTES, freeBytes, installNeeds, runInstall } from "./install";
+import { MODELS_BYTES, RUNTIME_BYTES, freeBytes, installNeeds, runInstall, systemSupport } from "./install";
 import { pruneCache, removeStorage, storageItems } from "./storage";
 import { readDesktopPalette, watchDesktopPalette } from "./desktopTheme";
 import { Updater } from "./updater";
@@ -46,10 +46,13 @@ protocol.registerSchemesAsPrivileged([{ scheme: MEDIA_SCHEME, privileges: { stan
 
 const settingsFile = join(app.getPath("userData"), "settings.json");
 const IS_WIN = process.platform === "win32";
-// Disk, not /tmp (it is RAM on many Linux desktops): XDG cache, else ~/.cache; on Windows %LOCALAPPDATA%.
+const IS_MAC = process.platform === "darwin";
+// Disk, not /tmp (it is RAM on many Linux desktops): XDG cache, else ~/.cache; on Windows %LOCALAPPDATA%; on macOS ~/Library/Caches.
 const cacheDir = IS_WIN
   ? join(process.env.LOCALAPPDATA || join(app.getPath("home"), "AppData", "Local"), "corridorkey-desktop", "cache")
-  : join(process.env.XDG_CACHE_HOME || join(app.getPath("home"), ".cache"), "corridorkey-desktop");
+  : IS_MAC
+    ? join(app.getPath("home"), "Library", "Caches", "corridorkey-desktop")
+    : join(process.env.XDG_CACHE_HOME || join(app.getPath("home"), ".cache"), "corridorkey-desktop");
 const mediaDir = join(cacheDir, "media");
 let settings = loadSettings(settingsFile, process.env);
 let checkout = checkCheckout(settings.corridorKeyRoot);
@@ -79,13 +82,11 @@ function enginePaths() {
 }
 let rustEngine = checkRustEngine(null, null);
 // ffmpeg: "checking" until the first check (started at ready); then after an install or before a queue
-let ffmpeg: FfmpegState = { checked: false, ok: false, problem: null, command: "", canInstall: false, asksPassword: true, note: null, installing: false, installError: null };
+let ffmpeg: FfmpegState = { checked: false, ok: false, problem: null, command: "", canInstall: false, runHint: "", note: null, installing: false, installError: null };
 // the first-run install: what is missing, and its progress while it runs
 function installIdle(): InstallState {
   const need = installNeeds(enginePlaces().data);
-  // loop: NOT-WORTH — one stat of the NVIDIA driver's proc file per check
-  // the NVIDIA driver: its proc file on Linux, its NVML library in System32 on Windows
-  const nvidia = IS_WIN ? existsSync(join(process.env.SystemRoot || "C:\\Windows", "System32", "nvml.dll")) : existsSync("/proc/driver/nvidia/version");
+  const sys = systemSupport(process.platform, process.arch, existsSync, process.env);
   return {
     dir: enginePlaces().data,
     needRuntime: need.runtime,
@@ -93,7 +94,9 @@ function installIdle(): InstallState {
     bytes: need.bytes,
     runtimeBytes: RUNTIME_BYTES,
     modelsBytes: MODELS_BYTES,
-    nvidia,
+    gpuOk: sys.ok,
+    gpuProblem: sys.problem,
+    runtimeWhat: sys.runtime,
     status: "idle",
     step: null,
     done: 0,
@@ -112,6 +115,13 @@ async function recheckFfmpeg(): Promise<void> {
     // loop: NOT-WORTH — a couple of folders per check
     const add = wingetFfmpegDirs(process.env.LOCALAPPDATA).filter((d) => !have.includes(d));
     if (add.length) process.env.PATH = [...add, ...have].join(delimiter);
+  }
+  // macOS: apps started from the Dock don't get the shell's PATH, so Homebrew's folders are added here
+  if (IS_MAC) {
+    const have = (process.env.PATH ?? "").split(delimiter);
+    // loop: NOT-WORTH — two folders per check
+    const add = HOMEBREW_DIRS.filter((d) => !have.includes(d));
+    if (add.length) process.env.PATH = [...have, ...add].join(delimiter);
   }
   // an install still running stays running (a check while it runs must not bring the Install button back)
   ffmpeg = { ...ffmpegState(await checkFfmpeg(), planFor(process.platform, readOsRelease())), installing: ffmpeg.installing, installError: ffmpeg.installError };
@@ -375,7 +385,7 @@ function registerIpc(): void {
     const opts = {
       binary: { title: "The CorridorKey engine program (corridorkey-engine)", properties: ["openFile"] as const },
       models: { title: "The folder with the CorridorKey ONNX models", properties: ["openDirectory"] as const },
-      ort: { title: `ONNX Runtime's library (${IS_WIN ? "onnxruntime.dll" : "libonnxruntime.so"}) for the graphics card`, properties: ["openFile"] as const },
+      ort: { title: `ONNX Runtime's library (${IS_WIN ? "onnxruntime.dll" : IS_MAC ? "libonnxruntime.dylib" : "libonnxruntime.so"}) for the graphics card`, properties: ["openFile"] as const },
     }[what];
     const r = await dialog.showOpenDialog(mainWindow!, { title: opts.title, properties: [...opts.properties] });
     if (r.canceled) return;
@@ -398,7 +408,7 @@ function registerIpc(): void {
     scheduleSend();
   });
   ipcMain.handle(IPC.startInstall, async () => {
-    if (install.status === "running" || !install.nvidia) return;
+    if (install.status === "running" || !install.gpuOk) return;
     installAbort = new AbortController();
     install = { ...install, status: "running", error: null, step: "Starting", done: 0, total: install.bytes };
     scheduleSend();

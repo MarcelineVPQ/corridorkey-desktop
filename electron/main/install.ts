@@ -148,6 +148,55 @@ export const RUNTIME_WIN = {
   ] as Download[],
 };
 
+// macOS (Apple Silicon): the plain onnxruntime wheel; its library has the Core ML execution provider built in
+// (Apple's GPU and Neural Engine), and macOS has no CUDA, so nothing else is needed.
+export const RUNTIME_MAC = {
+  name: "ort-1.31.0-coreml",
+  wheels: [
+    {
+      label: "ONNX Runtime",
+      file: "onnxruntime-1.31.0-cp312-cp312-macosx_14_0_arm64.whl",
+      url: `${PYPI}/b3/bd/2ac094311163b803e3626c3937461d6900934bd56cca7601f6150ff860c3/onnxruntime-1.31.0-cp312-cp312-macosx_14_0_arm64.whl`,
+      size: 20882054,
+      sha256: "aaab9b3af536b06ca27ab5e35e3d429c97457ce76cf298af103f687e8b9975c0",
+    },
+  ] as Download[],
+};
+
+/** The runtime this system downloads. */
+export function runtimeFor(platform: NodeJS.Platform) {
+  return platform === "win32" ? RUNTIME_WIN : platform === "darwin" ? RUNTIME_MAC : RUNTIME;
+}
+
+/** Can this system run the engine on its graphics hardware, and what the setup downloads for it. */
+export interface SystemSupport {
+  ok: boolean;
+  // why not, in the user's words (null when ok)
+  problem: string | null;
+  // the runtime download, as the setup page describes it
+  runtime: string;
+}
+
+const NVIDIA_RUNTIME = "ONNX Runtime (Microsoft, MIT licence) and NVIDIA's CUDA and cuDNN libraries (NVIDIA licence), from pypi.org";
+
+/**
+ * Linux: the NVIDIA driver's proc file; Windows: its NVML library in System32; macOS: Apple Silicon (Core ML runs
+ * on its GPU and Neural Engine; there is no Intel Mac build).
+ */
+export function systemSupport(platform: NodeJS.Platform, arch: string, exists: (p: string) => boolean, env: NodeJS.ProcessEnv): SystemSupport {
+  if (platform === "darwin") {
+    const ok = arch === "arm64";
+    return {
+      ok,
+      problem: ok ? null : "This Mac has an Intel processor. CorridorKey Desktop runs on Macs with Apple Silicon (M1 or newer).",
+      runtime: "ONNX Runtime (Microsoft, MIT licence) with Apple's Core ML, from pypi.org",
+    };
+  }
+  // loop: NOT-WORTH — one stat of the NVIDIA driver's file per check
+  const ok = platform === "win32" ? exists(join(env.SystemRoot || "C:\\Windows", "System32", "nvml.dll")) : exists("/proc/driver/nvidia/version");
+  return { ok, problem: ok ? null : "No NVIDIA graphics driver is loaded. CorridorKey Desktop runs on NVIDIA graphics cards.", runtime: NVIDIA_RUNTIME };
+}
+
 /** What to keep from a wheel: ONNX Runtime's libraries, NVIDIA's libraries, and every licence file. */
 export function keepFromWheel(name: string): boolean {
   if (/^onnxruntime\/capi\/libonnxruntime(\.so\.|_providers_(cuda|shared)\.so$)/.test(name)) return true;
@@ -157,6 +206,10 @@ export function keepFromWheel(name: string): boolean {
   // the package's metadata: the Engine page reads ONNX Runtime's version from its dist-info folder on Windows
   if (/^onnxruntime(_gpu)?-[\d.]+\.dist-info\/METADATA$/.test(name)) return true;
   if (/^nvidia\/[^/]+\/lib\/[^/]+\.so[.\d]*$/.test(name)) return true;
+  // macOS: libonnxruntime.1.31.0.dylib
+  if (/^onnxruntime\/capi\/libonnxruntime\.[\d.]+\.dylib$/.test(name)) return true;
+  // ONNX Runtime's own licence and third-party notices (the macOS wheel keeps them in the package folder)
+  if (/^onnxruntime\/(LICENSE|ThirdPartyNotices\.txt)$/.test(name)) return true;
   return /\.dist-info\/(licenses\/.+|LICENSE[^/]*)$/i.test(name);
 }
 
@@ -182,7 +235,7 @@ export const MODELS = {
 
 // loop: NOT-WORTH — sums a dozen sizes, once per plan
 const total = (d: Download[]) => d.reduce((n, x) => n + x.size, 0);
-export const RUNTIME_BYTES = total(process.platform === "win32" ? RUNTIME_WIN.wheels : RUNTIME.wheels);
+export const RUNTIME_BYTES = total(runtimeFor(process.platform).wheels);
 export const MODELS_BYTES = total(MODELS.files);
 
 /** What gets installed: the pinned runtime and model set (tests pass a small one). */
@@ -190,7 +243,7 @@ export interface Catalog {
   runtime: { name: string; wheels: Download[] };
   models: { name: string; files: Download[] };
 }
-const CATALOG: Catalog = { runtime: process.platform === "win32" ? RUNTIME_WIN : RUNTIME, models: MODELS };
+const CATALOG: Catalog = { runtime: runtimeFor(process.platform), models: MODELS };
 
 /** What is still to install: each set is there once its folder is (the rename is the last step). */
 export function installNeeds(data: string, exists: (p: string) => boolean = existsSync, c: Catalog = CATALOG): { runtime: boolean; models: boolean; bytes: number } {

@@ -51,6 +51,22 @@ describe("ffmpeg install", () => {
     expect(f.note).toContain("RPM Fusion");
     expect(installPlan('ID="opensuse-tumbleweed"\nID_LIKE="opensuse suse"\n').note).toContain("Packman");
   });
+  it("installs with Homebrew on macOS, without pkexec, and says Homebrew comes first", async () => {
+    const plan = planFor("darwin", "");
+    expect(plan.command).toBe("brew install ffmpeg");
+    expect(plan.note).toContain("brew.sh");
+    const calls: string[][] = [];
+    await installFfmpeg(plan, async (cmd, args) => {
+      calls.push([cmd, ...args]);
+      return "";
+    });
+    expect(calls).toEqual([["brew", "install", "ffmpeg"]]);
+    await expect(
+      installFfmpeg(plan, async () => {
+        throw Object.assign(new Error("spawn brew ENOENT"), { code: "ENOENT" });
+      }),
+    ).rejects.toThrow('brew isn\'t available: run "brew install ffmpeg" in a terminal');
+  });
   it("installs with winget on Windows, without pkexec", async () => {
     const plan = planFor("win32", "");
     const calls: string[][] = [];

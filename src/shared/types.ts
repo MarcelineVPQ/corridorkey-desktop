@@ -204,7 +204,7 @@ export interface EngineFiles {
 
 // The first-run install (electron/main/install.ts): the GPU runtime and the models into the data folder.
 export interface InstallState {
-  // where it installs (the data folder: $XDG_DATA_HOME/corridorkey-desktop)
+  // where it installs (the data folder: $XDG_DATA_HOME, %LOCALAPPDATA% or Application Support/corridorkey-desktop)
   dir: string;
   // what is missing, and its download size in bytes
   needRuntime: boolean;
@@ -213,8 +213,11 @@ export interface InstallState {
   // each part's download size (shown before the start)
   runtimeBytes: number;
   modelsBytes: number;
-  // an NVIDIA driver is loaded (1.0 runs on NVIDIA graphics cards only)
-  nvidia: boolean;
+  // the system can run the engine on its graphics hardware (an NVIDIA driver; Apple Silicon on macOS), else why not
+  gpuOk: boolean;
+  gpuProblem: string | null;
+  // the runtime download, as the setup page describes it (CUDA libraries, or Core ML on macOS)
+  runtimeWhat: string;
   status: "idle" | "running" | "error";
   step: string | null;
   done: number;
@@ -239,8 +242,8 @@ export interface FfmpegState {
   // the install for this distro, to read or copy; canInstall = the app can run it (pkexec), else `note` says what first
   command: string;
   canInstall: boolean;
-  // Linux: pkexec's password prompt; Windows: winget may ask for permission itself
-  asksPassword: boolean;
+  // what the install button's hint says (Linux: the desktop's password prompt; Windows: winget; macOS: Homebrew)
+  runHint: string;
   note: string | null;
   installing: boolean;
   installError: string | null;

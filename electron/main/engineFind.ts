@@ -25,9 +25,10 @@ const realDeps: FindDeps = {
   read: (p) => readFileSync(p, "utf8"),
 };
 
-/** The app's data folder: $XDG_DATA_HOME (else ~/.local/share) on Linux, %LOCALAPPDATA% on Windows. */
+/** The app's data folder: $XDG_DATA_HOME (else ~/.local/share) on Linux, %LOCALAPPDATA% on Windows, Application Support on macOS. */
 export function dataDir(env: NodeJS.ProcessEnv, home: string, platform: NodeJS.Platform = process.platform): string {
   if (platform === "win32") return join(env.LOCALAPPDATA || join(home, "AppData", "Local"), "corridorkey-desktop");
+  if (platform === "darwin") return join(home, "Library", "Application Support", "corridorkey-desktop");
   return join(env.XDG_DATA_HOME || join(home, ".local", "share"), "corridorkey-desktop");
 }
 
@@ -101,6 +102,12 @@ export function findEngineFiles(places: { bundledBinary: string | null; devBinar
         .map((f) => /^onnxruntime(?:_gpu)?-([\d.]+)\.dist-info$/.exec(f)?.[1])
         .find(Boolean);
       gpu = d.exists(join(capi, "onnxruntime_providers_cuda.dll"));
+    } else if (platform === "darwin") {
+      // macOS: libonnxruntime.1.31.0.dylib; Core ML (Apple's GPU and Neural Engine) is built into it
+      // loop: NOT-WORTH — a few files in ONNX Runtime's capi folder
+      lib = dirs(capi, d).find((f) => /^libonnxruntime\.\d[\d.]*\.dylib$/.test(f));
+      version = lib?.slice("libonnxruntime.".length, -".dylib".length);
+      gpu = true;
     } else {
       // loop: NOT-WORTH — a dozen files in ONNX Runtime's capi folder
       lib = dirs(capi, d).find((f) => /^libonnxruntime\.so\.\d/.test(f));
