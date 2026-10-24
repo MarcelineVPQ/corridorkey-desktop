@@ -147,6 +147,16 @@ export const RUNTIME_WIN = {
       size: 39053950,
       sha256: "b286f3a4f227a9363efdec263c7b91788cef1478d2b8a5fa8bab7f3e82ff82fd",
     },
+    // onnxruntime.dll needs Microsoft's Visual C++ 2015-2022 runtime (msvcp140, vcruntime140 and their _1 parts),
+    // which a fresh Windows doesn't have (found in the Windows VM 2026-10-24: "LoadLibraryExW failed"). Microsoft's
+    // redistributable DLLs, unmodified, from PyPI's msvc-runtime wheel; the engine finds them on its PATH (engine.ts).
+    {
+      label: "Microsoft Visual C++ runtime",
+      file: "msvc_runtime-14.51.36231-cp312-cp312-win_amd64.whl",
+      url: `${PYPI}/98/33/be9ef68901200813fc174a06758b4ae48ca4eb58fa783280dd879d5fd048/msvc_runtime-14.51.36231-cp312-cp312-win_amd64.whl`,
+      size: 2052033,
+      sha256: "89f70d1a37bb64164cdb09d02dd82d6b1400e1310be2995b4ed5a9f23efe2222",
+    },
   ] as Download[],
 };
 
@@ -211,6 +221,8 @@ export function keepFromWheel(name: string): boolean {
   // the package's metadata: the Engine page reads ONNX Runtime's version from its dist-info folder on Windows
   if (/^onnxruntime(_gpu)?-[\d.]+\.dist-info\/METADATA$/.test(name)) return true;
   if (/^nvidia\/[^/]+\/lib\/[^/]+\.so[.\d]*$/.test(name)) return true;
+  // Windows: the Visual C++ runtime ONNX Runtime needs (msvc_runtime-<version>.data/data/Scripts/)
+  if (/^msvc_runtime-[\d.]+\.data\/data\/Scripts\/(msvcp140[^/]*|vcruntime140[^/]*)\.dll$/.test(name)) return true;
   // macOS: libonnxruntime.1.31.0.dylib
   if (/^onnxruntime\/capi\/libonnxruntime\.[\d.]+\.dylib$/.test(name)) return true;
   // ONNX Runtime's own licence and third-party notices (the macOS wheel keeps them in the package folder)

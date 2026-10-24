@@ -101,15 +101,17 @@ describe("engine launch", () => {
 
   it("puts the Windows DLL folders (bin, CUDA 13's bin/x86_64) first on PATH", () => {
     const rt = "/data/runtime/ort-1.31.0-cuda13";
-    const have = new Set([`${rt}/nvidia`, `${rt}/nvidia/cu13/bin/x86_64`, `${rt}/nvidia/cudnn/bin`]);
+    const vc = `${rt}/msvc_runtime-14.51.36231.data/data/Scripts`;
+    const have = new Set([rt, `${rt}/nvidia`, `${rt}/nvidia/cu13/bin/x86_64`, `${rt}/nvidia/cudnn/bin`, vc]);
     const env = rustEngineEnv(
       { PATH: "C:/Windows" },
       `${rt}/onnxruntime/capi/onnxruntime.dll`,
       (p) => have.has(p),
-      () => ["cu13", "cudnn"],
+      (p) => (p === rt ? ["onnxruntime", "nvidia", "msvc_runtime-14.51.36231.data", "msvc_runtime-14.51.36231.dist-info"] : ["cu13", "cudnn"]),
       "win32",
     );
-    expect(env.PATH).toBe([`${rt}/onnxruntime/capi`, `${rt}/nvidia/cu13/bin/x86_64`, `${rt}/nvidia/cudnn/bin`, "C:/Windows"].join(";"));
+    // the Visual C++ runtime folder too: onnxruntime.dll can't load without it on a fresh Windows
+    expect(env.PATH).toBe([`${rt}/onnxruntime/capi`, `${rt}/nvidia/cu13/bin/x86_64`, `${rt}/nvidia/cudnn/bin`, vc, "C:/Windows"].join(";"));
     expect(env.LD_LIBRARY_PATH).toBeUndefined();
   });
 });

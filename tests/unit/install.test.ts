@@ -64,6 +64,12 @@ describe("first-run install", () => {
     expect(keepFromWheel("onnxruntime/capi/onnxruntime_providers_tensorrt.dll")).toBe(false);
     expect(keepFromWheel("nvidia/cu13/bin/x86_64/cublasLt64_13.dll")).toBe(true);
     expect(keepFromWheel("nvidia/cudnn/bin/cudnn64_9.dll")).toBe(true);
+    // Windows: Microsoft's Visual C++ runtime, which onnxruntime.dll needs (the Scripts copy has all four)
+    expect(keepFromWheel("msvc_runtime-14.51.36231.data/data/Scripts/vcruntime140_1.dll")).toBe(true);
+    expect(keepFromWheel("msvc_runtime-14.51.36231.data/data/Scripts/msvcp140.dll")).toBe(true);
+    expect(keepFromWheel("msvc_runtime-14.51.36231.data/data/Scripts/vcamp140.dll")).toBe(false);
+    expect(keepFromWheel("msvc_runtime.cp312-win_amd64.pyd")).toBe(false);
+    expect(RUNTIME_WIN.wheels.some((w) => w.file.startsWith("msvc_runtime-"))).toBe(true);
     expect(keepFromWheel("onnxruntime_gpu-1.31.0.dist-info/METADATA")).toBe(true);
   });
 

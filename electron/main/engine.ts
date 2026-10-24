@@ -86,6 +86,10 @@ export function rustEngineEnv(
       }
     }
     if (exists(join(site, "tensorrt_libs"))) dirs.push(join(site, "tensorrt_libs"));
+    // Windows: Microsoft's Visual C++ runtime from the msvc-runtime wheel, which onnxruntime.dll needs (install.ts)
+    if (win && exists(site))
+      // loop: NOT-WORTH — the runtime folder's few entries, once per engine spawn
+      for (const d of list(site).filter((n) => /^msvc_runtime-[\d.]+\.data$/.test(n))) if (exists(join(site, d, "data", "Scripts"))) dirs.push(join(site, d, "data", "Scripts"));
     out.CK_ENGINE_ORT = ort;
   }
   // the engine ends with this app on every system (engine-rs proc.rs end_with_parent; Windows waits on this pid)
