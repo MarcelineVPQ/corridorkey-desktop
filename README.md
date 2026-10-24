@@ -295,6 +295,16 @@ node tools/engine_bench.mjs rust --bin <corridorkey-engine> --models <models>/2.
   --device cuda --out out/rust --vram-budget 12 CLIP...
 ```
 
+Then compare them: `tools/matte_compare.py` gives the numbers for whole clips, and `tools/side_by_side.py` the
+pictures, for any two output folders (engines, versions, video or EXR): each frame's foreground and matte side by
+side, a 20× difference image, crops of the spots you name, an optional side-by-side video, and the exact numbers.
+It reads EXR as float and checks itself (the reference against itself must be zero) before writing anything:
+
+```
+python3 tools/side_by_side.py out/pytorch/<clip> out/rust/<clip> --out compare --labels Original Ours \
+  --frames 72 --crop hair:2160,480,880,720 --video --open
+```
+
 ## How it's tested
 
 Every result in this README is reproducible with the tools in this repository. The full run of 2026-10-24:
