@@ -1,6 +1,7 @@
 // Unpacks chosen files from a zip (a Python wheel: the first-run install's GPU runtime, install.ts).
 // Streams each file straight to disk (the CUDA libraries are hundreds of MB each); nothing is held in
-// memory but the zip's directory. Stored and deflated entries; Zip64 is refused (no wheel we use needs it).
+// memory but the zip's directory. Stored and deflated entries, Zip64 included (NVIDIA's 3.7 GB TensorRT wheel puts its
+// offsets past 2 GiB in Zip64 fields, as Python's zipfile does).
 // The wheel itself is SHA-256 checked before this runs, so entries aren't CRC-checked again.
 import { createReadStream, createWriteStream, mkdirSync, openSync, readSync, closeSync, fstatSync } from "node:fs";
 import { dirname, join, normalize, sep } from "node:path";
@@ -23,6 +24,13 @@ function readAt(fd: number, offset: number, length: number): Buffer {
   return b;
 }
 
+// a Zip64 value; past 2^53 (8 PiB) a Number can't hold it exactly
+function u64(b: Buffer, at: number): number {
+  const n = b.readBigUInt64LE(at);
+  if (n > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("damaged Zip64 value");
+  return Number(n);
+}
+
 /** The zip's directory, read through an open file descriptor. */
 export function listZip(fd: number): ZipEntry[] {
   // loop: NOT-WORTH — one stat per unpack
@@ -37,10 +45,18 @@ export function listZip(fd: number): ZipEntry[] {
       break;
     }
   if (eocd < 0) throw new Error("not a zip file");
-  const count = tail.readUInt16LE(eocd + 10);
-  const cdSize = tail.readUInt32LE(eocd + 12);
-  const cdOffset = tail.readUInt32LE(eocd + 16);
-  if (count === 0xffff || cdOffset === 0xffffffff) throw new Error("Zip64 isn't supported");
+  let count = tail.readUInt16LE(eocd + 10);
+  let cdSize = tail.readUInt32LE(eocd + 12);
+  let cdOffset = tail.readUInt32LE(eocd + 16);
+  if (count === 0xffff || cdSize === 0xffffffff || cdOffset === 0xffffffff) {
+    // Zip64: the locator sits just before the end record and points at the Zip64 end record
+    if (eocd < 20 || tail.readUInt32LE(eocd - 20) !== 0x07064b50) throw new Error("damaged Zip64 end record");
+    const end64 = readAt(fd, u64(tail, eocd - 12), 56);
+    if (end64.readUInt32LE(0) !== 0x06064b50) throw new Error("damaged Zip64 end record");
+    count = u64(end64, 32);
+    cdSize = u64(end64, 40);
+    cdOffset = u64(end64, 48);
+  }
   const cd = readAt(fd, cdOffset, cdSize);
   const out: ZipEntry[] = [];
   let p = 0;
@@ -48,14 +64,31 @@ export function listZip(fd: number): ZipEntry[] {
   for (let i = 0; i < count; i++) {
     if (cd.readUInt32LE(p) !== 0x02014b50) throw new Error("damaged zip directory");
     const method = cd.readUInt16LE(p + 10);
-    const compressedSize = cd.readUInt32LE(p + 20);
-    const sizeU = cd.readUInt32LE(p + 24);
+    let compressedSize = cd.readUInt32LE(p + 20);
+    let sizeU = cd.readUInt32LE(p + 24);
     const nameLen = cd.readUInt16LE(p + 28);
     const extraLen = cd.readUInt16LE(p + 30);
     const commentLen = cd.readUInt16LE(p + 32);
     const external = cd.readUInt32LE(p + 38);
-    const localOffset = cd.readUInt32LE(p + 42);
-    if (compressedSize === 0xffffffff || sizeU === 0xffffffff || localOffset === 0xffffffff) throw new Error("Zip64 isn't supported");
+    let localOffset = cd.readUInt32LE(p + 42);
+    if (compressedSize === 0xffffffff || sizeU === 0xffffffff || localOffset === 0xffffffff) {
+      // the real values are in the Zip64 extra field (id 1), only those marked 0xffffffff, in this order
+      let x = p + 46 + nameLen;
+      const xEnd = x + extraLen;
+      // loop: NOT-WORTH — walks one entry's extra fields (a few)
+      while (x + 4 <= xEnd && cd.readUInt16LE(x) !== 0x0001) x += 4 + cd.readUInt16LE(x + 2);
+      if (x + 4 > xEnd) throw new Error("damaged Zip64 entry");
+      let v = x + 4;
+      const next = (): number => {
+        if (v + 8 > x + 4 + cd.readUInt16LE(x + 2)) throw new Error("damaged Zip64 entry");
+        const n = u64(cd, v);
+        v += 8;
+        return n;
+      };
+      if (sizeU === 0xffffffff) sizeU = next();
+      if (compressedSize === 0xffffffff) compressedSize = next();
+      if (localOffset === 0xffffffff) localOffset = next();
+    }
     out.push({ name: cd.toString("utf8", p + 46, p + 46 + nameLen), method, compressedSize, size: sizeU, localOffset, mode: (external >>> 16) & 0o777 });
     p += 46 + nameLen + extraLen + commentLen;
   }

@@ -31,7 +31,8 @@ import {
 import { unzip } from "../../electron/main/unzip";
 
 /** A minimal zip (deflated entries) as a wheel looks, for the unpacker. */
-function makeZip(files: Record<string, string>, stored: string[] = []): Buffer {
+// zip64: every size and offset in the Zip64 fields, as Python's zipfile writes them past 2 GiB (NVIDIA's TensorRT wheel)
+function makeZip(files: Record<string, string>, stored: string[] = [], zip64 = false): Buffer {
   const locals: Buffer[] = [];
   const central: Buffer[] = [];
   let offset = 0;
@@ -54,8 +55,20 @@ function makeZip(files: Record<string, string>, stored: string[] = []): Buffer {
     ch.writeUInt16LE(n.length, 28);
     ch.writeUInt32LE((0o100755 << 16) >>> 0, 38);
     ch.writeUInt32LE(offset, 42);
+    const extra = Buffer.alloc(zip64 ? 28 : 0);
+    if (zip64) {
+      ch.writeUInt32LE(0xffffffff, 20);
+      ch.writeUInt32LE(0xffffffff, 24);
+      ch.writeUInt32LE(0xffffffff, 42);
+      ch.writeUInt16LE(extra.length, 30);
+      extra.writeUInt16LE(0x0001, 0);
+      extra.writeUInt16LE(24, 2);
+      extra.writeBigUInt64LE(BigInt(data.length), 4);
+      extra.writeBigUInt64LE(BigInt(comp.length), 12);
+      extra.writeBigUInt64LE(BigInt(offset), 20);
+    }
     locals.push(lh, n, comp);
-    central.push(ch, n);
+    central.push(ch, n, extra);
     offset += 30 + n.length + comp.length;
   }
   const cd = Buffer.concat(central);
@@ -65,7 +78,24 @@ function makeZip(files: Record<string, string>, stored: string[] = []): Buffer {
   end.writeUInt16LE(Object.keys(files).length, 10);
   end.writeUInt32LE(cd.length, 12);
   end.writeUInt32LE(offset, 16);
-  return Buffer.concat([...locals, cd, end]);
+  if (!zip64) return Buffer.concat([...locals, cd, end]);
+  const count = BigInt(Object.keys(files).length);
+  const end64 = Buffer.alloc(56);
+  end64.writeUInt32LE(0x06064b50, 0);
+  end64.writeBigUInt64LE(44n, 4);
+  end64.writeBigUInt64LE(count, 24);
+  end64.writeBigUInt64LE(count, 32);
+  end64.writeBigUInt64LE(BigInt(cd.length), 40);
+  end64.writeBigUInt64LE(BigInt(offset), 48);
+  const locator = Buffer.alloc(20);
+  locator.writeUInt32LE(0x07064b50, 0);
+  locator.writeBigUInt64LE(BigInt(offset + cd.length), 8);
+  locator.writeUInt32LE(1, 16);
+  end.writeUInt16LE(0xffff, 8);
+  end.writeUInt16LE(0xffff, 10);
+  end.writeUInt32LE(0xffffffff, 12);
+  end.writeUInt32LE(0xffffffff, 16);
+  return Buffer.concat([...locals, cd, end64, locator, end]);
 }
 
 describe("first-run install", () => {
@@ -103,6 +133,14 @@ describe("first-run install", () => {
     expect(existsSync(join(dir, "out/nvidia/cu13/include/x.h"))).toBe(false);
     writeFileSync(zip, makeZip({ "../evil.so": "x" }));
     await expect(unzip(zip, join(dir, "out2"), () => true)).rejects.toThrow("outside the folder");
+  });
+
+  it("unpacks a Zip64 wheel (NVIDIA's TensorRT wheel: offsets past 2 GiB)", async () => {
+    const zip = join(dir, "z.whl");
+    writeFileSync(zip, makeZip({ "tensorrt_libs/libnvinfer.so.10": "NVINFER", "tensorrt_libs/libnvonnxparser.so.10": "PARSER" }, ["tensorrt_libs/libnvonnxparser.so.10"], true));
+    expect(await unzip(zip, join(dir, "out5"), () => true)).toHaveLength(2);
+    expect(readFileSync(join(dir, "out5/tensorrt_libs/libnvinfer.so.10"), "utf8")).toBe("NVINFER");
+    expect(readFileSync(join(dir, "out5/tensorrt_libs/libnvonnxparser.so.10"), "utf8")).toBe("PARSER");
   });
 
   it("unpacks an empty stored file (a 0-byte licence) instead of failing the install", async () => {
