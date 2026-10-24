@@ -113,9 +113,9 @@ pub fn build_timeout() -> std::time::Duration {
 
 /// Build `piece`'s engine for bucket `b` into `dir` (`<piece>.engine`) with ck-trt-build, a child process (its
 /// host memory goes back when it ends). Ok(seconds), Err(why). `workspace_mb`: TensorRT's working-memory limit.
-pub fn build_engine(builder: &Path, onnx: &Path, piece: &str, b: &Bucket, dir: &Path, workspace_mb: u64, timing_cache: &Path) -> Result<f64, String> {
-    let (min, opt, max) = profile(piece, b).ok_or("unknown network")?;
-    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+pub fn build_engine(builder: &Path, onnx: &Path, piece: &str, b: &Bucket, dir: &Path, workspace_mb: u64, timing_cache: &Path) -> Result<f64, BuildError> {
+    let (min, opt, max) = profile(piece, b).ok_or_else(|| BuildError::transient("unknown network".into()))?;
+    std::fs::create_dir_all(dir).map_err(|e| BuildError::transient(format!("{}: {e}", dir.display())))?;
     let t = std::time::Instant::now();
     let mut cmd = std::process::Command::new(builder);
     // a killed engine takes its builder with it (it holds the card for minutes)
@@ -128,18 +128,68 @@ pub fn build_engine(builder: &Path, onnx: &Path, piece: &str, b: &Bucket, dir: &
         .arg("--timing-cache")
         .arg(timing_cache);
     // loop: SERIAL-REQUIRED — one engine build at a time (the builder needs the card to itself); deadline build_timeout() 1800 s (this pass: it had none)
-    let out = crate::proc::output_timeout(&mut cmd, build_timeout()).map_err(|e| format!("ck-trt-build: {e}"))?;
+    // a timeout or a builder that can't start is never remembered as a failed build
+    let out = crate::proc::output_timeout(&mut cmd, build_timeout()).map_err(|e| BuildError::transient(format!("ck-trt-build: {e}")))?;
     // loop: NOT-WORTH — the builder's output lines, once per build
     let line = String::from_utf8_lossy(&out.stdout).lines().last().unwrap_or("").to_string();
     if out.status.success() && line.contains("\"ok\":true") {
         return Ok(t.elapsed().as_secs_f64());
     }
-    let why = serde_json::from_str::<serde_json::Value>(&line)
-        .ok()
-        .and_then(|v| v["error"].as_str().map(|s| s.to_string()))
-        // loop: NOT-WORTH — the builder's stderr, once per failed build
-        .unwrap_or_else(|| format!("ck-trt-build exited with {}: {}", out.status, String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("")));
-    Err(why)
+    match serde_json::from_str::<serde_json::Value>(&line).ok().and_then(|v| v["error"].as_str().map(|s| s.to_string())) {
+        // the builder's own answer: remembered only when it says the network can't be built
+        Some(why) => Err(BuildError { deterministic: deterministic_failure(&why), why }),
+        // a crash or a kill (no answer line): may go another way next time
+        None => Err(BuildError::transient(format!(
+            "ck-trt-build exited with {}: {}",
+            out.status,
+            // loop: NOT-WORTH — the builder's stderr, once per failed build
+            String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("")
+        ))),
+    }
+}
+
+/// A failed engine build: why, and whether the same build would fail again (`deterministic`: the network can't
+/// be parsed or no tactic fits; only those are remembered in `.failed`, never a timeout, a lack of memory or a
+/// busy card).
+#[derive(Clone, Debug, PartialEq)]
+pub struct BuildError {
+    pub why: String,
+    pub deterministic: bool,
+}
+
+impl BuildError {
+    pub fn transient(why: String) -> BuildError {
+        BuildError { why, deterministic: false }
+    }
+}
+
+/// Whether the builder's error says the build itself can't succeed with these inputs: the ONNX parser refused the
+/// network, the arguments are wrong, or TensorRT found no implementation (tactic) for a node within the workspace.
+/// A lack of graphics or host memory, a busy or unavailable card, or a CUDA error is not: the next job may have the
+/// card to itself.
+pub fn deterministic_failure(why: &str) -> bool {
+    let low = why.to_lowercase();
+    const TRANSIENT: [&str; 12] = [
+        "out of memory",
+        "outofmemory",
+        "cudaerrormemoryallocation",
+        "could not be allocated",
+        "failed to allocate",
+        "insufficient memory",
+        "bad_alloc",
+        "busy",
+        "unavailable",
+        "timed out",
+        "no answer within",
+        "cuda error",
+    ];
+    // loop: NOT-WORTH — a dozen markers over one error line, once per failed build
+    if TRANSIENT.iter().any(|m| low.contains(m)) {
+        return false;
+    }
+    const DETERMINISTIC: [&str; 7] = ["could not find any implementation", "no tactic", "parse:", "bad shapes", "no shape range", "missing --", "bad argument"];
+    // loop: NOT-WORTH — a few markers over one error line, once per failed build
+    DETERMINISTIC.iter().any(|m| low.contains(m))
 }
 
 /// `<dir>/<piece>.engine`
@@ -215,6 +265,15 @@ pub fn failed_path(dir: &Path, piece: &str) -> PathBuf {
 pub fn record_failure(dir: &Path, piece: &str, stamp: &str, workspace_mb: u64, why: &str) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     std::fs::write(failed_path(dir, piece), format!("{stamp}\n{workspace_mb}\n{why}\n"))
+}
+
+/// Remember a failed build only when it would fail the same way again (`BuildError::deterministic`); a timeout,
+/// a lack of memory or a busy card is tried again by the next job. Ok(true): remembered.
+pub fn note_failure(dir: &Path, piece: &str, stamp: &str, workspace_mb: u64, err: &BuildError) -> std::io::Result<bool> {
+    if !err.deterministic {
+        return Ok(false);
+    }
+    record_failure(dir, piece, stamp, workspace_mb, &err.why).map(|_| true)
 }
 
 /// Why `piece` failed before, if it failed from this export with at least `workspace_mb` (None: any workspace).
@@ -315,6 +374,47 @@ mod tests {
         std::fs::write(&onnx, b"abc").unwrap();
         assert!(source_stamp(&onnx).starts_with("3:") && source_stamp(&onnx).ends_with(",-"));
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn only_builds_that_would_fail_again_are_remembered() {
+        // the builder's answers (ck_trt_build.cpp `fail`) and TensorRT's own error texts
+        // loop: NOT-WORTH — a test's few messages
+        for why in [
+            "build: [optimizer.cpp::computeCosts] Error Code 10: Internal Error (Could not find any implementation for node /blocks/MatMul.)",
+            "parse: Unsupported ONNX data type: UINT8 (2)",
+            "bad shapes",
+            "no shape range for input hint",
+            "bad argument: stoull",
+        ] {
+            assert!(deterministic_failure(why), "{why}");
+        }
+        // loop: NOT-WORTH — a test's few messages
+        for why in [
+            "build: Error Code 2: OutOfMemory (Requested size was 6442450944 bytes.)",
+            "build: [resizingAllocator.cpp] Error Code 1: Cuda Runtime (out of memory)",
+            "build: Requested amount of GPU memory (7000000000 bytes) could not be allocated",
+            "build: Error Code 1: Cuda Runtime (CUDA-capable device(s) is/are busy or unavailable)",
+            "ck-trt-build: no answer within 1800 s; stopped",
+            "ck-trt-build exited with signal: 9 (SIGKILL): ",
+            "TensorRT builder: CUDA initialization failure with error: 999",
+            // no tactic because the memory ran out is still a lack of memory
+            "build: Could not find any implementation for node X due to insufficient memory",
+        ] {
+            assert!(!deterministic_failure(why), "{why}");
+        }
+        let dir = std::env::temp_dir().join(format!("ck-trt-note-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let oom = BuildError { why: "build: Error Code 2: OutOfMemory".into(), deterministic: false };
+        assert!(!note_failure(&dir, "stage1", "s1", 7000, &oom).unwrap());
+        assert_eq!(failed_before(&dir, "stage1", "s1", Some(7000)), None);
+        let timeout = BuildError::transient("ck-trt-build: no answer within 1800 s; stopped".into());
+        assert!(!note_failure(&dir, "stage1", "s1", 7000, &timeout).unwrap());
+        assert_eq!(failed_before(&dir, "stage1", "s1", None), None);
+        let tactic = BuildError { why: "build: Could not find any implementation for node X".into(), deterministic: true };
+        assert!(note_failure(&dir, "stage1", "s1", 7000, &tactic).unwrap());
+        assert!(failed_before(&dir, "stage1", "s1", Some(7000)).is_some());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

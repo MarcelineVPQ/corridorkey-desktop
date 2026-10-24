@@ -863,12 +863,16 @@ impl Pipeline {
                     sink.log(&format!("  TensorRT: {} engine built in {secs:.1} s", piece_name(piece)));
                     self.trt_seconds.insert(piece, ((secs * 10.0).round() / 10.0, true));
                 }
-                Err(why) => {
-                    sink.log(&format!("  TensorRT could not build {piece}; it runs on CUDA: {why}"));
-                    if let Err(e) = crate::tensorrt::record_failure(&pdir, piece, &source, workspace_mb, &why) {
-                        sink.log(&format!("  TensorRT: couldn't note the failed build ({e}); the next job tries again"));
+                Err(err) => {
+                    sink.log(&format!("  TensorRT could not build {piece}; it runs on CUDA: {}", err.why));
+                    match crate::tensorrt::note_failure(&pdir, piece, &source, workspace_mb, &err) {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            sink.log("  TensorRT: not remembered as a failed build (it may work when the card has more room); the next job tries again")
+                        }
+                        Err(e) => sink.log(&format!("  TensorRT: couldn't note the failed build ({e}); the next job tries again")),
                     }
-                    self.trt_fallbacks.insert(piece, why);
+                    self.trt_fallbacks.insert(piece, err.why);
                 }
             }
         }
