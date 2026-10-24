@@ -8,22 +8,22 @@ use std::sync::Arc;
 
 /// Seconds measured on one thread and read on another: an f64's bits in an atomic (no lock for a timing number).
 #[derive(Clone, Default)]
-pub struct Seconds(Arc<AtomicU64>);
+pub(crate) struct Seconds(Arc<AtomicU64>);
 
 impl Seconds {
-    pub fn get(&self) -> f64 {
+    pub(crate) fn get(&self) -> f64 {
         f64::from_bits(self.0.load(Ordering::Relaxed))
     }
-    pub fn set(&self, v: f64) {
+    pub(crate) fn set(&self, v: f64) {
         self.0.store(v.to_bits(), Ordering::Relaxed);
     }
     /// Add `v` (only the thread that measures writes, so a load and a store are enough).
-    pub fn add(&self, v: f64) {
+    pub(crate) fn add(&self, v: f64) {
         self.set(self.get() + v);
     }
 }
 
-pub struct Ahead<T> {
+pub(crate) struct Ahead<T> {
     rx: Receiver<Result<T, Error>>,
     /// seconds the producer spent making items
     seconds: Seconds,
@@ -31,7 +31,7 @@ pub struct Ahead<T> {
 
 impl<T: Send + 'static> Ahead<T> {
     /// Run `next` on a thread, keeping up to `depth` items ready.
-    pub fn spawn(depth: usize, mut next: impl FnMut() -> Result<Option<T>, Error> + Send + 'static) -> Ahead<T> {
+    pub(crate) fn spawn(depth: usize, mut next: impl FnMut() -> Result<Option<T>, Error> + Send + 'static) -> Ahead<T> {
         let (tx, rx) = sync_channel(depth);
         let seconds = Seconds::default();
         let s2 = seconds.clone();
@@ -57,7 +57,7 @@ impl<T: Send + 'static> Ahead<T> {
     }
 
     /// The next item, or None at the end.
-    pub fn next_item(&mut self) -> Result<Option<T>, Error> {
+    pub(crate) fn next_item(&mut self) -> Result<Option<T>, Error> {
         // loop: SERIAL-REQUIRED — the consumer takes items in order [bounded: the producer ends at its sequence's end or first error, which closes the channel]
         match self.rx.recv() {
             Ok(Ok(v)) => Ok(Some(v)),
@@ -66,7 +66,7 @@ impl<T: Send + 'static> Ahead<T> {
         }
     }
 
-    pub fn seconds(&self) -> f64 {
+    pub(crate) fn seconds(&self) -> f64 {
         self.seconds.get()
     }
 }

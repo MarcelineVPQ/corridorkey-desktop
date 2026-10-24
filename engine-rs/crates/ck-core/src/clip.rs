@@ -5,7 +5,7 @@ use crate::Error;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-pub const SHAPE_QUANTUM: usize = 128;
+pub(crate) const SHAPE_QUANTUM: usize = 128;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Source {
@@ -35,9 +35,6 @@ impl ClipMeta {
         let (shape_h, shape_w) = (ceil_to_multiple(h, SHAPE_QUANTUM), ceil_to_multiple(w, SHAPE_QUANTUM));
         ClipMeta { source, fps, h, w, shape_h, shape_w, pad: center_pad(h, w, shape_h, shape_w), num_frames, exr_linear }
     }
-    pub fn is_frames(&self) -> bool {
-        matches!(self.source, Source::Frames(_))
-    }
 }
 
 /// Whether the ONNX networks take this padded model shape; an `input` error that says why when they don't.
@@ -50,7 +47,7 @@ impl ClipMeta {
 ///   grid, where upstream PyTorch switches to a replicate pad (blocks.py; the export fixed the trace's branch).
 ///
 /// Refused before any work, in words, instead of an ONNX Runtime message after the RVM pass.
-pub fn model_shape_supported(shape_h: usize, shape_w: usize, w: usize, h: usize, portrait: bool) -> Result<(), Error> {
+pub(crate) fn model_shape_supported(shape_h: usize, shape_w: usize, w: usize, h: usize, portrait: bool) -> Result<(), Error> {
     if shape_h <= SHAPE_QUANTUM || shape_w <= SHAPE_QUANTUM {
         return Err(Error::input(format!("This clip is too small ({w}x{h}): CorridorKey's networks need more than {SHAPE_QUANTUM} pixels in each direction.")));
     }
@@ -63,7 +60,7 @@ pub fn model_shape_supported(shape_h: usize, shape_w: usize, w: usize, h: usize,
 }
 
 /// video_io.none_path: "", none, null, off, false, - mean no path.
-pub fn none_path(p: Option<&str>) -> Option<&str> {
+pub(crate) fn none_path(p: Option<&str>) -> Option<&str> {
     let p = p?;
     match p.trim().to_lowercase().as_str() {
         "" | "none" | "null" | "off" | "false" | "-" => None,
@@ -72,7 +69,7 @@ pub fn none_path(p: Option<&str>) -> Option<&str> {
 }
 
 /// video_io.raw_clip_name: the file stem, or the parent folder's name for input/frames/rgb.
-pub fn raw_clip_name(path: &str) -> String {
+pub(crate) fn raw_clip_name(path: &str) -> String {
     let norm = normpath(path);
     let p = Path::new(&norm);
     let base = p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
@@ -121,7 +118,7 @@ fn normpath(path: &str) -> String {
 }
 
 /// "f_2" before "f_10": runs of digits compare by value, the rest by text (then plain text, so the order is total).
-pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+pub(crate) fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     let (mut x, mut y) = (a.as_bytes(), b.as_bytes());
     // loop: NOT-WORTH — one pass over two file names, per comparison of a sort
     while let (Some(&ca), Some(&cb)) = (x.first(), y.first()) {
@@ -157,7 +154,7 @@ fn strip_zeros(d: &[u8]) -> &[u8] {
 
 /// video_io.frame_paths, with upstream's two bugs fixed (CorridorKey2.0 PR #4): *.exr, *.png, *.jpg, *.jpeg directly in
 /// the folder, the extension in any case (.EXR too), in natural order (f_2 before f_10, not as text).
-pub fn frame_paths(dir: &Path) -> Result<Vec<PathBuf>, Error> {
+pub(crate) fn frame_paths(dir: &Path) -> Result<Vec<PathBuf>, Error> {
     let mut out: Vec<String> = Vec::new();
     let rd = std::fs::read_dir(dir).map_err(|e| Error::input(format!("{}: {e}", dir.display())))?;
     // loop: HOT-PATH-OK — one pass over the folder's entries
@@ -179,11 +176,11 @@ pub fn frame_paths(dir: &Path) -> Result<Vec<PathBuf>, Error> {
 
 /// What ffprobe says about the first video stream.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct VideoProbe {
-    pub w: usize,
-    pub h: usize,
-    pub fps: f64,
-    pub frames: usize,
+pub(crate) struct VideoProbe {
+    pub(crate) w: usize,
+    pub(crate) h: usize,
+    pub(crate) fps: f64,
+    pub(crate) frames: usize,
 }
 
 fn rational(s: &str) -> f64 {
@@ -203,7 +200,7 @@ fn rational(s: &str) -> f64 {
 /// OpenCV's reading of an ffprobe answer (cap_ffmpeg get_fps / get_total_frames): the average frame rate,
 /// else the real base rate, else 24 (probe_video_meta's `or 24.0`); nb_frames, else
 /// round(duration * fps); a 90/270 degree rotation swaps width and height (both auto-rotate).
-pub fn read_probe(json: &serde_json::Value) -> Result<VideoProbe, Error> {
+pub(crate) fn read_probe(json: &serde_json::Value) -> Result<VideoProbe, Error> {
     let st = json["streams"].get(0).ok_or_else(|| Error::input("no video stream".into()))?;
     let num = |v: &serde_json::Value| -> f64 {
         match v {
@@ -244,9 +241,9 @@ pub fn read_probe(json: &serde_json::Value) -> Result<VideoProbe, Error> {
 }
 
 /// ffprobe's deadline.
-pub const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+pub(crate) const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
-pub fn ffprobe(path: &Path) -> Result<VideoProbe, Error> {
+pub(crate) fn ffprobe(path: &Path) -> Result<VideoProbe, Error> {
     let mut cmd = Command::new("ffprobe");
     cmd.args(["-v", "error", "-select_streams", "v:0", "-show_entries"])
         .arg("stream=width,height,avg_frame_rate,r_frame_rate,nb_frames,duration:stream_tags=rotate:stream_side_data=rotation:format=duration")
@@ -293,7 +290,7 @@ fn count_packets(path: &Path) -> Result<Option<usize>, Error> {
 }
 
 /// probe_video_meta at native resolution, start "begin": the first `num_frames` frames (all when <= 0).
-pub fn probe_video(path: &Path, num_frames: i64) -> Result<ClipMeta, Error> {
+pub(crate) fn probe_video(path: &Path, num_frames: i64) -> Result<ClipMeta, Error> {
     let p = ffprobe(path)?;
     let n = if num_frames <= 0 { p.frames } else { (num_frames as usize).min(p.frames) };
     if n == 0 {
@@ -303,7 +300,7 @@ pub fn probe_video(path: &Path, num_frames: i64) -> Result<ClipMeta, Error> {
 }
 
 /// probe_frame_dir_meta: the folder's frames at `fps`; the size comes from the first frame.
-pub fn probe_frame_dir(dir: &Path, num_frames: i64, fps: f64, exr_linear: bool) -> Result<ClipMeta, Error> {
+pub(crate) fn probe_frame_dir(dir: &Path, num_frames: i64, fps: f64, exr_linear: bool) -> Result<ClipMeta, Error> {
     let mut paths = frame_paths(dir)?;
     if paths.is_empty() {
         return Err(Error::input(format!("No frames found under {}", dir.display())));

@@ -4,7 +4,7 @@
 use crate::color::{asinh_to_linear, despill, linear_to_srgb, srgb_to_linear, to_u16, LinearAdjust, ToF32};
 use crate::writers::Batch;
 
-pub const OUTPUTS: [&str; 4] = ["alpha", "fg", "checker", "cutout"];
+pub(crate) const OUTPUTS: [&str; 4] = ["alpha", "fg", "checker", "cutout"];
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RenderOpts {

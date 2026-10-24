@@ -14,14 +14,14 @@ use std::sync::mpsc::{sync_channel, SyncSender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-pub type Writers = Vec<(String, Box<dyn Writer>)>;
+pub(crate) type Writers = Vec<(String, Box<dyn Writer>)>;
 
 /// Where the frames go and how they are cut out of the padded model shape.
 #[derive(Clone)]
-pub struct Geometry {
-    pub shape: (usize, usize),
-    pub crop: (usize, usize),
-    pub hw: (usize, usize),
+pub(crate) struct Geometry {
+    pub(crate) shape: (usize, usize),
+    pub(crate) crop: (usize, usize),
+    pub(crate) hw: (usize, usize),
 }
 
 /// Frames queued between stage 2 and the render thread (each up to 4 x H x W floats).
@@ -30,7 +30,7 @@ const QUEUE: usize = 2;
 /// What the render thread gives back when it ends: the writers, its failure if any, and its render + hand-off seconds.
 type WorkerEnd = (Writers, Result<(), Error>, f64);
 
-pub struct RenderWorker<'a> {
+pub(crate) struct RenderWorker<'a> {
     home: &'a mut Writers,
     tx: Option<SyncSender<Data<'static>>>,
     /// frames every writer has taken, as the render thread last counted them
@@ -41,7 +41,7 @@ pub struct RenderWorker<'a> {
 }
 
 impl<'a> RenderWorker<'a> {
-    pub fn start(home: &'a mut Writers, ro: RenderOpts, checker: Vec<f32>, geo: Geometry) -> RenderWorker<'a> {
+    pub(crate) fn start(home: &'a mut Writers, ro: RenderOpts, checker: Vec<f32>, geo: Geometry) -> RenderWorker<'a> {
         let mut writers = std::mem::take(home);
         let (tx, rx) = sync_channel::<Data<'static>>(QUEUE);
         let done = Arc::new(AtomicUsize::new(0));
@@ -90,7 +90,7 @@ impl<'a> RenderWorker<'a> {
 
     /// Queue one frame's stage-2 output (blocks while `QUEUE` frames wait). If the worker stopped, its own
     /// failure (a writer's error) is returned and the writers are back with the caller.
-    pub fn send(&mut self, logits: Data<'static>) -> Result<(), Error> {
+    pub(crate) fn send(&mut self, logits: Data<'static>) -> Result<(), Error> {
         match &self.tx {
             Some(tx) if tx.send(logits).is_ok() => Ok(()),
             // loop: SERIAL-REQUIRED — the render thread already stopped (its channel closed) [bounded: it has ended or is ending]
@@ -99,7 +99,7 @@ impl<'a> RenderWorker<'a> {
     }
 
     /// The latest frame count every writer has taken, if it changed since the last call.
-    pub fn done(&mut self) -> Option<usize> {
+    pub(crate) fn done(&mut self) -> Option<usize> {
         let n = self.done.load(Ordering::Relaxed);
         if n == 0 || self.seen == Some(n) {
             return None;
@@ -109,7 +109,7 @@ impl<'a> RenderWorker<'a> {
     }
 
     /// Wait for every queued frame, give the writers back; the render thread's seconds, or its failure.
-    pub fn finish(mut self) -> Result<f64, Error> {
+    pub(crate) fn finish(mut self) -> Result<f64, Error> {
         // loop: SERIAL-REQUIRED — waits for the queued frames (≤ QUEUE = 2) to be rendered and handed off [bounded: the sender is dropped first, so the thread ends after them]
         self.join()
     }

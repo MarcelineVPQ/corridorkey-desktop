@@ -20,8 +20,8 @@ const LOW: Table = (
         (8.36, &[3.25, 3.92, 5.28, 8.38, 20.78, 39.66, 64.65]),
     ],
 );
-pub const MARGIN_SCALE: f64 = 1.1;
-pub const MARGIN_GB: f64 = 0.3;
+pub(crate) const MARGIN_SCALE: f64 = 1.1;
+pub(crate) const MARGIN_GB: f64 = 0.3;
 
 fn table(low_vram: bool) -> Table {
     if low_vram {
@@ -66,7 +66,7 @@ pub struct Profile {
 }
 
 impl Profile {
-    pub fn fits(&self, budget_gb: f64) -> bool {
+    pub(crate) fn fits(&self, budget_gb: f64) -> bool {
         self.estimate_gb * MARGIN_SCALE + MARGIN_GB <= budget_gb
     }
 }

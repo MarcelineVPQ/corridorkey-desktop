@@ -30,23 +30,23 @@ struct ProcInfo {
 
 /// One NVML card: NVML's index (PCI order), its PCI bus id and UUID ("GPU-…").
 #[derive(Clone, Debug, PartialEq)]
-pub struct Card {
-    pub index: u32,
-    pub pci: String,
-    pub uuid: String,
+pub(crate) struct Card {
+    pub(crate) index: u32,
+    pub(crate) pci: String,
+    pub(crate) uuid: String,
 }
 
 /// CUDA's device 0 as the CUDA driver itself reports it (cuInit applies CUDA_VISIBLE_DEVICES and
 /// CUDA_DEVICE_ORDER, UUID and MIG entries included).
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct CudaDevice {
-    pub pci: Option<String>,
-    pub uuid: Option<String>,
+pub(crate) struct CudaDevice {
+    pub(crate) pci: Option<String>,
+    pub(crate) uuid: Option<String>,
 }
 
 /// What CUDA's device 0 is as a card NVML can read.
 #[derive(Clone, Debug, PartialEq)]
-pub enum Pick {
+pub(crate) enum Pick {
     /// CUDA sees no card (CUDA_VISIBLE_DEVICES="" / "-1" / an invalid first entry).
     Hidden,
     /// this NVML index
@@ -72,7 +72,7 @@ fn pci_key(s: &str) -> Option<(u32, u32, u32, u32)> {
 /// matched by UUID or PCI bus id; without a CUDA driver, CUDA_VISIBLE_DEVICES' first entry read as CUDA reads it
 /// (an index in CUDA's order, a GPU-/MIG- UUID or a unique UUID prefix). CUDA's default order (FASTEST_FIRST) is
 /// not NVML's (PCI), so an index maps to an NVML card only under CUDA_DEVICE_ORDER=PCI_BUS_ID or with one card.
-pub fn pick_card(visible: Option<&str>, order: Option<&str>, cuda0: Option<&CudaDevice>, cards: &[Card]) -> Pick {
+pub(crate) fn pick_card(visible: Option<&str>, order: Option<&str>, cuda0: Option<&CudaDevice>, cards: &[Card]) -> Pick {
     let first = match visible {
         None => "0".to_string(),
         // CUDA reads the list up to its first invalid entry: an empty list or "-1" first hides every card
@@ -115,7 +115,7 @@ pub fn pick_card(visible: Option<&str>, order: Option<&str>, cuda0: Option<&Cuda
 }
 
 /// UUID bytes as NVML spells them: GPU-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.
-pub fn uuid_string(b: &[u8; 16]) -> String {
+pub(crate) fn uuid_string(b: &[u8; 16]) -> String {
     // loop: NOT-WORTH — 16 bytes
     let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
     format!("GPU-{}-{}-{}-{}-{}", &h[..8], &h[8..12], &h[12..16], &h[16..20], &h[20..])
@@ -333,7 +333,7 @@ impl Nvml {
 
 /// The card CUDA uses as device 0, or None (no driver library, no card, CUDA_VISIBLE_DEVICES hides every card, or
 /// several cards in an order this can't tell).
-pub fn nvidia() -> Option<GpuInfo> {
+pub(crate) fn nvidia() -> Option<GpuInfo> {
     nvml()?.info()
 }
 
@@ -349,7 +349,7 @@ fn nvml() -> Option<&'static Nvml> {
 
 /// The memory budget the runtime's apply_auto_vram uses: free memory plus what this process already holds
 /// (its loaded models count for it). (budget bytes, free bytes, own bytes).
-pub fn budget() -> Option<(u64, u64, u64)> {
+pub(crate) fn budget() -> Option<(u64, u64, u64)> {
     let n = nvml()?;
     let info = n.info()?;
     let own = n.used_by(std::process::id()).unwrap_or(0);
@@ -364,7 +364,7 @@ const NVINFER_LIBS: [&str; 2] = ["libnvinfer.so.10", "libnvinfer.so"];
 
 /// TensorRT's version from libnvinfer (getInferLibVersion: major*10000 + minor*100 + patch for 10.x),
 /// as "10.16.0"; None when the library is not there.
-pub fn tensorrt_version() -> Option<String> {
+pub(crate) fn tensorrt_version() -> Option<String> {
     // loop: NOT-WORTH — two library names
     for name in NVINFER_LIBS {
         // SAFETY: getInferLibVersion takes nothing and returns an int32
@@ -380,14 +380,14 @@ pub fn tensorrt_version() -> Option<String> {
     None
 }
 
-pub fn trt_version_string(v: i32) -> String {
+pub(crate) fn trt_version_string(v: i32) -> String {
     format!("{}.{}.{}", v / 10000, (v / 100) % 100, v % 100)
 }
 
 /// Host memory the system says is available (bytes): the CPU provider's budget. Linux: /proc/meminfo's
 /// MemAvailable; Windows: GlobalMemoryStatusEx's ullAvailPhys; macOS: free + inactive pages (host_statistics64,
 /// psutil's reading of "available"). None only where the system doesn't say.
-pub fn host_available() -> Option<u64> {
+pub(crate) fn host_available() -> Option<u64> {
     #[cfg(target_os = "linux")]
     {
         let s = std::fs::read_to_string("/proc/meminfo").ok()?;
@@ -443,7 +443,7 @@ mod win_mem {
         fn GlobalMemoryStatusEx(buf: *mut MemoryStatus) -> i32;
     }
     /// ullAvailPhys: physical memory that can be used without paging out (bytes).
-    pub fn avail_phys() -> Option<u64> {
+    pub(crate) fn avail_phys() -> Option<u64> {
         let mut m = MemoryStatus { length: std::mem::size_of::<MemoryStatus>() as u32, ..Default::default() };
         // SAFETY: GlobalMemoryStatusEx fills a MEMORYSTATUSEX whose dwLength is set, as documented
         (unsafe { GlobalMemoryStatusEx(&mut m) } != 0).then_some(m.avail_phys)
@@ -484,7 +484,7 @@ mod mac_mem {
         let rc = unsafe { sysctlbyname(name.as_ptr(), &mut v as *mut u64 as *mut c_void, &mut len, std::ptr::null_mut(), 0) };
         (rc == 0 && len > 0).then_some(v)
     }
-    pub fn available() -> Option<u64> {
+    pub(crate) fn available() -> Option<u64> {
         let page = sysctl_u64(c"hw.pagesize")?;
         // SAFETY: an all-integer struct; host_statistics64 writes at most `count` 32-bit words into it
         unsafe {

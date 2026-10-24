@@ -4,8 +4,8 @@
 //! The model's RGB contract: display-coded sRGB -> scene-linear (IEC 61966-2-1) -> signed asinh
 //! (knee 0.008, ref 16). Its fg output goes back the other way.
 
-pub const HDR_ASINH_KNEE: f32 = 0.008;
-pub const HDR_ASINH_REF: f64 = 16.0;
+pub(crate) const HDR_ASINH_KNEE: f32 = 0.008;
+pub(crate) const HDR_ASINH_REF: f64 = 16.0;
 
 /// asinh(ref / knee) as color_utils computes it (numpy float64), used as float32 (`x.new_tensor(denom)`).
 pub fn asinh_denom() -> f32 {
@@ -60,19 +60,13 @@ pub fn asinh_to_linear(y: f32, denom: f32) -> f32 {
     (y * denom).sinh() * HDR_ASINH_KNEE
 }
 
-/// The SDR proxy the foundation models see (color_utils.linear_to_vfm_sdr): clip(srgb(max(x, 0)), 0, 1).
-#[inline]
-pub fn linear_to_vfm_sdr(x: f32) -> f32 {
-    linear_to_srgb(x.max(0.0)).clamp(0.0, 1.0)
-}
-
 /// The scene-linear brightness/contrast adjust (video_io.apply_linear_adjust) and its inverse
 /// (runtime._linear_adjust_inverse_torch). Identity at gain = contrast = 1, the protocol's only setting.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LinearAdjust {
-    pub gain: f32,
-    pub contrast: f32,
-    pub pivot: f32,
+    pub(crate) gain: f32,
+    pub(crate) contrast: f32,
+    pub(crate) pivot: f32,
 }
 
 impl Default for LinearAdjust {
@@ -82,19 +76,11 @@ impl Default for LinearAdjust {
 }
 
 impl LinearAdjust {
-    pub fn is_identity(&self) -> bool {
+    pub(crate) fn is_identity(&self) -> bool {
         (self.gain - 1.0).abs() <= 1e-6 && (self.contrast - 1.0).abs() <= 1e-6
     }
     #[inline]
-    pub fn apply(&self, x: f32) -> f32 {
-        if self.is_identity() {
-            x
-        } else {
-            self.gain * (self.pivot + self.contrast * (x - self.pivot))
-        }
-    }
-    #[inline]
-    pub fn invert(&self, x: f32) -> f32 {
+    pub(crate) fn invert(&self, x: f32) -> f32 {
         if self.is_identity() {
             x
         } else {
@@ -120,13 +106,13 @@ pub fn despill(rgb: [f32; 3], strength: f32) -> [f32; 3] {
 }
 
 /// The largest input value kept as it is: `x / knee` (the asinh encoding) stays finite in float32 up to here.
-pub const INPUT_MAX: f32 = 1e30;
+pub(crate) const INPUT_MAX: f32 = 1e30;
 
 /// A decoded input value the networks can take: NaN -> 0, +-infinity (and beyond +-INPUT_MAX) -> +-INPUT_MAX;
 /// every other value unchanged. Measured: three non-finite pixels in a linear EXR plate (NaN, +inf, -inf) made
 /// every pixel of every output frame NaN (the networks' attention spreads one NaN everywhere).
 #[inline]
-pub fn finite_input(v: f32) -> f32 {
+pub(crate) fn finite_input(v: f32) -> f32 {
     if v.is_nan() {
         0.0
     } else {
@@ -137,19 +123,13 @@ pub fn finite_input(v: f32) -> f32 {
 /// torch's float32 -> bfloat16 (round to nearest even), back to float32: the runtime keeps decoded frames,
 /// hints and hint quality as bfloat16 tensors.
 #[inline]
-pub fn bf16_round(x: f32) -> f32 {
+pub(crate) fn bf16_round(x: f32) -> f32 {
     half::bf16::from_f32(x).to_f32()
-}
-
-/// float32 -> float16 -> float32 (the runtime's fp16 memmaps: RVM features and the stage-1 baton).
-#[inline]
-pub fn f16_round(x: f32) -> f32 {
-    half::f16::from_f32(x).to_f32()
 }
 
 /// `(x.clamp(0, 1) * 65535).astype(uint16)`: the 16-bit samples the video writers get (truncated).
 #[inline]
-pub fn to_u16(x: f32) -> u16 {
+pub(crate) fn to_u16(x: f32) -> u16 {
     let v = x.clamp(0.0, 1.0) * 65535.0;
     v as u16
 }

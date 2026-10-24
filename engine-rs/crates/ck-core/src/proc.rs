@@ -6,10 +6,10 @@ use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::time::{Duration, Instant};
 
 /// How often a deadline wait looks at the child.
-pub const POLL: Duration = Duration::from_millis(50);
+pub(crate) const POLL: Duration = Duration::from_millis(50);
 
 /// Wait for `child` until `timeout`; past it the child is killed and reaped, and `None` returned.
-pub fn wait_timeout(child: &mut Child, timeout: Duration) -> std::io::Result<Option<ExitStatus>> {
+pub(crate) fn wait_timeout(child: &mut Child, timeout: Duration) -> std::io::Result<Option<ExitStatus>> {
     let end = Instant::now() + timeout;
     // loop: SERIAL-REQUIRED — one child; a poll every POLL ms [bounded: the deadline, then kill]
     loop {
@@ -29,7 +29,7 @@ pub fn wait_timeout(child: &mut Child, timeout: Duration) -> std::io::Result<Opt
 
 /// `cmd.output()` with a deadline: stdout and stderr are read on their own threads (a full pipe can't stall the
 /// child), the child is killed past `timeout`. Err names what happened.
-pub fn output_timeout(cmd: &mut Command, timeout: Duration) -> Result<Output, String> {
+pub(crate) fn output_timeout(cmd: &mut Command, timeout: Duration) -> Result<Output, String> {
     let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| e.to_string())?;
     let drain = |r: Option<Box<dyn Read + Send>>| {
         // loop: SERIAL-REQUIRED — one reader per pipe, so a full pipe can't stall the child; ends at the pipe's end
@@ -63,7 +63,7 @@ pub fn output_timeout(cmd: &mut Command, timeout: Duration) -> Result<Output, St
 /// jobs there). PR_SET_PDEATHSIG fires when the parent THREAD exits, not the process (prctl(2)): a child started
 /// from a short-lived worker thread (a `std::thread::spawn` or a rayon task) would be killed as soon as that thread
 /// ends, in the middle of its work (tests: `a_child_started_to_die_with_its_parent_does`).
-pub fn die_with_parent(cmd: &mut Command) -> &mut Command {
+pub(crate) fn die_with_parent(cmd: &mut Command) -> &mut Command {
     #[cfg(target_os = "linux")]
     {
         use std::os::unix::process::CommandExt;
@@ -186,7 +186,7 @@ mod win {
     #[cfg(target_pointer_width = "64")]
     const _: () = assert!(std::mem::size_of::<ExtendedLimits>() == 144);
 
-    pub fn end_with_parent(parent_pid: Option<u32>) {
+    pub(crate) fn end_with_parent(parent_pid: Option<u32>) {
         // SAFETY: documented kernel32 calls with a zeroed, correctly sized JOBOBJECT_EXTENDED_LIMIT_INFORMATION;
         // the job handle is kept open for the engine's whole life on purpose (closing it is what kills the job)
         unsafe {

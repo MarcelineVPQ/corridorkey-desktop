@@ -23,22 +23,22 @@ impl Planar {
         Planar { c, h, w, data }
     }
     #[inline]
-    pub fn plane(&self, c: usize) -> &[f32] {
+    pub(crate) fn plane(&self, c: usize) -> &[f32] {
         &self.data[c * self.h * self.w..(c + 1) * self.h * self.w]
     }
     #[inline]
-    pub fn plane_mut(&mut self, c: usize) -> &mut [f32] {
+    pub(crate) fn plane_mut(&mut self, c: usize) -> &mut [f32] {
         let n = self.h * self.w;
         &mut self.data[c * n..(c + 1) * n]
     }
-    pub fn map(&mut self, f: impl Fn(f32) -> f32) {
+    pub(crate) fn map(&mut self, f: impl Fn(f32) -> f32) {
         // loop: HOT-PATH-OK — one pass over a small image (RVM input, carry hint, hint); clamp / round
         self.data.iter_mut().for_each(|v| *v = f(*v));
     }
 }
 
 /// The padding of the runtime's probe: (pad_l, pad_r, pad_t, pad_b) to the next multiple of `q` (at least q).
-pub fn ceil_to_multiple(x: usize, q: usize) -> usize {
+pub(crate) fn ceil_to_multiple(x: usize, q: usize) -> usize {
     q.max(x.div_ceil(q) * q)
 }
 
@@ -59,7 +59,7 @@ pub fn center_pad(h: usize, w: usize, h_out: usize, w_out: usize) -> Pad {
 
 /// cv2.borderInterpolate for BORDER_REFLECT_101 (gfedcb|abcdefgh|gfedcba).
 #[inline]
-pub fn reflect101(mut p: isize, len: usize) -> usize {
+pub(crate) fn reflect101(mut p: isize, len: usize) -> usize {
     let n = len as isize;
     if n == 1 {
         return 0;
@@ -76,10 +76,10 @@ pub fn reflect101(mut p: isize, len: usize) -> usize {
 }
 
 /// Rows per rayon task in the per-frame image passes (a 1280-wide row is ~1 µs of work).
-pub const ROWS_MIN: usize = 8;
+pub(crate) const ROWS_MIN: usize = 8;
 
 /// cv2.copyMakeBorder(BORDER_REFLECT_101) of every plane.
-pub fn pad_reflect101(img: &Planar, pad: Pad) -> Planar {
+pub(crate) fn pad_reflect101(img: &Planar, pad: Pad) -> Planar {
     if pad == (Pad { l: 0, r: 0, t: 0, b: 0 }) {
         return img.clone();
     }
@@ -103,8 +103,10 @@ pub fn pad_reflect101(img: &Planar, pad: Pad) -> Planar {
     out
 }
 
-/// x[..., t:t+h, l:l+w] (runtime._crop_native_torch / video_io.crop_chw_to_native).
-pub fn crop(img: &Planar, t: usize, l: usize, h: usize, w: usize) -> Planar {
+/// x[..., t:t+h, l:l+w] (runtime._crop_native_torch / video_io.crop_chw_to_native); the render crops its rows
+/// itself, so only the tests use this (the pad / crop round trip).
+#[cfg(test)]
+fn crop(img: &Planar, t: usize, l: usize, h: usize, w: usize) -> Planar {
     let mut out = Planar::new(img.c, h, w);
     // loop: HOT-PATH-OK — once per output frame and plane
     for c in 0..img.c {
@@ -178,7 +180,7 @@ pub fn resize_bilinear(img: &Planar, ho: usize, wo: usize) -> Planar {
 }
 
 /// `resize_bilinear` into `dst` (c * ho * wo).
-pub fn resize_bilinear_into(img: &Planar, ho: usize, wo: usize, dst_all: &mut [f32]) {
+pub(crate) fn resize_bilinear_into(img: &Planar, ho: usize, wo: usize, dst_all: &mut [f32]) {
     let ys = bilinear_axis(img.h, ho);
     let xs = bilinear_axis(img.w, wo);
     use rayon::prelude::*;

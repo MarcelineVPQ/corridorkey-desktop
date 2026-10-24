@@ -15,21 +15,21 @@ use std::path::{Path, PathBuf};
 /// Padded height / width ranges (inclusive, multiples of 128), 3-4 quanta wide so a range's largest shape stays
 /// close to the clips in it (TensorRT sizes its working memory, and so the longest window, for the largest shape).
 /// 720p pads to 768x1280, 1080p to 1152x1920, UHD to 2176x3840.
-pub const DIM_RANGES: [(usize, usize); 8] = [(128, 512), (640, 896), (1024, 1280), (1408, 1664), (1792, 2176), (2304, 2816), (2944, 3456), (3584, 4096)];
+pub(crate) const DIM_RANGES: [(usize, usize); 8] = [(128, 512), (640, 896), (1024, 1280), (1408, 1664), (1792, 2176), (2304, 2816), (2944, 3456), (3584, 4096)];
 /// The largest padded side TensorRT is used for. UHD (2176 x 3840 and up) runs on CUDA until its builds are
 /// measured (BACKLOG row 12, step 3).
-pub const MAX_SIDE: usize = 2176;
+pub(crate) const MAX_SIDE: usize = 2176;
 /// Frames per call of the foundation models in low-VRAM mode (pipeline.rs, the foundations prepass).
-pub const FOUNDATION_CHUNK: usize = 4;
+pub(crate) const FOUNDATION_CHUNK: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Bucket {
-    pub h: (usize, usize),
-    pub w: (usize, usize),
+pub(crate) struct Bucket {
+    pub(crate) h: (usize, usize),
+    pub(crate) w: (usize, usize),
     /// stage-1 window lengths (1 ..= the job's window)
-    pub t: (usize, usize),
+    pub(crate) t: (usize, usize),
     /// foundation-model batch (1 ..= FOUNDATION_CHUNK in low-VRAM mode, else the window)
-    pub f: (usize, usize),
+    pub(crate) f: (usize, usize),
 }
 
 fn range_of(v: usize, ranges: &[(usize, usize)]) -> Option<(usize, usize)> {
@@ -40,7 +40,7 @@ fn range_of(v: usize, ranges: &[(usize, usize)]) -> Option<(usize, usize)> {
 /// The engine set for padded (H, W) and the job's window (the CUDA path's choice; measured 2026-10-24: at the
 /// same window TensorRT's mattes match CUDA's within fp16 rounding, at a shorter one they don't). None: outside
 /// every range or larger than MAX_SIDE (CUDA runs it).
-pub fn bucket_for(shape_h: usize, shape_w: usize, window: usize, low_vram: bool) -> Option<Bucket> {
+pub(crate) fn bucket_for(shape_h: usize, shape_w: usize, window: usize, low_vram: bool) -> Option<Bucket> {
     if shape_h > MAX_SIDE || shape_w > MAX_SIDE || window == 0 {
         return None;
     }
@@ -52,20 +52,20 @@ pub fn bucket_for(shape_h: usize, shape_w: usize, window: usize, low_vram: bool)
 
 impl Bucket {
     /// "h1024-1280_w1024-1280_t1-48_f1-4": the folder of this range's engines.
-    pub fn key(&self) -> String {
+    pub(crate) fn key(&self) -> String {
         format!("h{}-{}_w{}-{}_t{}-{}_f{}-{}", self.h.0, self.h.1, self.w.0, self.w.1, self.t.0, self.t.1, self.f.0, self.f.1)
     }
 }
 
 /// Channel counts of the exported networks (scripts/onnx_spike/wrappers.py).
-pub const CRADIO_CH: usize = 1152;
-pub const MOGE_CH: usize = 768;
-pub const RVM_CH: usize = 384;
-pub const BATON_CH: usize = 512;
+pub(crate) const CRADIO_CH: usize = 1152;
+pub(crate) const MOGE_CH: usize = 768;
+pub(crate) const RVM_CH: usize = 384;
+pub(crate) const BATON_CH: usize = 512;
 
 /// The optimisation profile of one network for a bucket: (min, opt, max) shape strings in ck-trt-build's (and
 /// ORT's) format ("frame:1x3x256x384,state:..."). opt = the range's largest shape.
-pub fn profile(piece: &str, b: &Bucket) -> Option<(String, String, String)> {
+pub(crate) fn profile(piece: &str, b: &Bucket) -> Option<(String, String, String)> {
     let at = |h: usize, w: usize, t: usize| -> String {
         let (h4, w4, h64, w64) = (h / 4, w / 4, h / 64, w / 64);
         match piece {
@@ -88,7 +88,7 @@ pub fn profile(piece: &str, b: &Bucket) -> Option<(String, String, String)> {
 }
 
 /// The engine builder: CK_ENGINE_TRT_BUILD, else `ck-trt-build` (`ck-trt-build.exe` on Windows) next to this program.
-pub fn builder_path() -> Option<PathBuf> {
+pub(crate) fn builder_path() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("CK_ENGINE_TRT_BUILD") {
         if !p.is_empty() {
             return Some(PathBuf::from(p));
@@ -100,20 +100,28 @@ pub fn builder_path() -> Option<PathBuf> {
 }
 
 /// The builder's file name on this system.
-pub fn builder_name() -> String {
+pub(crate) fn builder_name() -> String {
     format!("ck-trt-build{}", std::env::consts::EXE_SUFFIX)
 }
 
 /// The longest one engine build may take: CK_ENGINE_TRT_BUILD_TIMEOUT_S, default 1800 s (measured builds on the
 /// RTX 5080: 23-93 s per network; slower cards take longer, a hung build is stopped and the network runs on CUDA).
-pub fn build_timeout() -> std::time::Duration {
+pub(crate) fn build_timeout() -> std::time::Duration {
     let s = std::env::var("CK_ENGINE_TRT_BUILD_TIMEOUT_S").ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(1800);
     std::time::Duration::from_secs(s.max(1))
 }
 
 /// Build `piece`'s engine for bucket `b` into `dir` (`<piece>.engine`) with ck-trt-build, a child process (its
 /// host memory goes back when it ends). Ok(seconds), Err(why). `workspace_mb`: TensorRT's working-memory limit.
-pub fn build_engine(builder: &Path, onnx: &Path, piece: &str, b: &Bucket, dir: &Path, workspace_mb: u64, timing_cache: &Path) -> Result<f64, BuildError> {
+pub(crate) fn build_engine(
+    builder: &Path,
+    onnx: &Path,
+    piece: &str,
+    b: &Bucket,
+    dir: &Path,
+    workspace_mb: u64,
+    timing_cache: &Path,
+) -> Result<f64, BuildError> {
     let (min, opt, max) = profile(piece, b).ok_or_else(|| BuildError::transient("unknown network".into()))?;
     std::fs::create_dir_all(dir).map_err(|e| BuildError::transient(format!("{}: {e}", dir.display())))?;
     let t = std::time::Instant::now();
@@ -154,13 +162,13 @@ pub fn build_engine(builder: &Path, onnx: &Path, piece: &str, b: &Bucket, dir: &
 /// be parsed or no tactic fits; only those are remembered in `.failed`, never a timeout, a lack of memory or a
 /// busy card).
 #[derive(Clone, Debug, PartialEq)]
-pub struct BuildError {
-    pub why: String,
-    pub deterministic: bool,
+pub(crate) struct BuildError {
+    pub(crate) why: String,
+    pub(crate) deterministic: bool,
 }
 
 impl BuildError {
-    pub fn transient(why: String) -> BuildError {
+    pub(crate) fn transient(why: String) -> BuildError {
         BuildError { why, deterministic: false }
     }
 }
@@ -169,7 +177,7 @@ impl BuildError {
 /// network, the arguments are wrong, or TensorRT found no implementation (tactic) for a node within the workspace.
 /// A lack of graphics or host memory, a busy or unavailable card, or a CUDA error is not: the next job may have the
 /// card to itself.
-pub fn deterministic_failure(why: &str) -> bool {
+pub(crate) fn deterministic_failure(why: &str) -> bool {
     let low = why.to_lowercase();
     const TRANSIENT: [&str; 12] = [
         "out of memory",
@@ -195,17 +203,17 @@ pub fn deterministic_failure(why: &str) -> bool {
 }
 
 /// `<dir>/<piece>.engine`
-pub fn engine_path(dir: &Path, piece: &str) -> PathBuf {
+pub(crate) fn engine_path(dir: &Path, piece: &str) -> PathBuf {
     dir.join(format!("{piece}.engine"))
 }
 
 /// `<dir>/<piece>_ctx.onnx`: the EPContext stub ONNX Runtime opens (its `ep_cache_context` is `<piece>.engine`)
-pub fn stub_path(dir: &Path, piece: &str) -> PathBuf {
+pub(crate) fn stub_path(dir: &Path, piece: &str) -> PathBuf {
     dir.join(format!("{piece}_ctx.onnx"))
 }
 
 /// "nvidia-geforce-rtx-5080": a folder-safe card name.
-pub fn slug(s: &str) -> String {
+pub(crate) fn slug(s: &str) -> String {
     let mut out = String::new();
     // loop: NOT-WORTH — one short name
     for c in s.chars() {
@@ -219,13 +227,13 @@ pub fn slug(s: &str) -> String {
 }
 
 /// The cache folder for this card + driver + TensorRT + ONNX Runtime + precision.
-pub fn cache_dir(root: &Path, gpu: &str, driver: &str, trt: &str, ort: &str, precision: &str) -> PathBuf {
+pub(crate) fn cache_dir(root: &Path, gpu: &str, driver: &str, trt: &str, ort: &str, precision: &str) -> PathBuf {
     root.join(format!("{}__drv{}__trt{}__ort{}__{}", slug(gpu), driver, trt, ort, precision))
 }
 
 /// Cache folders of the same card that were made for another driver / TensorRT / ORT: they can no longer be
 /// used (TensorRT engines are tied to the versions that built them).
-pub fn stale_dirs(root: &Path, current: &Path, gpu: &str) -> Vec<PathBuf> {
+pub(crate) fn stale_dirs(root: &Path, current: &Path, gpu: &str) -> Vec<PathBuf> {
     let prefix = format!("{}__", slug(gpu));
     let Ok(rd) = std::fs::read_dir(root) else { return vec![] };
     let mut v: Vec<PathBuf> = rd
@@ -239,7 +247,7 @@ pub fn stale_dirs(root: &Path, current: &Path, gpu: &str) -> Vec<PathBuf> {
 
 /// What an engine was built from: size and modification time of the TensorRT-ready export and its weights.
 /// A changed export (a new model set) no longer matches, so its engine is rebuilt.
-pub fn source_stamp(onnx: &Path) -> String {
+pub(crate) fn source_stamp(onnx: &Path) -> String {
     let data = PathBuf::from(format!("{}.data", onnx.display()));
     [onnx.to_path_buf(), data]
         // loop: NOT-WORTH — a few cache folders, once per TensorRT job
@@ -253,25 +261,25 @@ pub fn source_stamp(onnx: &Path) -> String {
 }
 
 /// `<dir>/<piece>.source`: the source stamp the engine was built from.
-pub fn source_path(dir: &Path, piece: &str) -> PathBuf {
+pub(crate) fn source_path(dir: &Path, piece: &str) -> PathBuf {
     dir.join(format!("{piece}.source"))
 }
 
 /// `<dir>/<piece>.failed`: a build that found no tactic, remembered so later jobs don't spend minutes on it again
 /// (measured 2026-10-24: stage 1 for 80-frame windows retried its failing build on every 80-frame job, ~2.5 min each).
-pub fn failed_path(dir: &Path, piece: &str) -> PathBuf {
+pub(crate) fn failed_path(dir: &Path, piece: &str) -> PathBuf {
     dir.join(format!("{piece}.failed"))
 }
 
 /// Remember that `piece` failed to build from the export with `stamp` and `workspace_mb` of working memory.
-pub fn record_failure(dir: &Path, piece: &str, stamp: &str, workspace_mb: u64, why: &str) -> std::io::Result<()> {
+pub(crate) fn record_failure(dir: &Path, piece: &str, stamp: &str, workspace_mb: u64, why: &str) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     std::fs::write(failed_path(dir, piece), format!("{stamp}\n{workspace_mb}\n{why}\n"))
 }
 
 /// Remember a failed build only when it would fail the same way again (`BuildError::deterministic`); a timeout,
 /// a lack of memory or a busy card is tried again by the next job. Ok(true): remembered.
-pub fn note_failure(dir: &Path, piece: &str, stamp: &str, workspace_mb: u64, err: &BuildError) -> std::io::Result<bool> {
+pub(crate) fn note_failure(dir: &Path, piece: &str, stamp: &str, workspace_mb: u64, err: &BuildError) -> std::io::Result<bool> {
     if !err.deterministic {
         return Ok(false);
     }
@@ -281,7 +289,7 @@ pub fn note_failure(dir: &Path, piece: &str, stamp: &str, workspace_mb: u64, err
 /// Why `piece` failed before, if it failed from this export with at least `workspace_mb` (None: any workspace).
 /// The cache folder is already per card, driver, TensorRT and ONNX Runtime, so a change of any of those, of the
 /// models, or a bigger workspace (a larger memory budget) tries the build again.
-pub fn failed_before(dir: &Path, piece: &str, stamp: &str, workspace_mb: Option<u64>) -> Option<String> {
+pub(crate) fn failed_before(dir: &Path, piece: &str, stamp: &str, workspace_mb: Option<u64>) -> Option<String> {
     let text = std::fs::read_to_string(failed_path(dir, piece)).ok()?;
     // loop: NOT-WORTH — the three lines of one small file, once per network per TensorRT job
     let mut lines = text.lines();
@@ -296,7 +304,7 @@ pub fn failed_before(dir: &Path, piece: &str, stamp: &str, workspace_mb: Option<
 }
 
 /// Whether `piece`'s engine and its stub exist in `dir`, built from the export with this `stamp`.
-pub fn built(dir: &Path, piece: &str, stamp: &str) -> bool {
+pub(crate) fn built(dir: &Path, piece: &str, stamp: &str) -> bool {
     engine_path(dir, piece).exists()
         && stub_path(dir, piece).exists()
         && std::fs::read_to_string(source_path(dir, piece)).map(|s| s.trim() == stamp).unwrap_or(false)

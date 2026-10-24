@@ -26,7 +26,7 @@ impl Default for WriterConfig {
 }
 
 /// The ffmpeg arguments ThreadedVideoWriter builds (after the binary name).
-pub fn ffmpeg_args(path: &Path, fps: f64, w: usize, h: usize, cfg: &WriterConfig, channels: usize, color_trc: &str) -> Vec<String> {
+pub(crate) fn ffmpeg_args(path: &Path, fps: f64, w: usize, h: usize, cfg: &WriterConfig, channels: usize, color_trc: &str) -> Vec<String> {
     // loop: NOT-WORTH — ffmpeg arguments, once per writer
     let mut a: Vec<String> = ["-y", "-hide_banner", "-loglevel", "error", "-nostats", "-f", "rawvideo", "-pix_fmt"].iter().map(|s| s.to_string()).collect();
     a.push(if channels == 4 { "bgra64le" } else { "bgr48le" }.into());
@@ -68,7 +68,7 @@ pub enum Batch {
     F32(Vec<f32>),
 }
 
-pub trait Writer: Send {
+pub(crate) trait Writer: Send {
     /// The output's path (a file, or the EXR folder).
     fn path(&self) -> &Path;
     /// Hand over `n` frames; counted as soon as they are queued (the protocol's `frames`).
@@ -86,9 +86,9 @@ compile_error!("the ffmpeg writers and temp files assume a little-endian host");
 
 /// How long a writer may take to finish its file once the last frame is queued (measured: 0.5 s after the last
 /// frame at 1280x1080; x264's lookahead at UHD takes seconds, not minutes).
-pub const FINISH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+pub(crate) const FINISH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
-pub struct VideoWriter {
+pub(crate) struct VideoWriter {
     path: PathBuf,
     channels: usize,
     frame_len: usize,
@@ -100,7 +100,7 @@ pub struct VideoWriter {
 }
 
 impl VideoWriter {
-    pub fn new(path: &Path, fps: f64, w: usize, h: usize, cfg: &WriterConfig, channels: usize, color_trc: &str) -> Result<VideoWriter, Error> {
+    pub(crate) fn new(path: &Path, fps: f64, w: usize, h: usize, cfg: &WriterConfig, channels: usize, color_trc: &str) -> Result<VideoWriter, Error> {
         let mut child = Command::new("ffmpeg")
             .args(ffmpeg_args(path, fps, w, h, cfg, channels, color_trc))
             .stdin(Stdio::piped())
@@ -208,12 +208,12 @@ impl Drop for VideoWriter {
 
 /// EXR pixel type: half (float16, values clamped to +-65504 so they stay finite) or float.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ExrType {
+pub(crate) enum ExrType {
     Half,
     Float,
 }
 
-pub struct ExrWriter {
+pub(crate) struct ExrWriter {
     dir: PathBuf,
     channels: usize,
     frame_len: usize,
@@ -224,7 +224,7 @@ pub struct ExrWriter {
 }
 
 /// One EXR frame as cv2.imwrite writes it: channels R, G, B (+A) from BGR(A) data, or Y; ZIP compression.
-pub fn write_exr(path: &Path, w: usize, h: usize, channels: usize, nhwc: &[f32], ty: ExrType) -> Result<(), String> {
+pub(crate) fn write_exr(path: &Path, w: usize, h: usize, channels: usize, nhwc: &[f32], ty: ExrType) -> Result<(), String> {
     use exr::prelude::*;
     let names: &[&str] = match channels {
         1 => &["Y"],
@@ -257,7 +257,7 @@ pub fn write_exr(path: &Path, w: usize, h: usize, channels: usize, nhwc: &[f32],
 }
 
 impl ExrWriter {
-    pub fn new(dir: &Path, w: usize, h: usize, channels: usize, ty: ExrType, frame_name: &str) -> Result<ExrWriter, Error> {
+    pub(crate) fn new(dir: &Path, w: usize, h: usize, channels: usize, ty: ExrType, frame_name: &str) -> Result<ExrWriter, Error> {
         std::fs::create_dir_all(dir).map_err(|e| Error::engine(format!("{}: {e}", dir.display())))?;
         let (tx, rx) = sync_channel::<(usize, usize, Vec<f32>)>(2);
         let err: Shared = Arc::new(Mutex::new(None));

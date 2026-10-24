@@ -40,14 +40,14 @@ pub fn taper_weights(tc: usize, overlap: usize, is_first: bool, is_last: bool) -
 /// The weighted running sum of the batons per frame (live_acc / live_w): frames are released, as float16,
 /// once no later window covers them.
 #[derive(Default)]
-pub struct BatonBlend {
+pub(crate) struct BatonBlend {
     acc: BTreeMap<usize, (Vec<f32>, f64)>,
 }
 
 impl BatonBlend {
     /// Add frame `t`'s baton from one window with weight `w` (weighted = baton * w in float32). The baton is
     /// read in the type stage 1 made it (float16 or float32), converted value by value (exact).
-    pub fn add<T: ToF32>(&mut self, t: usize, baton: &[T], w: f32) {
+    pub(crate) fn add<T: ToF32>(&mut self, t: usize, baton: &[T], w: f32) {
         use rayon::prelude::*;
         match self.acc.get_mut(&t) {
             Some((sum, wsum)) => {
@@ -63,7 +63,7 @@ impl BatonBlend {
     }
 
     /// Every frame before `t_limit`, in order: (t, acc / max(wsum, 1e-6) as float16, the runtime's memmap type).
-    pub fn flush_before(&mut self, t_limit: usize) -> Vec<(usize, Vec<half::f16>)> {
+    pub(crate) fn flush_before(&mut self, t_limit: usize) -> Vec<(usize, Vec<half::f16>)> {
         let keys: Vec<usize> = self.acc.range(..t_limit).map(|(k, _)| *k).collect();
         // loop: HOT-PATH-OK — the frames a window finishes (≤ stride); each frame's values in parallel
         keys.into_iter()
@@ -75,10 +75,6 @@ impl BatonBlend {
                 (k, sum.into_par_iter().with_min_len(1 << 14).map(|v| half::f16::from_f32(v / d)).collect())
             })
             .collect()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.acc.is_empty()
     }
 }
 
@@ -113,6 +109,6 @@ mod tests {
         let out = b.flush_before(2);
         let h = |v: f32| vec![half::f16::from_f32(v)];
         assert_eq!(out, vec![(0, h(1.0)), (1, h(3.0))]);
-        assert!(b.is_empty());
+        assert!(b.acc.is_empty());
     }
 }

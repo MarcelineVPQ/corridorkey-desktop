@@ -40,7 +40,7 @@ pub trait Sink {
     }
 }
 
-pub const FRAMES_EVERY_S: f64 = 0.25;
+pub(crate) const FRAMES_EVERY_S: f64 = 0.25;
 
 /// `frames` replies: frames handed to every writer (the slowest), at most 4 per second plus the last.
 struct FrameReport {
@@ -73,13 +73,13 @@ impl FrameReport {
 
 /// The loaded networks and what they were loaded for.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct ModelKey {
-    pub provider: Provider,
-    pub precision: Precision,
+pub(crate) struct ModelKey {
+    pub(crate) provider: Provider,
+    pub(crate) precision: Precision,
     /// TensorRT: the shape range's cache folder
-    pub trt_cache: Option<PathBuf>,
+    pub(crate) trt_cache: Option<PathBuf>,
     /// the job's graphics memory budget (bytes): each session's arena limit
-    pub vram_cap: Option<u64>,
+    pub(crate) vram_cap: Option<u64>,
 }
 
 /// A network loading ahead on its own thread: (network, the key it is for, the load: the session and its seconds).
@@ -285,7 +285,7 @@ impl Pipeline {
 
     /// Drop every loaded network (frees the graphics memory their sessions hold), and give the host memory
     /// their loading used back to the system.
-    pub fn unload(&mut self) {
+    pub(crate) fn unload(&mut self) {
         self.fold_stats();
         let had = !self.nets.is_empty();
         self.nets.clear();
@@ -360,7 +360,7 @@ impl Pipeline {
                 let tried = match (self.trt_fallbacks.get(piece), settings.as_ref()) {
                     (Some(why), _) => Err(why.clone()),
                     (None, Some(st)) => {
-                        Net::load(self.rt, piece, Provider::TensorRt, key.precision, &crate::tensorrt::stub_path(&st.dir, piece), Some(st), cap)
+                        Net::load(self.rt, piece, Provider::TensorRt, &crate::tensorrt::stub_path(&st.dir, piece), cap)
                             // loop: NOT-WORTH — first line of an error message
                             .map_err(|e| format!("loading its engine: {}", e.message.lines().next().unwrap_or("")))
                     }
@@ -373,11 +373,11 @@ impl Pipeline {
                             sink.log(&format!("  TensorRT could not run {piece}; it runs on CUDA: {why}"));
                             self.trt_fallbacks.insert(piece, why);
                         }
-                        Net::load(self.rt, piece, Provider::Cuda, key.precision, &file, None, cap)?
+                        Net::load(self.rt, piece, Provider::Cuda, &file, cap)?
                     }
                 }
             } else {
-                Net::load(self.rt, piece, key.provider, key.precision, &file, settings.as_ref(), cap)?
+                Net::load(self.rt, piece, key.provider, &file, cap)?
             };
             eprintln!(
                 "  loaded {piece} ({}, {}) in {:.1} s, arena limit {}: {}",
@@ -429,7 +429,7 @@ impl Pipeline {
             // loop: PARALLELIZE — the next low-VRAM phase's network loads while this phase runs (this pass; measured: 1.3-1.5 s less per job)
             let h = std::thread::spawn(move || {
                 let t = Instant::now();
-                let net = Net::load(rt, piece, prov, prec, &file, None, cap)?;
+                let net = Net::load(rt, piece, prov, &file, cap)?;
                 eprintln!("  loaded {piece} ahead ({}, {}) in {:.1} s on its own thread", prov.name(), prec.name(), t.elapsed().as_secs_f64());
                 Ok((net, t.elapsed().as_secs_f64()))
             });
@@ -1417,7 +1417,7 @@ fn foundation_inputs(frames: &[Prepped], sh: usize, sw: usize) -> (Vec<f32>, Vec
 /// in one engine process (locked_backdrop, with_motion_blur, locked_backdrop, metal_glasses): sessions loaded
 /// on their own thread left their freed host memory in that thread's arena, and the engine's resident memory
 /// grew from job to job (3.8 -> 9.1 GB after each job, peak 12.3 GB); trimming after each unload keeps it flat.
-pub fn trim_host_memory() {
+pub(crate) fn trim_host_memory() {
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     {
         extern "C" {
@@ -1434,12 +1434,12 @@ pub fn trim_host_memory() {
 /// system's cache folder (the app's own, electron/main/platform.ts appDirs): Linux $XDG_CACHE_HOME (or
 /// ~/.cache)/corridorkey-desktop/tensorrt, Windows %LOCALAPPDATA%\corridorkey-desktop\cache\tensorrt, macOS
 /// ~/Library/Caches/corridorkey-desktop/tensorrt.
-pub fn trt_root() -> PathBuf {
+pub(crate) fn trt_root() -> PathBuf {
     trt_root_for(std::env::consts::OS, |k| std::env::var(k).ok())
 }
 
 /// `trt_root` for system `os` ("linux", "windows", "macos") and an environment lookup.
-pub fn trt_root_for(os: &str, env: impl Fn(&str) -> Option<String>) -> PathBuf {
+pub(crate) fn trt_root_for(os: &str, env: impl Fn(&str) -> Option<String>) -> PathBuf {
     let var = |k: &str| env(k).filter(|s| !s.is_empty()).map(PathBuf::from);
     if let Some(p) = var("CK_ENGINE_TRT_CACHE") {
         return p;
@@ -1456,7 +1456,7 @@ pub fn trt_root_for(os: &str, env: impl Fn(&str) -> Option<String>) -> PathBuf {
 }
 
 /// A network's name for people (progress details and logs).
-pub fn piece_name(piece: &str) -> &'static str {
+pub(crate) fn piece_name(piece: &str) -> &'static str {
     match piece {
         "cradio" => "C-RADIO",
         "moge" => "MoGe",

@@ -13,7 +13,7 @@ use ort::value::Tensor;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-pub const PIECES: [&str; 5] = ["cradio", "moge", "rvm", "stage1", "stage2"];
+pub(crate) const PIECES: [&str; 5] = ["cradio", "moge", "rvm", "stage1", "stage2"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Provider {
@@ -45,7 +45,7 @@ impl Precision {
             Precision::Fp32 => "fp32",
         }
     }
-    pub fn parse(s: &str) -> Option<Precision> {
+    pub(crate) fn parse(s: &str) -> Option<Precision> {
         match s {
             "fp16" => Some(Precision::Fp16),
             "fp32" => Some(Precision::Fp32),
@@ -68,7 +68,7 @@ pub struct ModelSet {
     pub dir: PathBuf,
     manifest: BTreeMap<String, BTreeMap<String, String>>,
     /// manifest.json's "version" (CorridorKey2.0 make_manifest.py), when the folder has one
-    pub version: Option<String>,
+    pub(crate) version: Option<String>,
 }
 
 /// Model sets whose C-RADIO only takes landscape or square frames (measured: an ONNX Runtime broadcast error
@@ -77,7 +77,7 @@ pub struct ModelSet {
 const LANDSCAPE_ONLY_SETS: [&str; 2] = ["2.0.0-onnx.1", "2.0.0-onnx.2"];
 
 /// A model's size on disk: the .onnx file and its external weights (.onnx.data) next to it.
-pub fn model_bytes(file: &Path) -> u64 {
+pub(crate) fn model_bytes(file: &Path) -> u64 {
     let data = PathBuf::from(format!("{}.data", file.display()));
     // loop: NOT-WORTH — two files' sizes
     [file.to_path_buf(), data].iter().filter_map(|p| std::fs::metadata(p).ok()).map(|m| m.len()).sum()
@@ -100,12 +100,12 @@ impl ModelSet {
     }
 
     /// Whether this set's C-RADIO takes frames taller than wide (false only for the sets measured to fail).
-    pub fn takes_portrait(&self) -> bool {
+    pub(crate) fn takes_portrait(&self) -> bool {
         !self.version.as_deref().is_some_and(|v| LANDSCAPE_ONLY_SETS.contains(&v))
     }
 
     /// The file of `piece` at `p`, if there is one.
-    pub fn file(&self, piece: &str, p: Precision) -> Option<PathBuf> {
+    pub(crate) fn file(&self, piece: &str, p: Precision) -> Option<PathBuf> {
         if let Some(name) = self.manifest.get(p.name()).and_then(|m| m.get(piece)) {
             let f = self.dir.join(name);
             return f.exists().then_some(f);
@@ -118,7 +118,7 @@ impl ModelSet {
     /// TensorRT's ONNX parser takes: plain attention instead of com.microsoft::MultiHeadAttention, MoGe's
     /// antialiased resize as weight matrices, at most 8-dimensional tensors; CorridorKey2.0
     /// scripts/onnx_spike/to_trt.py). None: no such file, the network runs on CUDA.
-    pub fn trt_file(&self, piece: &str, p: Precision) -> Option<PathBuf> {
+    pub(crate) fn trt_file(&self, piece: &str, p: Precision) -> Option<PathBuf> {
         let name = self.manifest.get(&format!("tensorrt-{}", p.name()))?.get(piece)?;
         let f = self.dir.join(name);
         f.exists().then_some(f)
@@ -127,7 +127,7 @@ impl ModelSet {
     /// The EPContext stub for `piece`'s TensorRT engine (models.json "tensorrt-fp16-ctx": an ONNX file with the
     /// TensorRT-ready export's inputs and outputs and one EPContext node pointing at `<piece>.engine` next to it;
     /// CorridorKey2.0 scripts/onnx_spike/trt_ctx.py).
-    pub fn trt_stub(&self, piece: &str, p: Precision) -> Option<PathBuf> {
+    pub(crate) fn trt_stub(&self, piece: &str, p: Precision) -> Option<PathBuf> {
         let name = self.manifest.get(&format!("tensorrt-{}-ctx", p.name()))?.get(piece)?;
         let f = self.dir.join(name);
         f.exists().then_some(f)
@@ -139,20 +139,21 @@ impl ModelSet {
         PIECES.iter().map(|k| (k.to_string(), self.file(k, p).is_some())).collect()
     }
 
-    pub fn missing(&self, p: Precision) -> Vec<String> {
+    pub(crate) fn missing(&self, p: Precision) -> Vec<String> {
         // loop: NOT-WORTH — five networks, once per job
         PIECES.iter().filter(|k| self.file(k, p).is_none()).map(|k| k.to_string()).collect()
     }
 }
 
 /// "1.31.0" from ORT's build info ("... git-branch=rel-1.31.0, ...").
-pub fn ort_version(info: &str) -> String {
+pub(crate) fn ort_version(info: &str) -> String {
     // loop: NOT-WORTH — a short build-info string, once per process
     info.split(|c: char| c == ',' || c.is_whitespace()).find_map(|t| t.strip_prefix("git-branch=rel-")).unwrap_or(info).to_string()
 }
 
 /// The version a libonnxruntime reports (OrtGetApiBase()->GetVersionString), e.g. "1.31.0".
-pub fn dylib_version(lib: &Path) -> Option<String> {
+#[cfg(feature = "ort-dynamic")]
+fn dylib_version(lib: &Path) -> Option<String> {
     #[repr(C)]
     struct ApiBase {
         get_api: unsafe extern "C" fn(u32) -> *const std::ffi::c_void,
@@ -176,12 +177,12 @@ pub fn dylib_version(lib: &Path) -> Option<String> {
 pub struct Runtime {
     env: ort::environment::Environment,
     pub gpu: Option<GpuInfo>,
-    pub cuda_ep: bool,
+    pub(crate) cuda_ep: bool,
     pub tensorrt_ep: bool,
     pub ort_version: String,
     /// asked for with --device / CK_ENGINE_DEVICE: auto | cuda | cpu
-    pub want: String,
-    pub threads: usize,
+    pub(crate) want: String,
+    pub(crate) threads: usize,
 }
 
 static GLOBAL: std::sync::OnceLock<Result<Runtime, String>> = std::sync::OnceLock::new();
@@ -191,10 +192,6 @@ impl Runtime {
     /// load-dynamic build (else CK_ENGINE_ORT / ORT_DYLIB_PATH).
     pub fn init(ort_lib: Option<&Path>, want: &str) -> Result<&'static Runtime, String> {
         GLOBAL.get_or_init(|| Runtime::new(ort_lib, want)).as_ref().map_err(|e| e.clone())
-    }
-
-    pub fn get() -> Option<&'static Runtime> {
-        GLOBAL.get().and_then(|r| r.as_ref().ok())
     }
 
     fn new(ort_lib: Option<&Path>, want: &str) -> Result<Runtime, String> {
@@ -281,7 +278,7 @@ impl Runtime {
 
     /// A session for `file` on `prov` (TensorRT: `file` is the network's EPContext stub, see TrtSettings).
     /// `vram_cap`: the most graphics memory (bytes) the session's CUDA arena may hold (gpu_mem_limit).
-    pub fn session(&self, prov: Provider, file: &Path, trt: Option<&TrtSettings>, vram_cap: Option<u64>) -> Result<Session, String> {
+    pub(crate) fn session(&self, prov: Provider, file: &Path, vram_cap: Option<u64>) -> Result<Session, String> {
         let _ = vram_cap;
         let mut b = self.builder()?;
         // CK_ENGINE_PROFILE=<folder>: ONNX Runtime's per-node profile of each session (a measurement knob)
@@ -304,13 +301,11 @@ impl Runtime {
                 // prebuilt engine, nothing is built here; the CUDA provider stays behind it
                 #[cfg(feature = "tensorrt")]
                 {
-                    let _ = trt;
                     let ep = ort::ep::TensorRT::default().with_device_id(0);
                     b = b.with_execution_providers([ep.build().error_on_failure(), cuda_ep(vram_cap).build()]).map_err(|e| e.to_string())?;
                 }
                 #[cfg(not(feature = "tensorrt"))]
                 {
-                    let _ = trt;
                     return Err("this engine was built without the TensorRT execution provider".into());
                 }
             }
@@ -346,29 +341,27 @@ fn cuda_ep(vram_cap: Option<u64>) -> ort::ep::CUDA {
 
 /// Where a TensorRT network's engine lives: the shape range's folder for this network (engine + EPContext stub).
 #[derive(Clone, Debug, PartialEq)]
-pub struct TrtSettings {
-    pub dir: PathBuf,
+pub(crate) struct TrtSettings {
+    pub(crate) dir: PathBuf,
 }
 
 /// A loaded network: its session and how its inputs want to be fed.
-pub struct Net {
-    pub piece: &'static str,
+pub(crate) struct Net {
+    pub(crate) piece: &'static str,
     // (end_profiling on drop when CK_ENGINE_PROFILE is set)
-    pub session: Session,
-    pub provider: Provider,
-    pub precision: Precision,
-    pub file: PathBuf,
+    pub(crate) session: Session,
+    pub(crate) provider: Provider,
     f16_inputs: Vec<String>,
     /// run options that give the arena's working memory back after the run (GPU only)
     shrink_options: Option<ort::session::RunOptions>,
     /// whether runs use `shrink_options` (the pipeline sets it from `shrinks` for what is loaded)
-    pub shrink: bool,
+    pub(crate) shrink: bool,
     /// measured: seconds in session.run, seconds converting inputs/outputs, calls (reset per job)
-    pub run_s: f64,
-    pub convert_s: f64,
-    pub calls: usize,
+    pub(crate) run_s: f64,
+    pub(crate) convert_s: f64,
+    pub(crate) calls: usize,
     /// seconds of this session's first run (cuDNN's algorithm search happens there)
-    pub first_s: Option<f64>,
+    pub(crate) first_s: Option<f64>,
 }
 
 impl Drop for Net {
@@ -386,7 +379,7 @@ impl Drop for Net {
 /// (`shared`, the normal mode), so their working memory doesn't add up. A network that has the card to itself
 /// (the low-VRAM phases) keeps its arena: measured, a shrunk arena allocates its buffers again on the next run,
 /// 159 ms per stage-2 call against 60 ms kept (1280x1152, docs/ENGINE_RUST.md).
-pub fn shrinks(piece: &str, setting: Option<&str>, shared: bool) -> bool {
+pub(crate) fn shrinks(piece: &str, setting: Option<&str>, shared: bool) -> bool {
     match setting.map(|s| s.trim()) {
         Some("all") | Some("1") => true,
         Some("0") | Some("none") => false,
@@ -399,7 +392,7 @@ pub fn shrinks(piece: &str, setting: Option<&str>, shared: bool) -> bool {
 /// Tensor data in the type it already has: nothing is converted until a network needs another type, and
 /// then in one pass. Every conversion is exact where the old float32 path was (bfloat16 and float16 values
 /// are exact in float32; float32 -> float16 rounds once, as before).
-pub enum Data<'a> {
+pub(crate) enum Data<'a> {
     F32(Vec<f32>),
     F16(Vec<half::f16>),
     /// bfloat16 frames, concatenated in order (the decoded frames' model view: stage 1 and 2's rgb)
@@ -422,7 +415,7 @@ impl From<Vec<half::f16>> for Data<'_> {
 const PAR_MIN: usize = 1 << 14;
 
 impl Data<'_> {
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         match self {
             Data::F32(v) => v.len(),
             Data::F16(v) => v.len(),
@@ -431,12 +424,8 @@ impl Data<'_> {
         }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
     /// As float32 (exact for float16 / bfloat16).
-    pub fn into_f32(self) -> Vec<f32> {
+    pub(crate) fn into_f32(self) -> Vec<f32> {
         use rayon::prelude::*;
         match self {
             Data::F32(v) => v,
@@ -447,7 +436,7 @@ impl Data<'_> {
     }
 
     /// As float16 (float32 values round to nearest even, as `half::f16::from_f32`).
-    pub fn into_f16(self) -> Vec<half::f16> {
+    pub(crate) fn into_f16(self) -> Vec<half::f16> {
         use rayon::prelude::*;
         match self {
             Data::F16(v) => v,
@@ -458,7 +447,7 @@ impl Data<'_> {
     }
 
     /// Values `range` as float32 (a copy).
-    pub fn range_f32(&self, range: std::ops::Range<usize>) -> Vec<f32> {
+    pub(crate) fn range_f32(&self, range: std::ops::Range<usize>) -> Vec<f32> {
         match self {
             Data::F32(v) => v[range].to_vec(),
             // loop: HOT-PATH-OK — carry hints: one small aux plane per frame the next window takes
@@ -483,19 +472,11 @@ fn concat_parts<T: Send>(parts: &[&[half::bf16]], f: impl Fn(half::bf16) -> T + 
 }
 
 /// An input: name, shape, data.
-pub type Input<'a> = (&'a str, Vec<usize>, Data<'a>);
+pub(crate) type Input<'a> = (&'a str, Vec<usize>, Data<'a>);
 
 impl Net {
-    pub fn load(
-        rt: &Runtime,
-        piece: &'static str,
-        prov: Provider,
-        precision: Precision,
-        file: &Path,
-        trt: Option<&TrtSettings>,
-        vram_cap: Option<u64>,
-    ) -> Result<Net, Error> {
-        let session = rt.session(prov, file, trt, vram_cap).map_err(|e| Error::ort(&format!("loading {}", file.display()), e))?;
+    pub(crate) fn load(rt: &Runtime, piece: &'static str, prov: Provider, file: &Path, vram_cap: Option<u64>) -> Result<Net, Error> {
+        let session = rt.session(prov, file, vram_cap).map_err(|e| Error::ort(&format!("loading {}", file.display()), e))?;
         let f16_inputs =
             // loop: NOT-WORTH — ≤ six inputs, once per session load
             session.inputs().iter().filter(|i| i.dtype().tensor_type() == Some(ort::value::TensorElementType::Float16)).map(|i| i.name().to_string()).collect();
@@ -508,31 +489,18 @@ impl Net {
         } else {
             None
         };
-        Ok(Net {
-            piece,
-            session,
-            provider: prov,
-            precision,
-            file: file.to_path_buf(),
-            f16_inputs,
-            shrink_options,
-            shrink: false,
-            first_s: None,
-            run_s: 0.0,
-            convert_s: 0.0,
-            calls: 0,
-        })
+        Ok(Net { piece, session, provider: prov, f16_inputs, shrink_options, shrink: false, first_s: None, run_s: 0.0, convert_s: 0.0, calls: 0 })
     }
 
     /// Whether the graph takes input `name` as float16.
-    pub fn wants_f16(&self, name: &str) -> bool {
+    pub(crate) fn wants_f16(&self, name: &str) -> bool {
         // loop: NOT-WORTH — ≤ six input names per input
         self.f16_inputs.iter().any(|n| n == name)
     }
 
     /// Run; each input is converted (once) to the type the graph takes. Outputs in the graph's output order as
     /// (shape, data) in the type the graph made them (float32 or float16), not converted.
-    pub fn run(&mut self, inputs: Vec<Input<'_>>) -> Result<Vec<(Vec<usize>, Data<'static>)>, Error> {
+    pub(crate) fn run(&mut self, inputs: Vec<Input<'_>>) -> Result<Vec<(Vec<usize>, Data<'static>)>, Error> {
         let t0 = std::time::Instant::now();
         let mut feed: Vec<(std::borrow::Cow<'_, str>, ort::session::SessionInputValue<'_>)> = Vec::with_capacity(inputs.len());
         // loop: NOT-WORTH — at most six inputs

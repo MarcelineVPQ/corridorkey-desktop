@@ -14,21 +14,21 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdout, Command, Stdio};
 
 /// The ffmpeg filter that reproduces cv2.VideoCapture's YUV -> BGR24 conversion.
-pub const CV2_SCALE: &str = "scale=in_color_matrix=bt601:flags=bicubic";
+pub(crate) const CV2_SCALE: &str = "scale=in_color_matrix=bt601:flags=bicubic";
 
 /// 8-bit RGB frames of a video, from an ffmpeg child process (killed when dropped).
-pub struct VideoDecoder {
+pub(crate) struct VideoDecoder {
     child: Child,
     out: BufReader<ChildStdout>,
     path: PathBuf,
-    pub w: usize,
-    pub h: usize,
-    pub decoded: usize,
+    pub(crate) w: usize,
+    pub(crate) h: usize,
+    pub(crate) decoded: usize,
     buf: Vec<u8>,
 }
 
 impl VideoDecoder {
-    pub fn open(path: &Path, w: usize, h: usize, max_frames: usize) -> Result<VideoDecoder, Error> {
+    pub(crate) fn open(path: &Path, w: usize, h: usize, max_frames: usize) -> Result<VideoDecoder, Error> {
         let mut child = Command::new("ffmpeg")
             .args(["-v", "error", "-nostdin", "-i"])
             .arg(path)
@@ -45,7 +45,7 @@ impl VideoDecoder {
     }
 
     /// The next frame as interleaved RGB bytes, or an error naming the frame that could not be decoded.
-    pub fn next_rgb(&mut self) -> Result<&[u8], Error> {
+    pub(crate) fn next_rgb(&mut self) -> Result<&[u8], Error> {
         let mut got = 0;
         // loop: HOT-PATH-OK — read() fills the frame in a few large pieces
         while got < self.buf.len() {
@@ -188,7 +188,7 @@ pub fn read_still(p: &Path) -> Result<Still, Error> {
 }
 
 /// (h, w) of a still without keeping its pixels.
-pub fn image_size(p: &Path) -> Result<(usize, usize), Error> {
+pub(crate) fn image_size(p: &Path) -> Result<(usize, usize), Error> {
     if is_exr(p) {
         // the header only (decoding a 4K frame to learn its size took ~50 ms): the first layer with R, G and B,
         // the one read_still reads
@@ -248,7 +248,7 @@ pub fn prep_frame(display_or_linear: Planar, exr_linear: bool, meta: &ClipMeta, 
 
 /// `prep_frame`; without `need_model` only the display view (the RVM and foundation passes need no more,
 /// as the runtime's need_model=False readers). Spread over the cores.
-pub fn prep_frame_views(display_or_linear: Planar, exr_linear: bool, meta: &ClipMeta, denom: f32, need_model: bool) -> Prepped {
+pub(crate) fn prep_frame_views(display_or_linear: Planar, exr_linear: bool, meta: &ClipMeta, denom: f32, need_model: bool) -> Prepped {
     use rayon::prelude::*;
     let padded = if meta.pad == (crate::image::Pad { l: 0, r: 0, t: 0, b: 0 }) { display_or_linear } else { pad_reflect101(&display_or_linear, meta.pad) };
     // EXR frames can hold NaN / infinity: made finite first (`finite_input`), a no-op for every finite value
@@ -281,9 +281,9 @@ pub fn prep_frame_views(display_or_linear: Planar, exr_linear: bool, meta: &Clip
 }
 
 /// Sequential frames of a clip (video or folder), decoded and preprocessed in order.
-pub struct FrameReader {
+pub(crate) struct FrameReader {
     /// measured: seconds decoding + preprocessing
-    pub seconds: f64,
+    pub(crate) seconds: f64,
     meta: ClipMeta,
     video: Option<VideoDecoder>,
     next: usize,
@@ -299,7 +299,7 @@ pub struct FrameReader {
 const FOLDER_BATCH: usize = 4;
 
 impl FrameReader {
-    pub fn open(meta: &ClipMeta) -> Result<FrameReader, Error> {
+    pub(crate) fn open(meta: &ClipMeta) -> Result<FrameReader, Error> {
         let video = match &meta.source {
             crate::clip::Source::Video(p) => Some(VideoDecoder::open(p, meta.w, meta.h, meta.num_frames)?),
             crate::clip::Source::Frames(_) => None,
@@ -308,13 +308,13 @@ impl FrameReader {
     }
 
     /// Only the display view (the RVM / foundation passes).
-    pub fn display_only(mut self) -> FrameReader {
+    pub(crate) fn display_only(mut self) -> FrameReader {
         self.need_model = false;
         self
     }
 
     /// The next frame (None after num_frames).
-    pub fn next_frame(&mut self) -> Result<Option<Prepped>, Error> {
+    pub(crate) fn next_frame(&mut self) -> Result<Option<Prepped>, Error> {
         if let Some(p) = self.ready.pop_front() {
             return p.map(Some);
         }
@@ -364,14 +364,14 @@ impl FrameReader {
 
 /// A FrameReader on its own thread, a few frames ahead (the runtime prefetches its prepass chunks the same way):
 /// decoding overlaps the networks.
-pub struct Prefetch {
+pub(crate) struct Prefetch {
     rx: std::sync::mpsc::Receiver<Result<Prepped, Error>>,
     seconds: crate::ahead::Seconds,
     _thread: std::thread::JoinHandle<()>,
 }
 
 impl Prefetch {
-    pub fn new(mut reader: FrameReader, depth: usize) -> Prefetch {
+    pub(crate) fn new(mut reader: FrameReader, depth: usize) -> Prefetch {
         let (tx, rx) = std::sync::mpsc::sync_channel(depth);
         let seconds = crate::ahead::Seconds::default();
         let s2 = seconds.clone();
@@ -396,7 +396,7 @@ impl Prefetch {
     }
 
     /// The next frame, or None at the end.
-    pub fn next_frame(&mut self) -> Result<Option<Prepped>, Error> {
+    pub(crate) fn next_frame(&mut self) -> Result<Option<Prepped>, Error> {
         // loop: SERIAL-REQUIRED — frames in order [bounded: the prefetch thread ends at the clip's end (ffmpeg closes its pipe) or an error]
         match self.rx.recv() {
             Ok(Ok(p)) => Ok(Some(p)),
@@ -406,7 +406,7 @@ impl Prefetch {
     }
 
     /// Seconds the decoding thread spent (decode + preprocessing).
-    pub fn seconds(&self) -> f64 {
+    pub(crate) fn seconds(&self) -> f64 {
         self.seconds.get()
     }
 }
@@ -464,7 +464,7 @@ pub fn prep_hint(still: Still, meta: &ClipMeta) -> Vec<f32> {
 
 /// video_io.read_hint_image + load_initial_hint_frame: the first-frame matte (a file, or the first frame of a
 /// folder). 4 channels: the alpha; 3: the first channel cv2 reads (blue); its size must be the clip's.
-pub fn load_initial_hint(path: &Path, meta: &ClipMeta) -> Result<Vec<f32>, Error> {
+pub(crate) fn load_initial_hint(path: &Path, meta: &ClipMeta) -> Result<Vec<f32>, Error> {
     let file = if path.is_dir() {
         // loop: NOT-WORTH — a hint folder's file names, once per job
         crate::clip::frame_paths(path)?.into_iter().find(|p| p.is_file())
@@ -502,7 +502,7 @@ pub fn load_initial_hint(path: &Path, meta: &ClipMeta) -> Result<Vec<f32>, Error
 }
 
 /// A full hint, one matte per frame: a video or a folder of stills (make_hint_reader).
-pub struct HintReader {
+pub(crate) struct HintReader {
     meta: ClipMeta,
     video: Option<VideoDecoder>,
     paths: Vec<PathBuf>,
@@ -510,7 +510,7 @@ pub struct HintReader {
 }
 
 impl HintReader {
-    pub fn open(path: &Path, meta: &ClipMeta) -> Result<HintReader, Error> {
+    pub(crate) fn open(path: &Path, meta: &ClipMeta) -> Result<HintReader, Error> {
         if path.is_dir() {
             let paths = crate::clip::frame_paths(path)?;
             if paths.len() < meta.num_frames {
@@ -530,7 +530,7 @@ impl HintReader {
         Ok(HintReader { meta: meta.clone(), video: Some(VideoDecoder::open(path, p.w, p.h, meta.num_frames)?), paths: vec![], next: 0 })
     }
 
-    pub fn next_frame(&mut self) -> Result<Vec<f32>, Error> {
+    pub(crate) fn next_frame(&mut self) -> Result<Vec<f32>, Error> {
         let still = match &mut self.video {
             Some(v) => {
                 let (w, h) = (v.w, v.h);

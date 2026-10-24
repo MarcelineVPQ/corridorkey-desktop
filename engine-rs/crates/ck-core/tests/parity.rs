@@ -10,12 +10,15 @@ use ck_core::vram::{estimate_peak_vram_gb, select_vram_profile};
 use ck_core::writers::Batch;
 use std::path::PathBuf;
 
+/// the .npy reader for the fixtures (test-only: tests/npy)
+mod npy;
+
 fn fx(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name)
 }
 
 fn load(name: &str) -> (Vec<usize>, Vec<f32>) {
-    ck_core::npy::read(&fx(&format!("{name}.npy"))).unwrap()
+    npy::read(&fx(&format!("{name}.npy"))).unwrap()
 }
 
 /// max |a - b| and the count above `tol`

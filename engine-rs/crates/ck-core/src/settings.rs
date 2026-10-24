@@ -1,7 +1,7 @@
 //! `<clip>_settings.txt`, written as runtime.run_inference writes it (Python's str() of each value).
 
 /// Python's repr of a float: shortest round trip, always with a dot or an exponent ("1.0", "0.95", "1e-07").
-pub fn py_float(v: f64) -> String {
+pub(crate) fn py_float(v: f64) -> String {
     if v.is_nan() {
         return "nan".into();
     }
@@ -24,7 +24,7 @@ pub fn py_float(v: f64) -> String {
     }
 }
 
-pub fn py_bool(b: bool) -> &'static str {
+pub(crate) fn py_bool(b: bool) -> &'static str {
     if b {
         "True"
     } else {
@@ -32,35 +32,35 @@ pub fn py_bool(b: bool) -> &'static str {
     }
 }
 
-pub fn py_opt(s: Option<&str>) -> String {
+pub(crate) fn py_opt(s: Option<&str>) -> String {
     s.map(|x| x.to_string()).unwrap_or_else(|| "None".into())
 }
 
 /// The values the settings log lists.
-pub struct SettingsLog<'a> {
-    pub input: &'a str,
-    pub output_dir: &'a str,
-    pub w: usize,
-    pub h: usize,
-    pub fps: f64,
-    pub outputs: &'a [String],
-    pub output_format: &'a str,
-    pub exr_dtype: &'a str,
-    pub hint_first_frame: Option<&'a str>,
-    pub hint_video: Option<&'a str>,
-    pub hint_quality: f64,
-    pub carry_hint: bool,
-    pub carry_hint_quality: f64,
-    pub despill_strength: f64,
-    pub cutout_linear: bool,
-    pub frame_dir_linear: bool,
-    pub hann_chunk: usize,
-    pub hann_stride: usize,
-    pub low_vram: bool,
-    pub num_frames: i64,
+pub(crate) struct SettingsLog<'a> {
+    pub(crate) input: &'a str,
+    pub(crate) output_dir: &'a str,
+    pub(crate) w: usize,
+    pub(crate) h: usize,
+    pub(crate) fps: f64,
+    pub(crate) outputs: &'a [String],
+    pub(crate) output_format: &'a str,
+    pub(crate) exr_dtype: &'a str,
+    pub(crate) hint_first_frame: Option<&'a str>,
+    pub(crate) hint_video: Option<&'a str>,
+    pub(crate) hint_quality: f64,
+    pub(crate) carry_hint: bool,
+    pub(crate) carry_hint_quality: f64,
+    pub(crate) despill_strength: f64,
+    pub(crate) cutout_linear: bool,
+    pub(crate) frame_dir_linear: bool,
+    pub(crate) hann_chunk: usize,
+    pub(crate) hann_stride: usize,
+    pub(crate) low_vram: bool,
+    pub(crate) num_frames: i64,
 }
 
-pub fn settings_text(s: &SettingsLog) -> String {
+pub(crate) fn settings_text(s: &SettingsLog) -> String {
     // loop: NOT-WORTH — ≤ four outputs, once per job
     let mut sorted: Vec<&String> = s.outputs.iter().collect();
     sorted.sort();

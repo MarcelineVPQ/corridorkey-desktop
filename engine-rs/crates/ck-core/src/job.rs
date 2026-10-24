@@ -167,7 +167,7 @@ pub fn parse(req: &Value) -> Result<JobConfig, Error> {
 }
 
 /// The file-name suffix of an output (runtime.run_inference's `suffix`).
-pub fn suffix(name: &str, despill: f64) -> String {
+pub(crate) fn suffix(name: &str, despill: f64) -> String {
     if name == "checker" {
         // f"{int(cfg.despill_strength * 100):03d}"
         format!("checker_comp_despill{:03}", (despill * 100.0).trunc() as i64)
