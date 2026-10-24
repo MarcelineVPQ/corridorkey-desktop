@@ -87,7 +87,10 @@ spent 29 minutes waiting on a package mirror).
 2. `tools/release.sh`. It checks the version shape (`X.Y.Z` = Stable, `X.Y.Z-dev.N` = Development), the lock, a
    clean `main` in step with GitHub, the CHANGELOG section and the signing key; runs `npm run check` and
    `npm run dist:linux` (memory-capped; the engine is linked for glibc 2.28 with cargo-zigbuild, Zig in
-   `~/.local/share/corridorkey-release/zig/venv`); writes `SHA256SUMS` / `SHA512SUMS`; pushes `main`; creates the
+   `~/.local/share/corridorkey-release/zig/venv`) and `npm run dist:win` (the Windows engine cross-built with
+   MinGW-w64, the NSIS installer through Wine); writes `SHA256SUMS` / `SHA512SUMS` of the AppImage and the
+   `-Setup.exe`, uploads both; the update feeds name the AppImage only (Windows updates from the releases page);
+   pushes `main`; creates the
    release as a draft on that commit, uploads, and publishes it, which makes the `vX.Y.Z…` tag (Development as a
    **prerelease**, never *Latest*; Stable as *Latest*); then `tools/build-feed.mjs` picks the release per channel
    from GitHub's release list (retried until the released channel names the new version), downloads and hashes

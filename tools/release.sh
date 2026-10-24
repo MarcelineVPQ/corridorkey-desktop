@@ -5,8 +5,9 @@
 #
 # 1. checks: on main, clean, in step with origin; package.json and the lock carry the version; a CHANGELOG
 #    section for it; the signing key is there
-# 2. npm run check, then npm run dist:linux (the engine for glibc 2.28, then the AppImage), memory-capped
-# 3. SHA256SUMS / SHA512SUMS and the notes (the CHANGELOG section)
+# 2. npm run check, then npm run dist:linux (the engine for glibc 2.28, then the AppImage) and npm run dist:win (the
+#    Windows engine cross-built here, then the NSIS installer through Wine), memory-capped
+# 3. SHA256SUMS / SHA512SUMS of both files and the notes (the CHANGELOG section)
 # 4. pushes main, creates the GitHub release as a draft on that commit (no tag yet), uploads, then publishes it,
 #    which makes the tag (Development = prerelease, never Latest). A failure anywhere here can simply be rerun.
 # 5. the feeds: tools/build-feed.mjs from the published release, signed here with the key in
@@ -38,10 +39,13 @@ grep -q "^## $v\( \|$\)" CHANGELOG.md || { echo "release: CHANGELOG.md has no '#
 if [ "$state" != false ]; then
 NODE_OPTIONS=--max-old-space-size=4096 "${CAP[@]}" npm run -s check
 NODE_OPTIONS=--max-old-space-size=4096 "${CAP[@]}" npm run -s dist:linux
+NODE_OPTIONS=--max-old-space-size=4096 "${CAP[@]}" npm run -s dist:win
 
 file="CorridorKey-Desktop-$v.AppImage"
-[ -f "release/$file" ] || { echo "release: release/$file was not built" >&2; exit 1; }
-(cd release && sha256sum "$file" > SHA256SUMS && sha512sum "$file" > SHA512SUMS)
+winfile="CorridorKey-Desktop-$v-Setup.exe"
+# loop: NOT-WORTH — the two release files
+for f in "$file" "$winfile"; do [ -f "release/$f" ] || { echo "release: release/$f was not built" >&2; exit 1; }; done
+(cd release && sha256sum "$file" "$winfile" > SHA256SUMS && sha512sum "$file" "$winfile" > SHA512SUMS)
 # loop: NOT-WORTH — one pass over CHANGELOG.md for this version's section
 awk -v v="$v" '$0 == "## " v || index($0, "## " v " ") == 1 {on=1; next} on && /^## / {exit} on' CHANGELOG.md > release/notes.md
 [ -s release/notes.md ] || echo "See CHANGELOG.md." > release/notes.md
@@ -53,7 +57,7 @@ git push origin main
 flags=(--title "CorridorKey $v" --notes-file release/notes.md)
 if [ "$dev" = true ]; then flags+=(--prerelease --latest=false); else flags+=(--latest); fi
 [ "$state" = true ] || gh release create "v$v" --draft --target "$(git rev-parse HEAD)" "${flags[@]}"
-gh release upload "v$v" "release/$file" release/SHA256SUMS release/SHA512SUMS --clobber
+gh release upload "v$v" "release/$file" "release/$winfile" release/SHA256SUMS release/SHA512SUMS --clobber
 gh release edit "v$v" --draft=false
 git fetch -q origin "refs/tags/v$v:refs/tags/v$v"
 else
