@@ -9,7 +9,8 @@
 # cached in ~/.local/share/corridorkey-release/tensorrt (a lasting place, like Zig) and checked by SHA-256.
 # Compiled with Zig's C++ for glibc 2.28, as the engine (tools/build_engine.sh): Zig links its C++ library in
 # statically and exports none of it, so the builder needs only libc and the two TensorRT libraries. The build
-# stops if the result needs a newer glibc than 2.28. Memory-capped (its own 4 G scope).
+# stops if the result needs a newer glibc than 2.28. Memory-capped (its own 4 G scope; CK_SLICE joins a shared
+# budget, as tools/build_engine.sh).
 set -euo pipefail
 APP="$(cd "$(dirname "$0")/.." && pwd)"
 GLIBC=2.28
@@ -30,7 +31,7 @@ LIBS="$CACHE/libs-10.16.1.11"
 if [ ! -f "$LIBS/libnvinfer.so.10" ] || [ ! -f "$LIBS/libnvonnxparser.so.10" ]; then
   mkdir -p "$LIBS"
   # only the two libraries the builder links against (700 MB of the wheel's 4.4 GB)
-  systemd-run --user --scope --quiet --collect -p MemoryMax=2G -p MemorySwapMax=0 -- python3 -I -c '
+  systemd-run --user --scope --quiet --collect ${CK_SLICE:+--slice=$CK_SLICE} -p MemoryMax=2G -p MemorySwapMax=0 -- python3 -I -c '
 import sys, zipfile, shutil, os
 z = zipfile.ZipFile(sys.argv[1])
 for n in ("libnvinfer.so.10", "libnvonnxparser.so.10"):  # loop: NOT-WORTH — two libraries, once per cache
@@ -40,7 +41,7 @@ for n in ("libnvinfer.so.10", "libnvonnxparser.so.10"):  # loop: NOT-WORTH — t
 ' "$CACHE/$WHEEL" "$LIBS"
 fi
 OUT="$APP/engine-rs/target/trt-build"
-systemd-run --user --scope --quiet --collect -p MemoryMax=4G -p MemorySwapMax=0 -- \
+systemd-run --user --scope --quiet --collect ${CK_SLICE:+--slice=$CK_SLICE} -p MemoryMax=4G -p MemorySwapMax=0 -- \
   env CXX="$ZIG_VENV/bin/python -m ziglang c++ -target x86_64-linux-gnu.$GLIBC" "$APP/engine-rs/tools/trt-build/build.sh" "$LIBS" "$OUT"
 BIN="$APP/engine-rs/target/dist/ck-trt-build"
 # copy beside it, then rename: a running build keeps its old file
