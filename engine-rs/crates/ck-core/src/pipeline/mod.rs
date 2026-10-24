@@ -1537,46 +1537,4 @@ pub(crate) fn piece_name(piece: &str) -> &'static str {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_hint_made_in_the_graphs_type_is_the_same_tensor() {
-        // three frames of 5 values: a matte, none, a matte; the old way made a float32 window and converted it
-        let plane = 5;
-        let a: Vec<f32> = vec![0.0, 0.25, 0.5039, 1.0, 0.123];
-        let b: Vec<f32> = vec![1.0, 0.0, 0.33, 0.66, 0.999];
-        let src = vec![Some(&a[..]), None, Some(&b[..])];
-        let mut old = vec![0f32; 3 * plane];
-        old[..plane].copy_from_slice(&a);
-        old[2 * plane..].copy_from_slice(&b);
-        let new16 = hint_window(&src, plane, half::f16::from_f32);
-        let old16 = Data::F32(old.clone()).into_f16();
-        // loop: NOT-WORTH — fifteen values
-        assert_eq!(new16.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), old16.iter().map(|x| x.to_bits()).collect::<Vec<_>>());
-        assert_eq!(hint_window(&src, plane, |v| v), old);
-        // a window without mattes: the shared zeros are the same as a fresh zero window
-        let zeros = vec![half::f16::ZERO; 4 * plane];
-        assert_eq!(Data::F16Ref(&zeros[..3 * plane]).into_f16(), Data::F32(vec![0f32; 3 * plane]).into_f16());
-    }
-
-    #[test]
-    fn tensorrt_cache_root_per_system() {
-        let env = |pairs: &'static [(&'static str, &'static str)]| {
-            // loop: NOT-WORTH — a test's two or three variables
-            move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string())
-        };
-        // loop: NOT-WORTH — a path's few parts
-        let j = |parts: &[&str]| parts.iter().collect::<PathBuf>();
-        // the app's folder wins everywhere
-        assert_eq!(trt_root_for("windows", env(&[("CK_ENGINE_TRT_CACHE", "/app/cache/tensorrt"), ("LOCALAPPDATA", "C:/L")])), j(&["/app/cache/tensorrt"]));
-        assert_eq!(trt_root_for("linux", env(&[("XDG_CACHE_HOME", "/x"), ("HOME", "/h")])), j(&["/x", "corridorkey-desktop", "tensorrt"]));
-        assert_eq!(trt_root_for("linux", env(&[("XDG_CACHE_HOME", ""), ("HOME", "/h")])), j(&["/h", ".cache", "corridorkey-desktop", "tensorrt"]));
-        assert_eq!(trt_root_for("windows", env(&[("LOCALAPPDATA", "C:/L"), ("HOME", "/h")])), j(&["C:/L", "corridorkey-desktop", "cache", "tensorrt"]));
-        assert_eq!(trt_root_for("windows", env(&[("USERPROFILE", "C:/U")])), j(&["C:/U", "AppData", "Local", "corridorkey-desktop", "cache", "tensorrt"]));
-        assert_eq!(
-            trt_root_for("macos", env(&[("HOME", "/Users/m"), ("XDG_CACHE_HOME", "/x")])),
-            j(&["/Users/m", "Library", "Caches", "corridorkey-desktop", "tensorrt"])
-        );
-    }
-}
+mod tests;
