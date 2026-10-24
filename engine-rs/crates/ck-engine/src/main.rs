@@ -52,7 +52,10 @@ fn arg_value(args: &[String], name: &str) -> Option<String> {
 }
 
 fn main() {
-    // end with the app on every system (ck_core::proc::end_with_parent)
+    // end with the app on every system (ck_core::proc::end_with_parent). First thing, on the main thread, before any
+    // other thread exists: on Linux the parent-death signal is armed for this process from here on, and the protocol
+    // loop (`serve`) stays on this thread so the children it starts with proc::die_with_parent (the TensorRT
+    // builder) die with it: PR_SET_PDEATHSIG follows the spawning thread, not the process.
     ck_core::proc::end_with_parent(ck_core::proc::parent_pid_from(std::env::var("CK_ENGINE_PARENT_PID").ok().as_deref()));
     let args: Vec<String> = std::env::args().collect();
     // loop: NOT-WORTH — the command line, once per process

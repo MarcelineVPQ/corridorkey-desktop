@@ -118,7 +118,9 @@ pub fn build_engine(builder: &Path, onnx: &Path, piece: &str, b: &Bucket, dir: &
     std::fs::create_dir_all(dir).map_err(|e| BuildError::transient(format!("{}: {e}", dir.display())))?;
     let t = std::time::Instant::now();
     let mut cmd = std::process::Command::new(builder);
-    // a killed engine takes its builder with it (it holds the card for minutes)
+    // a killed engine takes its builder with it (it holds the card for minutes). Linux: the death signal follows the
+    // spawning THREAD, so this runs on the engine's main thread (trt_prepare, called by Pipeline::run from the
+    // protocol loop); never call build_engine from a worker thread (proc::die_with_parent)
     crate::proc::die_with_parent(&mut cmd);
     cmd.arg("--onnx")
         .arg(onnx)

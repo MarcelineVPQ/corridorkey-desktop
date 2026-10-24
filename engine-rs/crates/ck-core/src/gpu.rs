@@ -185,8 +185,24 @@ struct PciInfo {
     bus_id: [c_char; 32],
 }
 
+type MemFn = unsafe extern "C" fn(*mut c_void, *mut Memory) -> c_int;
+type NameFn = unsafe extern "C" fn(*mut c_void, *mut c_char, c_uint) -> c_int;
+type DriverFn = unsafe extern "C" fn(*mut c_char, c_uint) -> c_int;
+type ProcsFn = unsafe extern "C" fn(*mut c_void, *mut c_uint, *mut ProcInfo) -> c_int;
+
+/// NVML's calls this engine makes, looked up once when NVML is opened (they were looked up on every read).
+struct NvmlFns {
+    mem: MemFn,
+    name: NameFn,
+    driver: DriverFn,
+    /// absent on drivers older than NVML's v3 process list: what this process holds is then unknown
+    procs: Option<ProcsFn>,
+}
+
 struct Nvml {
-    lib: Library,
+    /// keeps the function pointers in `f` valid (never unloaded while the Nvml lives: it lives for the process)
+    _lib: Library,
+    f: NvmlFns,
     dev: *mut c_void,
 }
 
@@ -226,7 +242,13 @@ impl Nvml {
                 }
                 Pick::Hidden | Pick::Unknown => return None,
             };
-            Some(Nvml { lib, dev })
+            let f = NvmlFns {
+                mem: *lib.get::<MemFn>(b"nvmlDeviceGetMemoryInfo\0").ok()?,
+                name: *lib.get::<NameFn>(b"nvmlDeviceGetName\0").ok()?,
+                driver: *lib.get::<DriverFn>(b"nvmlSystemGetDriverVersion\0").ok()?,
+                procs: lib.get::<ProcsFn>(b"nvmlDeviceGetComputeRunningProcesses_v3\0").ok().map(|s| *s),
+            };
+            Some(Nvml { _lib: lib, f, dev })
         }
     }
 
@@ -268,11 +290,9 @@ impl Nvml {
     }
 
     fn info(&self) -> Option<GpuInfo> {
-        // SAFETY: buffers are sized as passed; types as documented
+        // SAFETY: buffers are sized as passed; types as documented; the library behind the pointers stays loaded
         unsafe {
-            let mem: Symbol<unsafe extern "C" fn(*mut c_void, *mut Memory) -> c_int> = self.lib.get(b"nvmlDeviceGetMemoryInfo\0").ok()?;
-            let name: Symbol<unsafe extern "C" fn(*mut c_void, *mut c_char, c_uint) -> c_int> = self.lib.get(b"nvmlDeviceGetName\0").ok()?;
-            let drv: Symbol<unsafe extern "C" fn(*mut c_char, c_uint) -> c_int> = self.lib.get(b"nvmlSystemGetDriverVersion\0").ok()?;
+            let (mem, name, drv) = (self.f.mem, self.f.name, self.f.driver);
             let mut m = Memory::default();
             if mem(self.dev, &mut m) != 0 {
                 return None;
@@ -292,10 +312,9 @@ impl Nvml {
 
     /// Graphics memory held by `pid` (compute processes), None when NVML can't tell.
     fn used_by(&self, pid: u32) -> Option<u64> {
-        // SAFETY: the buffer holds `n` entries as passed
+        // SAFETY: the buffer holds `n` entries as passed; the library behind the pointer stays loaded
         unsafe {
-            let procs: Symbol<unsafe extern "C" fn(*mut c_void, *mut c_uint, *mut ProcInfo) -> c_int> =
-                self.lib.get(b"nvmlDeviceGetComputeRunningProcesses_v3\0").ok()?;
+            let procs = self.f.procs?;
             let mut buf = [ProcInfo::default(); 128];
             let mut n = buf.len() as c_uint;
             if procs(self.dev, &mut n, buf.as_mut_ptr()) != 0 {

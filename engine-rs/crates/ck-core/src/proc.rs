@@ -58,6 +58,11 @@ pub fn output_timeout(cmd: &mut Command, timeout: Duration) -> Result<Output, St
 /// Linux: the child is killed when the thread that started it ends (the engine's main thread: the engine).
 /// For a child with no pipe to lose: the TensorRT builder holds the graphics card for minutes, and would
 /// otherwise go on building after the engine was killed (the app's cancel or quit, or the app gone).
+///
+/// INVARIANT: spawn such a child only from the engine's main thread (the protocol loop, `ck_engine::serve`, runs
+/// jobs there). PR_SET_PDEATHSIG fires when the parent THREAD exits, not the process (prctl(2)): a child started
+/// from a short-lived worker thread (a `std::thread::spawn` or a rayon task) would be killed as soon as that thread
+/// ends, in the middle of its work (tests: `a_child_started_to_die_with_its_parent_does`).
 pub fn die_with_parent(cmd: &mut Command) -> &mut Command {
     #[cfg(target_os = "linux")]
     {
