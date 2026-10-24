@@ -9,6 +9,8 @@ export const IPC = {
   pickRustEngine: "ck:pick-rust-engine",
   setRustEngine: "ck:set-rust-engine",
   installFfmpeg: "ck:install-ffmpeg",
+  startInstall: "ck:start-install",
+  stopInstall: "ck:stop-install",
   setJobOptions: "ck:set-job-options",
   removeJob: "ck:remove-job",
   retryJob: "ck:retry-job",

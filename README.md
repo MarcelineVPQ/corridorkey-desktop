@@ -13,6 +13,21 @@ Status: in development, Linux first.
 - A CorridorKey2.0 checkout set up as its README describes (Python venv, weights). The app
   asks for that folder on first start.
 
+## Install size
+
+Less than half the disk space of the original CorridorKey 2.0 setup (measured on the same PC, 2026-10-24):
+
+| Part | CorridorKey Desktop | Original CorridorKey 2.0 |
+|---|---|---|
+| App / code | **131 MB** (AppImage, engine inside) | 3 MB (Python scripts) |
+| Runtime | **~2.3 GB**: ONNX Runtime + CUDA/cuDNN | **~7.1 GB** Python venv: PyTorch 1.7 GB, NVIDIA libraries 4.3 GB, Triton 0.6 GB, other packages |
+| Models | **~3.1 GB** (fp16) | **~4.8 GB**: CorridorKey weights 2.5 GB + foundation models 2.3 GB |
+| **Total** | **~5.5 GB** | **~11.9 GB** |
+| Setup | Download one file; the app fetches the rest itself | Install Python, create a venv, pip install, run a download script |
+
+PyTorch's environment carries NVIDIA libraries the ONNX Runtime engine never uses (NCCL and
+cuSPARSELt, for multi-GPU and training), and the fp16 models are a third smaller.
+
 ## Develop
 
 ```

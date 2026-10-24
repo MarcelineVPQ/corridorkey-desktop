@@ -197,6 +197,24 @@ export interface EngineFiles {
   ort: EngineFileChoice[];
 }
 
+// The first-run install (electron/main/install.ts): the GPU runtime and the models into the data folder.
+export interface InstallState {
+  // what is missing, and its download size in bytes
+  needRuntime: boolean;
+  needModels: boolean;
+  bytes: number;
+  // each part's download size (shown before the start)
+  runtimeBytes: number;
+  modelsBytes: number;
+  // an NVIDIA driver is loaded (1.0 runs on NVIDIA graphics cards only)
+  nvidia: boolean;
+  status: "idle" | "running" | "error";
+  step: string | null;
+  done: number;
+  total: number;
+  error: string | null;
+}
+
 // The system's ffmpeg (electron/main/ffmpeg.ts): ok = ffmpeg + ffprobe with the encoders the engine writes with.
 export interface FfmpegState {
   ok: boolean;
@@ -229,6 +247,7 @@ export interface AppState {
   // what the Engine page's lists offer, and the paths the engine runs with (a setting of null = Automatic)
   engineFiles: EngineFiles;
   ffmpeg: FfmpegState;
+  install: InstallState;
   enginePaths: { binary: string | null; models: string | null; ort: string | null };
   // the desktop's colors (Desktop theme / desktop accent); null = couldn't be read or not asked
   desktopPalette: DesktopPalette | null;
@@ -246,6 +265,8 @@ export interface CorridorKeyApi {
   // null = Automatic; a path must be one the list offers (or the current setting)
   setRustEngine(what: "binary" | "models" | "ort", path: string | null): Promise<void>;
   installFfmpeg(): Promise<void>;
+  startInstall(): Promise<void>;
+  stopInstall(): Promise<void>;
   pathForFile(file: File): string;
   setJobOptions(id: string, options: JobOptions): Promise<void>;
   removeJob(id: string): Promise<void>;

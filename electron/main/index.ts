@@ -11,10 +11,11 @@ import { clearJobTemps, Queue } from "./queue";
 import { checkCheckout, checkRustEngine, chooseEngine, loadSettings, saveSettings } from "./settings";
 import { dataDir, effectivePath, findEngineFiles } from "./engineFind";
 import { checkFfmpeg, ffmpegState, installFfmpeg, installPlan, readOsRelease } from "./ffmpeg";
+import { MODELS_BYTES, RUNTIME_BYTES, installNeeds, runInstall } from "./install";
 import { readDesktopPalette, watchDesktopPalette } from "./desktopTheme";
 import { Updater } from "./updater";
 import { holdAppImageMountUntilExit } from "./appImageQuit";
-import type { AppState, FfmpegState, GpuInfo, Job, JobOptions, OutputName } from "../../src/shared/types";
+import type { AppState, FfmpegState, GpuInfo, InstallState, Job, JobOptions, OutputName } from "../../src/shared/types";
 import type { DesktopPalette } from "../../src/ui/theme/palette";
 import { IPC } from "./ipc";
 import { idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir } from "./validate";
@@ -67,6 +68,27 @@ function enginePaths() {
 let rustEngine = checkRustEngine(enginePaths().binary, enginePaths().models);
 // ffmpeg: unknown until the first check (at start, before the window shows); then after an install
 let ffmpeg: FfmpegState = { ok: true, problem: null, command: "", canInstall: false, note: null, installing: false, installError: null };
+// the first-run install: what is missing, and its progress while it runs
+function installIdle(prev?: InstallState): InstallState {
+  const need = installNeeds(enginePlaces().data);
+  // loop: NOT-WORTH — one stat of the NVIDIA driver's proc file per check
+  const nvidia = existsSync("/proc/driver/nvidia/version");
+  return {
+    needRuntime: need.runtime,
+    needModels: need.models,
+    bytes: need.bytes,
+    runtimeBytes: RUNTIME_BYTES,
+    modelsBytes: MODELS_BYTES,
+    nvidia,
+    status: prev?.status === "error" ? "error" : "idle",
+    step: null,
+    done: 0,
+    total: 0,
+    error: prev?.error ?? null,
+  };
+}
+let install = installIdle();
+let installAbort: AbortController | null = null;
 async function recheckFfmpeg(): Promise<void> {
   ffmpeg = { ...ffmpegState(await checkFfmpeg(), installPlan(readOsRelease())), installError: ffmpeg.installError };
   scheduleSend();
@@ -125,6 +147,7 @@ function state(): AppState {
     engineFiles,
     enginePaths: enginePaths(),
     ffmpeg,
+    install,
     desktopPalette,
     update: updater.state,
   };
@@ -334,6 +357,32 @@ function registerIpc(): void {
     persist();
     scheduleSend();
   });
+  ipcMain.handle(IPC.startInstall, async () => {
+    if (install.status === "running" || !install.nvidia) return;
+    installAbort = new AbortController();
+    install = { ...install, status: "running", error: null, step: "Starting", done: 0, total: install.bytes };
+    scheduleSend();
+    try {
+      await runInstall(enginePlaces().data, {
+        // loop: NOT-WORTH — the fetch the install is given; downloadVerified sets a connect timeout and a stall deadline [bounded: CONNECT_TIMEOUT_MS / STALL_TIMEOUT_MS]
+        fetch: (url, init) => net.fetch(url, init),
+        progress: (done, total, step) => {
+          install = { ...install, done, total, step };
+          scheduleSend();
+        },
+        abort: installAbort.signal,
+      });
+      install = installIdle();
+    } catch (e) {
+      // error: SHOWN — the Engine page's install section and its task; a retry resumes the downloads
+      // a stop is not an error: what arrived is kept and the next start resumes
+      install = installAbort?.signal.aborted ? { ...installIdle(), status: "idle", error: null } : { ...installIdle(), status: "error", error: (e as Error).message };
+    }
+    installAbort = null;
+    recheckEngines();
+    scheduleSend();
+  });
+  ipcMain.handle(IPC.stopInstall, () => installAbort?.abort());
   ipcMain.handle(IPC.installFfmpeg, async () => {
     if (ffmpeg.ok || ffmpeg.installing) return;
     ffmpeg = { ...ffmpeg, installing: true, installError: null };

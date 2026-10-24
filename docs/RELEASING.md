@@ -71,37 +71,32 @@ Feed format (written by `feedText` in `updateFeed.ts`, used by `tools/build-feed
 - Public key (base64 SPKI) in `TRUSTED_KEYS`, `electron/main/updateFeed.ts`:
   `MCowBQYDK2VwAyEAuUIsZgGZQ7RSvVoCGijbgkuw/TsHnSxRLke55eRhbnk=`
   (SHA-256 of the DER: `8c92245161ae36c9d3db3f819f5a09762b90a027e984a7c15483df40d52f21a0`).
-- CI signs with it as the Actions secret **`CK_FEED_KEY`** (the whole PEM). Set it once:
-
-  ```bash
-  gh secret set CK_FEED_KEY -R MarcelineVPQ/corridorkey-desktop < ~/.config/corridorkey-release/feed-signing.pem
-  ```
-
-  Without it the feed workflow fails; an unsigned feed is never published.
-- Rotation: add the new public key to `TRUSTED_KEYS` and release; once that release is out, switch the secret
-  to the new key; drop the old key in a later release.
+- `tools/release.sh` signs with it on this PC (read into `CK_FEED_KEY` for `tools/sign-feed.mjs`, never
+  printed). Without it the script stops before anything is published; an unsigned feed is never published.
+- Rotation: add the new public key to `TRUSTED_KEYS` and release; once that release is out, sign with the new
+  key; drop the old key in a later release.
 
 ## Cutting a release
+
+Releases are built on this PC and uploaded (Marcy 2026-10-24: GitHub doesn't build them; a CI Linux build once
+spent 29 minutes waiting on a package mirror).
 
 1. Set the version (package.json and the lock together):
    `npx -y npm@10.9.2 version X.Y.Z-dev.N --no-git-tag-version` (Development) or `… X.Y.Z …` (Stable).
    Add its `## X.Y.Z-dev.N` section to `CHANGELOG.md` (the release notes are that section). Commit on `main`.
-2. `npm run check` locally.
-3. `git tag vX.Y.Z-dev.N && git push origin main vX.Y.Z-dev.N`.
-4. `.github/workflows/release.yml` checks the tag shape (`vX.Y.Z` = Stable, `vX.Y.Z-dev.N` = Development) and
-   that it equals package.json's and the lock's version, runs `npm run check`, builds the AppImage
-   (`npm run dist:linux`), writes `SHA256SUMS` / `SHA512SUMS`, and publishes the release: a Development tag as
-   a **prerelease** (never *Latest*), a Stable tag as *Latest*.
-5. It then runs `.github/workflows/feed.yml`: `tools/build-feed.mjs` picks the release per channel from
-   GitHub's release list, downloads and hashes the AppImage, writes the feed; `tools/sign-feed.mjs` signs it;
-   `tools/verify-feed.mjs` checks it exactly as the app does; the changed feeds are committed to `main`.
-6. Check it: `node tools/verify-feed.mjs` (the live feeds) must say OK for the channel you released.
+2. `tools/release.sh`. It checks the version shape (`X.Y.Z` = Stable, `X.Y.Z-dev.N` = Development), the lock, a
+   clean `main` in step with GitHub, the CHANGELOG section and the signing key; runs `npm run check` and
+   `npm run dist:linux` (memory-capped); writes `SHA256SUMS` / `SHA512SUMS`; tags and pushes; publishes the release
+   (Development as a **prerelease**, never *Latest*; Stable as *Latest*); then `tools/build-feed.mjs` picks the
+   release per channel from GitHub's release list, downloads and hashes the AppImage and writes the feed,
+   `tools/sign-feed.mjs` signs it, `tools/verify-feed.mjs` checks it exactly as the app does, and the changed
+   feeds are committed to `main` and pushed.
+3. It ends with `node tools/verify-feed.mjs` on the live feeds, which must say OK for the channel you released.
 
 Development builds ship one feature at a time on the Development channel; a stable release goes out when its
 planned set is done and Marcy has done her QC (the DS5 rhythm).
 
-**Never edit the feeds by hand.** To regenerate them: Actions → Update feed → Run workflow
-(`gh workflow run feed.yml -R MarcelineVPQ/corridorkey-desktop`). It also runs daily.
+**Never edit the feeds by hand.** They are only ever written by `tools/release.sh` (build, sign, verify).
 
 ## A local signed test feed
 

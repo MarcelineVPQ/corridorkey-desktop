@@ -3,7 +3,7 @@
 // only while a job runs). Panel: where the ONNX Runtime engine and its models
 // live, and the CorridorKey checkout the PyTorch engine runs from (kept until
 // the ONNX engine replaces it; more when the in-app install lands, BACKLOG row 2).
-import { Check, Cpu, Film, FolderOpen, FolderCog, X } from "lucide-react";
+import { Check, Cpu, Download, Film, FolderOpen, FolderCog, X } from "lucide-react";
 import type { AppState } from "../../shared/types";
 import { Accordion, Row, Section } from "../panel/Section";
 import { MainBlock, SplitView } from "../panel/SplitView";
@@ -18,6 +18,9 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
   const kind = state.engineKind;
   const rust = state.rustEngine;
   const ff = state.ffmpeg;
+  const inst = state.install;
+  const needInstall = inst.needRuntime || inst.needModels;
+  const pct = inst.total ? Math.floor((inst.done / inst.total) * 100) : 0;
   const checks = (c: { ok: boolean; problems: string[] }, okText: string) =>
     c.ok ? (
       <div className="check-line ok">
@@ -179,6 +182,61 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
 
   const panel = (
     <Accordion page="engine" focus={props.focus}>
+      <Section
+        id="install"
+        icon={Download}
+        title="Runtime and models"
+        status={inst.status === "running" ? `downloading ${pct}%` : needInstall ? "not installed" : "installed"}
+        task={props.sectionTasks["engine/install"] ?? null}
+      >
+        {() =>
+          !needInstall ? (
+            <div className="check-line ok">
+              <Check size={15} aria-hidden /> The GPU runtime and the CorridorKey models are installed
+            </div>
+          ) : (
+            <>
+              <p className="hint-text">CorridorKey downloads what it runs on, once, into ~/.local/share/corridorkey-desktop:</p>
+              <ul className="check-list">
+                {inst.needRuntime && (
+                  <li className="hint-text">
+                    GPU runtime, {gb(inst.runtimeBytes / 1048576)} download: ONNX Runtime (Microsoft, MIT licence) and NVIDIA's CUDA and cuDNN libraries (NVIDIA licence), from pypi.org
+                  </li>
+                )}
+                {inst.needModels && (
+                  <li className="hint-text">
+                    CorridorKey models, {gb(inst.modelsBytes / 1048576)} download: by Corridor Digital, under the CorridorKey licence (free to use, never sold), from this app's GitHub releases
+                  </li>
+                )}
+              </ul>
+              {!inst.nvidia && <p className="hint-text">No NVIDIA graphics driver is loaded. CorridorKey Desktop runs on NVIDIA graphics cards.</p>}
+              {inst.status === "running" ? (
+                <>
+                  <div className="hint-text">
+                    {inst.step} · {gb(inst.done / 1048576)} of {gb(inst.total / 1048576)}
+                  </div>
+                  <div className="bar" role="progressbar" aria-valuemin={0} aria-valuemax={inst.total} aria-valuenow={inst.done}>
+                    <span style={{ width: `${pct}%` }} />
+                  </div>
+                  <button type="button" className="btn small" onClick={() => void window.ck.stopInstall()}>
+                    Stop
+                  </button>
+                </>
+              ) : (
+                <button type="button" className="btn small" disabled={!inst.nvidia} onClick={() => void window.ck.startInstall()}>
+                  <Download size={14} /> {inst.error ? "Try again (resumes)" : `Download and install (${gb(inst.bytes / 1048576)})`}
+                </button>
+              )}
+              {inst.error && (
+                <div className="check-line error">
+                  <X size={15} aria-hidden /> {inst.error}
+                </div>
+              )}
+              <p className="hint-text">Every file is checked against its SHA-256 before it is used. A stopped download continues where it left off.</p>
+            </>
+          )
+        }
+      </Section>
       <Section id="ffmpeg" icon={Film} title="ffmpeg" status={ff.ok ? "installed" : ff.installing ? "installing…" : "not installed"} task={props.sectionTasks["engine/ffmpeg"] ?? null}>
         {() =>
           ff.ok ? (
