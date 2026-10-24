@@ -17,7 +17,8 @@ stops the run (a broken decode can't pass as a result). Needs numpy and ffmpeg; 
 OPENCV_IO_ENABLE_OPENEXR, set here).
 
 Per clip: alpha MAE, max |diff|, SAD per frame, % of pixels off by more than 1/255 and 4/255, alpha PSNR;
-fg PSNR over all pixels and over the subject (reference alpha > 0.5); the worst frame by alpha MAE.
+fg PSNR over all pixels and over the subject (reference alpha > 0.5); the worst frame by alpha MAE; in the JSON
+also the hair-edge band (reference alpha 0.02-0.98): its MAE and % off by more than 1/255 and 4/255.
 Frames are streamed: memory stays at a few frames whatever the clip length.
 """
 import argparse
@@ -170,7 +171,8 @@ def self_check(src):
 def compare(ref, test):
     n = 0
     s_abs = s_gt1 = s_gt4 = s_sq = 0.0
-    px = 0
+    e_abs = e_gt1 = e_gt4 = 0.0
+    px = e_px = 0
     worst = 0.0
     worst_frame = (None, -1.0)
     ref_alpha = []
@@ -188,6 +190,12 @@ def compare(ref, test):
         if mae > worst_frame[1]:
             worst_frame = (n, mae)
         px += d.size
+        # the hair-edge band: semi-transparent reference pixels (0.02-0.98), where precision shows first
+        e = d[(a > 0.02) & (a < 0.98)]
+        e_abs += e.sum()
+        e_gt1 += (e > 1 / 255).sum()
+        e_gt4 += (e > 4 / 255).sum()
+        e_px += e.size
         ref_alpha.append(a > 0.5)
         n += 1
     if n == 0:
@@ -202,6 +210,10 @@ def compare(ref, test):
         "alpha_psnr_db": psnr(s_sq / px),
         "worst_frame": worst_frame[0],
         "worst_frame_alpha_mae": worst_frame[1],
+        "edge_band_px_per_frame": e_px / n,
+        "edge_band_mae": e_abs / e_px if e_px else None,
+        "edge_band_pct_gt_1_255": 100.0 * e_gt1 / e_px if e_px else None,
+        "edge_band_pct_gt_4_255": 100.0 * e_gt4 / e_px if e_px else None,
     }
     rf, tf = ref.fg(), test.fg()
     # the spike's .npz keeps fg as float16: round the other side the same way, or its storage dominates
