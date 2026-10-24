@@ -28,6 +28,21 @@ ssh <user>@<mac>.local 'sw_vers; sysctl -n machdep.cpu.brand_string hw.memsize'
 Then turn off password logins for SSH on the Mac (keys only): in `/etc/ssh/sshd_config.d/` add a file with
 `PasswordAuthentication no` and `KbdInteractiveAuthentication no`, and restart Remote Login (off and on).
 
+## The Mac's screen from the Linux PC (optional)
+
+For the times you want to see the Mac's desktop (first app runs, the original's plugins in Resolve or Nuke):
+
+1. On the Mac: System Settings → General → Sharing → turn on **Screen Sharing**. Under its ⓘ, allow your user only,
+   and turn on **VNC viewers may control screen with password** (most Linux viewers need it) with a password of its own.
+2. On the PC, through the SSH login above, so the screen travels encrypted and the Mac needn't expose port 5900:
+   ```
+   ssh -N -L 5900:localhost:5900 <user>@<mac>.local
+   ```
+   then connect **KRDC** (KDE) or **Remmina** to `vnc://localhost:5900`. (Remmina can also use Apple's own login
+   instead of the VNC password.)
+3. Headless: a Mac mini with no display attached often gives Screen Sharing a low resolution. An HDMI dummy plug
+   (a few dollars) makes it behave as if a monitor were connected.
+
 ## A test run (the gate, one command on the Linux PC)
 
 ```
