@@ -28,6 +28,47 @@ Less than half the disk space of the original CorridorKey 2.0 setup (measured on
 PyTorch's environment carries NVIDIA libraries the ONNX Runtime engine never uses (NCCL and
 cuSPARSELt, for multi-GPU and training), and the fp16 models are a third smaller.
 
+## Speed
+
+The same clips through the original CorridorKey 2.0 (PyTorch, its shipping bf16 mode) and CorridorKey
+Desktop's engine (Rust + ONNX Runtime, fp16, model set `2.0.0-onnx.3`), with the same settings: 12 GB graphics
+memory budget, automatic temporal window (both picked the same one), alpha + foreground outputs, no hint.
+Total = engine start to finish. Memory = peak of the engine's processes. Measured 2026-10-24 on an RTX 5080
+(driver 615.71.09), Ryzen 9 9950X3D, Kubuntu 26.04.
+
+| Clip | Original | CorridorKey Desktop | Faster | Graphics memory | RAM |
+|---|---|---|---|---|---|
+| godiva_close 960×720, 349 frames | 61.1 s | **39.6 s** | 1.54× | 9.37 → 9.15 GB | 9.45 → 5.38 GB |
+| locked_backdrop 1280×1080, 80 frames | 31.3 s | **19.5 s** | 1.61× | 11.97 → 8.07 GB | 9.23 → 5.15 GB |
+| metal_glasses 1280×1080, 139 frames | 42.3 s | **26.7 s** | 1.58× | 11.97 → 8.07 GB | 9.92 → 5.47 GB |
+| smoke 1280×1080, 250 frames | 74.7 s | **46.8 s** | 1.60× | 11.97 → 8.25 GB | 11.29 → 5.82 GB |
+| walking_sitting 1280×1080, 314 frames | 91.5 s | **56.1 s** | 1.63× | 11.97 → 8.13 GB | 11.44 → 5.88 GB |
+| with_motion_blur 1280×1080, 50 frames | 20.8 s | **11.4 s** | 1.82× | 12.03 → 9.44 GB | 8.86 → 3.70 GB |
+
+### Test it yourself
+
+The clips are free to download (their owners don't allow re-hosting, so they aren't in this repository):
+
+- **The six clips above:** [Hollywood Camera Work's green screen plates](http://www.hollywoodcamerawork.us/downloads.html)
+  (© 2009 Hollywood Camera Work; free to use and post results, mention them).
+- **4K plates (hair, glasses, green on green):** [Tears of Steel](https://mango.blender.org/production/4-tb-original-4k-footage-available-as-cc-by)
+  original footage, 4096×2160 scene-linear OpenEXR from a Sony F65 (CC-BY 3.0, Blender Foundation). The shots we
+  test with: [04_5h](https://media.xiph.org/mango/tearsofsteel-footage-exr/04_5h/linear/) (curly hair through
+  glasses), [04_5d](https://media.xiph.org/mango/tearsofsteel-footage-exr/04_5d/linear/) (dreadlocks, curls,
+  bright lamps), [08_3a](https://media.xiph.org/mango/tearsofsteel-footage-exr/08_3a/linear/) (wispy grey hair,
+  a green prop against the green screen), [04_2c](https://media.xiph.org/mango/tearsofsteel-footage-exr/04_2c/linear/)
+  (two actors, grey hair, low light); 120 frames from the middle of each.
+
+Run both engines the same way with `tools/engine_bench.mjs` (it writes this table's numbers, `bench.md`):
+
+```
+node tools/engine_bench.mjs python --python <CorridorKey2.0>/venv/bin/python --script engine/ck_engine.py \
+  --package-root <CorridorKey2.0> --out out/pytorch --vram-budget 12 CLIP...
+node tools/engine_bench.mjs rust --bin <corridorkey-engine> --models <models>/2.0.0-onnx.3 \
+  --ort <runtime>/onnxruntime/capi/libonnxruntime.so.1.31.0 --env LD_LIBRARY_PATH=<runtime's library folders> \
+  --device cuda --out out/rust --vram-budget 12 CLIP...
+```
+
 ## Develop
 
 ```
