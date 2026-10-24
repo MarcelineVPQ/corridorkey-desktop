@@ -16,16 +16,18 @@
 #   - --password-store=basic: Chromium never looks for a keyring.
 #   - its own headless Wayland compositor (kwin_wayland --virtual), the same
 #     native-Wayland path the app requires (no X11: HDR, Marcy 2026-10-21).
-#   - memory-capped (systemd-run scope, MemoryMax=4G; started from your session, outside env -i).
+#   - memory-capped (systemd-run scope, MemoryMax=4G, or --mem SIZE: running jobs needs the engine's 5-6 GB too, so a
+#     keying test needs about 14G; started from your session, outside env -i).
 set -euo pipefail
 APP="$(cd "$(dirname "$0")/.." && pwd)"
-STATE="" PORT="" SIZE="1400x900" ENVS=() PACKAGED=""
+STATE="" PORT="" SIZE="1400x900" ENVS=() PACKAGED="" MEM="4G"
 # loop: NOT-WORTH — the command line
 while [ $# -gt 0 ]; do
   case "$1" in
     --state) STATE="$2"; shift 2 ;;
     --port) PORT="$2"; shift 2 ;;
     --size) SIZE="$2"; shift 2 ;;
+    --mem) MEM="$2"; shift 2 ;;
     --env) ENVS+=("$2"); shift 2 ;;
     --packaged) PACKAGED="$(cd "$2" && pwd)"; shift 2 ;;
     *) echo "isolated.sh: unknown argument $1" >&2; exit 2 ;;
@@ -56,7 +58,7 @@ RUN
 chmod +x "$STATE/iso/run-app.sh"
 # not exec: the EXIT trap above removes RUN only if this shell is still there when the app ends (with exec every run
 # left a /tmp/ck-iso-* folder behind)
-systemd-run --user --scope --quiet --collect -p MemoryMax=4G -p MemorySwapMax=0 -- \
+systemd-run --user --scope --quiet --collect -p MemoryMax="$MEM" -p MemorySwapMax=0 -- \
   env -i HOME="$STATE/home" USER="$USER" PATH="/usr/local/bin:/usr/bin:/bin" LANG="${LANG:-C.UTF-8}" \
   XDG_RUNTIME_DIR="$RUN" XDG_CONFIG_HOME="$STATE/home/.config" XDG_CACHE_HOME="$STATE/home/.cache" XDG_DATA_HOME="$STATE/home/.local/share" \
   XDG_SESSION_TYPE=wayland GTK_USE_PORTAL=0 NO_AT_BRIDGE=1 GSETTINGS_BACKEND=memory GIO_USE_VFS=local "${ENVS[@]}" \

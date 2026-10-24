@@ -17,12 +17,29 @@ export function stagingDir(outputDir: string): string {
 
 /** Before a run: makes the output folder (remembering whether this job made it) and clears what a crashed app left
  * in the staging folder (ours by name). The engine gets the staging folder as its output_dir. */
+/** The background deletes still running (discard); discardsSettled() waits for them (tests, and before a quit). */
+const discarding = new Set<Promise<void>>();
+export async function discardsSettled(): Promise<void> {
+  // loop: SERIAL-REQUIRED — waits for the few deletes in flight [bounded: each is one folder's rm]
+  await Promise.all([...discarding]);
+}
+
+/** A discarded staging folder's name while it is deleted in the background (hidden, ours by name). */
+export const DISCARD_PREFIX = ".corridorkey-discarded-";
+
 export function prepare(outputDir: string): { staging: string; madeOutputDir: boolean } {
   // loop: NOT-WORTH — one stat per job start
   const madeOutputDir = !existsSync(outputDir);
   const staging = stagingDir(outputDir);
   // loop: NOT-WORTH — one folder per job start (normally absent)
   rmSync(staging, { recursive: true, force: true });
+  // a discarded job's files whose background delete didn't finish (the app quit meanwhile)
+  try {
+    // loop: NOT-WORTH — one readdir per job start, then the rare leftovers
+    for (const n of readdirSync(outputDir).filter((x) => x.startsWith(DISCARD_PREFIX))) void rm(join(outputDir, n), { recursive: true, force: true });
+  } catch {
+    // error: NOT-WORTH — no output folder yet: nothing left over
+  }
   // loop: NOT-WORTH — one mkdir per job start
   mkdirSync(staging, { recursive: true });
   return { staging, madeOutputDir };
@@ -109,22 +126,34 @@ export function discard(outputDir: string, madeOutputDir: boolean): string {
     // error: NOT-WORTH — no staging folder: the engine never got to write
     n = 0;
   }
+  // The folder is renamed aside at once (it leaves the output folder in one step) and deleted in the background: a
+  // cancelled 4K EXR job holds thousands of frames, and deleting them here blocked the window (leak audit 2026-10-24, #11).
+  const aside = join(outputDir, `${DISCARD_PREFIX}${Date.now()}`);
   try {
-    // loop: NOT-WORTH — removes one failed job's started files (a few videos or EXR folders) once; ≤ 2 retries 50 ms apart
-    // for a file a killed engine's last syscall was still creating [bounded: 2 retries]
-    rmSync(staging, { recursive: true, force: true, maxRetries: 2, retryDelay: 50 });
+    // loop: NOT-WORTH — one rename per failed job
+    renameSync(staging, aside);
   } catch (e) {
-    // error: SHOWN — the row names the folder and the reason
-    return `Couldn't remove the files it had started in ${staging}: ${(e as Error).message}`;
-  }
-  if (madeOutputDir) {
-    try {
-      // loop: NOT-WORTH — one rmdir; it fails (and is left) when anything else is in the folder
-      rmdirSync(outputDir);
-    } catch {
-      // error: NOT-WORTH — the folder holds something else now: it stays
+    if ((e as { code?: string }).code !== "ENOENT") {
+      // error: SHOWN — the row names the folder and the reason
+      return `Couldn't remove the files it had started in ${staging}: ${(e as Error).message}`;
     }
   }
+  // loop: NOT-WORTH — one background delete per failed job; ≤ 2 retries 50 ms apart for a file a killed engine was still
+  // creating [bounded: 2 retries]
+  const done = rm(aside, { recursive: true, force: true, maxRetries: 2, retryDelay: 50 })
+    .then(() => {
+      if (!madeOutputDir) return;
+      try {
+        // loop: NOT-WORTH — one rmdir; it fails (and is left) when anything else is in the folder
+        rmdirSync(outputDir);
+      } catch {
+        // error: NOT-WORTH — the folder holds something else now: it stays
+      }
+    })
+    // error: SHOWN — logged; prepare() removes a leftover aside folder at the next run into this folder
+    .catch((e: unknown) => console.error(`[partial] could not remove ${aside}:`, e))
+    .finally(() => discarding.delete(done));
+  discarding.add(done);
   const files = n === 1 ? "the 1 file it had started" : `the ${n} files it had started`;
   return n === 0 ? "It hadn't written any files." : `Removed ${files}; earlier results in the folder are untouched.`;
 }

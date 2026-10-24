@@ -3,11 +3,9 @@
 // (readouts are always shown, never folded).
 import { useEffect, useState } from "react";
 import { FolderOpen, RotateCcw } from "lucide-react";
-import type { Job } from "../shared/types";
+import { LOG_SHOWN, type Job } from "../shared/types";
 import { duration, remaining, STAGE_ORDER, STAGE_TEXT } from "./format";
 import { MainBlock } from "./panel/SplitView";
-
-const LOG_SHOWN = 12;
 
 export function JobView({ job }: { job: Job }) {
   // A 1 s tick for the elapsed clock, only while this job runs and the page is visible (rule 3).
@@ -109,7 +107,7 @@ export function JobView({ job }: { job: Job }) {
       )}
 
       {job.log.length > 0 && (
-        <MainBlock title={`Engine log · last ${Math.min(LOG_SHOWN, job.log.length)} of ${job.log.length} lines`}>
+        <MainBlock title={`Engine log · last ${Math.min(LOG_SHOWN, job.log.length)} of ${job.logLines ?? job.log.length} lines`}>
           <pre className="log">{job.log.slice(-LOG_SHOWN).join("\n")}</pre>
         </MainBlock>
       )}

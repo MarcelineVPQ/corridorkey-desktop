@@ -1,3 +1,4 @@
+import { discardsSettled } from "../../electron/main/partial";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -271,6 +272,7 @@ describe("a job's started files (staging, partial.ts)", () => {
     h.q.stop();
     expect(h.killed()).toBe(1);
     expect(h.q.jobs[0].status).toBe("cancelled");
+    await discardsSettled();
     earlierIntact(dir, "c1");
     expect(h.q.jobs[0].partial).toMatch(/^Removed the 3 files/);
   });
@@ -284,6 +286,7 @@ describe("a job's started files (staging, partial.ts)", () => {
     h.exit(null, "SIGSEGV");
     await h.flush();
     expect(h.q.jobs[0].status).toBe("failed");
+    await discardsSettled();
     expect(existsSync(join(OUT, "out_x1"))).toBe(false);
   });
 

@@ -44,7 +44,7 @@ export function SetupPage(props: { state: AppState; openQueue: () => void; openG
         <Step n={3} title="Add your first clip" done={hasClips}>
           {!hasClips && (
             <>
-              <p className="hint-text">A video file, a folder of frames (EXR, PNG, TIFF…) or a folder of clips. Drop them anywhere on this window, or:</p>
+              <p className="hint-text">A video file, a folder of frames (EXR, PNG or JPEG) or a folder of clips. Drop them anywhere on this window, or:</p>
               <div className="btn-row">
                 <button type="button" className="btn small primary" onClick={() => void window.ck.pickClips("files")}>
                   <FolderOpen size={14} /> Add clips…

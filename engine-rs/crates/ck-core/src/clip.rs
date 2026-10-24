@@ -120,8 +120,43 @@ fn normpath(path: &str) -> String {
     }
 }
 
-/// video_io.frame_paths: *.exr, *.png, *.jpg, *.jpeg directly in the folder (case-sensitive, as glob on
-/// Linux), sorted by path.
+/// "f_2" before "f_10": runs of digits compare by value, the rest by text (then plain text, so the order is total).
+pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let (mut x, mut y) = (a.as_bytes(), b.as_bytes());
+    // loop: NOT-WORTH — one pass over two file names, per comparison of a sort
+    while let (Some(&ca), Some(&cb)) = (x.first(), y.first()) {
+        if ca.is_ascii_digit() && cb.is_ascii_digit() {
+            // loop: NOT-WORTH — a digit run's length, per comparison
+            let na = x.iter().take_while(|c| c.is_ascii_digit()).count();
+            // loop: NOT-WORTH — as above
+            let nb = y.iter().take_while(|c| c.is_ascii_digit()).count();
+            // loop: NOT-WORTH — strips leading zeros of one digit run
+            let (da, db) = (strip_zeros(&x[..na]), strip_zeros(&y[..nb]));
+            let ord = da.len().cmp(&db.len()).then_with(|| da.cmp(db));
+            if ord != std::cmp::Ordering::Equal {
+                return ord;
+            }
+            x = &x[na..];
+            y = &y[nb..];
+        } else {
+            if ca != cb {
+                return ca.cmp(&cb);
+            }
+            x = &x[1..];
+            y = &y[1..];
+        }
+    }
+    x.len().cmp(&y.len()).then_with(|| a.cmp(b))
+}
+
+fn strip_zeros(d: &[u8]) -> &[u8] {
+    // loop: NOT-WORTH — the leading zeros of one digit run
+    let i = d.iter().position(|&c| c != b'0').unwrap_or(d.len());
+    &d[i..]
+}
+
+/// video_io.frame_paths, with upstream's two bugs fixed (CorridorKey2.0 PR #4): *.exr, *.png, *.jpg, *.jpeg directly in
+/// the folder, the extension in any case (.EXR too), in natural order (f_2 before f_10, not as text).
 pub fn frame_paths(dir: &Path) -> Result<Vec<PathBuf>, Error> {
     let mut out: Vec<String> = Vec::new();
     let rd = std::fs::read_dir(dir).map_err(|e| Error::input(format!("{}: {e}", dir.display())))?;
@@ -129,12 +164,15 @@ pub fn frame_paths(dir: &Path) -> Result<Vec<PathBuf>, Error> {
     for e in rd.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
         // loop: NOT-WORTH — four extensions per file name, once per probe
-        let ok = [".exr", ".png", ".jpg", ".jpeg"].iter().any(|x| name.ends_with(x) && name.len() > x.len() && !name.starts_with('.'));
+        let lower = name.to_ascii_lowercase();
+        // loop: NOT-WORTH — four extensions per file name, once per probe
+        let ok = [".exr", ".png", ".jpg", ".jpeg"].iter().any(|x| lower.ends_with(x) && name.len() > x.len() && !name.starts_with('.'));
         if ok && e.path().is_file() {
             out.push(e.path().to_string_lossy().into_owned());
         }
     }
-    out.sort();
+    // loop: NOT-WORTH — sorts the folder's file names once per probe
+    out.sort_by(|a, b| natural_cmp(a, b));
     // loop: NOT-WORTH — the folder's file names, once per probe
     Ok(out.into_iter().map(PathBuf::from).collect())
 }
@@ -281,6 +319,22 @@ pub fn probe_frame_dir(dir: &Path, num_frames: i64, fps: f64, exr_linear: bool) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frames_in_natural_order_any_case() {
+        let dir = std::env::temp_dir().join(format!("ck-frames-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // loop: NOT-WORTH — a test's few files
+        for n in ["f_1.png", "f_10.PNG", "f_2.Png", "notes.txt", "f_002b.exr"] {
+            std::fs::write(dir.join(n), b"").unwrap();
+        }
+        // loop: NOT-WORTH — a test's few paths
+        let names: Vec<String> = frame_paths(&dir).unwrap().iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(names, ["f_1.png", "f_2.Png", "f_002b.exr", "f_10.PNG"]);
+        assert_eq!(natural_cmp("frame_0009", "frame_0010"), std::cmp::Ordering::Less);
+        assert_eq!(natural_cmp("a9", "a09"), std::cmp::Ordering::Greater);
+    }
 
     #[test]
     fn clip_names() {

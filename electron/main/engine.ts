@@ -129,8 +129,7 @@ export class EngineProcess {
     // lifetime: OK — both readers end with the child's streams
     createInterface({ input: child.stdout! }).on("line", (line) => this.line(line));
     createInterface({ input: child.stderr! }).on("line", (line) => {
-      this.stderr.push(line);
-      if (this.stderr.length > STDERR_LINES) this.stderr.shift();
+      this.tail(line);
     });
     child.on("error", (err) => this.fail(new Error(`engine could not start: ${err.message}`)));
     child.on("exit", (code, signal) => {
@@ -153,6 +152,13 @@ export class EngineProcess {
   send(msg: Record<string, unknown>): void {
     if (!this.child?.stdin?.writable) return;
     this.child.stdin.write(JSON.stringify(msg) + "\n");
+  }
+
+  /** Keep the last STDERR_LINES lines (stderr, and stdout that isn't protocol), never more (leak audit 2026-10-24, #1). */
+  private tail(line: string): void {
+    this.stderr.push(line);
+    // loop: NOT-WORTH — drops at most one line per added line
+    while (this.stderr.length > STDERR_LINES) this.stderr.shift();
   }
 
   stderrTail(): string[] {
@@ -202,7 +208,7 @@ export class EngineProcess {
       reply = JSON.parse(line) as EngineReply;
     } catch {
       // error: SHOWN — a non-protocol line on stdout goes to the stderr tail the error report shows
-      this.stderr.push(`[stdout] ${line}`);
+      this.tail(`[stdout] ${line}`);
       return;
     }
     if (reply.type === "pong" && this.pongWait) {

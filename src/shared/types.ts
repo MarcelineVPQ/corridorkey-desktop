@@ -76,6 +76,9 @@ export interface JobError {
   stderrTail: string[];
 }
 
+// the engine-log lines the page shows per job (and all a state push carries)
+export const LOG_SHOWN = 12;
+
 export interface Job {
   id: string;
   clip: ClipInfo;
@@ -98,6 +101,8 @@ export interface Job {
   // a failed / cancelled job: what happened to the files it had started (removed, or why not); null otherwise
   partial: string | null;
   log: string[];
+  // the log's full length: a state push carries only its last LOG_SHOWN lines (the job keeps them all)
+  logLines?: number;
 }
 
 export interface Pong {

@@ -24,16 +24,50 @@ const PROBE_TIMEOUT_MS = 120_000;
 // one frame seeked and scaled: well under a second normally
 const STILL_TIMEOUT_MS = 60_000;
 
-/** The frame files of a folder, sorted by name like the runtime reads them. */
+/** "f_2" before "f_10": digit runs compare by value, the rest by text, then plain text (the engine's natural_cmp, clip.rs). */
+export function naturalCompare(a: string, b: string): number {
+  const re = /(\d+)|(\D+)/g;
+  // loop: NOT-WORTH — two file names split into runs, per comparison of a sort
+  const pa = a.match(re) ?? [];
+  // loop: NOT-WORTH — as above
+  const pb = b.match(re) ?? [];
+  // loop: NOT-WORTH — the runs of two file names, per comparison
+  for (let i = 0; i < Math.min(pa.length, pb.length); i++) {
+    const [x, y] = [pa[i], pb[i]];
+    if (/^\d/.test(x) && /^\d/.test(y)) {
+      const [dx, dy] = [x.replace(/^0+/, ""), y.replace(/^0+/, "")];
+      if (dx.length !== dy.length) return dx.length - dy.length;
+      if (dx !== dy) return dx < dy ? -1 : 1;
+      // equal values with different zero padding: decided by what follows, then by plain text below
+      if (x.length !== y.length) continue;
+    } else if (x !== y) {
+      // runs that differ: compare char by char like the engine (byte order)
+      const n = Math.min(x.length, y.length);
+      // loop: NOT-WORTH — the characters of one run
+      for (let k = 0; k < n; k++) if (x[k] !== y[k]) return x.charCodeAt(k) - y.charCodeAt(k);
+      return x.length - y.length;
+    }
+  }
+  if (pa.length !== pb.length) return pa.length - pb.length;
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** The frame files of a folder (any case of .exr/.png/.jpg), in the engine's natural order (CorridorKey2.0 PR #4). */
 export function frameFiles(dir: string): string[] {
   // loop: HOT-PATH-OK — one readdir per added folder, not per frame of playback
   return (
     readdirSync(dir)
       // loop: NOT-WORTH — a frame folder's names, once per probe
       .filter((f) => FRAME_EXT.has(extname(f).toLowerCase()))
-      .sort()
+      .sort(naturalCompare)
       .map((f) => join(dir, f))
   );
+}
+
+/** Whether a folder holds any frame file: a scan, no sort (the sort happens once, in probeClip; leak audit 2026-10-24, #9). */
+export function hasFrames(dir: string): boolean {
+  // loop: NOT-WORTH — one readdir per added folder, stops at the first frame file
+  return readdirSync(dir).some((f) => FRAME_EXT.has(extname(f).toLowerCase()));
 }
 
 /** Expand dropped paths into clips: videos, frame folders, and folders of clips (one level). */
@@ -55,7 +89,7 @@ export function expandPaths(paths: string[]): { path: string; kind: "video" | "f
       out.push({ path: join(p, input), kind: "frames" });
       continue;
     }
-    if (frameFiles(p).length > 0) {
+    if (hasFrames(p)) {
       out.push({ path: p, kind: "frames" });
       continue;
     }

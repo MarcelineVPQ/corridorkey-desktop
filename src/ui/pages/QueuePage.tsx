@@ -1,5 +1,6 @@
 // Queue: the clips (left), the selected clip's readouts (main view), its
 // settings in the panel. Start/Stop and Add clips sit in the page's own bar.
+import { memo } from "react";
 import { FolderPlus, Play, Plus, Square, Trash2 } from "lucide-react";
 import type { AppState, Job } from "../../shared/types";
 import { missingInput } from "../../shared/tasks";
@@ -107,7 +108,17 @@ export function QueuePage(props: {
   );
 }
 
-function JobRow({ job, selected, onSelect }: { job: Job; selected: boolean; onSelect: () => void }) {
+/**
+ * One queue row. Memoised: every state push brings fresh job objects over IPC, so without it every row of a long queue
+ * re-rendered on every push; a row now renders again only when what it shows changed (leak audit 2026-10-24, #5).
+ */
+const JobRow = memo(JobRowView, (a, b) => a.selected === b.selected && rowKey(a.job) === rowKey(b.job));
+
+/** What a row shows, as one string: the job without its log and stills (the row never shows those). */
+// loop: NOT-WORTH — serialises one job's row fields, per row per state push (no log, no stills)
+const rowKey = (j: Job) => JSON.stringify({ ...j, log: undefined, logLines: undefined, stills: undefined });
+
+function JobRowView({ job, selected, onSelect }: { job: Job; selected: boolean; onSelect: () => void }) {
   const pct = job.framesTotal ? (job.framesDone / job.framesTotal) * 100 : 0;
   const need = missingInput(job);
   return (
@@ -120,7 +131,7 @@ function JobRow({ job, selected, onSelect }: { job: Job; selected: boolean; onSe
       onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onSelect()}
     >
       <span className="thumb-wrap">
-        {job.clip.thumb ? <img className="thumb" src={job.clip.thumb} alt="" width={96} /> : <div className="thumb" />}
+        {job.clip.thumb ? <img className="thumb" src={job.clip.thumb} alt="" width={96} loading="lazy" decoding="async" /> : <div className="thumb" />}
         {need && <i className="task" aria-hidden />}
       </span>
       <div style={{ minWidth: 0 }}>

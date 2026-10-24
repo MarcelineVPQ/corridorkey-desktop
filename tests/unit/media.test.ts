@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { clipName, expandPaths, findFirstFrameHint, findHintVideo, isCompanionHint } from "../../electron/main/media";
+import { clipName, expandPaths, findFirstFrameHint, findHintVideo, frameFiles, isCompanionHint, naturalCompare } from "../../electron/main/media";
 
 // every folder a test made goes at the end (each run used to leave five in /tmp, which is RAM on many desktops)
 const made: string[] = [];
@@ -44,5 +44,20 @@ describe("expandPaths", () => {
   it("a folder of frames is one clip", () => {
     const d = dir(["f_0001.exr", "f_0002.exr"]);
     expect(expandPaths([d])).toEqual([{ path: d, kind: "frames" }]);
+  });
+});
+
+describe("frame order (CorridorKey2.0 PR #4: natural order, any extension case)", () => {
+  it("sorts like the engine: f_2 before f_10, padding by value", () => {
+    expect(["f_10.PNG", "f_1.png", "f_002b.exr", "f_2.Png"].sort(naturalCompare)).toEqual(["f_1.png", "f_2.Png", "f_002b.exr", "f_10.PNG"]);
+    expect(naturalCompare("frame_0009", "frame_0010")).toBeLessThan(0);
+    expect(naturalCompare("a9", "a09")).toBeGreaterThan(0);
+  });
+  it("finds .EXR / .Png frames and leaves other files out", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ck-frames-"));
+    // loop: NOT-WORTH — a test's few files
+    for (const n of ["f_1.png", "f_10.PNG", "f_2.Png", "notes.txt"]) writeFileSync(join(dir, n), "");
+    expect(frameFiles(dir).map((p) => basename(p))).toEqual(["f_1.png", "f_2.Png", "f_10.PNG"]);
+    rmSync(dir, { recursive: true, force: true });
   });
 });

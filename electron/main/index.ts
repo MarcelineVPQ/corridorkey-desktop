@@ -17,7 +17,7 @@ import { pruneCache, removeStorage, storageItems } from "./storage";
 import { readDesktopPalette, watchDesktopPalette } from "./desktopTheme";
 import { Updater } from "./updater";
 import { holdAppImageMountUntilExit } from "./appImageQuit";
-import type { AppState, FfmpegState, GpuInfo, InstallState, StorageItem, Job, JobOptions, OutputName } from "../../src/shared/types";
+import { LOG_SHOWN, type AppState, type FfmpegState, type GpuInfo, type InstallState, type StorageItem, type Job, type JobOptions, type OutputName } from "../../src/shared/types";
 import type { DesktopPalette } from "../../src/ui/theme/palette";
 import { IPC } from "./ipc";
 import { idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir } from "./validate";
@@ -165,7 +165,9 @@ const queue = new Queue({
 function state(): AppState {
   return {
     version: app.getVersion(),
-    jobs: queue.jobs,
+    // each job's log trimmed to what the page shows: a long queue's pushes stay small (leak audit 2026-10-24, #4)
+    // loop: HOT-PATH-OK — one shallow copy per job per state push (≤ 10/s while shown)
+    jobs: queue.jobs.map((j) => (j.log.length > LOG_SHOWN ? { ...j, log: j.log.slice(-LOG_SHOWN), logLines: j.log.length } : j)),
     queueRunning: queue.running,
     engine: queue.engine,
     gpu,
