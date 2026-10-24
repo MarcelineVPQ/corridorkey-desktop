@@ -74,7 +74,6 @@ const LANDSCAPE_ONLY_SETS: [&str; 2] = ["2.0.0-onnx.1", "2.0.0-onnx.2"];
 /// A model's size on disk: the .onnx file and its external weights (.onnx.data) next to it.
 pub(crate) fn model_bytes(file: &Path) -> u64 {
     let data = PathBuf::from(format!("{}.data", file.display()));
-    // loop: NOT-WORTH — two files' sizes
     [file.to_path_buf(), data].iter().filter_map(|p| std::fs::metadata(p).ok()).map(|m| m.len()).sum()
 }
 
@@ -105,7 +104,6 @@ impl ModelSet {
             let f = self.dir.join(name);
             return f.exists().then_some(f);
         }
-        // loop: NOT-WORTH — ≤ four default names per network
         default_names(piece, p).into_iter().map(|n| self.dir.join(n)).find(|f| f.exists())
     }
 
@@ -366,7 +364,6 @@ pub(crate) fn shrinks(piece: &str, setting: &ArenaShrink, shared: bool) -> bool 
     match setting {
         ArenaShrink::All => true,
         ArenaShrink::None => false,
-        // loop: NOT-WORTH — a short list of network names, once per session load
         ArenaShrink::List(list) => list.iter().any(|p| p == piece),
         ArenaShrink::Auto => shared,
     }
@@ -406,7 +403,6 @@ impl Data<'_> {
         match self {
             Data::F32(v) => v.len(),
             Data::F16(v) => v.len(),
-            // loop: NOT-WORTH — ≤ 80 slices
             Data::Bf16(parts) => parts.iter().map(|p| p.len()).sum(),
             Data::F16Ref(v) => v.len(),
             Data::F32Ref(v) => v.len(),
@@ -501,7 +497,6 @@ impl Net {
 
     /// Whether the graph takes input `name` as float16.
     pub(crate) fn wants_f16(&self, name: &str) -> bool {
-        // loop: NOT-WORTH — ≤ six input names per input
         self.f16_inputs.iter().any(|n| n == name)
     }
 

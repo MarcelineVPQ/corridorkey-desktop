@@ -86,10 +86,8 @@ pub(crate) fn pick_card(visible: Option<&str>, order: Option<&str>, cuda0: Optio
         return Pick::Mig(first);
     }
     if let Some(c) = cuda0 {
-        // loop: NOT-WORTH — the machine's few cards, once per NVML open
         let by_uuid = c.uuid.as_ref().and_then(|u| cards.iter().find(|k| k.uuid.eq_ignore_ascii_case(u)));
         let key = c.pci.as_deref().and_then(pci_key);
-        // loop: NOT-WORTH — the machine's few cards, once per NVML open
         let by_pci = key.and_then(|k| cards.iter().find(|card| pci_key(&card.pci) == Some(k)));
         if let Some(card) = by_uuid.or(by_pci) {
             return Pick::Card(card.index);
@@ -325,7 +323,6 @@ impl Nvml {
             if mine.contains(&u64::MAX) {
                 return None; // NVML_VALUE_NOT_AVAILABLE
             }
-            // loop: NOT-WORTH — this process's entries (one or two)
             Some(mine.iter().sum())
         }
     }
@@ -365,7 +362,6 @@ const NVINFER_LIBS: [&str; 2] = ["libnvinfer.so.10", "libnvinfer.so"];
 /// TensorRT's version from libnvinfer (getInferLibVersion: major*10000 + minor*100 + patch for 10.x),
 /// as "10.16.0"; None when the library is not there.
 pub(crate) fn tensorrt_version() -> Option<String> {
-    // loop: NOT-WORTH — two library names
     for name in NVINFER_LIBS {
         // SAFETY: getInferLibVersion takes nothing and returns an int32
         unsafe {
@@ -410,7 +406,6 @@ pub(crate) fn host_available() -> Option<u64> {
 /// MemAvailable of a /proc/meminfo text, in bytes.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn meminfo_available(s: &str) -> Option<u64> {
-    // loop: NOT-WORTH — /proc/meminfo's ~55 lines, once per CPU job
     s.lines().find_map(|l| l.strip_prefix("MemAvailable:")).and_then(|r| r.trim().trim_end_matches("kB").trim().parse::<u64>().ok()).map(|kb| kb * 1024)
 }
 

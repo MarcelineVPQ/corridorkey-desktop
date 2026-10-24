@@ -96,7 +96,6 @@ fn splitext(base: &str) -> String {
 fn normpath(path: &str) -> String {
     let abs = path.starts_with('/');
     let mut parts: Vec<&str> = Vec::new();
-    // loop: NOT-WORTH — the components of one path
     for c in path.split('/') {
         match c {
             "" | "." => {}
@@ -147,7 +146,6 @@ pub(crate) fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
 }
 
 fn strip_zeros(d: &[u8]) -> &[u8] {
-    // loop: NOT-WORTH — the leading zeros of one digit run
     let i = d.iter().position(|&c| c != b'0').unwrap_or(d.len());
     &d[i..]
 }
@@ -227,7 +225,6 @@ pub(crate) fn read_probe(json: &serde_json::Value) -> Result<VideoProbe, Error> 
     }
     let rot = st["side_data_list"]
         .as_array()
-        // loop: NOT-WORTH — a stream's side data (a few entries), once per probe
         .and_then(|l| l.iter().find_map(|d| d.get("rotation").map(num)))
         .or_else(|| st["tags"].get("rotate").map(num))
         .unwrap_or(0.0);

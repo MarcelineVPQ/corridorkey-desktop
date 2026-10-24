@@ -33,7 +33,6 @@ impl TempPaths {
 pub(crate) struct Temps(Vec<PathBuf>);
 impl Drop for Temps {
     fn drop(&mut self) {
-        // loop: NOT-WORTH — four temp files at the job's end
         self.0.iter().for_each(|p| {
             let _ = std::fs::remove_file(p);
         });

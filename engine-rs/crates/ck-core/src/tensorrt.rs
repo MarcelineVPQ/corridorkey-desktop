@@ -33,7 +33,6 @@ pub(crate) struct Bucket {
 }
 
 fn range_of(v: usize, ranges: &[(usize, usize)]) -> Option<(usize, usize)> {
-    // loop: NOT-WORTH — eight ranges
     ranges.iter().copied().find(|(lo, hi)| v >= *lo && v <= *hi)
 }
 
@@ -148,7 +147,6 @@ pub(crate) fn build_engine(
         None => Err(BuildError::transient(format!(
             "ck-trt-build exited with {}: {}",
             out.status,
-            // loop: NOT-WORTH — the builder's stderr, once per failed build
             String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("")
         ))),
     }
@@ -189,12 +187,10 @@ pub(crate) fn deterministic_failure(why: &str) -> bool {
         "no answer within",
         "cuda error",
     ];
-    // loop: NOT-WORTH — a dozen markers over one error line, once per failed build
     if TRANSIENT.iter().any(|m| low.contains(m)) {
         return false;
     }
     const DETERMINISTIC: [&str; 7] = ["could not find any implementation", "no tactic", "parse:", "bad shapes", "no shape range", "missing --", "bad argument"];
-    // loop: NOT-WORTH — a few markers over one error line, once per failed build
     DETERMINISTIC.iter().any(|m| low.contains(m))
 }
 
@@ -275,7 +271,6 @@ pub(crate) fn stub_path(dir: &Path, piece: &str) -> PathBuf {
 /// "nvidia-geforce-rtx-5080": a folder-safe card name.
 pub(crate) fn slug(s: &str) -> String {
     let mut out = String::new();
-    // loop: NOT-WORTH — one short name
     for c in s.chars() {
         if c.is_ascii_alphanumeric() || c == '.' {
             out.push(c.to_ascii_lowercase());
@@ -351,7 +346,6 @@ pub(crate) fn note_failure(dir: &Path, piece: &str, stamp: &str, workspace_mb: u
 /// models, or a bigger workspace (a larger memory budget) tries the build again.
 pub(crate) fn failed_before(dir: &Path, piece: &str, stamp: &str, workspace_mb: Option<u64>) -> Option<String> {
     let text = std::fs::read_to_string(failed_path(dir, piece)).ok()?;
-    // loop: NOT-WORTH — the three lines of one small file, once per network per TensorRT job
     let mut lines = text.lines();
     if lines.next()?.trim() != stamp {
         return None;

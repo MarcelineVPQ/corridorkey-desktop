@@ -60,12 +60,10 @@ fn main() {
     // settings, so even a bad setting doesn't leave an engine without a parent.)
     ck_core::proc::end_with_parent(ck_core::proc::parent_pid_from(std::env::var("CK_ENGINE_PARENT_PID").ok().as_deref()));
     let args: Vec<String> = std::env::args().collect();
-    // loop: NOT-WORTH — the command line, once per process
     if args.iter().any(|a| a == "--help" || a == "-h") {
         eprintln!("usage: corridorkey-engine --models DIR [--ort libonnxruntime.so] [--device auto|cuda|cpu]");
         return;
     }
-    // loop: NOT-WORTH — the command line, once per process
     if args.iter().any(|a| a == "--version") {
         println!("corridorkey-engine {ENGINE_VERSION} (protocol {PROTOCOL})");
         return;

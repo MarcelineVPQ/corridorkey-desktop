@@ -31,7 +31,6 @@ pub fn taper_weights(tc: usize, overlap: usize, is_first: bool, is_last: bool) -
         w[..n].copy_from_slice(&ramp);
     }
     if !is_last {
-        // loop: NOT-WORTH — ≤ 40 weights, once per window
         w[tc - n..].iter_mut().zip(ramp.iter().rev()).for_each(|(d, &r)| *d = r);
     }
     w

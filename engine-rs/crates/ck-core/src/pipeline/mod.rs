@@ -53,7 +53,6 @@ struct FrameReport {
 
 impl FrameReport {
     fn report(&mut self, writers: &[(String, Box<dyn Writer>)], sink: &mut dyn Sink, force: bool) {
-        // loop: NOT-WORTH — ≤ four writers, ≤ 4 times per second
         let done = writers.iter().map(|(_, w)| w.frames()).min().unwrap_or(0);
         self.count(done, sink, force);
     }
@@ -181,7 +180,6 @@ impl<L: Loader> Pipeline<L> {
 
     /// Move the loaded networks' counters into `stats` (and zero them).
     fn fold_stats(&mut self) {
-        // loop: NOT-WORTH — at most five networks
         for (p, n) in self.nets.iter_mut() {
             let e = self.stats.entry(*p).or_default();
             let c = n.counters();
@@ -338,7 +336,6 @@ impl<L: Loader> Pipeline<L> {
 
     /// Drop loads started ahead (a job ends or restarts).
     fn drop_pending(&mut self) {
-        // loop: NOT-WORTH — at most two loads [bounded: each load ends (ORT session creation)]
         for (_, _, h) in self.pending.drain(..) {
             // loop: NOT-WORTH — joins loads that were started ahead [bounded: ORT session creation ends]
             let _ = h.join();
@@ -349,7 +346,6 @@ impl<L: Loader> Pipeline<L> {
     fn set_shrink(&mut self) {
         let shared = self.nets.contains_key("stage1") && self.nets.contains_key("stage2");
         let setting = &self.arena_shrink;
-        // loop: NOT-WORTH — at most five networks
         for (p, n) in self.nets.iter_mut() {
             n.set_shrink(n.provider() != Provider::Cpu && crate::runtime::shrinks(p, setting, shared));
         }
@@ -363,7 +359,6 @@ impl<L: Loader> Pipeline<L> {
     fn arena_limit(&self, key: &ModelKey, piece: &str) -> Option<u64> {
         let cap = key.vram_cap?;
         let others: u64 = crate::runtime::PIECES
-            // loop: NOT-WORTH — five model files' sizes, once per session load
             .iter()
             .filter(|p| **p != piece)
             .filter_map(|p| self.models.file(p, key.precision))
@@ -631,7 +626,6 @@ impl Pipeline<OrtLoader> {
         // release every writer (its encoder finishes the file), the first failure wins
         let rel_t = Instant::now();
         let mut rel: Result<(), Error> = Ok(());
-        // loop: NOT-WORTH — at most four writers
         for (_, wr) in writers.iter_mut() {
             if let Err(e) = wr.release() {
                 if rel.is_ok() {
@@ -710,13 +704,11 @@ impl Pipeline<OrtLoader> {
             let names: Vec<String> = stale.iter().filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).collect();
             sink.log(&format!("  TensorRT: the graphics driver or TensorRT changed; engines built for {} can't be used and were removed", names.join(", ")));
             msg["cache_invalidated"] = json!(names);
-            // loop: NOT-WORTH — a few stale folders
             for s in &stale {
                 let _ = std::fs::remove_dir_all(s);
             }
         }
         let bdir = dir.join(bucket.key());
-        // loop: NOT-WORTH — five networks' stamps, once per TensorRT job
         let built = ready.iter().all(|p| {
             let stamp = self.models.trt_file(p, trt_prec).map(|f| crate::tensorrt::source_stamp(&f)).unwrap_or_default();
             crate::tensorrt::built(&bdir.join(p), p, &stamp) || crate::tensorrt::failed_before(&bdir.join(p), p, &stamp, None).is_some()

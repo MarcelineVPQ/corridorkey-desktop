@@ -33,7 +33,6 @@ fn table(low_vram: bool) -> Table {
 
 /// runtime._interp: piecewise-linear through the points, extrapolating past both ends.
 fn interp(x: f64, points: &[(f64, f64)]) -> f64 {
-    // loop: NOT-WORTH — at most seven points
     for i in 0..points.len().saturating_sub(1) {
         let ((x0, y0), (x1, y1)) = (points[i], points[i + 1]);
         if x <= x1 || i + 2 == points.len() {
@@ -76,7 +75,6 @@ impl Profile {
 pub fn select_vram_profile(shape_hw: (usize, usize), num_frames: usize, budget_gb: f64) -> Profile {
     let mp = (shape_hw.0 * shape_hw.1) as f64 / 1e6;
     let mut estimate = 0.0;
-    // loop: NOT-WORTH — seven window lengths x two modes
     for &chunk in LOW.0.iter().rev() {
         // loop: NOT-WORTH — two modes
         for low in [false, true] {

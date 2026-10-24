@@ -116,7 +116,6 @@ const OOM_MESSAGES: [&str; 5] = ["out of memory", "failed to allocate", "cudaerr
 /// Whether an ONNX Runtime / CUDA message says the memory ran out.
 pub(crate) fn is_oom_message(m: &str) -> bool {
     let low = m.to_lowercase();
-    // loop: NOT-WORTH — five markers over one error message
     OOM_MESSAGES.iter().any(|k| low.contains(k))
 }
 
@@ -154,7 +153,6 @@ pub fn panic_message(p: &(dyn std::any::Any + Send)) -> String {
 }
 
 fn first_line(s: &str) -> &str {
-    // loop: NOT-WORTH — first line of an error message
     s.lines().next().unwrap_or(s)
 }
 

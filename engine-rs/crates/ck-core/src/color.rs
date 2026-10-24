@@ -162,7 +162,6 @@ mod finite_tests {
         assert_eq!(finite_input(f32::NAN), 0.0);
         assert_eq!(finite_input(f32::INFINITY), INPUT_MAX);
         assert_eq!(finite_input(f32::NEG_INFINITY), -INPUT_MAX);
-        // loop: NOT-WORTH — a few test values
         for v in [0.0f32, -0.5, 1.0, 40.0, 70000.0, 1e20] {
             assert_eq!(finite_input(v), v);
         }

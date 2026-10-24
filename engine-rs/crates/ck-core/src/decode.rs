@@ -119,7 +119,6 @@ const TURBOJPEG_LIBS: &[&str] = &["libturbojpeg.so.0"];
 fn turbojpeg() -> Option<&'static (libloading::Library, &'static str)> {
     static LIB: std::sync::OnceLock<Option<(libloading::Library, &'static str)>> = std::sync::OnceLock::new();
     LIB.get_or_init(|| {
-        // loop: NOT-WORTH — a few library names, once per process
         TURBOJPEG_LIBS.iter().find_map(|n| {
             // SAFETY: loading libjpeg-turbo runs only its own initialisers
             unsafe { libloading::Library::new(n) }.ok().map(|l| (l, *n))
@@ -150,7 +149,6 @@ fn loaded_path(part: &str) -> Option<String> {
     #[cfg(target_os = "linux")]
     {
         let maps = std::fs::read_to_string("/proc/self/maps").ok()?;
-        // loop: NOT-WORTH — this process's mappings, once per ping or job
         maps.lines().filter_map(|l| l.split_whitespace().nth(5)).find(|p| p.contains(part)).map(str::to_string)
     }
     #[cfg(not(target_os = "linux"))]
@@ -171,7 +169,6 @@ pub fn tool_version(bin: &str) -> Result<String, String> {
 
 /// The word after "version" on the first line.
 fn version_token(text: &str) -> Option<&str> {
-    // loop: NOT-WORTH — the words of one line
     let mut words = text.lines().next()?.split_whitespace();
     // loop: NOT-WORTH — as above
     words.find(|w| *w == "version")?;
@@ -284,7 +281,6 @@ pub(crate) fn image_size(p: &Path) -> Result<(usize, usize), Error> {
         // the header only (decoding a 4K frame to learn its size took ~50 ms): the first layer with R, G and B,
         // the one read_still reads
         let meta = exr::meta::MetaData::read_from_file(p, false).map_err(|e| Error::input(format!("{}: {e}", p.display())))?;
-        // loop: NOT-WORTH — a few layers, once per clip
         let has = |hd: &exr::meta::header::Header, c: &str| hd.channels.list.iter().any(|ch| ch.name.eq_case_insensitive(c));
         // loop: NOT-WORTH — a few layers, once per clip
         let hd = meta
@@ -559,7 +555,6 @@ pub fn prep_hint(still: Still, meta: &ClipMeta) -> Vec<f32> {
 /// folder). 4 channels: the alpha; 3: the first channel cv2 reads (blue); its size must be the clip's.
 pub(crate) fn load_initial_hint(path: &Path, meta: &ClipMeta) -> Result<Vec<f32>, Error> {
     let file = if path.is_dir() {
-        // loop: NOT-WORTH — a hint folder's file names, once per job
         crate::clip::frame_paths(path)?.into_iter().find(|p| p.is_file())
     } else if path.is_file() {
         Some(path.to_path_buf())

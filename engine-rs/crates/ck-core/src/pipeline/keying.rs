@@ -165,13 +165,9 @@ impl<L: Loader> Pipeline<L> {
         let starts = window_starts(t_all, plan.chunk, plan.stride);
         sink.log(&format!("    Hann stage1: chunk={}, stride={}, windows={}, baton_grid={w16}x{h16}", plan.chunk, plan.stride, starts.len()));
         let ro = RenderOpts {
-            // loop: NOT-WORTH — ≤ four output names, once per attempt
             alpha: job.outputs.iter().any(|o| o == "alpha"),
-            // loop: NOT-WORTH — ≤ four output names, once per attempt
             fg: job.outputs.iter().any(|o| o == "fg"),
-            // loop: NOT-WORTH — ≤ four output names, once per attempt
             checker: job.outputs.iter().any(|o| o == "checker"),
-            // loop: NOT-WORTH — ≤ four output names, once per attempt
             cutout: job.outputs.iter().any(|o| o == "cutout"),
             despill: job.despill_strength as f32,
             cutout_linear: job.cutout_linear,
@@ -657,7 +653,6 @@ impl<L: Loader> Pipeline<L> {
         let (sh, sw) = (meta.shape_h, meta.shape_w);
         let outs = self.net("stage2")?.run(vec![("rgb", vec![1, 1, 3, sh, sw], rgb), ("baton", vec![1, 1, BATON_CH, sh / 16, sw / 16], baton)])?;
         // the logits go to the render thread as stage 2 made them (float16 there becomes float32 off this thread)
-        // loop: NOT-WORTH — one output per stage-2 call
         let (_, logits) = outs.into_iter().next().ok_or_else(|| Error::engine("stage2: no logits".into()))?;
         if logits.len() != 4 * sh * sw {
             return Err(Error::engine(format!("stage2: {} logits for {}x{}", logits.len(), sw, sh)));

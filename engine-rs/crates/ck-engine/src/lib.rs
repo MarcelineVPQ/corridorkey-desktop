@@ -97,7 +97,6 @@ impl Inbox {
     /// Whether a `cancel` for `id` is among the lines read but not yet taken.
     fn cancel_queued(&self, id: &str) -> bool {
         let g = self.state.lock().unwrap();
-        // loop: NOT-WORTH — the few requests queued behind a job, once per job start
         g.lines.iter().flatten().any(|l| {
             serde_json::from_str::<Value>(l)
                 .is_ok_and(|v| v.get("cmd").and_then(|c| c.as_str()) == Some("cancel") && str_field(&v, "id").as_deref() == Some(id))

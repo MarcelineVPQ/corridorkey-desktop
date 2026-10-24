@@ -213,7 +213,6 @@ fn lanczos4_coeffs(fx: f32) -> [f32; 8] {
     let y0 = -(fx + 3.0) * std::f64::consts::PI * 0.25;
     let (s0, c0) = (y0.sin(), y0.cos());
     let mut sum = 0.0f64;
-    // loop: NOT-WORTH — eight taps
     for i in 0..8 {
         let y = -(fx + 3.0 - i as f64) * std::f64::consts::PI * 0.25;
         let v = (CS[i][0] * s0 + CS[i][1] * c0) / (y * y);
@@ -221,7 +220,6 @@ fn lanczos4_coeffs(fx: f32) -> [f32; 8] {
         sum += v;
     }
     let inv = 1.0 / sum;
-    // loop: NOT-WORTH — eight taps
     c.iter_mut().for_each(|v| *v = (*v as f64 * inv) as f32);
     c
 }
