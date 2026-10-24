@@ -1,8 +1,9 @@
 //! TensorRT, opt-in per job (docs/BACKLOG.md row 12; OFF by default, the CUDA provider is the normal path).
 //!
 //! Engines are built for shape RANGES, not single shapes: the padded height and width (multiples of the
-//! runtime's 128 px quantum, each axis on its own, so the aspect ratio counts) each fall in one range, and the
-//! range sets the longest stage-1 window its engines take. One engine set per range is built once, by
+//! runtime's 128 px quantum, each axis on its own, so the aspect ratio counts) each fall in one range. A TensorRT
+//! job uses exactly the window (and low-VRAM staging) the CUDA path picks for the clip, so both give the same
+//! matte; its engines are built for that window. One engine set per range is built once, by
 //! `ck-trt-build` (strongly typed: the TensorRT-ready exports keep their weight GEMMs and convolutions in FP32,
 //! the rest FP16, which matches the CUDA FP16 parity; ONNX Runtime's own TensorRT build is weakly typed and
 //! measured 2-4x the error), and cached on disk under a folder named for the card, its driver, TensorRT and
@@ -15,19 +16,20 @@ use std::path::{Path, PathBuf};
 /// close to the clips in it (TensorRT sizes its working memory, and so the longest window, for the largest shape).
 /// 720p pads to 768x1280, 1080p to 1152x1920, UHD to 2176x3840.
 pub const DIM_RANGES: [(usize, usize); 8] = [(128, 512), (640, 896), (1024, 1280), (1408, 1664), (1792, 2176), (2304, 2816), (2944, 3456), (3584, 4096)];
-/// Stage-1 window lengths a range can get: the longest whose window × largest frame fits PIXEL_FRAMES_MAX.
-pub const WINDOWS: [usize; 5] = [24, 16, 12, 8, 4];
-/// Measured (RTX 5080, TensorRT 10.16, 12 GB budget): stage 1 for windows up to 24 at 1152x1280 builds with
-/// 6.5 GB of graphics memory and runs with a 3.1 GiB context; 24 at 1152x2176 doesn't build (no tactic fits),
-/// 48 at 1152x2176 went past 12 GiB while building. So: window x largest frame <= 24 x 1152 x 1280.
-pub const PIXEL_FRAMES_MAX: usize = 24 * 1152 * 1280;
+/// The largest padded side TensorRT is used for. UHD (2176 x 3840 and up) runs on CUDA until its builds are
+/// measured (BACKLOG row 12, step 3).
+pub const MAX_SIDE: usize = 2176;
+/// Frames per call of the foundation models in low-VRAM mode (pipeline.rs, the foundations prepass).
+pub const FOUNDATION_CHUNK: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Bucket {
     pub h: (usize, usize),
     pub w: (usize, usize),
-    /// stage-1 window lengths (1 ..= the longest)
+    /// stage-1 window lengths (1 ..= the job's window)
     pub t: (usize, usize),
+    /// foundation-model batch (1 ..= FOUNDATION_CHUNK in low-VRAM mode, else the window)
+    pub f: (usize, usize),
 }
 
 fn range_of(v: usize, ranges: &[(usize, usize)]) -> Option<(usize, usize)> {
@@ -35,19 +37,23 @@ fn range_of(v: usize, ranges: &[(usize, usize)]) -> Option<(usize, usize)> {
     ranges.iter().copied().find(|(lo, hi)| v >= *lo && v <= *hi)
 }
 
-/// The engine set for padded (H, W). None: outside every range, or even a 4-frame window is too big (CUDA runs it).
-pub fn bucket_for(shape_h: usize, shape_w: usize) -> Option<Bucket> {
+/// The engine set for padded (H, W) and the job's window (the CUDA path's choice; measured 2026-10-24: at the
+/// same window TensorRT's mattes match CUDA's within fp16 rounding, at a shorter one they don't). None: outside
+/// every range or larger than MAX_SIDE (CUDA runs it).
+pub fn bucket_for(shape_h: usize, shape_w: usize, window: usize, low_vram: bool) -> Option<Bucket> {
+    if shape_h > MAX_SIDE || shape_w > MAX_SIDE || window == 0 {
+        return None;
+    }
     let h = range_of(shape_h, &DIM_RANGES)?;
     let w = range_of(shape_w, &DIM_RANGES)?;
-    // loop: NOT-WORTH — five window lengths
-    let tmax = WINDOWS.iter().copied().find(|t| t * h.1 * w.1 <= PIXEL_FRAMES_MAX)?;
-    Some(Bucket { h, w, t: (1, tmax) })
+    let f = if low_vram { FOUNDATION_CHUNK.min(window) } else { window };
+    Some(Bucket { h, w, t: (1, window), f: (1, f) })
 }
 
 impl Bucket {
-    /// "h1152-1536_w1152-1536_t1-16": the folder of this range's engines.
+    /// "h1024-1280_w1024-1280_t1-48_f1-4": the folder of this range's engines.
     pub fn key(&self) -> String {
-        format!("h{}-{}_w{}-{}_t{}-{}", self.h.0, self.h.1, self.w.0, self.w.1, self.t.0, self.t.1)
+        format!("h{}-{}_w{}-{}_t{}-{}_f{}-{}", self.h.0, self.h.1, self.w.0, self.w.1, self.t.0, self.t.1, self.f.0, self.f.1)
     }
 }
 
@@ -76,8 +82,9 @@ pub fn profile(piece: &str, b: &Bucket) -> Option<(String, String, String)> {
     if !["cradio", "moge", "rvm", "stage1", "stage2"].contains(&piece) {
         return None;
     }
-    // RVM and stage 2 take one frame; the foundations and stage 1 a window (foundations: 4 in low-VRAM mode)
-    Some((at(b.h.0, b.w.0, b.t.0), at(b.h.1, b.w.1, b.t.1), at(b.h.1, b.w.1, b.t.1)))
+    // RVM and stage 2 take one frame; stage 1 a window; the foundations a window, or FOUNDATION_CHUNK in low-VRAM mode
+    let t = if piece == "cradio" || piece == "moge" { b.f } else { b.t };
+    Some((at(b.h.0, b.w.0, t.0), at(b.h.1, b.w.1, t.1), at(b.h.1, b.w.1, t.1)))
 }
 
 /// The engine builder: CK_ENGINE_TRT_BUILD, else `ck-trt-build` next to this program.
@@ -193,6 +200,35 @@ pub fn source_path(dir: &Path, piece: &str) -> PathBuf {
     dir.join(format!("{piece}.source"))
 }
 
+/// `<dir>/<piece>.failed`: a build that found no tactic, remembered so later jobs don't spend minutes on it again
+/// (measured 2026-10-24: stage 1 for 80-frame windows retried its failing build on every 80-frame job, ~2.5 min each).
+pub fn failed_path(dir: &Path, piece: &str) -> PathBuf {
+    dir.join(format!("{piece}.failed"))
+}
+
+/// Remember that `piece` failed to build from the export with `stamp` and `workspace_mb` of working memory.
+pub fn record_failure(dir: &Path, piece: &str, stamp: &str, workspace_mb: u64, why: &str) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    std::fs::write(failed_path(dir, piece), format!("{stamp}\n{workspace_mb}\n{why}\n"))
+}
+
+/// Why `piece` failed before, if it failed from this export with at least `workspace_mb` (None: any workspace).
+/// The cache folder is already per card, driver, TensorRT and ONNX Runtime, so a change of any of those, of the
+/// models, or a bigger workspace (a larger memory budget) tries the build again.
+pub fn failed_before(dir: &Path, piece: &str, stamp: &str, workspace_mb: Option<u64>) -> Option<String> {
+    let text = std::fs::read_to_string(failed_path(dir, piece)).ok()?;
+    // loop: NOT-WORTH — the three lines of one small file, once per network per TensorRT job
+    let mut lines = text.lines();
+    if lines.next()?.trim() != stamp {
+        return None;
+    }
+    let ws: u64 = lines.next()?.trim().parse().ok()?;
+    if workspace_mb.is_some_and(|w| w > ws) {
+        return None;
+    }
+    Some(lines.next().unwrap_or("").to_string())
+}
+
 /// Whether `piece`'s engine and its stub exist in `dir`, built from the export with this `stamp`.
 pub fn built(dir: &Path, piece: &str, stamp: &str) -> bool {
     engine_path(dir, piece).exists()
@@ -205,45 +241,50 @@ mod tests {
     use super::*;
 
     #[test]
-    fn buckets_per_axis() {
-        // 1080p: 1152 x 1920 -> windows up to 12 (12 x 1280 x 2176 fits, 16 doesn't)
-        let b = bucket_for(1152, 1920).unwrap();
-        assert_eq!(b.key(), "h1024-1280_w1792-2176_t1-12");
-        // 1280x1080 -> 1152 x 1280: windows up to 16
-        assert_eq!(bucket_for(1152, 1280).unwrap().key(), "h1024-1280_w1024-1280_t1-16");
-        // 960x720 -> 768 x 1024, and 720p: 24
-        assert_eq!(bucket_for(768, 1024).unwrap().key(), "h640-896_w1024-1280_t1-24");
-        assert_eq!(bucket_for(768, 1280).unwrap().key(), "h640-896_w1024-1280_t1-24");
+    fn buckets_follow_the_cuda_window() {
+        // 1280x1080 -> 1152 x 1280 at CUDA's 48/24 low-VRAM window: foundations in fours
+        assert_eq!(bucket_for(1152, 1280, 48, true).unwrap().key(), "h1024-1280_w1024-1280_t1-48_f1-4");
+        // 960x720 -> 768 x 1024 at 80/40
+        assert_eq!(bucket_for(768, 1024, 80, true).unwrap().key(), "h640-896_w1024-1280_t1-80_f1-4");
+        // all networks loaded together: the foundations take the whole window
+        assert_eq!(bucket_for(1152, 1280, 16, false).unwrap().key(), "h1024-1280_w1024-1280_t1-16_f1-16");
+        // a window shorter than four frames
+        assert_eq!(bucket_for(1152, 1280, 2, true).unwrap().f, (1, 2));
         // portrait: a different bucket (aspect ratio counts)
-        assert_eq!(bucket_for(1920, 1152).unwrap().key(), "h1792-2176_w1024-1280_t1-12");
-        // UHD 2176 x 3840: even 4 frames are too big
-        assert_eq!(bucket_for(2176, 3840), None);
-        assert_eq!(bucket_for(4352, 7680), None);
-        // every bucket's longest window really fits
-        // loop: NOT-WORTH — 8 x 8 ranges in a test
-        for h in DIM_RANGES {
-            // loop: NOT-WORTH — 8 ranges
-            for w in DIM_RANGES {
-                if let Some(b) = bucket_for(h.1, w.1) {
-                    assert!(b.t.1 * h.1 * w.1 <= PIXEL_FRAMES_MAX);
-                }
-            }
-        }
+        assert_eq!(bucket_for(1920, 1152, 24, true).unwrap().key(), "h1792-2176_w1024-1280_t1-24_f1-4");
+        // UHD stays on CUDA (step 3), and so does anything past the ranges
+        assert_eq!(bucket_for(2176, 3840, 8, true), None);
+        assert_eq!(bucket_for(4352, 7680, 4, true), None);
+        assert_eq!(bucket_for(1152, 1280, 0, true), None);
     }
 
     #[test]
     fn profiles_cover_the_range() {
-        let b = bucket_for(1152, 1280).unwrap();
+        let b = bucket_for(1152, 1280, 48, true).unwrap();
         let (min, opt, max) = profile("stage1", &b).unwrap();
         assert!(min.starts_with("rgb:1x1x3x1024x1024,"), "{min}");
-        assert!(max.contains("cradio:1x16x1152x20x20"), "{max}");
+        assert!(max.contains("cradio:1x48x1152x20x20"), "{max}");
         assert_eq!(opt, max);
         let (min, _, max) = profile("rvm", &b).unwrap();
         assert_eq!(min, "frame:1x3x256x256,state:1x257x384");
         assert_eq!(max, "frame:1x3x320x320,state:1x401x384");
         let (min, _, max) = profile("moge", &b).unwrap();
-        assert_eq!((min.as_str(), max.as_str()), ("rgb:1x3x224x224", "rgb:16x3x280x280"));
+        assert_eq!((min.as_str(), max.as_str()), ("rgb:1x3x224x224", "rgb:4x3x280x280"));
         assert!(profile("nope", &b).is_none());
+    }
+
+    #[test]
+    fn a_failed_build_is_remembered_until_something_changes() {
+        let dir = std::env::temp_dir().join(format!("ck-trt-failed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(failed_before(&dir, "stage1", "s1", Some(7000)), None);
+        record_failure(&dir, "stage1", "s1", 7000, "no tactic").unwrap();
+        assert_eq!(failed_before(&dir, "stage1", "s1", Some(7000)).as_deref(), Some("no tactic"));
+        assert_eq!(failed_before(&dir, "stage1", "s1", None).as_deref(), Some("no tactic"));
+        // new models, or more working memory: try again
+        assert_eq!(failed_before(&dir, "stage1", "s2", Some(7000)), None);
+        assert_eq!(failed_before(&dir, "stage1", "s1", Some(8192)), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

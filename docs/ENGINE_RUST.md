@@ -329,18 +329,19 @@ networks, where TensorRT ignores the FP32 islands; its FP16 kernels measured 2-4
 network (stage 2 alpha MAE 1.24e-4 vs 1.58e-5). Strongly typed with the islands: 1.38e-5 (per-network table in
 docs/ONNX_EXPORT.md).
 
-**Ranges.** Padded H and W each fall in one of 128-512, 640-896, 1024-1280, 1408-1664, 1792-2176, 2304-2816,
-2944-3456, 3584-4096 (720p → h640-896 w1024-1280, 1080p → h1024-1280 w1792-2176, 1280×1080 → h1024-1280
-w1024-1280). A range's longest stage-1 window is the longest of 24/16/12/8/4 with window × largest frame ≤
-24 × 1152 × 1280 (stage 1 for windows to 24 at 1152×1280 built with 6.5 GB of graphics memory, context 3.1 GiB;
-to 24 at 1152×2176 found no tactic; to 48 at 1152×2176 went past 12 GiB while building and was stopped). So
-1080p gets 12-frame windows, 1280×1080 16, 720p 24; UHD is outside every range (CUDA). An automatic TensorRT job
-uses that window with stride half of it and no low-VRAM staging (`memory` reply `estimate_basis:
-"tensorrt-range"`). Engines live under `<cache>/<card>__drv…__trt…__ort…__fp16/<range>/<network>/`, with the
-export's size and time stamp (`<network>.source`): a new model set rebuilds; a driver / TensorRT / ORT change
-removes the folder and says so. A network without an export, or whose build or load fails, runs on CUDA and the
-`provider` reply lists it under `fallbacks` with why; `build_s` gives each build's seconds; `progress` stage
-`optimize` names the network being built ("stage 1 (4/5)").
+**Ranges and windows (2026-10-24, step 2).** Padded H and W each fall in one of 128-512, 640-896, 1024-1280,
+1408-1664, 1792-2176 (720p → h640-896 w1024-1280, 1080p → h1024-1280 w1792-2176, 1280×1080 → h1024-1280
+w1024-1280); a side over 2176 (UHD) runs on CUDA until step 3. A TensorRT job takes **exactly the CUDA path's
+window and low-VRAM staging** (`select_vram_profile`), so both give the same matte, and its engines are built
+for that window: stage 1 for 1..window frames, the foundations for 1..4 frames in low-VRAM mode (their prepass
+batch) or the whole window otherwise; the folder is `<range>_t1-<window>_f1-<batch>`. Why: at the old
+memory-capped windows (12-24 frames, against CUDA's 48/80) the mattes differed from CUDA's by up to 27 % of pixels
+> 1/255 (godiva_close); at CUDA's window they match within fp16 rounding (below). The builder's workspace is 60 %
+of the job's budget (else of the card's free memory), at most 8 GiB: stage 1 for 48 frames at 1152×1280 needs a
+6.1 GB tactic (a 4 GiB cap found none; 7 GiB built it in 138 s, peak 13.9 GB on the card, context 6.3 GiB), so it
+builds on 16 GB cards; a network whose build finds no tactic runs on CUDA at the same window (`fallbacks`).
+Before step 2: a range's longest window was the longest of 24/16/12/8/4 with window × largest frame ≤
+24 × 1152 × 1280, all networks loaded together.
 
 **One-time builds** (seconds, `build_s`; host peak of the whole bench process tree under memrun, builder
 included; VRAM peak of the tree):
@@ -388,7 +389,7 @@ PyTorch against itself at 80/40 vs 20/10 (2.15e-2, above).
    1.1 ms of wall time per call (run 54.5 ms vs 53.4 ms of kernels), so pinned buffers / IOBinding are not worth it.
 2. **An ONNX Runtime VRAM table** for the automatic window (the measured points above, more sizes, peaks
    read inside the engine rather than sampled), replacing halve-on-oom as the normal path.
-3. **TensorRT**: (a) longer windows: the measured memory cap gives TensorRT 12-24-frame windows where CUDA's
+3. **TensorRT**: (a) DONE 2026-10-24 (step 2): TensorRT takes CUDA's window. Before: the measured memory cap gave TensorRT 12-24-frame windows where CUDA's
    automatic window is 48 or 80, which changes the matte more than precision does; a low-VRAM-style staging for
    TensorRT, or stage 1 split per window half, would allow longer ones. (b) UHD (outside every range today).
    (c) Settings toggle and its explanation in the app; packaging ck-trt-build (needs the TensorRT libraries, +4.5 GB).

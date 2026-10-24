@@ -562,19 +562,9 @@ impl Pipeline {
         crate::clip::model_shape_supported(meta.shape_h, meta.shape_w, meta.w, meta.h, self.models.takes_portrait())?;
         let t_all = meta.num_frames;
         let (sh, sw) = (meta.shape_h, meta.shape_w);
-        // TensorRT jobs with an automatic window: the longest window the clip's TensorRT range was built for (its
-        // engines' memory is measured for it, tensorrt.rs PIXEL_FRAMES_MAX), all networks loaded (no low-VRAM staging)
-        let trt_window = if job.tensorrt && !job.manual && self.trt_possible(provider) { crate::tensorrt::bucket_for(sh, sw) } else { None };
-        if let Some(b) = trt_window {
-            chunk = b.t.1;
-            stride = (chunk / 2).max(1);
-            low_vram = false;
-            sink.log(&format!("  TensorRT window: {sw}x{sh} is in range {} -> hann_chunk={chunk}, hann_stride={stride}, low_vram=False", b.key()));
-            sink.send(json!({
-                "type": "memory", "hann_chunk": chunk, "hann_stride": stride, "low_vram": low_vram, "auto": true,
-                "budget_cap_gb": job.vram_budget_gb, "estimate_basis": "tensorrt-range", "range": b.key(), "provider": "tensorrt"
-            }));
-        } else if !job.manual {
+        // TensorRT jobs take the same window (and low-VRAM staging) as the CUDA path, so the mattes match
+        // (tensorrt.rs bucket_for); their engines are built for it
+        if !job.manual {
             // the budget the runtime's apply_auto_vram sees: free memory plus what this process holds
             let (seen, source) = match provider {
                 Provider::Cpu => (crate::gpu::host_available().unwrap_or(0) as f64 / 1073741824.0, "host"),
@@ -611,13 +601,12 @@ impl Pipeline {
             }));
         }
         // which provider really runs this job
-        let tc = chunk.min(t_all);
-        let (key, trt_info) = self.job_key(job, &base_key, sh, sw, tc, low_vram, sink)?;
+        let (key, trt_info) = self.job_key(job, &base_key, sh, sw, chunk, low_vram, sink)?;
         if key.provider == Provider::TensorRt {
             if trt_info.as_ref().is_some_and(|i| !i.1) {
                 sink.log("  TensorRT: optimizing for this resolution range (a one-time build; later clips in this range reuse it)");
             }
-            let bucket = crate::tensorrt::bucket_for(sh, sw).ok_or_else(|| Error::engine("no TensorRT range".into()))?;
+            let bucket = crate::tensorrt::bucket_for(sh, sw, chunk, low_vram).ok_or_else(|| Error::engine("no TensorRT range".into()))?;
             self.trt_prepare(&key, &bucket, sink)?;
         }
         let trt_dir = key.trt_cache.clone();
@@ -743,12 +732,6 @@ impl Pipeline {
         })
     }
 
-    /// Whether a TensorRT job can run on TensorRT at all (the card, the provider, TensorRT-ready models).
-    fn trt_possible(&self, provider: Provider) -> bool {
-        // loop: NOT-WORTH — five networks, once per job
-        provider == Provider::Cuda && self.rt.tensorrt_ep && crate::runtime::PIECES.iter().any(|p| self.models.trt_file(p, Precision::Fp16).is_some())
-    }
-
     /// The networks' key for this job and, for TensorRT, (cache folder, already built). Sends the
     /// `provider` reply.
     #[allow(clippy::too_many_arguments)]
@@ -758,8 +741,8 @@ impl Pipeline {
         base: &ModelKey,
         sh: usize,
         sw: usize,
-        tc: usize,
-        _low_vram: bool,
+        window: usize,
+        low_vram: bool,
         sink: &mut dyn Sink,
     ) -> Result<(ModelKey, Option<(PathBuf, bool)>), Error> {
         let mut msg = json!({"type": "provider", "provider": base.provider.name(), "precision": base.precision.name(), "tensorrt_requested": job.tensorrt});
@@ -780,16 +763,11 @@ impl Pipeline {
             sink.send(msg);
             return Ok((base.clone(), None));
         }
-        let Some(bucket) = crate::tensorrt::bucket_for(sh, sw) else {
-            fallback(format!("{sw}x{sh} is outside every TensorRT range"), &mut msg);
+        let Some(bucket) = crate::tensorrt::bucket_for(sh, sw, window, low_vram) else {
+            fallback(format!("{sw}x{sh} is outside the TensorRT ranges (larger than {} px a side runs on CUDA)", crate::tensorrt::MAX_SIDE), &mut msg);
             sink.send(msg);
             return Ok((base.clone(), None));
         };
-        if tc > bucket.t.1 {
-            fallback(format!("the {tc}-frame window is longer than the {}-frame TensorRT range for {sw}x{sh}", bucket.t.1), &mut msg);
-            sink.send(msg);
-            return Ok((base.clone(), None));
-        }
         let gpu = self.rt.gpu.clone().unwrap();
         let trt_ver = crate::gpu::tensorrt_version().unwrap_or_else(|| "unknown".into());
         let trt_prec = Precision::Fp16;
@@ -817,7 +795,7 @@ impl Pipeline {
         // loop: NOT-WORTH — five networks' stamps, once per TensorRT job
         let built = ready.iter().all(|p| {
             let stamp = self.models.trt_file(p, trt_prec).map(|f| crate::tensorrt::source_stamp(&f)).unwrap_or_default();
-            crate::tensorrt::built(&bdir.join(p), p, &stamp)
+            crate::tensorrt::built(&bdir.join(p), p, &stamp) || crate::tensorrt::failed_before(&bdir.join(p), p, &stamp, None).is_some()
         });
         msg["provider"] = json!("tensorrt");
         msg["precision"] = json!("fp16");
@@ -839,11 +817,21 @@ impl Pipeline {
         let Some(dir) = key.trt_cache.clone() else { return Ok(()) };
         let timing = dir.parent().map(|p| p.join("timing.cache")).unwrap_or_else(|| dir.join("timing.cache"));
         let builder = crate::tensorrt::builder_path();
-        // TensorRT's working memory while it builds: half the job's budget, at most 4 GiB
-        let workspace_mb = key.vram_cap.map(|c| (c >> 21).min(4096)).unwrap_or(4096).max(512);
+        // TensorRT's working memory while it builds: 60 % of the job's budget (else of the card's free memory), at
+        // most 8 GiB. Measured 2026-10-24: stage 1 for 48-frame windows at 1152x1280 needs a 6.1 GB tactic (a
+        // 4 GiB cap found none; 7 GiB built it, peak 13.9 GB on the card). A build that still finds no tactic
+        // runs that network on CUDA at the same window.
+        let budget = key.vram_cap.or_else(|| crate::gpu::budget().map(|b| b.0)).unwrap_or(8 << 30);
+        let workspace_mb = ((budget >> 20) * 6 / 10).clamp(512, 8192);
         let stamp = |p: &str| self.models.trt_file(p, key.precision).map(|f| crate::tensorrt::source_stamp(&f)).unwrap_or_default();
         // loop: NOT-WORTH — five networks, once per TensorRT job
-        let todo: Vec<&'static str> = crate::runtime::PIECES.iter().copied().filter(|p| !crate::tensorrt::built(&dir.join(p), p, &stamp(p))).collect();
+        let todo: Vec<&'static str> = crate::runtime::PIECES
+            .iter()
+            .copied()
+            .filter(|p| {
+                !crate::tensorrt::built(&dir.join(p), p, &stamp(p)) && crate::tensorrt::failed_before(&dir.join(p), p, &stamp(p), Some(workspace_mb)).is_none()
+            })
+            .collect();
         // loop: NOT-WORTH — five networks
         for (i, piece) in crate::runtime::PIECES.iter().copied().enumerate() {
             let pdir = dir.join(piece);
@@ -853,6 +841,11 @@ impl Pipeline {
             };
             let source = crate::tensorrt::source_stamp(&onnx);
             if crate::tensorrt::built(&pdir, piece, &source) {
+                continue;
+            }
+            if let Some(why) = crate::tensorrt::failed_before(&pdir, piece, &source, Some(workspace_mb)) {
+                sink.log(&format!("  TensorRT: {piece} failed to build before; it runs on CUDA (built again when the driver, TensorRT, the models or the memory budget change)"));
+                self.trt_fallbacks.insert(piece, why);
                 continue;
             }
             let Some(b) = &builder else {
@@ -872,6 +865,9 @@ impl Pipeline {
                 }
                 Err(why) => {
                     sink.log(&format!("  TensorRT could not build {piece}; it runs on CUDA: {why}"));
+                    if let Err(e) = crate::tensorrt::record_failure(&pdir, piece, &source, workspace_mb, &why) {
+                        sink.log(&format!("  TensorRT: couldn't note the failed build ({e}); the next job tries again"));
+                    }
                     self.trt_fallbacks.insert(piece, why);
                 }
             }
