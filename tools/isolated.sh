@@ -2,7 +2,10 @@
 # Run one isolated copy of the built app for checks and screenshots (rule 12):
 # never your screen, your D-Bus, your keyring or your settings.
 #
-#   tools/isolated.sh --state DIR --port P [--size 1400x900] [--env K=V]...
+#   tools/isolated.sh --state DIR --port P [--size 1400x900] [--env K=V]... [--packaged DIR]
+#
+# --packaged DIR runs a packaged build (electron-builder's linux-unpacked folder) instead of the dev
+# build in out/, so what ships inside the app (resources/engine/…) is what runs.
 #
 # Runs in the foreground until the app quits (close its window over CDP:
 # tools/drive.mjs does); KWin exits with it. P = the page's DevTools port.
@@ -16,7 +19,7 @@
 #   - memory-capped (systemd-run scope, MemoryMax=4G; started from your session, outside env -i).
 set -euo pipefail
 APP="$(cd "$(dirname "$0")/.." && pwd)"
-STATE="" PORT="" SIZE="1400x900" ENVS=()
+STATE="" PORT="" SIZE="1400x900" ENVS=() PACKAGED=""
 # loop: NOT-WORTH — the command line
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -24,6 +27,7 @@ while [ $# -gt 0 ]; do
     --port) PORT="$2"; shift 2 ;;
     --size) SIZE="$2"; shift 2 ;;
     --env) ENVS+=("$2"); shift 2 ;;
+    --packaged) PACKAGED="$(cd "$2" && pwd)"; shift 2 ;;
     *) echo "isolated.sh: unknown argument $1" >&2; exit 2 ;;
   esac
 done
@@ -47,7 +51,7 @@ W="${SIZE%x*}" H="${SIZE#*x}"
 cat > "$STATE/iso/run-app.sh" <<RUN
 #!/bin/sh
 export WAYLAND_DISPLAY=ck-wl-$PORT
-exec "$APP/node_modules/electron/dist/electron" --no-sandbox --password-store=basic --remote-debugging-port=$PORT "$APP"
+exec $(if [ -n "$PACKAGED" ]; then echo "\"$PACKAGED/corridorkey-desktop\""; else echo "\"$APP/node_modules/electron/dist/electron\""; fi) --no-sandbox --password-store=basic --remote-debugging-port=$PORT $([ -n "$PACKAGED" ] || echo "\"$APP\"")
 RUN
 chmod +x "$STATE/iso/run-app.sh"
 # not exec: the EXIT trap above removes RUN only if this shell is still there when the app ends (with exec every run

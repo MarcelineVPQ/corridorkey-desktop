@@ -67,6 +67,14 @@ cargo build --release -p ck-engine --no-default-features --features ort-dynamic,
 corridorkey-engine --models DIR [--ort libonnxruntime.so] [--device auto|cuda|cpu]
 ```
 
+**The copy inside the app:** `npm run build:engine` (`tools/build_engine.sh`, also the first step of
+`npm run dist:linux`) links it against glibc 2.28 with cargo-zigbuild, the oldest Electron supports, so it
+runs on every Linux the app runs on (a plain build on this desktop needs 2.43, newer than Ubuntu 24.04 or
+Debian 12 have). Same compiler and optimisation; only the glibc it links against differs. It lands in `engine-rs/target/dist/`, and
+electron-builder copies it to `resources/engine/corridorkey-engine`, where the Engine page finds it
+("Included with the app"). `tools/isolated.sh --packaged release/linux-unpacked` runs that packaged build.
+The engine runs `ffmpeg` / `ffprobe` from the system: they are not bundled.
+
 `npm run check:engine` (from the repository root) is the engine's gate: `cargo fmt --check`, `cargo clippy --all-targets
 -- -D warnings` (no warning passes) and `cargo test`.
 

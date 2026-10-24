@@ -15,6 +15,12 @@ asar: true
 # electron/main/index.ts looks in app.asar.unpacked/engine when packaged.
 asarUnpack:
   - engine/**
+# The Rust engine ships inside the app (tools/build_engine.sh builds it for glibc 2.28);
+# electron/main/engineFind.ts finds it at resources/engine/corridorkey-engine. Its GPU runtime
+# and models are downloaded on first run (BACKLOG row 2).
+extraResources:
+  - from: engine-rs/target/dist/corridorkey-engine
+    to: engine/corridorkey-engine
 # The updater (electron/main/updateFeed.ts) expects exactly this name.
 artifactName: CorridorKey-Desktop-${version}.${ext}
 
