@@ -162,7 +162,7 @@ export interface Settings {
   // null: results go next to each clip (out_<clip>); else into this folder
   outputRoot: string | null;
   // The Rust engine (ONNX Runtime): its program, the models folder, and ONNX Runtime's library for the
-  // GPU build (null: the engine finds its own). Set up = the engine the queue uses.
+  // GPU build. null = Automatic (the newest found, engineFind.ts). Set up = the engine the queue uses.
   engineBinary: string | null;
   modelsDir: string | null;
   ortLibrary: string | null;
@@ -186,6 +186,17 @@ export interface UpdateState {
   checkedAt: number | null;
 }
 
+// The Rust engine's files found on this computer (electron/main/engineFind.ts), newest first.
+export interface EngineFileChoice {
+  path: string;
+  label: string;
+}
+export interface EngineFiles {
+  binary: EngineFileChoice[];
+  models: EngineFileChoice[];
+  ort: EngineFileChoice[];
+}
+
 export interface CheckoutCheck {
   ok: boolean;
   problems: string[];
@@ -203,6 +214,9 @@ export interface AppState {
   // the Rust engine's setup, and which engine the queue uses (null: none is set up)
   rustEngine: CheckoutCheck;
   engineKind: EngineKind | null;
+  // what the Engine page's lists offer, and the paths the engine runs with (a setting of null = Automatic)
+  engineFiles: EngineFiles;
+  enginePaths: { binary: string | null; models: string | null; ort: string | null };
   // the desktop's colors (Desktop theme / desktop accent); null = couldn't be read or not asked
   desktopPalette: DesktopPalette | null;
   update: UpdateState;
@@ -216,6 +230,8 @@ export interface CorridorKeyApi {
   pickFile(kind: "hint-image" | "hint-video"): Promise<string | null>;
   pickCheckout(): Promise<void>;
   pickRustEngine(what: "binary" | "models" | "ort"): Promise<void>;
+  // null = Automatic; a path must be one the list offers (or the current setting)
+  setRustEngine(what: "binary" | "models" | "ort", path: string | null): Promise<void>;
   pathForFile(file: File): string;
   setJobOptions(id: string, options: JobOptions): Promise<void>;
   removeJob(id: string): Promise<void>;

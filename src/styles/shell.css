@@ -233,6 +233,8 @@
 }
 .split-panel {
   flex: 0 0 380px;
+  /* stays 380 px: a long unbreakable line (a path) shortens with … instead of widening it */
+  min-width: 0;
   display: flex;
   flex-direction: column;
   min-height: 0;

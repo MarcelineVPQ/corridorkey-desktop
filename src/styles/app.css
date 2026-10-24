@@ -447,6 +447,15 @@ select {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* a list over the path it resolves to (Engine page): the list keeps its full label */
+.file-pick.stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+.file-pick.stacked select {
+  width: 100%;
+}
 
 /* ---- running / results ---- */
 .stats {

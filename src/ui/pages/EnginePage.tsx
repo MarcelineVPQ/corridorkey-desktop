@@ -32,20 +32,45 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
         ))}
       </ul>
     );
-  const pick = (what: "binary" | "models" | "ort", label: string, value: string | null, hint: string) => (
-    <Row label={label} hint={hint}>
-      <div className="file-pick">
-        <button type="button" className="btn small" onClick={() => window.ck.pickRustEngine(what)}>
-          <FolderOpen size={14} /> Choose…
-        </button>
-        {value && (
-          <span className="path" title={value}>
-            {value}
-          </span>
-        )}
-      </div>
-    </Row>
-  );
+  // A list of what was found (newest first), Automatic on top, Browse… for anything else (Marcy 2026-10-23:
+  // choose from a list, not only a file browser). The path in use shows under it.
+  const BROWSE = "::browse";
+  const pick = (what: "binary" | "models" | "ort", label: string, setting: string | null, hint: string) => {
+    const found = state.engineFiles[what];
+    const inUse = state.enginePaths[what];
+    // loop: NOT-WORTH — one or two found copies per render
+    const custom = setting && !found.some((f) => f.path === setting) ? setting : null;
+    return (
+      <Row label={label} hint={hint} htmlFor={`engine-${what}`}>
+        <div className="file-pick stacked">
+          <select
+            id={`engine-${what}`}
+            value={setting ?? ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === BROWSE) void window.ck.pickRustEngine(what);
+              else void window.ck.setRustEngine(what, v === "" ? null : v);
+            }}
+          >
+            <option value="">{found.length ? `Automatic: ${found[0].label}` : "Automatic: none found"}</option>
+            {/* loop: NOT-WORTH — one or two found copies per list */}
+            {found.map((f) => (
+              <option key={f.path} value={f.path}>
+                {f.label}
+              </option>
+            ))}
+            {custom && <option value={custom}>{custom}</option>}
+            <option value={BROWSE}>Browse…</option>
+          </select>
+          {inUse && (
+            <span className="path" title={inUse}>
+              {inUse}
+            </span>
+          )}
+        </div>
+      </Row>
+    );
+  };
 
   const main = (
     <div className="page-body">
@@ -65,7 +90,7 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
               ? "The CorridorKey engine on ONNX Runtime."
               : kind === "python"
                 ? "The PyTorch engine from your CorridorKey2.0 folder. Set up the ONNX Runtime engine to use it instead."
-                : "None set up yet: choose the engine program and its models folder in the panel."}
+                : "None set up yet: no engine program or models found. Choose them in the panel."}
           </p>
         </MainBlock>
         <MainBlock title="Engine">
@@ -81,14 +106,14 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
           )}
         </MainBlock>
         <MainBlock title="ONNX Runtime engine files">
-          {st.engineBinary && (
+          {state.enginePaths.binary && (
             <div className="path" style={{ marginBottom: 4 }}>
-              {st.engineBinary}
+              {state.enginePaths.binary}
             </div>
           )}
-          {st.modelsDir && (
+          {state.enginePaths.models && (
             <div className="path" style={{ marginBottom: 8 }}>
-              {st.modelsDir}
+              {state.enginePaths.models}
             </div>
           )}
           {checks(rust, "Engine program and the five networks found")}
@@ -156,7 +181,7 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
       <Section id="onnx" icon={Cpu} title="ONNX Runtime engine" status={rust.ok ? (kind === "rust" ? "in use" : "set up") : "not set up"} task={props.sectionTasks["engine/onnx"] ?? null}>
         {() => (
           <>
-            {pick("binary", "Engine program", st.engineBinary, "corridorkey-engine, built from engine-rs/")}
+            {pick("binary", "Engine program", st.engineBinary, "corridorkey-engine")}
             {pick("models", "Models folder", st.modelsDir, "The five CorridorKey ONNX networks (C-RADIO, MoGe, RVM, stage 1, stage 2)")}
             {pick("ort", "ONNX Runtime library", st.ortLibrary, "libonnxruntime.so with the CUDA provider, for the graphics card build")}
           </>

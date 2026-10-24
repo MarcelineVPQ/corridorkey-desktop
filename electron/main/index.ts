@@ -9,6 +9,7 @@ import { GPU_POLL_MS, readGpu } from "./gpu";
 import { expandPaths, probeClip, still, STILL_WIDTH, VIDEO_EXT } from "./media";
 import { clearJobTemps, Queue } from "./queue";
 import { checkCheckout, checkRustEngine, chooseEngine, loadSettings, saveSettings } from "./settings";
+import { dataDir, effectivePath, findEngineFiles } from "./engineFind";
 import { readDesktopPalette, watchDesktopPalette } from "./desktopTheme";
 import { Updater } from "./updater";
 import { holdAppImageMountUntilExit } from "./appImageQuit";
@@ -45,11 +46,30 @@ const cacheDir = join(process.env.XDG_CACHE_HOME || join(app.getPath("home"), ".
 const mediaDir = join(cacheDir, "media");
 let settings = loadSettings(settingsFile, process.env);
 let checkout = checkCheckout(settings.corridorKeyRoot);
-let rustEngine = checkRustEngine(settings.engineBinary, settings.modelsDir);
+/** Where the Engine page's lists look (engineFind.ts): the app's own engine, a dev build, the in-app install's folder. */
+function enginePlaces() {
+  return {
+    bundledBinary: app.isPackaged ? join(process.resourcesPath, "engine", "corridorkey-engine") : null,
+    devBinary: app.isPackaged ? null : resolve(app.getAppPath(), "engine-rs", "target", "release", "corridorkey-engine"),
+    data: dataDir(process.env, app.getPath("home")),
+  };
+}
+let engineFiles = findEngineFiles(enginePlaces());
+/** The paths the engine runs with: each setting, or (null = Automatic) the newest found. */
+function enginePaths() {
+  return {
+    binary: effectivePath(settings.engineBinary, engineFiles.binary),
+    models: effectivePath(settings.modelsDir, engineFiles.models),
+    ort: effectivePath(settings.ortLibrary, engineFiles.ort),
+  };
+}
+let rustEngine = checkRustEngine(enginePaths().binary, enginePaths().models);
 /** Re-check both engines' files (after a setting changed, or before the queue starts). */
 function recheckEngines(): void {
   checkout = checkCheckout(settings.corridorKeyRoot);
-  rustEngine = checkRustEngine(settings.engineBinary, settings.modelsDir);
+  engineFiles = findEngineFiles(enginePlaces());
+  const paths = enginePaths();
+  rustEngine = checkRustEngine(paths.binary, paths.models);
 }
 let mainWindow: BrowserWindow | null = null;
 let windowShown = false;
@@ -72,7 +92,8 @@ const queue = new Queue({
   makeEngine: (onReply, onExit) => {
     // the Rust engine when it is set up; the PyTorch engine (CorridorKey checkout) until it replaces it
     if (chooseEngine(rustEngine, checkout) === "rust") {
-      return new EngineProcess({ kind: "rust", binary: settings.engineBinary!, models: settings.modelsDir!, ort: settings.ortLibrary, env: process.env }, onReply, onExit);
+      const paths = enginePaths();
+      return new EngineProcess({ kind: "rust", binary: paths.binary!, models: paths.models!, ort: paths.ort, env: process.env }, onReply, onExit);
     }
     const root = settings.corridorKeyRoot!;
     return new EngineProcess({ python: join(root, "venv", "bin", "python"), script: engineScript(), packageRoot: root, env: process.env }, onReply, onExit);
@@ -94,6 +115,8 @@ function state(): AppState {
     checkout,
     rustEngine,
     engineKind: chooseEngine(rustEngine, checkout),
+    engineFiles,
+    enginePaths: enginePaths(),
     desktopPalette,
     update: updater.state,
   };
@@ -287,6 +310,18 @@ function registerIpc(): void {
     if (r.canceled) return;
     const key = { binary: "engineBinary", models: "modelsDir", ort: "ortLibrary" }[what] as "engineBinary" | "modelsDir" | "ortLibrary";
     settings = { ...settings, [key]: r.filePaths[0] };
+    recheckEngines();
+    persist();
+    scheduleSend();
+  });
+  ipcMain.handle(IPC.setRustEngine, (_e, whatArg: unknown, pathArgIn: unknown) => {
+    if (whatArg !== "binary" && whatArg !== "models" && whatArg !== "ort") return;
+    const key = { binary: "engineBinary", models: "modelsDir", ort: "ortLibrary" }[whatArg] as "engineBinary" | "modelsDir" | "ortLibrary";
+    // null = Automatic; otherwise only a path the list offers, or the one already chosen with Browse…
+    // loop: NOT-WORTH — one or two found copies, once per list choice
+    const offered = engineFiles[whatArg].some((f) => f.path === pathArgIn) || pathArgIn === settings[key];
+    if (pathArgIn !== null && !(typeof pathArgIn === "string" && offered)) return;
+    settings = { ...settings, [key]: pathArgIn };
     recheckEngines();
     persist();
     scheduleSend();

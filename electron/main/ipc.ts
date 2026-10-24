@@ -7,6 +7,7 @@ export const IPC = {
   pickFile: "ck:pick-file",
   pickCheckout: "ck:pick-checkout",
   pickRustEngine: "ck:pick-rust-engine",
+  setRustEngine: "ck:set-rust-engine",
   setJobOptions: "ck:set-job-options",
   removeJob: "ck:remove-job",
   retryJob: "ck:retry-job",
