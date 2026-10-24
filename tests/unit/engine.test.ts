@@ -65,7 +65,8 @@ describe("engine launch", () => {
   it("runs the Rust engine with its models (and ONNX Runtime's library)", () => {
     const c = launchCommand({ kind: "rust", binary: "/e/corridorkey-engine", models: "/m", ort: null, env: { HOME: "/h", LD_PRELOAD: "/bad.so" } });
     expect([c.cmd, ...c.args]).toEqual(["/e/corridorkey-engine", "--models", "/m"]);
-    expect(c.env).toEqual({ HOME: "/h" });
+    // the engine ends with this app (proc.rs end_with_parent): it gets the app's pid
+    expect(c.env).toEqual({ HOME: "/h", CK_ENGINE_PARENT_PID: String(process.pid) });
     const g = launchCommand({ kind: "rust", binary: "/e/corridorkey-engine", models: "/m", ort: "/o/libonnxruntime.so", env: {} });
     expect(g.args).toEqual(["--models", "/m", "--ort", "/o/libonnxruntime.so"]);
   });
