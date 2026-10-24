@@ -91,7 +91,8 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
 ← {"type":"pong","version":"0.2.0","protocol":1,"engine":"onnxruntime","device":"cuda","gpu":"NVIDIA GeForce RTX 5080",
    "vram_total_mb":16303,"provider":"cuda","precision":"fp16","ort":"1.31.0","tensorrt_available":true,
    "models_dir":"/models","assets":{"cradio":true,"moge":true,"rvm":true,"stage1":true,"stage2":true},"python":null,"torch":null,
-   "config":{"device":"auto","precision":null,"graph_opt":"all","arena_shrink":"auto","trt_cache":"...",...}}
+   "config":{"device":"auto","precision":null,"graph_opt":"all","arena_shrink":"auto","trt_cache":"...",...},
+   "decoders":{"jpeg":"libjpeg-turbo (/usr/lib/libturbojpeg.so.0.4.0, TurboJPEG 3 API)","ffmpeg":"8.0","ffprobe":"8.0"}}
 ← {"type":"progress","id":"j1","stage":"load|optimize|probe|rvm|foundations|keying","p":0.42,"detail":"window 3/9"}
 ← {"type":"provider","id":"j1","provider":"cuda|tensorrt|tensorrt+cuda|cpu","precision":"fp16","tensorrt_requested":false,
    "fallback_reason":"...","range":"h1024-1280_w1792-2176_t1-12","cache":"build|reused","pieces":{...},"fallbacks":{...},
@@ -117,6 +118,10 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
   job's `vram_budget_gb`), `budget_source` (`gpu`, or `host` on the CPU
   provider) and `estimate_basis` (`pytorch-bf16-table`: the estimate is the
   upstream runtime's PyTorch table, not an ONNX Runtime measurement).
+- `decoders` (Rust engine pong, additive): the JPEG decoder frame folders get (libjpeg-turbo,
+  the one OpenCV uses, or the image crate's, which differs by a few levels) and the ffmpeg and
+  ffprobe versions. A job writes the same three at the end of its `_settings.txt`
+  (`JPEG Decoder:`, `FFmpeg:`, `FFprobe:`) and in a `log` line.
 - `config` (Rust engine pong, additive): the settings the engine runs with, read once at
   startup from its command line and `CK_ENGINE_*` variables (docs/ENGINE_RUST.md "Knobs").
 - `provider` (Rust engine, additive) says what really runs the job: the

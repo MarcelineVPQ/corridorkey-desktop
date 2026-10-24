@@ -105,19 +105,110 @@ fn is_jpeg(p: &Path) -> bool {
     p.extension().map(|e| e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg")).unwrap_or(false)
 }
 
-/// JPEG through libjpeg-turbo's TurboJPEG API (libturbojpeg.so.0, opened at run time), the decoder cv2 is
-/// built with (accurate integer DCT, smooth chroma upsampling): RGB bytes. None without the library or on a
-/// decode error (the image crate's decoder is used then; it differs by a few levels in places).
+/// libjpeg-turbo's TurboJPEG library by its per-system names (Linux distributions, the Windows installer and
+/// vcpkg, Homebrew on Apple Silicon and Intel Macs).
+#[cfg(windows)]
+const TURBOJPEG_LIBS: &[&str] = &["turbojpeg.dll"];
+#[cfg(target_os = "macos")]
+const TURBOJPEG_LIBS: &[&str] =
+    &["libturbojpeg.0.dylib", "libturbojpeg.dylib", "/opt/homebrew/lib/libturbojpeg.0.dylib", "/usr/local/lib/libturbojpeg.0.dylib"];
+#[cfg(not(any(windows, target_os = "macos")))]
+const TURBOJPEG_LIBS: &[&str] = &["libturbojpeg.so.0"];
+
+/// The TurboJPEG library, opened once (None: not installed), and the name it was opened by.
+fn turbojpeg() -> Option<&'static (libloading::Library, &'static str)> {
+    static LIB: std::sync::OnceLock<Option<(libloading::Library, &'static str)>> = std::sync::OnceLock::new();
+    LIB.get_or_init(|| {
+        // loop: NOT-WORTH — a few library names, once per process
+        TURBOJPEG_LIBS.iter().find_map(|n| {
+            // SAFETY: loading libjpeg-turbo runs only its own initialisers
+            unsafe { libloading::Library::new(n) }.ok().map(|l| (l, *n))
+        })
+    })
+    .as_ref()
+}
+
+/// Which JPEG decoder frame folders get, in words (the pong's and _settings.txt's `jpeg`): libjpeg-turbo (the one
+/// OpenCV uses) with the library it was found as, or the image crate's decoder, which differs by a few levels.
+pub fn jpeg_decoder() -> String {
+    match turbojpeg() {
+        Some((lib, name)) => {
+            // SAFETY: only looks a symbol up
+            let api = if unsafe { lib.get::<unsafe extern "C" fn()>(b"tj3Init\0") }.is_ok() { "TurboJPEG 3 API" } else { "TurboJPEG 2 API" };
+            match loaded_path("turbojpeg") {
+                Some(p) => format!("libjpeg-turbo ({p}, {api})"),
+                None => format!("libjpeg-turbo ({name}, {api})"),
+            }
+        }
+        None => "image crate (libturbojpeg not found; JPEG frames may differ from OpenCV's by a few levels)".into(),
+    }
+}
+
+/// Linux: the file a loaded library really is (/proc/self/maps; its name carries the version, e.g.
+/// libturbojpeg.so.0.3.0). Elsewhere None.
+fn loaded_path(part: &str) -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        let maps = std::fs::read_to_string("/proc/self/maps").ok()?;
+        // loop: NOT-WORTH — this process's mappings, once per ping or job
+        maps.lines().filter_map(|l| l.split_whitespace().nth(5)).find(|p| p.contains(part)).map(str::to_string)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = part;
+        None
+    }
+}
+
+/// `bin -version`'s version ("7.1.1" from "ffmpeg version 7.1.1 Copyright ..."), "unknown" when it runs but says
+/// something else; Err when it can't be run (30 s deadline).
+pub fn tool_version(bin: &str) -> Result<String, String> {
+    // loop: NOT-WORTH — one `-version` run, 30 s deadline
+    let out = crate::proc::output_timeout(std::process::Command::new(bin).arg("-version"), std::time::Duration::from_secs(30))?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    Ok(version_token(&text).unwrap_or("unknown").to_string())
+}
+
+/// The word after "version" on the first line.
+fn version_token(text: &str) -> Option<&str> {
+    // loop: NOT-WORTH — the words of one line
+    let mut words = text.lines().next()?.split_whitespace();
+    // loop: NOT-WORTH — as above
+    words.find(|w| *w == "version")?;
+    words.next()
+}
+
+/// The decoders a job reads its frames with, for the pong (`decoders`) and _settings.txt (additive).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Decoders {
+    pub jpeg: String,
+    pub ffmpeg: String,
+    pub ffprobe: String,
+}
+
+impl Decoders {
+    /// `ffmpeg`: its version when the caller already ran it; else it is asked here.
+    pub fn read(ffmpeg: Option<String>) -> Decoders {
+        let ver = |bin: &str| tool_version(bin).unwrap_or_else(|_| "not found".into());
+        Decoders { jpeg: jpeg_decoder(), ffmpeg: ffmpeg.unwrap_or_else(|| ver("ffmpeg")), ffprobe: ver("ffprobe") }
+    }
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({"jpeg": self.jpeg, "ffmpeg": self.ffmpeg, "ffprobe": self.ffprobe})
+    }
+}
+
+/// JPEG through libjpeg-turbo's TurboJPEG API (opened at run time: `turbojpeg`), the decoder cv2 is built with
+/// (accurate integer DCT, smooth chroma upsampling): RGB bytes. None without the library or on a decode error (the
+/// image crate's decoder is used then; it differs by a few levels in places).
 fn turbojpeg_rgb(buf: &[u8]) -> Option<(usize, usize, Vec<u8>)> {
     use std::ffi::{c_int, c_uchar, c_ulong, c_void};
     type Init = unsafe extern "C" fn() -> *mut c_void;
     type Header = unsafe extern "C" fn(*mut c_void, *const c_uchar, c_ulong, *mut c_int, *mut c_int, *mut c_int, *mut c_int) -> c_int;
     type Decomp = unsafe extern "C" fn(*mut c_void, *const c_uchar, c_ulong, *mut c_uchar, c_int, c_int, c_int, c_int, c_int) -> c_int;
     type Destroy = unsafe extern "C" fn(*mut c_void) -> c_int;
-    static LIB: std::sync::OnceLock<Option<libloading::Library>> = std::sync::OnceLock::new();
     // SAFETY: TurboJPEG 2.x C API with its documented signatures; buffers sized from the header
     unsafe {
-        let lib = LIB.get_or_init(|| libloading::Library::new("libturbojpeg.so.0").ok()).as_ref()?;
+        let (lib, _) = turbojpeg()?;
         let init: libloading::Symbol<Init> = lib.get(b"tjInitDecompress\0").ok()?;
         let header: libloading::Symbol<Header> = lib.get(b"tjDecompressHeader3\0").ok()?;
         let decomp: libloading::Symbol<Decomp> = lib.get(b"tjDecompress2\0").ok()?;
@@ -561,6 +652,20 @@ mod tests {
             // loop: NOT-WORTH — twelve values
             assert!(p.model.iter().chain(p.display.iter()).all(|x| x.to_f32().is_finite()), "linear={linear}: {:?} {:?}", p.model, p.display);
         }
+    }
+
+    #[test]
+    fn decoder_versions_are_read_and_reported() {
+        assert_eq!(version_token("ffmpeg version 7.1.1 Copyright (c) 2000-2025 the FFmpeg developers\nbuilt with gcc"), Some("7.1.1"));
+        assert_eq!(version_token("ffprobe version n8.0-12-gabc Copyright"), Some("n8.0-12-gabc"));
+        assert_eq!(version_token("something else"), None);
+        assert!(tool_version("ck-no-such-program-here").is_err());
+        let d = Decoders::read(Some("7.1.1".into()));
+        assert_eq!(d.ffmpeg, "7.1.1");
+        assert!(d.jpeg.starts_with("libjpeg-turbo (") || d.jpeg.starts_with("image crate"), "{}", d.jpeg);
+        let j = d.to_json();
+        assert_eq!(j["ffmpeg"], "7.1.1");
+        assert!(j["ffprobe"].is_string() && j["jpeg"].is_string());
     }
 
     #[test]

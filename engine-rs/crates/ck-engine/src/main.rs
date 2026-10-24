@@ -37,7 +37,9 @@ impl Backend for Ort {
             "assets": precision.map(|p| json!(self.pipeline.models.assets(p))).unwrap_or(json!({})),
             "python": null, "torch": null,
             // the settings it runs with (additive): its command line and CK_ENGINE_* variables, as read at startup
-            "config": rt.cfg.to_json()
+            "config": rt.cfg.to_json(),
+            // what reads the frames (additive): the JPEG decoder (libjpeg-turbo or the image crate), ffmpeg and ffprobe
+            "decoders": ck_core::decode::Decoders::read(None).to_json()
         })
     }
     fn run(&mut self, job: &JobConfig, sink: &mut dyn Sink) -> Result<JobResult, Error> {

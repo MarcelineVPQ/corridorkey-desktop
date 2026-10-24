@@ -58,6 +58,8 @@ pub(crate) struct SettingsLog<'a> {
     pub(crate) hann_stride: usize,
     pub(crate) low_vram: bool,
     pub(crate) num_frames: i64,
+    /// the decoders the frames are read with (additive lines at the end)
+    pub(crate) decoders: &'a crate::decode::Decoders,
 }
 
 pub(crate) fn settings_text(s: &SettingsLog) -> String {
@@ -95,6 +97,9 @@ pub(crate) fn settings_text(s: &SettingsLog) -> String {
     t.push_str("Linear Brightness: 1.0\n");
     t.push_str("Linear Contrast: 1.0\n");
     t.push_str("Linear Contrast Pivot: 0.18\n");
+    t.push_str(&format!("JPEG Decoder: {}\n", s.decoders.jpeg));
+    t.push_str(&format!("FFmpeg: {}\n", s.decoders.ffmpeg));
+    t.push_str(&format!("FFprobe: {}\n", s.decoders.ffprobe));
     t
 }
 

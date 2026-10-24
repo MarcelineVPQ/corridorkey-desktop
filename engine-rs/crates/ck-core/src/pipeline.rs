@@ -520,10 +520,12 @@ impl Pipeline {
         if !missing.is_empty() {
             return Err(Error::assets(format!("missing ONNX model(s) {} ({}) in {}", missing.join(", "), precision.name(), self.models.dir.display())));
         }
-        // loop: NOT-WORTH — ffmpeg -version once per job, 30 s deadline (this pass: had none)
-        if crate::proc::output_timeout(std::process::Command::new("ffmpeg").arg("-version"), std::time::Duration::from_secs(30)).is_err() {
+        // ffmpeg -version once per job, 30 s deadline: it must run, and its version goes into the settings file
+        let Ok(ffmpeg_version) = crate::decode::tool_version("ffmpeg") else {
             return Err(Error::assets("ffmpeg binary not found: ffmpeg. Install ffmpeg.".into()));
-        }
+        };
+        let decoders = crate::decode::Decoders::read(Some(ffmpeg_version));
+        sink.log(&format!("  decoders: JPEG {}, ffmpeg {}, ffprobe {}", decoders.jpeg, decoders.ffmpeg, decoders.ffprobe));
         if !Path::new(&job.input).exists() {
             return Err(Error::input(format!("input not found: {}", job.input)));
         }
@@ -687,6 +689,7 @@ impl Pipeline {
                 hann_stride: stride,
                 low_vram,
                 num_frames: job.num_frames,
+                decoders: &decoders,
             });
             if let Err(e) = std::fs::write(&settings_path, text) {
                 sink.log(&format!("[WARNING] Failed to write settings file: {e}"));
