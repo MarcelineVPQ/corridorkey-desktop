@@ -72,7 +72,18 @@ fn despill_strengths() {
 }
 
 fn meta(h: usize, w: usize, sh: usize, sw: usize) -> ClipMeta {
-    ClipMeta { source: Source::Frames(vec![]), fps: 24.0, h, w, shape_h: sh, shape_w: sw, pad: center_pad(h, w, sh, sw), num_frames: 1, exr_linear: false }
+    ClipMeta {
+        source: Source::Frames(vec![]),
+        fps: 24.0,
+        h,
+        w,
+        shape_h: sh,
+        shape_w: sw,
+        pad: center_pad(h, w, sh, sw),
+        num_frames: 1,
+        exr_linear: false,
+        video_bits: 8,
+    }
 }
 
 #[test]
@@ -202,10 +213,17 @@ fn render_paths() {
 #[test]
 fn stills_as_cv2_reads_them() {
     let s = |n: &str| fx("stills").join(n);
-    // loop: NOT-WORTH — two PNGs
-    for (file, name) in [("rgb8.png", "still_rgb8_png"), ("rgb16.png", "still_rgb16_png")] {
-        diff(name, &read_image_rgb(&s(file)).unwrap().data, &load(name).1, 0.0);
-    }
+    diff("still_rgb8_png", &read_image_rgb(&s("rgb8.png")).unwrap().data, &load("still_rgb8_png").1, 0.0);
+    // 16-bit PNG: read at full depth (the film-quality path, 2026-10-24), where cv2 keeps only the high byte. So it
+    // equals the file's own 16-bit samples / 65535 exactly, and differs from cv2 by less than one 8-bit step.
+    let full = read_image_rgb(&s("rgb16.png")).unwrap().data;
+    let Still::U16 { ch, h, w, data } = ck_core::decode::read_still(&s("rgb16.png")).unwrap() else { panic!("16-bit PNG not read as 16-bit") };
+    assert_eq!(ch, 3, "the fixture is RGB");
+    let n = h * w;
+    // loop: NOT-WORTH — a small fixture
+    let want: Vec<f32> = (0..3 * n).map(|i| data[(i % n) * 3 + i / n] as f32 / 65535.0).collect();
+    diff("still_rgb16_png full depth", &full, &want, 0.0);
+    diff("still_rgb16_png vs cv2's 8 bits", &full, &load("still_rgb16_png").1, 1.0 / 255.0);
     // JPEG through libjpeg-turbo, as cv2 (the test machine has libturbojpeg.so.0)
     diff("still_q90_jpg", &read_image_rgb(&s("q90.jpg")).unwrap().data, &load("still_q90_jpg").1, 0.0);
     let h = ck_core::decode::read_still(&s("hint16.png")).unwrap();

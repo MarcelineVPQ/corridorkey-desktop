@@ -286,7 +286,18 @@ impl FakeFrames {
     pub(crate) fn meta(&self) -> ClipMeta {
         let (sh, sw) = self.shape;
         let pad = crate::image::center_pad(sh, sw, sh, sw);
-        ClipMeta { source: Source::Frames(vec![]), fps: 24.0, h: sh, w: sw, shape_h: sh, shape_w: sw, pad, num_frames: self.n, exr_linear: false }
+        ClipMeta {
+            source: Source::Frames(vec![]),
+            fps: 24.0,
+            h: sh,
+            w: sw,
+            shape_h: sh,
+            shape_w: sw,
+            pad,
+            num_frames: self.n,
+            exr_linear: false,
+            video_bits: 8,
+        }
     }
 }
 

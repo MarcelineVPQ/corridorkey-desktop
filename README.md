@@ -283,6 +283,28 @@ These differences are fp16 against bf16 rounding. With both engines in full prec
 `engine-rs/tools/e2e_cpu.sh`), the mattes are the same to within rounding: alpha MAE 1.7e-7, max 6.9e-5, no pixel
 off by even 1/255, foreground PSNR 102.6 dB; the low-memory mode matches the normal one exactly (difference 0).
 
+### Deep input: 10- and 12-bit plates reach the model in full (1.0)
+
+Film plates come as 10- or 12-bit ProRes 4444 / HEVC 4:4:4 or 16-bit image sequences. The original reads video
+and PNG at 8 bits (OpenCV), so everything above 8 bits is rounded away before the model sees it. CorridorKey
+Desktop now decodes deep video to 16-bit RGB and reads 16-bit PNG at full depth (8-bit sources take the same path
+as before, unchanged).
+
+Measured on 2026-10-24 on the 4K plate 04_5d (120 frames), encoded as 10-bit ProRes 4444 XQ and as 12-bit HEVC
+4:4:4. The reference is the same plate decoded to 16-bit PNG frames (exactly the values the video holds), keyed by
+the same engine; outputs as EXR, compared exactly (OpenCV float, every frame):
+
+| Plate | Decode | Alpha MAE | Alpha max | Hair edges (alpha 0.02-0.98) off by > 1/255 | Foreground max | Time (4K, 120 frames) |
+| --- | --- | --- | --- | --- | --- | --- |
+| ProRes 4444 XQ, 10-bit | 8-bit (before) | 6.5e-5 | 0.058 | 8.4 % | 0.214 | 86.6 s |
+| ProRes 4444 XQ, 10-bit | **16-bit (now)** | **0** | **0** | **0 %** | **0** | 88.2 s |
+| HEVC 4:4:4, 12-bit | 8-bit (before) | 6.3e-5 | 0.062 | 7.5 % | 0.278 | 89.3 s |
+| HEVC 4:4:4, 12-bit | **16-bit (now)** | **0** | **0** | **0 %** | **0** | 90.1 s |
+
+The 16-bit path gives exactly the matte of the 16-bit image sequence. The 8-bit read cost the most where keying is
+hardest: about one hair-edge pixel in twelve was off, by up to 15 levels of 255. The deep decode costs about 2 % more
+time.
+
 ### Test it yourself
 
 The clips are free to download (their owners don't allow re-hosting, so they aren't in this repository):
@@ -323,7 +345,7 @@ Every result in this README is reproducible with the tools in this repository. T
 
 | Test | What it checks | Result |
 | --- | --- | --- |
-| `npm run check` | TypeScript types, formatting, the theme gate (colours only from one place), the loop gate (every loop, timer and wait in the app and engine carries a written verdict: 743 rows listed, 676 with a required verdict; trivial Rust iterators are exempt), 141 unit tests (151 since the platform passes the same day), the PyTorch engine's own tests | pass |
+| `npm run check` | TypeScript types, formatting, the theme gate (colours only from one place), the loop gate (every loop, timer and wait in the app and engine carries a written verdict: 748 rows listed, 679 with a required verdict; trivial Rust iterators are exempt), 141 unit tests (151 since the platform passes the same day), the PyTorch engine's own tests | pass |
 | `npm run check:engine` | Rust formatting, clippy with every warning an error, 67 engine tests | pass |
 | CPU end to end (`e2e_cpu.sh`) | the Rust engine against PyTorch, both fp32: frame folder, H.264 and hint inputs, EXR and video outputs, low-memory mode | pass: alpha MAE 1.7e-7, low-memory mode identical |
 | GPU speed and quality, HD and 4K | `engine_bench.mjs` + `matte_compare.py`, ten clips, both engines | pass (the tables above) |

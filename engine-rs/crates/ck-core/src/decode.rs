@@ -1,10 +1,12 @@
 //! Frame input (video_io readers) and the per-frame preprocessing (preprocess_video_frame_views,
 //! preprocess_frame_dir_path, the hint readers).
 //!
-//! Video is decoded by ffmpeg into 8-bit RGB with the colour conversion OpenCV's VideoCapture uses (BT.601
-//! matrix, bicubic chroma): measured bit-identical to cv2 4.11 on a ProRes 4444 plate, an untagged and a
-//! BT.709-tagged H.264 clip and a 10-bit 4:4:4 clip (docs/ENGINE_RUST.md). Frame folders are read as
-//! cv2.imread does: 8-bit RGB for PNG/JPEG (16-bit PNGs keep their high byte), float RGB for EXR.
+//! Video is decoded by ffmpeg with the colour conversion OpenCV's VideoCapture uses (BT.601 matrix, bicubic
+//! chroma). 8-bit sources become 8-bit RGB: measured bit-identical to cv2 4.11 on an untagged and a BT.709-tagged
+//! H.264 clip (docs/ENGINE_RUST.md). Sources above 8 bits (10/12-bit ProRes 4444, DNxHR, HEVC) become 16-bit RGB
+//! (2026-10-24, the film-quality path): the original reads them through cv2 at 8 bits and loses the rest, this
+//! engine keeps them (it no longer matches the original on those, on purpose). Frame folders: 8-bit PNG/JPEG as
+//! cv2.imread does, 16-bit PNG at full depth (cv2 keeps the high byte), float RGB for EXR.
 use crate::clip::ClipMeta;
 use crate::color::{bf16_round, finite_input, linear_to_asinh, linear_to_srgb, srgb_to_linear};
 use crate::image::{pad_reflect101, resize_lanczos4, Planar};
@@ -16,7 +18,8 @@ use std::process::{Child, ChildStdout, Command, Stdio};
 /// The ffmpeg filter that reproduces cv2.VideoCapture's YUV -> BGR24 conversion.
 pub(crate) const CV2_SCALE: &str = "scale=in_color_matrix=bt601:flags=bicubic";
 
-/// 8-bit RGB frames of a video, from an ffmpeg child process (killed when dropped).
+/// RGB frames of a video (8-bit, or 16-bit for sources above 8 bits), from an ffmpeg child process (killed when
+/// dropped).
 pub(crate) struct VideoDecoder {
     child: Child,
     out: BufReader<ChildStdout>,
@@ -25,23 +28,26 @@ pub(crate) struct VideoDecoder {
     pub(crate) h: usize,
     pub(crate) decoded: usize,
     buf: Vec<u8>,
+    /// 16-bit samples (rgb48le) instead of 8-bit (rgb24)
+    deep: bool,
 }
 
 impl VideoDecoder {
-    pub(crate) fn open(path: &Path, w: usize, h: usize, max_frames: usize) -> Result<VideoDecoder, Error> {
+    /// `deep`: decode at 16 bits (a source above 8 bits, ClipMeta::video_bits); hint videos stay 8-bit masks.
+    pub(crate) fn open(path: &Path, w: usize, h: usize, max_frames: usize, deep: bool) -> Result<VideoDecoder, Error> {
         let mut child = Command::new("ffmpeg")
             .args(["-v", "error", "-nostdin", "-i"])
             .arg(path)
             .args(["-map", "0:v:0", "-an", "-sn", "-dn", "-fps_mode", "passthrough", "-frames:v"])
             .arg(max_frames.to_string())
-            .args(["-vf", CV2_SCALE, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"])
+            .args(["-vf", CV2_SCALE, "-f", "rawvideo", "-pix_fmt", if deep { "rgb48le" } else { "rgb24" }, "pipe:1"])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()
             .map_err(|e| Error::assets(format!("ffmpeg could not run: {e}")))?;
         let out = BufReader::with_capacity(1 << 20, child.stdout.take().unwrap());
-        Ok(VideoDecoder { child, out, path: path.to_path_buf(), w, h, decoded: 0, buf: vec![0; w * h * 3] })
+        Ok(VideoDecoder { child, out, path: path.to_path_buf(), w, h, decoded: 0, buf: vec![0; w * h * if deep { 6 } else { 3 }], deep })
     }
 
     /// The next frame as interleaved RGB bytes, or an error naming the frame that could not be decoded.
@@ -58,6 +64,13 @@ impl VideoDecoder {
         }
         self.decoded += 1;
         Ok(&self.buf)
+    }
+
+    /// The next frame as (3, h, w) float32 in [0, 1], at the depth it was decoded at.
+    pub(crate) fn next_planar(&mut self) -> Result<Planar, Error> {
+        let (h, w, deep) = (self.h, self.w, self.deep);
+        let raw = self.next_rgb()?;
+        Ok(if deep { rgb48_to_planar(raw, h, w) } else { rgb8_to_planar(raw, h, w) })
     }
 }
 
@@ -84,6 +97,27 @@ pub fn rgb8_to_planar(rgb: &[u8], h: usize, w: usize) -> Planar {
                 r[x] = px[0] as f32 / 255.0;
                 g[x] = px[1] as f32 / 255.0;
                 b[x] = px[2] as f32 / 255.0;
+            }
+        },
+    );
+    p
+}
+
+/// Interleaved 16-bit little-endian RGB -> (3, h, w) float32 in [0, 1] (`/ 65535`).
+pub fn rgb48_to_planar(rgb: &[u8], h: usize, w: usize) -> Planar {
+    use rayon::prelude::*;
+    let mut p = Planar::new(3, h, w);
+    let (r, gb) = p.data.split_at_mut(h * w);
+    let (g, b) = gb.split_at_mut(h * w);
+    let s = |px: &[u8], c: usize| u16::from_le_bytes([px[2 * c], px[2 * c + 1]]) as f32 / 65535.0;
+    // loop: HOT-PATH-OK — one pass per decoded frame, rows in parallel (as rgb8_to_planar)
+    r.par_chunks_mut(w).zip(g.par_chunks_mut(w)).zip(b.par_chunks_mut(w)).zip(rgb.par_chunks(w * 6)).with_min_len(crate::image::ROWS_MIN).for_each(
+        |(((r, g), b), src)| {
+            // loop: HOT-PATH-OK — one row of pixels
+            for (x, px) in src.chunks_exact(6).enumerate() {
+                r[x] = s(px, 0);
+                g[x] = s(px, 1);
+                b[x] = s(px, 2);
             }
         },
     );
@@ -311,7 +345,8 @@ pub fn read_image_rgb(p: &Path) -> Result<Planar, Error> {
     };
     Ok(match read_still(p)? {
         Still::U8 { ch, h, w, data } => to_planar(ch, h, w, &|i| data[i] as f32 / 255.0),
-        Still::U16 { ch, h, w, data } => to_planar(ch, h, w, &|i| (data[i] >> 8) as f32 / 255.0),
+        // 16-bit PNG at full depth (cv2 keeps only the high byte; the film-quality path keeps all 16 bits)
+        Still::U16 { ch, h, w, data } => to_planar(ch, h, w, &|i| data[i] as f32 / 65535.0),
         Still::F32 { ch, h, w, data } => to_planar(ch, h, w, &|i| data[i]),
     })
 }
@@ -405,7 +440,7 @@ const FOLDER_BATCH: usize = 4;
 impl FrameReader {
     pub(crate) fn open(meta: &ClipMeta) -> Result<FrameReader, Error> {
         let video = match &meta.source {
-            crate::clip::Source::Video(p) => Some(VideoDecoder::open(p, meta.w, meta.h, meta.num_frames)?),
+            crate::clip::Source::Video(p) => Some(VideoDecoder::open(p, meta.w, meta.h, meta.num_frames, meta.video_bits > 8)?),
             crate::clip::Source::Frames(_) => None,
         };
         Ok(FrameReader { seconds: 0.0, meta: meta.clone(), video, next: 0, denom: crate::color::asinh_denom(), need_model: true, ready: Default::default() })
@@ -428,8 +463,7 @@ impl FrameReader {
         let t0 = std::time::Instant::now();
         let out = match (&mut self.video, &self.meta.source) {
             (Some(v), _) => {
-                let rgb = v.next_rgb()?;
-                let img = rgb8_to_planar(rgb, self.meta.h, self.meta.w);
+                let img = v.next_planar()?;
                 self.next += 1;
                 Ok(Some(prep_frame_views(img, self.meta.exr_linear, &self.meta, self.denom, self.need_model)))
             }
@@ -615,7 +649,7 @@ impl HintReader {
                 meta.num_frames
             )));
         }
-        Ok(HintReader { meta: meta.clone(), video: Some(VideoDecoder::open(path, p.w, p.h, meta.num_frames)?), paths: vec![], next: 0 })
+        Ok(HintReader { meta: meta.clone(), video: Some(VideoDecoder::open(path, p.w, p.h, meta.num_frames, false)?), paths: vec![], next: 0 })
     }
 
     pub(crate) fn next_frame(&mut self) -> Result<Vec<f32>, Error> {
@@ -655,6 +689,7 @@ mod tests {
             shape_w: 4,
             pad: crate::image::Pad { l: 0, r: 0, t: 0, b: 0 },
             num_frames: 1,
+            video_bits: 8,
             exr_linear: true,
         };
         // loop: NOT-WORTH — both EXR codings
@@ -678,6 +713,16 @@ mod tests {
         let j = d.to_json();
         assert_eq!(j["ffmpeg"], "7.1.1");
         assert!(j["ffprobe"].is_string() && j["jpeg"].is_string());
+    }
+
+    #[test]
+    fn rgb48_to_planes_keeps_16_bits() {
+        // 65535 -> 1.0, 0 -> 0.0, and a value an 8-bit read can't hold (257*51 + 128)
+        let v: u16 = 257 * 51 + 128;
+        let px: Vec<u8> = [65535u16, 0, v, 0, 65535, 1].iter().flat_map(|x| x.to_le_bytes()).collect();
+        let p = rgb48_to_planar(&px, 1, 2);
+        assert_eq!(p.data, vec![1.0, 0.0, 0.0, 1.0, v as f32 / 65535.0, 1.0 / 65535.0]);
+        assert!((p.data[4] - 51.0 / 255.0).abs() > 1e-4, "more than 8 bits survive");
     }
 
     #[test]

@@ -28,12 +28,15 @@ pub struct ClipMeta {
     pub num_frames: usize,
     /// frame folders of scene-linear EXRs (frame_dir_linear)
     pub exr_linear: bool,
+    /// a video source's bits per sample (8 for frame folders and 8-bit video): above 8, frames are decoded at
+    /// 16 bits so 10/12-bit ProRes 4444, DNxHR and HEVC reach the model at full precision (decode.rs)
+    pub video_bits: u32,
 }
 
 impl ClipMeta {
     fn with_shape(source: Source, fps: f64, h: usize, w: usize, num_frames: usize, exr_linear: bool) -> ClipMeta {
         let (shape_h, shape_w) = (ceil_to_multiple(h, SHAPE_QUANTUM), ceil_to_multiple(w, SHAPE_QUANTUM));
-        ClipMeta { source, fps, h, w, shape_h, shape_w, pad: center_pad(h, w, shape_h, shape_w), num_frames, exr_linear }
+        ClipMeta { source, fps, h, w, shape_h, shape_w, pad: center_pad(h, w, shape_h, shape_w), num_frames, exr_linear, video_bits: 8 }
     }
 }
 
@@ -179,6 +182,39 @@ pub(crate) struct VideoProbe {
     pub(crate) h: usize,
     pub(crate) fps: f64,
     pub(crate) frames: usize,
+    /// bits per sample of the decoded picture (bits_per_raw_sample, else read from pix_fmt; 8 when unknown)
+    pub(crate) bits: u32,
+}
+
+/// Bits per sample of a stream: ffprobe's bits_per_raw_sample, else the number in its pixel format's name
+/// (yuv422p10le -> 10, yuv444p12le -> 12, gbrp16le -> 16, rgb48le -> 16); 8 when neither says more.
+pub(crate) fn stream_bits(bits_per_raw_sample: Option<&str>, pix_fmt: Option<&str>) -> u32 {
+    if let Some(b) = bits_per_raw_sample.and_then(|s| s.trim().parse::<u32>().ok()).filter(|b| *b > 0) {
+        return b;
+    }
+    let Some(f) = pix_fmt else { return 8 };
+    if f.starts_with("rgb48") || f.starts_with("bgr48") || f.starts_with("rgba64") || f.starts_with("bgra64") {
+        return 16;
+    }
+    // nv12 / nv21 / nv16 / nv24 are 8-bit (the digits name the layout); p010 / p016 / p210 / p410: the last two
+    let base = f.trim_end_matches("le").trim_end_matches("be");
+    if base.starts_with("nv") {
+        return 8;
+    }
+    // loop: NOT-WORTH — four characters, once per probe
+    if base.len() == 4 && base.starts_with('p') && base[1..].chars().all(|c| c.is_ascii_digit()) {
+        return base[2..].parse().unwrap_or(8);
+    }
+    // the digits after the layout letters: yuv444p12le -> "12"
+    // loop: NOT-WORTH — a pixel format name (a dozen characters), once per probe
+    let tail: String = f.trim_end_matches("le").trim_end_matches("be").chars().rev().take_while(|c| c.is_ascii_digit()).collect();
+    // loop: NOT-WORTH — as above
+    let n: u32 = tail.chars().rev().collect::<String>().parse().unwrap_or(0);
+    if (9..=16).contains(&n) {
+        n
+    } else {
+        8
+    }
 }
 
 fn rational(s: &str) -> f64 {
@@ -234,7 +270,8 @@ pub(crate) fn read_probe(json: &serde_json::Value) -> Result<VideoProbe, Error> 
     if w == 0 || h == 0 {
         return Err(Error::input("the video stream has no size".into()));
     }
-    Ok(VideoProbe { w, h, fps, frames })
+    let bits = stream_bits(st["bits_per_raw_sample"].as_str(), st["pix_fmt"].as_str());
+    Ok(VideoProbe { w, h, fps, frames, bits })
 }
 
 /// ffprobe's deadline.
@@ -243,7 +280,7 @@ pub(crate) const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_
 pub(crate) fn ffprobe(path: &Path) -> Result<VideoProbe, Error> {
     let mut cmd = Command::new("ffprobe");
     cmd.args(["-v", "error", "-select_streams", "v:0", "-show_entries"])
-        .arg("stream=width,height,avg_frame_rate,r_frame_rate,nb_frames,duration:stream_tags=rotate:stream_side_data=rotation:format=duration")
+        .arg("stream=width,height,avg_frame_rate,r_frame_rate,nb_frames,duration,pix_fmt,bits_per_raw_sample:stream_tags=rotate:stream_side_data=rotation:format=duration")
         .args(["-of", "json"])
         .arg(path);
     // a local file answers in well under a second; a stalled mount or device doesn't hold the job
@@ -293,7 +330,9 @@ pub(crate) fn probe_video(path: &Path, num_frames: i64) -> Result<ClipMeta, Erro
     if n == 0 {
         return Err(Error::input(format!("{}: no frames", path.display())));
     }
-    Ok(ClipMeta::with_shape(Source::Video(path.to_path_buf()), p.fps, p.h, p.w, n, false))
+    let mut meta = ClipMeta::with_shape(Source::Video(path.to_path_buf()), p.fps, p.h, p.w, n, false);
+    meta.video_bits = p.bits;
+    Ok(meta)
 }
 
 /// probe_frame_dir_meta: the folder's frames at `fps`; the size comes from the first frame.
@@ -312,6 +351,20 @@ pub(crate) fn probe_frame_dir(dir: &Path, num_frames: i64, fps: f64, exr_linear:
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn bit_depth_from_ffprobe() {
+        assert_eq!(super::stream_bits(Some("12"), Some("yuv444p12le")), 12);
+        assert_eq!(super::stream_bits(None, Some("yuv422p10le")), 10);
+        assert_eq!(super::stream_bits(Some("N/A"), Some("yuv444p12le")), 12);
+        assert_eq!(super::stream_bits(None, Some("gbrp16le")), 16);
+        assert_eq!(super::stream_bits(None, Some("rgb48le")), 16);
+        assert_eq!(super::stream_bits(None, Some("yuv420p")), 8);
+        assert_eq!(super::stream_bits(None, Some("nv12")), 8);
+        assert_eq!(super::stream_bits(None, Some("p010le")), 10);
+        assert_eq!(super::stream_bits(None, Some("gray12le")), 12);
+        assert_eq!(super::stream_bits(None, None), 8);
+    }
     use super::*;
 
     #[test]

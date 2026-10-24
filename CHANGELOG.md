@@ -41,3 +41,7 @@ screen keyer, on its own Rust + ONNX Runtime engine, for Linux, Windows and macO
   progress, stop and resume, every file SHA-256 checked); jobs ask for TensorRT only once it is installed, and the
   job's log says what really ran (and which network stayed on CUDA, and why). Its own item in Storage. Windows
   needs its own engine builder (later); macOS has no TensorRT.
+- Deep input: 10/12-bit video (ProRes 4444, HEVC/DNxHR 4:4:4…) is decoded to 16-bit RGB and 16-bit PNG is read at
+  full depth, so film plates reach the model without rounding to 8 bits. Measured on a 4K plate: the matte is
+  identical to keying the same plate as 16-bit frames; the old 8-bit read put one hair-edge pixel in twelve off by
+  up to 15/255 (README, Quality). About 2 % more time; 8-bit sources are unchanged.
