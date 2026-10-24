@@ -4,7 +4,7 @@ CorridorKey Desktop keys green and blue screen footage with CorridorKey 2.0, Cor
 
 ## Getting started
 
-1. The first time, open **Engine** in the rail and press **Download and install** under *Runtime and models*: the GPU runtime and the CorridorKey models (a 4.9 GB download, once). If ffmpeg is missing, the same page offers to install it. The engine itself comes with the app.
+1. The first time, CorridorKey opens its **setup**: three steps, each ticked when done. Download the GPU runtime and the CorridorKey models (a 4.9 GB download, once), install ffmpeg if it's missing (the app offers to), and add your first clip. The engine itself comes with the app. **Engine → Open the setup** brings it back.
 2. Open **Queue** and drop clips, frame folders or a folder of clips anywhere on the window, or use **Add clips**.
 3. Pick a clip; its settings are in the panel on the right. Press **Start queue**.
 

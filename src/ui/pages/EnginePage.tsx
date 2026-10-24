@@ -4,14 +4,24 @@
 // ffmpeg (checked, and installed on request), the lists of engine files found
 // (Automatic = the newest, Browse… for anything else), and the CorridorKey
 // checkout the PyTorch engine (the benchmark reference) runs from.
-import { Check, Cpu, Download, Film, FolderOpen, FolderCog, X } from "lucide-react";
+import { Check, Cpu, Download, Film, FolderOpen, FolderCog, ListChecks, X } from "lucide-react";
 import type { AppState } from "../../shared/types";
 import { Accordion, Row, Section } from "../panel/Section";
 import { MainBlock, SplitView } from "../panel/SplitView";
 import { Stat } from "../JobView";
-import { gb, gbBytes } from "../format";
+import { gb } from "../format";
+import { FfmpegBox, InstallBox, installPct } from "../setup/SetupParts";
 
-export function EnginePage(props: { state: AppState; panelShown: boolean; narrow: boolean; glass: boolean; focus: string | null; sectionTasks: Record<string, string>; hidePanel: () => void }) {
+export function EnginePage(props: {
+  state: AppState;
+  panelShown: boolean;
+  narrow: boolean;
+  glass: boolean;
+  focus: string | null;
+  sectionTasks: Record<string, string>;
+  hidePanel: () => void;
+  openSetup: () => void;
+}) {
   const { state } = props;
   const p = state.engine.pong;
   const root = state.settings.corridorKeyRoot;
@@ -21,7 +31,7 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
   const ff = state.ffmpeg;
   const inst = state.install;
   const needInstall = inst.needRuntime || inst.needModels;
-  const pct = inst.total ? Math.floor((inst.done / inst.total) * 100) : 0;
+  const pct = installPct(inst);
   const checks = (c: { ok: boolean; problems: string[] }, okText: string) =>
     c.ok ? (
       <div className="check-line ok">
@@ -96,9 +106,12 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
               : kind === "python"
                 ? "The PyTorch engine from your CorridorKey2.0 folder. Set up the ONNX Runtime engine to use it instead."
                 : needInstall
-                  ? "Not installed yet: press Download and install under Runtime and models in the panel."
+                  ? "Not installed yet: the setup downloads the GPU runtime and the models."
                   : "None set up yet: no engine program or models found. Choose them in the panel."}
           </p>
+          <button type="button" className="btn small" onClick={props.openSetup}>
+            <ListChecks size={14} /> Open the setup
+          </button>
         </MainBlock>
         <MainBlock title="Engine">
           {p ? (
@@ -113,17 +126,8 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
           )}
         </MainBlock>
         <MainBlock title="ONNX Runtime engine files">
-          {state.enginePaths.binary && (
-            <div className="path" style={{ marginBottom: 4 }}>
-              {state.enginePaths.binary}
-            </div>
-          )}
-          {state.enginePaths.models && (
-            <div className="path" style={{ marginBottom: 8 }}>
-              {state.enginePaths.models}
-            </div>
-          )}
-          {checks(rust, "Engine program and the five networks found")}
+          {/* before the first install nothing is wrong yet: the setup installs them (no red "missing" lines) */}
+          {needInstall && !rust.ok ? <p className="hint-text">The setup's first step installs them.</p> : checks(rust, "Engine program and the five networks found")}
           {p && !p.torch && (
             <ul className="check-list">
               {/* loop: NOT-WORTH — five networks per render */}
@@ -133,28 +137,6 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
                 </li>
               ))}
             </ul>
-          )}
-        </MainBlock>
-        <MainBlock title="CorridorKey files (PyTorch engine)">
-          {root ? (
-            <>
-              <div className="path" style={{ marginBottom: 8 }}>
-                {root}
-              </div>
-              {checks(state.checkout, "Code, Python environment, weights and foundation models found")}
-              {p && p.torch && (
-                <ul className="check-list">
-                  {/* loop: NOT-WORTH — five networks per render */}
-                  {Object.entries(p.assets).map(([k, ok]) => (
-                    <li key={k} className={`check-line ${ok ? "ok" : "error"}`}>
-                      {ok ? <Check size={15} aria-hidden /> : <X size={15} aria-hidden />} {k.replace("_", " ")} {ok ? "found by the engine" : "missing"}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </>
-          ) : (
-            <p className="hint-text">No CorridorKey folder chosen yet.</p>
           )}
         </MainBlock>
         <MainBlock title="Graphics card">
@@ -192,53 +174,7 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
         status={inst.status === "running" ? `downloading ${pct}%` : needInstall ? "not installed" : "installed"}
         task={props.sectionTasks["engine/install"] ?? null}
       >
-        {() =>
-          !needInstall ? (
-            <div className="check-line ok">
-              <Check size={15} aria-hidden /> The GPU runtime and the CorridorKey models are installed
-            </div>
-          ) : (
-            <>
-              <p className="hint-text">CorridorKey downloads what it runs on, once, into {inst.dir}:</p>
-              <ul className="check-list">
-                {inst.needRuntime && (
-                  <li className="hint-text">
-                    GPU runtime, {gbBytes(inst.runtimeBytes)} download: ONNX Runtime (Microsoft, MIT licence) and NVIDIA's CUDA and cuDNN libraries (NVIDIA licence), from pypi.org
-                  </li>
-                )}
-                {inst.needModels && (
-                  <li className="hint-text">
-                    CorridorKey models, {gbBytes(inst.modelsBytes)} download: by Corridor Digital, under the CorridorKey licence (free to use, never sold), from this app's GitHub releases
-                  </li>
-                )}
-              </ul>
-              {!inst.nvidia && <p className="hint-text">No NVIDIA graphics driver is loaded. CorridorKey Desktop runs on NVIDIA graphics cards.</p>}
-              {inst.status === "running" ? (
-                <>
-                  <div className="hint-text">
-                    {inst.step} · {gbBytes(inst.done)} of {gbBytes(inst.total)}
-                  </div>
-                  <div className="bar" role="progressbar" aria-valuemin={0} aria-valuemax={inst.total} aria-valuenow={inst.done}>
-                    <span style={{ width: `${pct}%` }} />
-                  </div>
-                  <button type="button" className="btn small" onClick={() => void window.ck.stopInstall()}>
-                    Stop
-                  </button>
-                </>
-              ) : (
-                <button type="button" className="btn small" disabled={!inst.nvidia} onClick={() => void window.ck.startInstall()}>
-                  <Download size={14} /> {inst.error ? "Try again (resumes)" : `Download and install (${gbBytes(inst.bytes)})`}
-                </button>
-              )}
-              {inst.error && (
-                <div className="check-line error">
-                  <X size={15} aria-hidden /> {inst.error}
-                </div>
-              )}
-              <p className="hint-text">Every file is checked against its SHA-256 before it is used. A stopped download continues where it left off.</p>
-            </>
-          )
-        }
+        {() => <InstallBox inst={inst} />}
       </Section>
       <Section
         id="ffmpeg"
@@ -247,33 +183,7 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
         status={!ff.checked ? "checking…" : ff.ok ? "installed" : ff.installing ? "installing…" : "not installed"}
         task={props.sectionTasks["engine/ffmpeg"] ?? null}
       >
-        {() =>
-          !ff.checked ? (
-            <p className="hint-text">Checking ffmpeg…</p>
-          ) : ff.ok ? (
-            <div className="check-line ok">
-              <Check size={15} aria-hidden /> ffmpeg and ffprobe found, with the H.264 and ProRes 4444 encoders
-            </div>
-          ) : (
-            <>
-              <p className="hint-text">CorridorKey reads and writes video with ffmpeg. {ff.problem}.</p>
-              {ff.note && <p className="hint-text">{ff.note}</p>}
-              <Row label="Install command" hint={ff.canInstall ? "The app runs it for you; your desktop asks for your password" : "Run it in a terminal"}>
-                <div className="path selectable">{ff.command}</div>
-              </Row>
-              {ff.canInstall && (
-                <button type="button" className="btn small" disabled={ff.installing} onClick={() => void window.ck.installFfmpeg()}>
-                  {ff.installing ? "Installing…" : "Install ffmpeg"}
-                </button>
-              )}
-              {ff.installError && (
-                <div className="check-line error">
-                  <X size={15} aria-hidden /> {ff.installError}
-                </div>
-              )}
-            </>
-          )
-        }
+        {() => <FfmpegBox ff={ff} />}
       </Section>
       <Section id="onnx" icon={Cpu} title="ONNX Runtime engine" status={rust.ok ? (kind === "rust" ? "in use" : "set up") : "not set up"} task={props.sectionTasks["engine/onnx"] ?? null}>
         {() => (
@@ -284,20 +194,41 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
           </>
         )}
       </Section>
-      <Section id="folder" icon={FolderCog} title="CorridorKey folder" status={root ? (state.checkout.ok ? root : "incomplete") : "not chosen"} task={props.sectionTasks["engine/folder"] ?? null}>
+      <Section id="folder" icon={FolderCog} title="Benchmark reference (advanced)" status={root ? (state.checkout.ok ? "set up" : "incomplete") : "not used"} task={null}>
         {() => (
-          <Row label="Folder" hint="The CorridorKey2.0 checkout with its venv and weights (the PyTorch engine)">
-            <div className="file-pick">
-              <button type="button" className="btn small" onClick={() => window.ck.pickCheckout()}>
-                <FolderOpen size={14} /> Choose…
-              </button>
-              {root && (
-                <span className="path" title={root}>
-                  {root}
-                </span>
-              )}
-            </div>
-          </Row>
+          <>
+            <p className="hint-text">
+              Not needed to use CorridorKey. It runs Corridor's original CorridorKey 2.0 (PyTorch) from a CorridorKey2.0 checkout, so speed and quality can be compared on the same machine (README,
+              Speed).
+            </p>
+            <Row label="CorridorKey2.0 checkout" hint="The original's folder, with its venv and weights">
+              <div className="file-pick">
+                <button type="button" className="btn small" onClick={() => window.ck.pickCheckout()}>
+                  <FolderOpen size={14} /> Choose…
+                </button>
+                {root && (
+                  <span className="path" title={root}>
+                    {root}
+                  </span>
+                )}
+              </div>
+            </Row>
+            {root &&
+              (state.checkout.ok ? (
+                <div className="check-line ok">
+                  <Check size={15} aria-hidden /> Code, Python environment, weights and foundation models found
+                </div>
+              ) : (
+                <ul className="check-list">
+                  {/* loop: NOT-WORTH — a few problems per render */}
+                  {state.checkout.problems.map((m) => (
+                    <li key={m} className="hint-text">
+                      Not usable yet: {m}
+                    </li>
+                  ))}
+                </ul>
+              ))}
+          </>
         )}
       </Section>
     </Accordion>

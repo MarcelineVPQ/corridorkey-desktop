@@ -1,6 +1,6 @@
 // The app shell: the page and its panel on the left, the rail on the right
 // edge (the house layout of the DS5 app and Sonata). Drop clips anywhere.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppState } from "../shared/types";
 import { dots, jobToSelect, tasksOf, type PageId } from "../shared/tasks";
 import { AppRail } from "./rail/AppRail";
@@ -12,6 +12,8 @@ import { QueuePage } from "./pages/QueuePage";
 import { EnginePage } from "./pages/EnginePage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { AboutPage } from "./pages/AboutPage";
+import { SetupPage } from "./pages/SetupPage";
+import { setupNeeded } from "./setup/SetupParts";
 
 export function App() {
   const [state, setState] = useState<AppState | null>(null);
@@ -49,6 +51,16 @@ export function App() {
     if (!selected || !state.jobs.some((j) => j.id === selected)) setSelected(state.jobs[0]?.id ?? null);
   }, [state, selected]);
 
+  // At start: the setup page while setup has work, else never left on it (once per launch; ffmpeg's first check
+  // must have answered so a missing ffmpeg counts too)
+  const startPage = useRef(false);
+  useEffect(() => {
+    if (!state || startPage.current || !state.ffmpeg.checked) return;
+    startPage.current = true;
+    if (setupNeeded(state)) setPage("setup");
+    else if (page === "setup") setPage("queue");
+  }, [state, page, setPage]);
+
   const tasks = useMemo(() => (state ? tasksOf(state) : []), [state]);
   const d = useMemo(() => dots(tasks), [tasks]);
   const narrow = width < NARROW;
@@ -79,7 +91,8 @@ export function App() {
     const paths = [...e.dataTransfer.files].map((f) => window.ck.pathForFile(f)).filter(Boolean);
     if (paths.length) {
       void window.ck.addPaths(paths);
-      setPage("queue");
+      // on the setup page the drop ticks step 3 there; elsewhere the queue shows the new clips
+      if (page !== "setup") setPage("queue");
     }
   };
 
@@ -97,9 +110,10 @@ export function App() {
     >
       <main className="shell-page">
         {page === "queue" && <QueuePage state={state} selected={selected} onSelect={setSelected} panelShown={panelShown("queue")} sectionTasks={d.sections} {...common} />}
-        {page === "engine" && <EnginePage state={state} panelShown={panelShown("engine")} sectionTasks={d.sections} {...common} />}
+        {page === "engine" && <EnginePage state={state} panelShown={panelShown("engine")} sectionTasks={d.sections} openSetup={() => setPage("setup")} {...common} />}
         {page === "settings" && <SettingsPage state={state} panelShown={panelShown("settings")} {...common} />}
         {page === "about" && <AboutPage version={state.version} panelShown={panelShown("about")} {...common} />}
+        {page === "setup" && <SetupPage state={state} openQueue={() => setPage("queue")} openGuide={() => setPage("about")} />}
       </main>
       <AppRail state={state} page={page} pageDots={d.pages} onPress={onPress} glass={glass} windowWidth={width} />
       {dragging && <div className="drop-overlay">Drop to add to the queue</div>}

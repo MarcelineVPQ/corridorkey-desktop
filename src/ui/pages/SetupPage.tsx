@@ -1,0 +1,73 @@
+// Setup: the first start's three steps, each with its control and a tick when done (Marcy 2026-10-24: "no
+// setup wizard or install guide, I don't even know how to use my own app"). Opens by itself at start while
+// setup has something to do; the Engine page reopens it. Every tick comes from the app state, never a guess.
+import { Check, FolderOpen, ListVideo } from "lucide-react";
+import type { ReactNode } from "react";
+import type { AppState } from "../../shared/types";
+import { MainBlock } from "../panel/SplitView";
+import { FfmpegBox, InstallBox } from "../setup/SetupParts";
+
+function Step(props: { n: number; title: string; done: boolean; children: ReactNode }) {
+  return (
+    <MainBlock title={`${props.n} · ${props.title}`}>
+      {props.done && (
+        <div className="check-line ok" style={{ marginBottom: 8 }}>
+          <Check size={15} aria-hidden /> Done
+        </div>
+      )}
+      {props.children}
+    </MainBlock>
+  );
+}
+
+export function SetupPage(props: { state: AppState; openQueue: () => void; openGuide: () => void }) {
+  const { state } = props;
+  const installed = !(state.install.needRuntime || state.install.needModels) || state.engineKind === "rust";
+  const ffmpegOk = state.ffmpeg.ok;
+  const hasClips = state.jobs.length > 0;
+  const allDone = installed && ffmpegOk && hasClips;
+  return (
+    <div className="page-body">
+      <div className="page-bar">
+        <h1>Set up CorridorKey</h1>
+      </div>
+      <div className="page-content">
+        <p className="hint-text" style={{ margin: "0 0 14px" }}>
+          Three steps, once. CorridorKey keys green and blue screen footage on your own NVIDIA graphics card: it needs its runtime and models, ffmpeg to read and write video, and your clips.
+        </p>
+        <Step n={1} title="Download the GPU runtime and the CorridorKey models" done={installed}>
+          {!installed && <InstallBox inst={state.install} />}
+        </Step>
+        <Step n={2} title="ffmpeg, for reading and writing video" done={ffmpegOk}>
+          {!ffmpegOk && <FfmpegBox ff={state.ffmpeg} />}
+        </Step>
+        <Step n={3} title="Add your first clip" done={hasClips}>
+          {!hasClips && (
+            <>
+              <p className="hint-text">A video file, a folder of frames (EXR, PNG, TIFF…) or a folder of clips. Drop them anywhere on this window, or:</p>
+              <button type="button" className="btn small primary" onClick={() => void window.ck.pickClips()}>
+                <FolderOpen size={14} /> Add clips…
+              </button>
+            </>
+          )}
+        </Step>
+        {allDone ? (
+          <section className="notice" style={{ margin: "0 0 14px" }}>
+            <h3>All set</h3>
+            <div className="hint-text">Pick a clip in the queue to choose its hint and outputs, then press Start queue.</div>
+            <button type="button" className="btn small primary" style={{ marginTop: 8 }} onClick={props.openQueue}>
+              <ListVideo size={14} /> Open the queue
+            </button>
+          </section>
+        ) : (
+          <p className="hint-text">
+            Each step ticks itself when it's done.{" "}
+            <button type="button" className="link-btn" onClick={props.openGuide}>
+              Read the guide
+            </button>
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}

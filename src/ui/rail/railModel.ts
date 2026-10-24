@@ -9,7 +9,7 @@ import type { PageId } from "../../shared/tasks";
 export const RAIL = { collapsed: 52, expanded: 196, minContent: 900, row: 36 } as const;
 
 export interface RailItem {
-  id: PageId;
+  id: Exclude<PageId, "setup">; // the setup page opens by itself, never from the rail
   label: string;
   tip: string;
 }
