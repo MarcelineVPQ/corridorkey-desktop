@@ -33,6 +33,8 @@
   --overlay: rgba(10, 12, 16, 0.78);
   --task: #f2b84b;
   --shadow: rgba(0, 0, 0, 0.32);
+  /* the page behind an open drawer (narrow windows) */
+  --scrim: rgba(0, 0, 0, 0.45);
   --glass-rim: rgba(255, 255, 255, 0.22);
   --font-ui: system-ui, "Segoe UI", "Noto Sans", sans-serif;
   --font-mono: ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace;
@@ -68,6 +70,7 @@
     --overlay: rgba(243, 244, 247, 0.85);
     --task: #b07200;
     --shadow: rgba(0, 0, 0, 0.16);
+    --scrim: rgba(0, 0, 0, 0.28);
     --glass-rim: rgba(255, 255, 255, 0.7);
   }
 }

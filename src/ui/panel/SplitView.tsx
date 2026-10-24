@@ -2,7 +2,7 @@
 // it (the DS5 SplitView). The panel is shown or hidden only by the rail item of
 // the page you're on (no show button on the page, no hide button in the panel);
 // opening a page shows it. Narrow windows: the panel opens as a drawer over the
-// page, the same rail item or Escape closes it.
+// page, the page behind is dimmed, and the same rail item, Escape or a click on the dimmed page closes it.
 import { useEffect, type ReactNode } from "react";
 import { useGlass } from "../glass/useGlass";
 import { REGULAR_GLASS } from "../glass/variants";
@@ -22,6 +22,8 @@ export function SplitView(props: { main: ReactNode; panel: ReactNode; panelTitle
   return (
     <div className={`split ${narrow ? "narrow" : ""}`}>
       <div className="split-main">{main}</div>
+      {/* the page behind the drawer is dimmed; a click on it closes the drawer, as Escape does */}
+      {narrow && shown && <div className="split-scrim" aria-hidden onClick={onEscape} />}
       {shown && (
         <aside ref={glassRef} className={`split-panel ${narrow ? "drawer" : ""} ${glass ? "glass" : ""}`} aria-label={panelTitle}>
           <header className="panel-head">

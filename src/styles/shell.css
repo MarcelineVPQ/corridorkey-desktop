@@ -241,6 +241,14 @@
   border-left: 1px solid var(--border-1);
   background: var(--bg-1);
 }
+/* narrow windows: the page behind the open drawer is dimmed (a click on it closes the drawer), so text that runs
+   under the drawer reads as behind it, not as cut off (the Windows VM at 1024x768, 2026-10-24) */
+.split-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 19;
+  background: var(--scrim);
+}
 .split-panel.drawer {
   position: absolute;
   top: 0;
