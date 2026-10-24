@@ -434,6 +434,7 @@ fi
 s7() {
 step "7. the Mac's results → $OUT, compared with the reference"
 MAC="$OUT/mac"
+run rm -rf "$OUT/compare" "$OUT/side_by_side"
 run mkdir -p "$MAC" "$OUT/compare"
 xfer -a --partial --exclude=/tmp/ --exclude=/pid "$HOST:$R/$RUN/" "$MAC/"
 SBS_ARGS=()
@@ -444,13 +445,14 @@ for n in "${CLIP_NAMES[@]}"; do
     continue
   fi
   worst=0
-  [ "$DRY" = 1 ] || worst=$(node -e 'console.log(require(process.argv[1])[0].worst_frame)' "$OUT/compare/$n.json")
+  # (Python reads it: its JSON has Infinity for identical frames' PSNR)
+  [ "$DRY" = 1 ] || worst=$("$PY" -I -c 'import json, sys; print(json.load(open(sys.argv[1]))[0]["worst_frame"])' "$OUT/compare/$n.json")
   heavy 8 "$PY" -I "$REPO/tools/side_by_side.py" "$REF/out/$n" "$MAC/out/$n" --out "$OUT/side_by_side/$n" \
     --labels "CUDA (this PC)" "Mac ($PROVIDER)" --frames "$worst" && SBS_ARGS+=(--sbs "$n=side_by_side/$n")
 done
 printf '+ (the per-clip comparisons merged into %s)\n' "$OUT/compare.json"
 if [ "$DRY" = 0 ]; then
-  node -e 'const fs=require("fs"), d=process.argv[1]; fs.writeFileSync(d+"/compare.json", JSON.stringify(fs.readdirSync(d+"/compare").filter(f=>f.endsWith(".json")).flatMap(f=>JSON.parse(fs.readFileSync(d+"/compare/"+f))), null, 2))' "$OUT"
+  "$PY" -I -c 'import glob, json, sys; d = sys.argv[1]; json.dump([m for f in sorted(glob.glob(d + "/compare/*.json")) for m in json.load(open(f))], open(d + "/compare.json", "w"), indent=2)' "$OUT"
   [ -f "$FACTS" ] || echo "facts=not collected in this run (step 1 skipped)" >"$FACTS"
 fi
 run "$PY" -I "$REPO/tools/mac_gate_report.py" --compare "$OUT/compare.json" --mac-bench "$MAC/bench.json" \
