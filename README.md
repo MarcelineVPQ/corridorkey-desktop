@@ -40,6 +40,9 @@ Status: 1.0 is almost ready, for Linux, Windows and macOS (Apple Silicon).
   the CorridorKey models (a 4.9 GB download on Linux and Windows, about 3.3 GB on macOS, once). If `ffmpeg` is
   missing, it offers to install it (apt or pacman on Linux, `winget` on Windows, Homebrew on macOS).
 
+**Windows, first start:** the installer isn't code-signed yet, so Windows SmartScreen shows "Windows protected
+your PC" the first time. Click **More info**, then **Run anyway**. It's asked once; signing comes later.
+
 **Windows, honestly:** the Windows build is tested in a Windows 11 virtual machine: it installs, opens, runs its setup
 (the downloads, ffmpeg through winget) and works through its pages. That machine has no NVIDIA graphics card, so
 **keying on an NVIDIA card under Windows has not been tested yet**: we don't have a real Windows PC with one. Every

@@ -1,0 +1,8 @@
+# The engine's Rust compiler, pinned so this PC, GitHub's runners and contributors build and lint with the same one
+# (2026-10-24: the macOS runner's newer clippy failed a lint that 1.93 doesn't have). Moving to a newer Rust is a
+# deliberate change: update this line and fix any new lints in the same commit.
+[toolchain]
+channel = "1.93.0"
+components = ["clippy", "rustfmt"]
+# the Windows engine is cross-built here (tools/build_engine.sh --windows)
+targets = ["x86_64-pc-windows-gnu"]
