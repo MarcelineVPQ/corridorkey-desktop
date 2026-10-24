@@ -60,7 +60,7 @@ speed and quality number in this README was measured on Linux. If you try it on 
 with the engine on ONNX Runtime's Core ML backend (Apple's GPU and Neural Engine), and it's built, installed and
 driven page by page on GitHub's Apple Silicon runners. The Core ML engine is being finished now. Those runners are
 virtual machines without the GPU or the Neural Engine, so **Mac keying speed will come from testers**, like Windows
-keying. The disk image will be signed and notarized by Apple.
+keying. The disk image is signed (Developer ID) and notarized by Apple: Gatekeeper accepts it as "Notarized Developer ID".
 
 ## Install size
 
