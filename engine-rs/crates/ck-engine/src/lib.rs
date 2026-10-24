@@ -107,7 +107,7 @@ pub fn serve<B: Backend, R: BufRead + Send + 'static, W: Write>(backend: &mut B,
     let inbox = std::sync::Arc::new(Inbox { state: std::sync::Mutex::new(InboxState::default()), more: std::sync::Condvar::new() });
     let reader = inbox.clone();
     // loop: SERIAL-REQUIRED — the request reader: lines in order into the inbox; ends at the input's end (the app closes the pipe or exits)
-    std::thread::spawn(move || {
+    let started = std::thread::Builder::new().name("stdin-reader".into()).spawn(move || {
         let mut input = input;
         let mut buf = Vec::new();
         // loop: SERIAL-REQUIRED — one line at a time, in order [bounded: ends at the input's end or a read error]
@@ -131,6 +131,11 @@ pub fn serve<B: Backend, R: BufRead + Send + 'static, W: Write>(backend: &mut B,
         reader.state.lock().unwrap().ended = true;
         reader.more.notify_one();
     });
+    if let Err(e) = started {
+        // no reader: nothing can come in, so the loop below ends at once instead of waiting forever
+        eprintln!("corridorkey-engine: couldn't start the request reader: {e}");
+        inbox.state.lock().unwrap().ended = true;
+    }
     let mut r = Replies::new(out);
     let mut pending_cancel: HashSet<String> = HashSet::new();
     // loop: SERIAL-REQUIRED — one job at a time on one GPU; the app queues
@@ -199,7 +204,7 @@ fn run_job<B: Backend, W: Write>(backend: &mut B, req: &Value, jid: &str, r: &mu
         Ok(job) => match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| backend.run(&job, r))) {
             Ok(res) => res,
             Err(p) => {
-                let m = p.downcast_ref::<String>().cloned().or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_else(|| "panic".into());
+                let m = ck_core::panic_message(&*p);
                 Err(Error::engine(format!("internal error: {m}")))
             }
         },

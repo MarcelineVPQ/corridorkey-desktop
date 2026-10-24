@@ -64,9 +64,9 @@ const P = {
     loop: /^\s*('\w+:\s*)?(for .+ in .+\{|while .+\{|loop \{)/,
     iter: /\.(par_)?iter(_mut)?\(\)|\.into_(par_)?iter\(\)|\.(par_)?chunks(_exact)?(_mut)?\(|\.par_extend\(|\.chars\(\)|\.lines\(\)|\.bytes\(\)|\.windows\(|\.split\(|\(\s*[\w.]+\s*\.\.=?\s*[^()]*(\([^()]*\))?[^()]*\)\s*\.\s*(map|for_each|into_par_iter|filter|step_by|rev|flat_map|fold|any|all|find|position)\b/,
     timer: /thread::sleep\(/,
-    wait: /\.recv\(\)|\.recv_timeout\(|\.join\(\)|\.wait\(\)|\.output\(\)|\.status\(\)|\.read_exact\(|\.read_to_end\(|\bwait_timeout\(|\boutput_timeout\(/,
+    wait: /\.recv\(\)|\.recv_timeout\(|\.join\(\)|\.wait\(\)|\.output\(\)|\.status\(\)|\.read_exact\(|\.read_to_end\(|\bwait_timeout\(|\boutput_timeout\(|\bjoined\(/,
     sync: null,
-    thread: /thread::spawn\(/,
+    thread: /thread::spawn\(|\bspawn_named\(|thread::Builder::new\(\)/,
     comment: /^\s*\/\//,
     alloc:
       /vec!\[|Vec::new\(|Vec::with_capacity\(|\.collect\b|\.to_vec\(\)|\.clone\(\)|format!\(|String::new\(|\.to_string\(\)|Box::new\(|Arc::new\(|\.into_owned\(\)|\.into_f(16|32)\(\)|\.range_f32\(/,

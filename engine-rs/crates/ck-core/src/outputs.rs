@@ -41,13 +41,13 @@ pub(crate) struct RenderWorker<'a> {
 }
 
 impl<'a> RenderWorker<'a> {
-    pub(crate) fn start(home: &'a mut Writers, ro: RenderOpts, checker: Vec<f32>, geo: Geometry) -> RenderWorker<'a> {
+    pub(crate) fn start(home: &'a mut Writers, ro: RenderOpts, checker: Vec<f32>, geo: Geometry) -> Result<RenderWorker<'a>, Error> {
         let mut writers = std::mem::take(home);
         let (tx, rx) = sync_channel::<Data<'static>>(QUEUE);
         let done = Arc::new(AtomicUsize::new(0));
         let done2 = done.clone();
         // loop: SERIAL-REQUIRED — the render thread: frames to the writers in order; ends when the sender is dropped or a writer fails
-        let handle = std::thread::spawn(move || {
+        let handle = crate::ahead::spawn_named("render", move || {
             let mut res = Ok(());
             let mut secs = 0.0;
             // loop: SERIAL-REQUIRED — frames reach the writers in order; ends when the sender is dropped
@@ -84,8 +84,8 @@ impl<'a> RenderWorker<'a> {
                 done2.store(n, Ordering::Relaxed);
             }
             (writers, res, secs)
-        });
-        RenderWorker { home, tx: Some(tx), done, seen: None, handle: Some(handle) }
+        })?;
+        Ok(RenderWorker { home, tx: Some(tx), done, seen: None, handle: Some(handle) })
     }
 
     /// Queue one frame's stage-2 output (blocks while `QUEUE` frames wait). If the worker stopped, its own
@@ -118,13 +118,11 @@ impl<'a> RenderWorker<'a> {
         self.tx = None;
         let Some(h) = self.handle.take() else { return Ok(0.0) };
         // loop: SERIAL-REQUIRED — joins the render thread after dropping its sender [bounded: ≤ 2 queued frames, then the thread ends]
-        match h.join() {
-            Ok((writers, res, secs)) => {
-                *self.home = writers;
-                res.map(|_| secs)
-            }
-            Err(_) => Err(Error::engine("the render thread panicked".into())),
-        }
+        // a panic there: "the render thread panicked: <what it said>" (its writers were dropped with it, which stops
+        // their encoders)
+        let (writers, res, secs) = crate::ahead::joined(h)?;
+        *self.home = writers;
+        res.map(|_| secs)
     }
 }
 
@@ -173,7 +171,7 @@ mod tests {
     fn frame_counts_and_seconds_come_back() {
         let mut writers: Writers = vec![("alpha".into(), Box::new(Counting { frames: 0, fail_at: 0 }))];
         let geo = Geometry { shape: (2, 2), crop: (0, 0), hw: (2, 2) };
-        let mut w = RenderWorker::start(&mut writers, opts(), vec![0.5; 4], geo);
+        let mut w = RenderWorker::start(&mut writers, opts(), vec![0.5; 4], geo).unwrap();
         assert_eq!(w.done(), None);
         // loop: NOT-WORTH — three frames
         for _ in 0..3 {
@@ -189,7 +187,7 @@ mod tests {
         let mut writers: Writers = vec![("alpha".into(), Box::new(Counting { frames: 0, fail_at: 2 }))];
         let geo = Geometry { shape: (2, 2), crop: (0, 0), hw: (2, 2) };
         let e = {
-            let mut w = RenderWorker::start(&mut writers, opts(), vec![0.5; 4], geo);
+            let mut w = RenderWorker::start(&mut writers, opts(), vec![0.5; 4], geo).unwrap();
             let mut err = None;
             // loop: NOT-WORTH — up to five frames
             for _ in 0..5 {

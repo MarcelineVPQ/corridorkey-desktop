@@ -114,7 +114,7 @@ impl VideoWriter {
         let err: Shared = Arc::new(Mutex::new(None));
         let e2 = err.clone();
         // loop: SERIAL-REQUIRED — the ffmpeg feeding thread: frames in order; ends when the queue closes or ffmpeg's pipe fails
-        let thread = std::thread::spawn(move || {
+        let thread = crate::ahead::spawn_named("ffmpeg-feed", move || {
             // loop: SERIAL-REQUIRED — frames go to ffmpeg in order; ends when the sender is dropped
             for buf in rx {
                 // the samples' own bytes: little-endian on the hosts this runs on (bgr48le / bgra64le)
@@ -123,7 +123,7 @@ impl VideoWriter {
                     return;
                 }
             }
-        });
+        })?;
         Ok(VideoWriter {
             path: path.to_path_buf(),
             channels,
@@ -175,7 +175,9 @@ impl Writer for VideoWriter {
                 }
             }
             // loop: SERIAL-REQUIRED — joins the feeding thread [bounded: it finished, or ffmpeg was just killed so its blocked write fails]
-            let _ = t.join();
+            if let Err(e) = crate::ahead::joined(t) {
+                self.err.lock().unwrap().get_or_insert(e);
+            }
         }
         let rc = match self.child.take() {
             // loop: SERIAL-REQUIRED — ffmpeg finishing the file, within FINISH_TIMEOUT 300 s (this pass: it had no deadline)
@@ -267,7 +269,7 @@ impl ExrWriter {
         let err: Shared = Arc::new(Mutex::new(None));
         let (e2, d2, name) = (err.clone(), dir.to_path_buf(), frame_name.to_string());
         // loop: SERIAL-REQUIRED — the EXR writing thread: batches in order; ends when the queue closes or a write fails
-        let thread = std::thread::spawn(move || {
+        let thread = crate::ahead::spawn_named("exr-write", move || {
             // loop: SERIAL-REQUIRED — batches in order; ends when the sender is dropped
             for (idx0, n, data) in rx {
                 let len = w * h * channels;
@@ -280,7 +282,7 @@ impl ExrWriter {
                     }
                 }
             }
-        });
+        })?;
         Ok(ExrWriter { dir: dir.to_path_buf(), channels, frame_len: w * h * channels, tx: Some(tx), thread: Some(thread), err, frames: 0 })
     }
 }
@@ -308,7 +310,9 @@ impl Writer for ExrWriter {
         self.tx.take();
         if let Some(t) = self.thread.take() {
             // loop: SERIAL-REQUIRED — joins the EXR thread after closing its queue [bounded: ≤ 2 queued frames, each one local file write]
-            let _ = t.join();
+            if let Err(e) = crate::ahead::joined(t) {
+                self.err.lock().unwrap().get_or_insert(e);
+            }
         }
         match self.err.lock().unwrap().clone() {
             Some(e) => Err(e),

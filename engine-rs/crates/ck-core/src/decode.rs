@@ -365,44 +365,29 @@ impl FrameReader {
 /// A FrameReader on its own thread, a few frames ahead (the runtime prefetches its prepass chunks the same way):
 /// decoding overlaps the networks.
 pub(crate) struct Prefetch {
-    rx: std::sync::mpsc::Receiver<Result<Prepped, Error>>,
+    frames: crate::ahead::Ahead<Prepped>,
+    /// the reader's own decode + preprocessing seconds
     seconds: crate::ahead::Seconds,
-    _thread: std::thread::JoinHandle<()>,
 }
 
 impl Prefetch {
-    pub(crate) fn new(mut reader: FrameReader, depth: usize) -> Prefetch {
-        let (tx, rx) = std::sync::mpsc::sync_channel(depth);
+    /// `reader` on a thread named `name`, `depth` frames ahead (a panic in the decoder is the next frame's error).
+    pub(crate) fn new(name: &str, mut reader: FrameReader, depth: usize) -> Result<Prefetch, Error> {
         let seconds = crate::ahead::Seconds::default();
         let s2 = seconds.clone();
         // loop: SERIAL-REQUIRED — the prefetch thread: decodes in order; ends at the clip's end, an error, or a dropped receiver
-        let thread = std::thread::spawn(move || {
-            // loop: SERIAL-REQUIRED — frames decode in order; ends at the clip's end, an error, or a dropped receiver
-            loop {
-                let item = reader.next_frame();
-                s2.set(reader.seconds);
-                let stop = !matches!(item, Ok(Some(_)));
-                let msg = match item {
-                    Ok(Some(p)) => Ok(p),
-                    Ok(None) => break,
-                    Err(e) => Err(e),
-                };
-                if tx.send(msg).is_err() || stop {
-                    break;
-                }
-            }
-        });
-        Prefetch { rx, seconds, _thread: thread }
+        let frames = crate::ahead::Ahead::spawn(name, depth, move || {
+            let item = reader.next_frame();
+            s2.set(reader.seconds);
+            item
+        })?;
+        Ok(Prefetch { frames, seconds })
     }
 
     /// The next frame, or None at the end.
     pub(crate) fn next_frame(&mut self) -> Result<Option<Prepped>, Error> {
         // loop: SERIAL-REQUIRED — frames in order [bounded: the prefetch thread ends at the clip's end (ffmpeg closes its pipe) or an error]
-        match self.rx.recv() {
-            Ok(Ok(p)) => Ok(Some(p)),
-            Ok(Err(e)) => Err(e),
-            Err(_) => Ok(None),
-        }
+        self.frames.next_item()
     }
 
     /// Seconds the decoding thread spent (decode + preprocessing).

@@ -140,6 +140,11 @@ pub(crate) fn write_failure(e: &std::io::Error) -> Option<&'static str> {
     }
 }
 
+/// What a panic said (its payload is a String or a &str for panic!/unwrap/expect; anything else: "panic").
+pub fn panic_message(p: &(dyn std::any::Any + Send)) -> String {
+    p.downcast_ref::<String>().cloned().or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_else(|| "panic".into())
+}
+
 fn first_line(s: &str) -> &str {
     // loop: NOT-WORTH — first line of an error message
     s.lines().next().unwrap_or(s)

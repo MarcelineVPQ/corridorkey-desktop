@@ -225,7 +225,7 @@ struct WindowReader {
 
 impl WindowReader {
     fn open(meta: &ClipMeta) -> Result<WindowReader, Error> {
-        Ok(WindowReader { reader: Prefetch::new(FrameReader::open(meta)?, 8), cache: BTreeMap::new(), next: 0 })
+        Ok(WindowReader { reader: Prefetch::new("frame-decode", FrameReader::open(meta)?, 8)?, cache: BTreeMap::new(), next: 0 })
     }
     /// Frames t0..t1 (decoding up to t1); frames before t0 are dropped.
     fn window(&mut self, t0: usize, t1: usize) -> Result<Vec<Prepped>, Error> {
@@ -343,7 +343,7 @@ impl Pipeline {
                 let (_, _, h) = self.pending.remove(i);
                 let t = Instant::now();
                 // loop: SERIAL-REQUIRED — takes a network loaded ahead; waits only for the part not yet done [bounded: ORT session creation ends (succeeds or fails)]
-                let (net, secs) = h.join().map_err(|_| Error::engine(format!("loading {piece} panicked")))??;
+                let (net, secs) = crate::ahead::joined(h)??;
                 self.load_s += t.elapsed().as_secs_f64();
                 *self.load_each.entry(piece).or_insert(0.0) += t.elapsed().as_secs_f64();
                 self.preload_s += secs;
@@ -431,13 +431,16 @@ impl Pipeline {
             let cap = self.arena_limit(key, piece);
             let (rt, prov, prec) = (self.rt, key.provider, key.precision);
             // loop: PARALLELIZE — the next low-VRAM phase's network loads while this phase runs (this pass; measured: 1.3-1.5 s less per job)
-            let h = std::thread::spawn(move || {
+            let started = crate::ahead::spawn_named(&format!("load-{piece}"), move || {
                 let t = Instant::now();
                 let net = Net::load(rt, piece, prov, &file, cap)?;
                 eprintln!("  loaded {piece} ahead ({}, {}) in {:.1} s on its own thread", prov.name(), prec.name(), t.elapsed().as_secs_f64());
                 Ok((net, t.elapsed().as_secs_f64()))
             });
-            self.pending.push((piece, key.clone(), h));
+            // a load that couldn't start ahead is made when its phase comes (`ensure`)
+            if let Ok(h) = started {
+                self.pending.push((piece, key.clone(), h));
+            }
         }
     }
 
@@ -987,10 +990,10 @@ impl Pipeline {
             let ntok = 1 + (he / 16) * (we / 16);
             let mut state: Data<'static> = Data::F32(vec![0f32; ntok * RVM_CH]);
             // the small frames are made ahead on their own thread (they don't depend on the state)
-            let mut reader = Prefetch::new(FrameReader::open(meta)?.display_only(), 8);
+            let mut reader = Prefetch::new("rvm-decode", FrameReader::open(meta)?.display_only(), 8)?;
             let dec = crate::ahead::Seconds::default();
             let dec2 = dec.clone();
-            let mut small_frames = Ahead::spawn(4, move || {
+            let mut small_frames = Ahead::spawn("rvm-inputs", 4, move || {
                 let Some(f) = reader.next_frame()? else {
                     dec2.set(reader.seconds());
                     return Ok(None);
@@ -1000,7 +1003,7 @@ impl Pipeline {
                 let mut small = resize_bilinear(&Planar::from_vec(3, sh, sw, disp), he, we);
                 small.map(|v| v.clamp(0.0, 1.0));
                 Ok(Some(small.data))
-            });
+            })?;
             let mut t = 0;
             let net = self.net("rvm")?;
             // loop: SERIAL-REQUIRED — RVM is recurrent: each frame's step takes the previous state
@@ -1036,11 +1039,11 @@ impl Pipeline {
             let mut cf = FeatFile::create(&cradio_path, CRADIO_CH * h64 * w64)?;
             let mut mf = FeatFile::create(&moge_path, MOGE_CH * h64 * w64)?;
             // the resized inputs are made ahead on their own thread
-            let mut reader = Prefetch::new(FrameReader::open(meta)?.display_only(), 8);
+            let mut reader = Prefetch::new("found-decode", FrameReader::open(meta)?.display_only(), 8)?;
             let dec = crate::ahead::Seconds::default();
             let dec2 = dec.clone();
             let mut done_frames = 0;
-            let mut chunks = Ahead::spawn(2, move || {
+            let mut chunks = Ahead::spawn("found-inputs", 2, move || {
                 let mut frames = Vec::new();
                 // loop: NOT-WORTH — up to four frames
                 while frames.len() < fchunk && done_frames < t_all {
@@ -1052,7 +1055,7 @@ impl Pipeline {
                     return Ok(None);
                 }
                 Ok(Some((frames.len(), foundation_inputs(&frames, sh, sw))))
-            });
+            })?;
             let mut t0 = 0;
             // loop: SERIAL-REQUIRED — chunks of 4 frames, in order
             while let Some((n, (radio, moge))) = chunks.next_item()? {
@@ -1090,7 +1093,7 @@ impl Pipeline {
         let checker = make_checker(meta.h, meta.w);
         // render + hand-off to the writers on their own thread (the writers come back when `out` ends)
         let geo = Geometry { shape: (sh, sw), crop: (meta.pad.t, meta.pad.l), hw: (meta.h, meta.w) };
-        let mut out = RenderWorker::start(writers, ro, checker, geo);
+        let mut out = RenderWorker::start(writers, ro, checker, geo)?;
         // each window's inputs that don't depend on the previous window (decoded frames, hint video, foundation
         // and RVM features, or the foundations' resized inputs) are made on their own thread while the card runs
         // the window before (at most one window ahead: a rendezvous channel)
@@ -1105,7 +1108,7 @@ impl Pipeline {
             let starts = starts.clone();
             let dec = window_decode_s.clone();
             let mut i = 0;
-            Ahead::spawn(0, move || {
+            Ahead::spawn("window-inputs", 0, move || {
                 let Some(&t0) = starts.get(i) else {
                     dec.set(reader.reader.seconds());
                     return Ok(None);
@@ -1123,7 +1126,7 @@ impl Pipeline {
                 };
                 let rvm = rvm_file.get(t0, t1)?;
                 Ok(Some(WindowInputs { frames, hint_video, found, rvm }))
-            })
+            })?
         };
         let baton_frame = BATON_CH * h16 * w16;
         let mut baton_file = if low_vram { Some(F16File::create(&baton_path, baton_frame)?) } else { None };
@@ -1266,12 +1269,12 @@ impl Pipeline {
             self.unload();
             self.ensure(key, &["stage2"], trt, sink, load_stage)?;
             // frames and stored states read and made into stage-2 inputs on their own thread, ahead of the card
-            let mut reader = Prefetch::new(FrameReader::open(meta)?, 8);
+            let mut reader = Prefetch::new("s2-decode", FrameReader::open(meta)?, 8)?;
             // the frame converted here, on the producer thread, to the type stage 2 takes
             let rgb_f16 = self.net("stage2")?.wants_f16("rgb");
             let (itx, irx) = std::sync::mpsc::sync_channel::<Result<(Data<'static>, Data<'static>), Error>>(2);
             // loop: SERIAL-REQUIRED — the low-VRAM stage-2 producer: frames in order; ends at the clip's end, an error, or a dropped receiver
-            let producer = std::thread::spawn(move || {
+            let producer = crate::ahead::spawn_named("s2-inputs", move || {
                 let mut prep_s = 0.0;
                 // loop: SERIAL-REQUIRED — frames in order; ends at the clip's end, an error, or a dropped receiver
                 for t in 0..t_all {
@@ -1288,7 +1291,7 @@ impl Pipeline {
                     }
                 }
                 (reader.seconds(), prep_s)
-            });
+            })?;
             let mut res = Ok(());
             // loop: SERIAL-REQUIRED — frames in order to the writers
             for _ in 0..t_all {
@@ -1303,7 +1306,7 @@ impl Pipeline {
             }
             drop(irx);
             // loop: SERIAL-REQUIRED — joins the producer after the receiver is dropped [bounded: its next send fails and it ends]
-            let (dec_s, prep_s) = producer.join().map_err(|_| Error::engine("the stage-2 input thread panicked".into()))?;
+            let (dec_s, prep_s) = crate::ahead::joined(producer)?;
             res?;
             sink.log(&format!("    stage 2 phase: inputs prepared on their own thread in {prep_s:.1} s"));
             decode_s += dec_s;
