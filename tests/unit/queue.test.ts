@@ -6,34 +6,14 @@ import { afterAll, describe, expect, it } from "vitest";
 import { clearJobTemps, engineOptions, providerText, Queue, type EngineHandle } from "../../electron/main/queue";
 import type { EngineReply } from "../../electron/main/engine";
 import { DEFAULT_OPTIONS, type Job } from "../../src/shared/types";
+import { job as fixtureJob } from "./fixtures";
 
 // the jobs' output folders: real ones (the queue stages each job's files there, partial.ts)
 const OUT = mkdtempSync(join(tmpdir(), "ck-queue-out-"));
 afterAll(() => rmSync(OUT, { recursive: true, force: true }));
 
-function job(id: string, extra: Partial<Job> = {}): Job {
-  return {
-    id,
-    clip: { path: `/c/${id}.mp4`, name: id, kind: "video", width: 640, height: 360, fps: 24, frames: 24, thumb: null, companionFirstFrame: null, companionHintVideo: null, probeError: null },
-    options: { ...DEFAULT_OPTIONS },
-    outputDir: join(OUT, `out_${id}`),
-    status: "waiting",
-    stage: null,
-    stageDetail: null,
-    framesDone: 0,
-    framesTotal: 24,
-    framesPerSecond: null,
-    memory: null,
-    startedAt: null,
-    finishedAt: null,
-    outputs: [],
-    stills: [],
-    error: null,
-    partial: null,
-    log: [],
-    ...extra,
-  };
-}
+// a waiting job (fixtures.ts) whose results go into a real folder under OUT
+const job = (id: string, extra: Partial<Job> = {}): Job => fixtureJob(id, { outputDir: join(OUT, `out_${id}`), ...extra });
 
 function harness(opts: { pongProtocol?: number; failStart?: boolean; slowStart?: boolean; tempRoot?: string; tensorrt?: () => boolean } = {}) {
   const sent: Record<string, unknown>[] = [];

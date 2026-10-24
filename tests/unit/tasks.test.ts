@@ -1,83 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { dots, jobToSelect, missingInput, tasksOf } from "../../src/shared/tasks";
-import { DEFAULT_APPEARANCE, DEFAULT_OPTIONS, type AppState, type Job, type TrtState } from "../../src/shared/types";
+import { DEFAULT_OPTIONS } from "../../src/shared/types";
+import { appState as state, clipInfo, ffmpegState, installState, job, trtState } from "./fixtures";
 
-const job = (id: string, extra: Partial<Job> = {}): Job =>
-  ({
-    id,
-    clip: { path: `/c/${id}.mp4`, name: id, kind: "video", width: 1, height: 1, fps: 24, frames: 1, thumb: null, companionFirstFrame: null, companionHintVideo: null, probeError: null },
-    options: { ...DEFAULT_OPTIONS },
-    status: "waiting",
-    ...extra,
-  }) as Job;
-
-const state = (extra: Partial<AppState>): AppState =>
-  ({
-    version: "0.1.0-dev.1",
-    jobs: [],
-    queueRunning: false,
-    engine: { status: "stopped", pong: null, error: null },
-    gpu: null,
-    gpuError: null,
-    settings: { corridorKeyRoot: "/ck", lastOptions: DEFAULT_OPTIONS, appearance: DEFAULT_APPEARANCE, outputRoot: null },
-    checkout: { ok: true, problems: [] },
-    rustEngine: { ok: false, problems: ["Choose the CorridorKey engine program (corridorkey-engine)."] },
-    engineKind: "python",
-    desktopPalette: null,
-    install: {
-      dir: "/d",
-      needRuntime: false,
-      needModels: false,
-      bytes: 0,
-      runtimeBytes: 0,
-      modelsBytes: 0,
-      gpuOk: true,
-      gpuProblem: null,
-      runtimeWhat: "",
-      status: "idle",
-      step: null,
-      done: 0,
-      total: 0,
-      error: null,
-    },
-    ffmpeg: { checked: true, ok: true, problem: null, command: "", canInstall: false, runHint: "", note: null, installing: false, installError: null },
-    ...extra,
-  }) as AppState;
-
-const installing = (status: "idle" | "running" | "error", error: string | null = null) => ({
-  dir: "/d",
-  needRuntime: true,
-  needModels: true,
-  bytes: 5,
-  runtimeBytes: 2,
-  modelsBytes: 3,
-  gpuOk: true,
-  gpuProblem: null,
-  runtimeWhat: "",
-  status,
-  step: null,
-  done: 0,
-  total: 0,
-  error,
-});
+// the runtime and models missing (2 + 3 bytes), the install idle, running or stopped with an error
+const installing = (status: "idle" | "running" | "error", error: string | null = null) =>
+  installState({ needRuntime: true, needModels: true, bytes: 5, runtimeBytes: 2, modelsBytes: 3, status, error });
 
 describe("TensorRT task", () => {
-  const trt = (extra: Partial<TrtState>): TrtState => ({
-    supported: true,
-    on: true,
-    ready: false,
-    needLibs: true,
-    needProvider: false,
-    needModels: true,
-    bytes: 1,
-    fullBytes: 1,
-    status: "idle",
-    step: null,
-    done: 0,
-    total: 0,
-    error: null,
-    ...extra,
-  });
+  // switched on, its libraries and models still to download
+  const trt = (extra: Parameters<typeof trtState>[0]) => trtState({ on: true, needLibs: true, needModels: true, bytes: 1, fullBytes: 1, ...extra });
   it("asks for TensorRT's parts once it is switched on (on top of the runtime and models), never while off", () => {
     expect(tasksOf(state({ tensorrt: trt({}) }))).toEqual([expect.objectContaining({ id: "tensorrt", page: "engine", section: "tensorrt", level: "task" })]);
     expect(tasksOf(state({ tensorrt: trt({ on: false }) }))).toEqual([]);
@@ -96,9 +28,8 @@ describe("first-run install and ffmpeg tasks", () => {
     expect(tasksOf(state({ engineKind: null, install: installing("error", "no space") }))[0]).toMatchObject({ level: "error", text: "The install stopped: no space" });
   });
   it("says nothing about ffmpeg before the first check has answered", () => {
-    const ff = { checked: false, ok: false, problem: null, command: "", canInstall: false, runHint: "", note: null, installing: false, installError: null };
-    expect(tasksOf(state({ ffmpeg: ff }))).toEqual([]);
-    expect(tasksOf(state({ ffmpeg: { ...ff, checked: true, problem: "ffmpeg isn't installed (ffprobe not found)" } }))[0]).toMatchObject({ id: "ffmpeg" });
+    expect(tasksOf(state({ ffmpeg: ffmpegState({ checked: false, ok: false }) }))).toEqual([]);
+    expect(tasksOf(state({ ffmpeg: ffmpegState({ ok: false, problem: "ffmpeg isn't installed (ffprobe not found)" }) }))[0]).toMatchObject({ id: "ffmpeg" });
   });
 });
 
@@ -123,7 +54,7 @@ describe("tasks (the one mechanism)", () => {
     expect(d.pages.engine).toMatch(/no python/);
   });
   it("a clip the app can't read is an error on the Queue item that selects that clip", () => {
-    const bad = job("b", { clip: { ...job("b").clip, probeError: "ffprobe: Invalid data found when processing input" } });
+    const bad = job("b", { clip: clipInfo("b", { probeError: "ffprobe: Invalid data found when processing input" }) });
     const t = tasksOf(state({ jobs: [job("a"), bad] }));
     expect(t).toEqual([expect.objectContaining({ page: "queue", level: "error", jobId: "b" })]);
     expect(jobToSelect(t, "queue")).toBe("b");
