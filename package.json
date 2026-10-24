@@ -10,7 +10,7 @@
     "build": "electron-vite build",
     "start": "electron-vite preview -- --no-sandbox",
     "build:engine": "tools/build_engine.sh",
-    "dist:linux": "tools/build_engine.sh && electron-vite build && electron-builder --linux AppImage --x64 --publish never",
+    "dist:linux": "tools/build_engine.sh && tools/build_trt_builder.sh && electron-vite build && electron-builder --linux AppImage --x64 --publish never",
     "dist:win": "tools/build_engine.sh --windows && electron-vite build && electron-builder --win nsis --x64 --publish never",
     "dist:mac": "tools/build_engine.sh --mac && electron-vite build && electron-builder --mac dmg --arm64 --publish never",
     "typecheck": "tsc -b",

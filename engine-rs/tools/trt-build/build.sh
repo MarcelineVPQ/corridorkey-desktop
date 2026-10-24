@@ -5,7 +5,10 @@
 # tensorrt_libs). Headers: TensorRT 10.16's public headers (Apache-2.0, NVIDIA/TensorRT release/10.16 at
 # d0faf303, onnx/onnx-tensorrt release/10.16-GA at 6bde6596), fetched into OUT_DIR/include and checked by sha256.
 # The CUDA runtime header is a two-line stand-in (the builder makes no CUDA calls of its own).
+# CXX: the compiler command (default g++); the app's release build passes Zig's for glibc 2.28
+# (tools/build_trt_builder.sh), so the shipped builder runs on every Linux the app does.
 set -euo pipefail
+read -ra CXXV <<< "${CXX:-g++}"
 LIBS=$1; OUT=$2
 INC=$OUT/include; mkdir -p "$INC" "$OUT/lib"
 T=https://raw.githubusercontent.com/NVIDIA/TensorRT/d0faf303ba766f20cd9fd8c413a112fc2e5a397b/include
@@ -30,6 +33,6 @@ SUMS
 printf '#pragma once\ntypedef struct CUstream_st* cudaStream_t;\ntypedef struct CUevent_st* cudaEvent_t;\n' > "$INC/cuda_runtime_api.h"
 ln -sf "$LIBS/libnvinfer.so.10" "$OUT/lib/libnvinfer.so"
 ln -sf "$LIBS/libnvonnxparser.so.10" "$OUT/lib/libnvonnxparser.so"
-g++ -O2 -std=c++17 -Wno-deprecated-declarations -I "$INC" "$(dirname "$0")/ck_trt_build.cpp" -L "$OUT/lib" -lnvinfer -lnvonnxparser \
+"${CXXV[@]}" -O2 -std=c++17 -Wno-deprecated-declarations -I "$INC" "$(dirname "$0")/ck_trt_build.cpp" -L "$OUT/lib" -lnvinfer -lnvonnxparser \
   -Wl,--allow-shlib-undefined -o "$OUT/ck-trt-build"
 echo "built $OUT/ck-trt-build"

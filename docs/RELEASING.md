@@ -87,7 +87,11 @@ spent 29 minutes waiting on a package mirror).
 2. `tools/release.sh`. It checks the version shape (`X.Y.Z` = Stable, `X.Y.Z-dev.N` = Development), the lock, a
    clean `main` in step with GitHub, the CHANGELOG section and the signing key; runs `npm run check` and
    `npm run dist:linux` (memory-capped; the engine is linked for glibc 2.28 with cargo-zigbuild, Zig in
-   `~/.local/share/corridorkey-release/zig/venv`) and `npm run dist:win` (the Windows engine cross-built with
+   `~/.local/share/corridorkey-release/zig/venv`; then `tools/build_trt_builder.sh` builds TensorRT's engine builder
+   `ck-trt-build` with Zig's C++ for glibc 2.28 and the AppImage ships it next to the engine. It links against
+   libnvinfer / libnvonnxparser from NVIDIA's pinned `tensorrt-cu13-libs` 10.16.1.11 wheel, the one the app's
+   TensorRT download uses, cached and SHA-256-checked in `~/.local/share/corridorkey-release/tensorrt` (3.7 GB,
+   downloaded once; only the two libraries are unpacked)) and `npm run dist:win` (the Windows engine cross-built with
    MinGW-w64, the NSIS installer through Wine); writes `SHA256SUMS` / `SHA512SUMS` of the AppImage and the
    `-Setup.exe`, uploads both; the update feeds name the AppImage only (Windows updates from the releases page);
    pushes `main`; creates the

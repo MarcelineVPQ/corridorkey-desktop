@@ -33,6 +33,10 @@ linux:
   extraResources:
     - from: engine-rs/target/dist/corridorkey-engine
       to: engine/corridorkey-engine
+    # TensorRT's engine builder (tools/build_trt_builder.sh, glibc 2.28), next to the engine, which finds it there;
+    # it loads TensorRT's libraries from the opt-in TensorRT download (install.ts), so it is 5 MB here
+    - from: engine-rs/target/dist/ck-trt-build
+      to: engine/ck-trt-build
   # The window's WM_CLASS matches the .desktop entry (DS5 does the same).
   syncDesktopName: true
   synopsis: Free desktop app for CorridorKey 2.0
