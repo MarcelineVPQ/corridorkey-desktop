@@ -39,12 +39,26 @@ pub struct JobConfig {
 }
 
 fn num(o: &serde_json::Map<String, Value>, k: &str) -> Result<Option<f64>, Error> {
-    match o.get(k) {
-        None | Some(Value::Null) => Ok(None),
-        Some(Value::Number(n)) => Ok(n.as_f64()),
-        Some(Value::Bool(b)) => Ok(Some(if *b { 1.0 } else { 0.0 })),
-        Some(Value::String(s)) => s.trim().parse().map(Some).map_err(|_| Error::input(format!("{k}: not a number: {s:?}"))),
-        Some(v) => Err(Error::input(format!("{k}: not a number: {v}"))),
+    let v = match o.get(k) {
+        None | Some(Value::Null) => None,
+        Some(Value::Number(n)) => n.as_f64(),
+        Some(Value::Bool(b)) => Some(if *b { 1.0 } else { 0.0 }),
+        Some(Value::String(s)) => Some(s.trim().parse::<f64>().map_err(|_| Error::input(format!("{k}: not a number: {s:?}")))?),
+        Some(v) => return Err(Error::input(format!("{k}: not a number: {v}"))),
+    };
+    // "nan", "inf" (as strings: JSON numbers can't be) would pass every range check below and reach the networks
+    match v {
+        Some(x) if !x.is_finite() => Err(Error::bad_request(format!("{k}: must be a finite number, got {x}"))),
+        _ => Ok(v),
+    }
+}
+
+/// An option documented as 0-1 (docs/ENGINE_PROTOCOL.md): `default` when absent, a bad request outside the range.
+fn unit(o: &serde_json::Map<String, Value>, k: &str, default: f64) -> Result<f64, Error> {
+    match num(o, k)? {
+        None => Ok(default),
+        Some(v) if (0.0..=1.0).contains(&v) => Ok(v),
+        Some(v) => Err(Error::bad_request(format!("{k} must be between 0 and 1, got {v}"))),
     }
 }
 
@@ -141,9 +155,9 @@ pub fn parse(req: &Value) -> Result<JobConfig, Error> {
         temp_dir,
         hint_first_frame: string(o, "hint_first_frame"),
         hint_video: string(o, "hint_video"),
-        hint_quality: num(o, "hint_quality")?.unwrap_or(0.95),
+        hint_quality: unit(o, "hint_quality", 0.95)?,
         carry_hint: boolean(o, "carry_hint", true),
-        carry_hint_quality: num(o, "carry_hint_quality")?.unwrap_or(0.95),
+        carry_hint_quality: unit(o, "carry_hint_quality", 0.95)?,
         hann_chunk: chunk as usize,
         hann_stride: stride as usize,
         manual,
@@ -151,7 +165,7 @@ pub fn parse(req: &Value) -> Result<JobConfig, Error> {
         outputs,
         exr: output_format == "exr",
         exr_float: exr_dtype == "float",
-        despill_strength: num(o, "despill_strength")?.unwrap_or(0.5),
+        despill_strength: unit(o, "despill_strength", 0.5)?,
         cutout_linear: boolean(o, "cutout_linear", false),
         frame_dir_fps: num(o, "frame_dir_fps")?.unwrap_or(24.0),
         frame_dir_linear: boolean(o, "frame_dir_linear", false),
@@ -219,6 +233,19 @@ mod tests {
         assert_eq!(parse(&req(json!({"vram_budget_gb": 12}))).unwrap().vram_budget_gb, Some(12.0));
         let c = parse(&req(json!({"outputs": ["fg", "checker", "alpha"], "tensorrt": true}))).unwrap();
         assert_eq!((c.outputs.join(","), c.tensorrt), ("alpha,checker,fg".to_string(), true));
+    }
+
+    #[test]
+    fn documented_ranges_and_finite_numbers() {
+        // the ends of 0-1 are fine
+        let c = parse(&req(json!({"hint_quality": 0, "carry_hint_quality": 1, "despill_strength": "1.0"}))).unwrap();
+        assert_eq!((c.hint_quality, c.carry_hint_quality, c.despill_strength), (0.0, 1.0, 1.0));
+        // loop: NOT-WORTH — a test's few options
+        for o in [json!({"hint_quality": 1.01}), json!({"despill_strength": -1}), json!({"carry_hint_quality": "NaN"}), json!({"num_frames": "inf"})] {
+            assert_eq!(parse(&req(o.clone())).unwrap_err().code, "bad-request", "{o}");
+        }
+        // not a number at all stays an input error
+        assert_eq!(parse(&req(json!({"despill_strength": "lots"}))).unwrap_err().code, "input");
     }
 
     #[test]

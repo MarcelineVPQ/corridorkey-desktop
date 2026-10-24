@@ -43,11 +43,68 @@ fn talk(lines: &[Value], raw: &[&str]) -> (Vec<Value>, Fake) {
         input.push_str(r);
         input.push('\n');
     }
+    talk_bytes(input.into_bytes())
+}
+
+/// The engine's replies to raw input bytes.
+fn talk_bytes(input: Vec<u8>) -> (Vec<Value>, Fake) {
     let mut out = Vec::new();
     let mut fake = Fake::default();
-    serve(&mut fake, std::io::Cursor::new(input.into_bytes()), &mut out);
+    serve(&mut fake, std::io::Cursor::new(input), &mut out);
+    // loop: NOT-WORTH — a test's few replies
     let replies = String::from_utf8(out).unwrap().lines().map(|l| serde_json::from_str(l).expect("every stdout line is JSON")).collect();
     (replies, fake)
+}
+
+fn line(v: &Value) -> Vec<u8> {
+    let mut b = serde_json::to_vec(v).unwrap();
+    b.push(b'\n');
+    b
+}
+
+#[test]
+fn a_line_that_is_not_utf8_is_a_bad_request_and_reading_goes_on() {
+    let mut input = b"{\"cmd\":\"ping\xff\xfe\"}\n".to_vec();
+    input.extend(line(&run("j1", "/a.mp4")));
+    input.extend(b"\xc3\x28\r\n");
+    input.extend(line(&json!({"cmd": "ping"})));
+    let (r, fake) = talk_bytes(input);
+    assert_eq!((r[0]["type"].as_str(), r[0]["code"].as_str()), (Some("error"), Some("bad-request")));
+    assert!(r[0]["message"].as_str().unwrap().contains("UTF-8"), "{}", r[0]);
+    assert_eq!(fake.ran, vec!["j1"]);
+    // loop: NOT-WORTH — a test's few replies
+    let codes: Vec<&str> = r.iter().filter_map(|m| m["code"].as_str()).collect();
+    assert_eq!(codes, vec!["bad-request", "bad-request"]);
+    assert_eq!(r.last().unwrap()["type"], "pong");
+}
+
+#[test]
+fn a_cancel_without_an_id_is_a_bad_request() {
+    let (r, fake) = talk(&[json!({"cmd": "cancel"}), json!({"cmd": "cancel", "id": null}), run("null", "/a.mp4")], &[]);
+    assert_eq!((r[0]["code"].as_str(), r[1]["code"].as_str()), (Some("bad-request"), Some("bad-request")));
+    assert!(r[0]["message"].as_str().unwrap().contains("cancel needs"));
+    // a job whose id is the text "null" is not cancelled by them
+    assert_eq!(fake.ran, vec!["null"]);
+    assert_eq!(r.last().unwrap()["type"], "result");
+}
+
+#[test]
+fn out_of_range_and_non_finite_options_are_bad_requests_without_running() {
+    // loop: NOT-WORTH — a test's few options
+    for o in [
+        json!({"hint_quality": 1.5}),
+        json!({"carry_hint_quality": -0.1}),
+        json!({"despill_strength": 2}),
+        json!({"despill_strength": "nan"}),
+        json!({"frame_dir_fps": "inf"}),
+        json!({"vram_budget_gb": "-inf"}),
+    ] {
+        let mut req = run("j1", "/a.mp4");
+        req["options"] = o.clone();
+        let (r, fake) = talk(&[req], &[]);
+        assert_eq!((r[0]["code"].as_str(), r[0]["id"].as_str()), (Some("bad-request"), Some("j1")), "{o}");
+        assert!(fake.ran.is_empty(), "{o}");
+    }
 }
 
 fn run(id: &str, input: &str) -> Value {

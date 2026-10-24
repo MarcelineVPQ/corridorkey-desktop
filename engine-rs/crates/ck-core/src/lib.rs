@@ -46,6 +46,10 @@ impl Error {
     pub fn no_gpu(m: String) -> Error {
         Error::new("no-gpu", m)
     }
+    /// A request the engine can't take as it is (a value outside its documented range, not a finite number).
+    pub fn bad_request(m: String) -> Error {
+        Error::new("bad-request", m)
+    }
     /// An ONNX Runtime failure: "oom" when the provider says it ran out of memory, else "engine".
     pub fn ort(what: &str, e: impl std::fmt::Display) -> Error {
         let m = e.to_string();

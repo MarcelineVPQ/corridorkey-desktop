@@ -67,14 +67,17 @@ struct Inbox {
 #[derive(Default)]
 struct InboxState {
     /// request lines read and not yet taken, in order
-    lines: std::collections::VecDeque<String>,
+    lines: std::collections::VecDeque<Line>,
     /// the input has ended (or failed): no more lines will come
     ended: bool,
 }
 
+/// One input line: its text, or why it isn't text (not UTF-8: answered as a bad request, and reading goes on).
+type Line = Result<String, String>;
+
 impl Inbox {
     /// The next request line, waiting for one; None once the input has ended and every line was taken.
-    fn take(&self) -> Option<String> {
+    fn take(&self) -> Option<Line> {
         let mut g = self.state.lock().unwrap();
         // loop: SERIAL-REQUIRED — waits for the next request line [bounded: the reader thread ends at the input's end and says so]
         loop {
@@ -92,7 +95,7 @@ impl Inbox {
     fn cancel_queued(&self, id: &str) -> bool {
         let g = self.state.lock().unwrap();
         // loop: NOT-WORTH — the few requests queued behind a job, once per job start
-        g.lines.iter().any(|l| {
+        g.lines.iter().flatten().any(|l| {
             serde_json::from_str::<Value>(l)
                 .is_ok_and(|v| v.get("cmd").and_then(|c| c.as_str()) == Some("cancel") && str_field(&v, "id").as_deref() == Some(id))
         })
@@ -105,10 +108,24 @@ pub fn serve<B: Backend, R: BufRead + Send + 'static, W: Write>(backend: &mut B,
     let reader = inbox.clone();
     // loop: SERIAL-REQUIRED — the request reader: lines in order into the inbox; ends at the input's end (the app closes the pipe or exits)
     std::thread::spawn(move || {
+        let mut input = input;
+        let mut buf = Vec::new();
         // loop: SERIAL-REQUIRED — one line at a time, in order [bounded: ends at the input's end or a read error]
-        for line in input.lines() {
-            let Ok(l) = line else { break };
-            reader.state.lock().unwrap().lines.push_back(l);
+        loop {
+            buf.clear();
+            // bytes, not `lines()`: a line that isn't UTF-8 was an Err there and ended the input silently
+            match input.read_until(b'\n', &mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+            if buf.last() == Some(&b'\n') {
+                buf.pop();
+                if buf.last() == Some(&b'\r') {
+                    buf.pop();
+                }
+            }
+            let line = String::from_utf8(std::mem::take(&mut buf)).map_err(|e| format!("a request line that isn't UTF-8 text ({e})"));
+            reader.state.lock().unwrap().lines.push_back(line);
             reader.more.notify_one();
         }
         reader.state.lock().unwrap().ended = true;
@@ -117,7 +134,14 @@ pub fn serve<B: Backend, R: BufRead + Send + 'static, W: Write>(backend: &mut B,
     let mut r = Replies::new(out);
     let mut pending_cancel: HashSet<String> = HashSet::new();
     // loop: SERIAL-REQUIRED — one job at a time on one GPU; the app queues
-    while let Some(raw) = inbox.take() {
+    while let Some(line) = inbox.take() {
+        let raw = match line {
+            Ok(text) => text,
+            Err(why) => {
+                r.send(json!({"type": "error", "code": "bad-request", "message": format!("bad request: {why}")}));
+                continue;
+            }
+        };
         let raw = raw.trim();
         if raw.is_empty() {
             continue;
@@ -140,9 +164,13 @@ pub fn serve<B: Backend, R: BufRead + Send + 'static, W: Write>(backend: &mut B,
                 r.send(p);
             }
             "quit" => return,
-            "cancel" => {
-                pending_cancel.insert(str_field(&req, "id").unwrap_or_else(|| id.to_string()));
-            }
+            "cancel" => match str_field(&req, "id") {
+                Some(jid) => {
+                    pending_cancel.insert(jid);
+                }
+                // no id: it can't name a job (it used to be filed under "null")
+                None => r.send(json!({"type": "error", "id": id, "code": "bad-request", "message": "cancel needs the id of a job"})),
+            },
             "run" => {
                 let jid = str_field(&req, "id");
                 if jid.is_none() || str_field(&req, "input").is_none() || str_field(&req, "output_dir").is_none() || str_field(&req, "temp_dir").is_none() {

@@ -130,3 +130,8 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
   `{"type":"error","code":"bad-request","message":"..."}` and the engine keeps
   running. After a job's `error` the engine also keeps running and takes the
   next job.
+- Rust engine: a request line that isn't UTF-8 text, a `cancel` without an `id`, a
+  `run` option outside its documented range (`hint_quality`, `carry_hint_quality`,
+  `despill_strength`: 0–1) or a number that isn't finite (`"nan"`, `"inf"`) is a
+  `bad-request` (for a `run`, with its id, before anything loads); the engine keeps
+  reading. An option that isn't a number at all stays an `input` error.
