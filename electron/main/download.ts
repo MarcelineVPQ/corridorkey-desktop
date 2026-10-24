@@ -1,9 +1,9 @@
 // The verified download (DS5's download.ts, with Sonata's SHA-512): streamed to
-// `path`, hashed on the way, deleted on any failure. Also the first-run install's
-// downloads (install.ts): SHA-256 (what PyPI and our model release list), and
-// `resume` keeps a partial file and asks the server for the rest. Anything bigger than the
-// signed feed declares is refused at once, and nothing is kept unless both size
-// and SHA-512 match. A server that doesn't answer, or a download that stops
+// `path`, hashed on the way. Also the first-run install's downloads (install.ts):
+// SHA-256 (what PyPI and our model release list), and `resume`, which keeps a
+// partial file on failure, checks a complete one offline, and asks the server for
+// the rest; without `resume` any failure deletes the file. Anything bigger than
+// declared is refused at once, and nothing is kept unless size and hash match. A server that doesn't answer, or a download that stops
 // sending data, fails instead of hanging. Free of Electron: the fetch is
 // passed in (the updater gives it Electron's net.fetch), so vitest runs it
 // against a local server (tests/unit/download.test.ts).
@@ -26,7 +26,7 @@ export interface Expected {
 }
 
 /** The bytes already in `path` (a partial download), hashed; 0 when there is none. */
-async function hashExisting(path: string, hash: ReturnType<typeof createHash>): Promise<number> {
+async function hashExisting(path: string, hash: ReturnType<typeof createHash>, abort?: AbortSignal): Promise<number> {
   let size = 0;
   try {
     // loop: NOT-WORTH — one stat per resumed download
@@ -36,7 +36,8 @@ async function hashExisting(path: string, hash: ReturnType<typeof createHash>): 
     return 0;
   }
   // loop: SERIAL-REQUIRED — stream order: the partial file is hashed in sequence before the rest arrives
-  for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer);
+  // a Stop also stops this re-read (up to 1.7 GB for a model file)
+  for await (const chunk of createReadStream(path, { signal: abort })) hash.update(chunk as Buffer);
   return size;
 }
 
@@ -56,14 +57,13 @@ export async function downloadVerified(
   let hash = createHash(algorithm);
   let have = 0;
   if (opts.resume) {
-    have = await hashExisting(path, hash);
+    have = await hashExisting(path, hash, abort);
     if (have === want.size) {
       // already complete (a stop after it arrived): keep it if it checks out, without going online
       if (hash.digest("hex") === expectHex) {
         progress(have, want.size);
         return;
       }
-      hash = createHash(algorithm);
     }
     if (have >= want.size) {
       // a complete leftover that doesn't check out, or an oversized one: start over
@@ -111,16 +111,28 @@ export async function downloadVerified(
   // error: NOT-WORTH — only marks the write-error promise handled; the same rejection is awaited through Promise.race below and rethrown
   failed.catch(() => undefined);
   let got = have;
+  // One stall timer for the whole download, pushed back after every chunk; it (or a write error) cancels the
+  // reader, so the read below ends without racing a promise per chunk (the old race kept one reaction per chunk
+  // alive until the end: tens of thousands on a 1.7 GB model file).
+  let stallError: Error | null = null;
+  // lifetime: OK — one timer per download, refreshed per chunk, cleared in finally
+  // loop: NOT-WORTH — one stall deadline per download [bounded: stallMs without data]
+  const stallTimer = setTimeout(() => {
+    stallError = new Error("the download stopped (no data for a minute)");
+    // error: NOT-WORTH — the cancel only ends the pending read; stallError is what gets thrown
+    void reader.cancel().catch(() => undefined);
+  }, stallMs);
+  // lifetime: OK — goes with the stream (see `failed`)
+  // error: NOT-WORTH — the cancel only ends the pending read; writeError is what gets thrown
+  file.on("error", () => void reader.cancel().catch(() => undefined));
   try {
     // loop: SERIAL-REQUIRED — stream order: each chunk is hashed and written in sequence, with a stall deadline
     for (;;) {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      // lifetime: OK — cleared in .finally() after every read
-      // loop: SERIAL-REQUIRED — the stall timer: one per read, rejects after a minute without data
-      const stall = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error("the download stopped (no data for a minute)")), stallMs)));
-      const { done, value } = await Promise.race([reader.read(), failed, stall]).finally(() => clearTimeout(timer));
-      if (done) break;
+      const { done, value } = await reader.read();
+      stallTimer.refresh();
+      if (stallError) throw stallError;
       if (writeError) throw writeError;
+      if (done) break;
       got += value.byteLength;
       if (got > want.size) throw new Error(`the download is bigger than ${source} says; refused`);
       hash.update(value);
@@ -130,6 +142,7 @@ export async function downloadVerified(
     }
     await Promise.race([new Promise<void>((resolve, reject) => file.end((err?: Error | null) => (err ? reject(err) : resolve()))), failed]);
   } catch (cause) {
+    clearTimeout(stallTimer);
     // error: NOT-WORTH — cleanup while the real error is rethrown below; a failed cancel adds nothing
     void reader.cancel().catch(() => undefined);
     file.destroy();
@@ -138,6 +151,7 @@ export async function downloadVerified(
     if (!opts.resume) rmSync(path, { force: true });
     throw abort?.aborted ? new Error("the download was stopped") : cause;
   }
+  clearTimeout(stallTimer);
   if (got !== want.size) {
     // loop: NOT-WORTH — removes a failed download (a local unlink)
     rmSync(path, { force: true });

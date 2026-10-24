@@ -12,6 +12,10 @@ describe("ffmpeg check", () => {
   it("is ok with ffprobe and both encoders", async () => {
     expect(await checkFfmpeg(runs({ ffprobe: "ffprobe version 8", ffmpeg: ENCODERS }))).toEqual({ ok: true, problem: null });
   });
+  it("tells a missing ffprobe from one that doesn't answer", async () => {
+    const r = await checkFfmpeg(async () => Promise.reject(Object.assign(new Error("timed out"), { code: "ETIMEDOUT" })));
+    expect(r.problem).toBe("ffprobe didn't answer (timed out)");
+  });
   it("says it isn't installed", async () => {
     expect((await checkFfmpeg(runs({}))).problem).toBe("ffmpeg isn't installed (ffprobe not found)");
   });
@@ -23,8 +27,20 @@ describe("ffmpeg check", () => {
 
 describe("ffmpeg install", () => {
   it("installs with apt on Ubuntu, Kubuntu and Mint (ID_LIKE)", () => {
-    expect(installPlan("ID=ubuntu\nID_LIKE=debian\n").argv).toEqual(["apt-get", "install", "-y", "ffmpeg"]);
-    expect(installPlan('ID=linuxmint\nID_LIKE="ubuntu debian"\n').command).toBe("sudo apt install ffmpeg");
+    // the package lists first: a stale list makes install alone fail
+    expect(installPlan("ID=ubuntu\nID_LIKE=debian\n").argv).toEqual(["sh", "-c", "apt-get update && apt-get install -y ffmpeg"]);
+    expect(installPlan('ID=linuxmint\nID_LIKE="ubuntu debian"\n').command).toBe("sudo apt update && sudo apt install ffmpeg");
+    // single quotes are valid os-release too
+    expect(installPlan("ID='pop'\nID_LIKE='ubuntu debian'\n").argv).not.toBeNull();
+  });
+  it("offers no package-manager install on read-only systems (SteamOS, Bazzite, Silverblue)", () => {
+    expect(installPlan("ID=steamos\nID_LIKE=arch\n").argv).toBeNull();
+    expect(installPlan("ID=bazzite\nID_LIKE=fedora\n").note).toContain("read-only");
+    expect(installPlan("ID=fedora\nVARIANT_ID=silverblue\n").argv).toBeNull();
+  });
+  it("gives RHEL-family systems their own advice", () => {
+    expect(installPlan('ID="rocky"\nID_LIKE="rhel centos fedora"\n').note).toContain("EPEL");
+    expect(installPlan('ID="almalinux"\nID_LIKE="rhel centos"\n').note).toContain("EPEL");
   });
   it("installs with pacman on Arch and its family", () => {
     expect(installPlan("ID=endeavouros\nID_LIKE=arch\n").argv).toEqual(["pacman", "-S", "--noconfirm", "--needed", "ffmpeg"]);
@@ -45,10 +61,10 @@ describe("ffmpeg install", () => {
       calls.push([cmd, ...args]);
       return "";
     });
-    expect(calls).toEqual([["pkexec", "apt-get", "install", "-y", "ffmpeg"]]);
+    expect(calls).toEqual([["pkexec", "sh", "-c", "apt-get update && apt-get install -y ffmpeg"]]);
     await expect(installFfmpeg(plan, async () => Promise.reject(Object.assign(new Error(), { code: 126 })))).rejects.toThrow("the password prompt was cancelled");
     await expect(installFfmpeg(plan, async () => Promise.reject(Object.assign(new Error(), { code: "ENOENT" })))).rejects.toThrow(
-      'pkexec isn\'t available: run "sudo apt install ffmpeg" in a terminal',
+      'pkexec isn\'t available: run "sudo apt update && sudo apt install ffmpeg" in a terminal',
     );
     await expect(installFfmpeg(installPlan("ID=fedora\n"), async () => "")).rejects.toThrow("can't install");
   });

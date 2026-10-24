@@ -31,8 +31,12 @@ export function dataDir(env: NodeJS.ProcessEnv, home: string): string {
 
 function dirs(p: string, d: FindDeps): string[] {
   try {
+    // a name starting with "." is an install still in progress (.partial-…): never offered
     // loop: NOT-WORTH — sorts a few folder names
-    return d.list(p).sort();
+    return d
+      .list(p)
+      .filter((n) => !n.startsWith("."))
+      .sort();
   } catch {
     // error: NOT-WORTH — no such folder yet (nothing installed): nothing found there
     return [];
@@ -95,6 +99,11 @@ export function findEngineFiles(places: { bundledBinary: string | null; devBinar
 
   // loop: NOT-WORTH — strips the sort keys from a few entries
   return { binary, models: models.map(({ path, label }) => ({ path, label })), ort: ort.map(({ path, label }) => ({ path, label })) };
+}
+
+/** A path inside the running AppImage's mount (resources/…): it changes every launch, so it is never saved. */
+export function isInsideApp(path: unknown, resourcesPath: string | null): boolean {
+  return typeof path === "string" && ((!!resourcesPath && path.startsWith(resourcesPath + "/")) || /\/\.mount_[^/]+\//.test(path));
 }
 
 /** What the engine runs with: the chosen path, else (Automatic) the first one found. */

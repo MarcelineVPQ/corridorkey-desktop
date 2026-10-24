@@ -53,6 +53,11 @@ export function statusText(job: Job): string {
   }
 }
 
+/** A byte count in decimal GB (10^9 bytes), as disks and downloads are sold and as `du --si` shows. */
+export function gbBytes(bytes: number): string {
+  return `${(bytes / 1e9).toFixed(1)} GB`;
+}
+
 export function gb(mb: number): string {
   return `${(mb / 1024).toFixed(1)} GB`;
 }

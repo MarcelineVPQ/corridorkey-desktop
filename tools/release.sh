@@ -7,12 +7,15 @@
 #    section for it; the signing key is there
 # 2. npm run check, then npm run dist:linux (the engine for glibc 2.28, then the AppImage), memory-capped
 # 3. SHA256SUMS / SHA512SUMS and the notes (the CHANGELOG section)
-# 4. tags vVERSION, pushes main + the tag, publishes the GitHub release (Development = prerelease, never Latest)
+# 4. pushes main, creates the GitHub release as a draft on that commit (no tag yet), uploads, then publishes it,
+#    which makes the tag (Development = prerelease, never Latest). A failure anywhere here can simply be rerun.
 # 5. the feeds: tools/build-feed.mjs from the published release, signed here with the key in
 #    ~/.config/corridorkey-release/feed-signing.pem (read into the environment, never printed),
 #    tools/verify-feed.mjs checks them exactly as the app does, then they are committed to main and pushed
 # 6. tools/verify-feed.mjs on the live feeds
-# Stops at the first failure; nothing is published before step 4. docs/RELEASING.md.
+# Stops at the first failure; nothing is published before step 4. Rerunning after a failure finishes the job:
+# a draft release is picked up again, and with v$VERSION already published only the feeds are redone.
+# docs/RELEASING.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 KEY="$HOME/.config/corridorkey-release/feed-signing.pem"
@@ -27,10 +30,12 @@ else echo "release: version $v is neither X.Y.Z nor X.Y.Z-dev.N" >&2; exit 1; fi
 [ -z "$(git status --porcelain)" ] || { echo "release: uncommitted changes" >&2; exit 1; }
 git fetch -q origin main
 [ "$(git rev-list --count HEAD..origin/main)" = 0 ] || { echo "release: origin/main has commits this copy lacks" >&2; exit 1; }
-! git rev-parse -q --verify "refs/tags/v$v" >/dev/null || { echo "release: tag v$v exists" >&2; exit 1; }
+# none = new; true = a draft left by a failed run (finished now); false = published (only the feeds are redone)
+state="$(gh release view "v$v" --json isDraft -q .isDraft 2>/dev/null || echo none)"
 grep -q "^## $v\( \|$\)" CHANGELOG.md || { echo "release: CHANGELOG.md has no '## $v' section" >&2; exit 1; }
 [ -r "$KEY" ] || { echo "release: no signing key at $KEY" >&2; exit 1; }
 
+if [ "$state" != false ]; then
 NODE_OPTIONS=--max-old-space-size=4096 "${CAP[@]}" npm run -s check
 NODE_OPTIONS=--max-old-space-size=4096 "${CAP[@]}" npm run -s dist:linux
 
@@ -44,16 +49,28 @@ if [ "$dev" = true ]; then
   printf '\n**This is a development build**: newer than the stable release and less tested. The app offers it only with Update channel set to Development.\n' >> release/notes.md
 fi
 
-git tag "v$v"
-git push origin main "v$v"
-flags=(--verify-tag --title "CorridorKey $v" --notes-file release/notes.md)
+git push origin main
+flags=(--title "CorridorKey $v" --notes-file release/notes.md)
 if [ "$dev" = true ]; then flags+=(--prerelease --latest=false); else flags+=(--latest); fi
-gh release create "v$v" --draft "${flags[@]}"
-gh release upload "v$v" "release/$file" release/SHA256SUMS release/SHA512SUMS
+[ "$state" = true ] || gh release create "v$v" --draft --target "$(git rev-parse HEAD)" "${flags[@]}"
+gh release upload "v$v" "release/$file" release/SHA256SUMS release/SHA512SUMS --clobber
 gh release edit "v$v" --draft=false
+git fetch -q origin "refs/tags/v$v:refs/tags/v$v"
+else
+  echo "release: v$v is published already: redoing the feeds"
+fi
 
-GITHUB_TOKEN="$(gh auth token)" node tools/build-feed.mjs --channel stable --out latest.json || [ $? -eq 2 ]
-GITHUB_TOKEN="$(gh auth token)" node tools/build-feed.mjs --channel dev --out latest-dev.json || [ $? -eq 2 ]
+# GitHub's release list can lag right after publishing: the released channel's feed must name v$v (a few tries)
+mine=latest.json; [ "$dev" = true ] && mine=latest-dev.json
+# loop: SERIAL-REQUIRED — polling until a deadline [bounded: 6 tries, 10 s apart]
+for try in 1 2 3 4 5 6; do
+  GITHUB_TOKEN="$(gh auth token)" node tools/build-feed.mjs --channel stable --out latest.json || [ $? -eq 2 ]
+  GITHUB_TOKEN="$(gh auth token)" node tools/build-feed.mjs --channel dev --out latest-dev.json || [ $? -eq 2 ]
+  [ -f "$mine" ] && [ "$(node -p "require('./$mine').version")" = "$v" ] && break
+  [ "$try" = 6 ] && { echo "release: $mine doesn't name $v yet; rerun tools/release.sh to finish the feeds" >&2; exit 1; }
+  # loop: SERIAL-REQUIRED — waits between feed tries [bounded: 6 tries, 10 s apart]
+  sleep 10
+done
 feeds=()
 # loop: NOT-WORTH — the two feed files
 for f in latest.json latest-dev.json; do [ -f "$f" ] && feeds+=("$f"); done
@@ -63,7 +80,8 @@ node tools/verify-feed.mjs "${feeds[@]}"
 for f in "${feeds[@]}"; do git add "$f" "$f.sig"; done
 if ! git diff --cached --quiet; then
   git commit -q -m "chore(feed): v$v"
-  git push origin main
+  # someone pushed meanwhile (the laptop): put the feed commit on top and push once more
+  git push origin main || { git pull -q --rebase origin main && git push origin main; }
 fi
 node tools/verify-feed.mjs
 echo "release: v$v published"

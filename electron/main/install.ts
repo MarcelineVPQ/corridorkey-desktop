@@ -3,15 +3,18 @@
 // ONNX Runtime and NVIDIA's CUDA / cuDNN libraries come from PyPI as published wheels, pinned here by
 // URL, size and SHA-256. The models come from this repository's `models-2.0.0-onnx.3` release
 // (converted from Corridor Digital's checkpoint; CorridorKey licence). Every file is checked before use.
-// Downloads resume after a stop or a lost connection; a set only appears in the lists once all of it is in
-// place (built in a `.partial-…` folder, then renamed).
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "node:fs";
+// After a Stop or a failure, pressing the button again resumes: finished files are checked offline and kept,
+// a partial one continues where it stopped. A set only appears in the lists once all of it is in place
+// (built in a `.partial-…` folder, then renamed; engineFind skips dot folders).
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statfsSync } from "node:fs";
 import { join } from "node:path";
 import { downloadVerified, type FetchFn } from "./download";
 import { unzip } from "./unzip";
 
 export interface Download {
   file: string;
+  // what the progress line calls it ("NVIDIA cuDNN"); model files are named by `file`
+  label?: string;
   url: string;
   size: number;
   sha256: string;
@@ -23,48 +26,56 @@ export const RUNTIME = {
   name: "ort-1.31.0-cuda13",
   wheels: [
     {
+      label: "ONNX Runtime",
       file: "onnxruntime_gpu-1.31.0-cp312-cp312-manylinux_2_28_x86_64.whl",
       url: `${PYPI}/8f/48/6fbfdbce25e5756c7b9ff8f40645d98b166b8022cf00ede58a2bb4571b8e/onnxruntime_gpu-1.31.0-cp312-cp312-manylinux_2_28_x86_64.whl`,
       size: 255569162,
       sha256: "b52998a075de27ff30e46a125001822541fa5b03f5d31398ab0e50789d80c51c",
     },
     {
+      label: "NVIDIA cuBLAS",
       file: "nvidia_cublas-13.8.1.7-py3-none-manylinux_2_27_x86_64.whl",
       url: `${PYPI}/eb/1b/adc70acf3fde509b1f0ca29d1c0e8d9b00aaecd871f8cf877257c8b68d9c/nvidia_cublas-13.8.1.7-py3-none-manylinux_2_27_x86_64.whl`,
       size: 439315821,
       sha256: "c11a27fd4379510e5b1f84b367a2514d1e52fe5cc13442117a0e0a1addee3cf2",
     },
     {
+      label: "NVIDIA CUDA compiler (NVRTC)",
       file: "nvidia_cuda_nvrtc-13.4.92-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl",
       url: `${PYPI}/56/9c/1342ebb460ce2afd014ec5a002adc99108e3c53a6b70f399cf64dd1f267d/nvidia_cuda_nvrtc-13.4.92-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl`,
       size: 53301733,
       sha256: "5ce8c97b00b232c4f50c8c4b5a3b68cafee08bdb82ea86f2052ff01d03194f4a",
     },
     {
+      label: "NVIDIA CUDA runtime",
       file: "nvidia_cuda_runtime-13.4.92-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
       url: `${PYPI}/98/8a/3431271f6344874b8f1ac03f16b3d679c91493f8da63f716160403e6d0a0/nvidia_cuda_runtime-13.4.92-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl`,
       size: 2494438,
       sha256: "9641f797da20ce1dd8e779b6e96d08cf9ba564cec8e8225458811ee26423f3a5",
     },
     {
+      label: "NVIDIA cuDNN",
       file: "nvidia_cudnn_cu13-9.27.0.42-py3-none-manylinux_2_27_x86_64.whl",
       url: `${PYPI}/af/75/96ea5c5368eb595c39d629cde08a66227a864e71ccb0e593add2612bb952/nvidia_cudnn_cu13-9.27.0.42-py3-none-manylinux_2_27_x86_64.whl`,
       size: 536771498,
       sha256: "9677e76f21862eb5da7ee5ed69d544738b2d8b5c3ce7e5ec125c5592e6cdbdc8",
     },
     {
+      label: "NVIDIA cuFFT",
       file: "nvidia_cufft-12.4.0.43-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
       url: `${PYPI}/76/bf/3fea3d1c6262bded26ae00e3106432d63235954965d7785f5051ac146651/nvidia_cufft-12.4.0.43-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl`,
       size: 161750089,
       sha256: "0e8385013596b112d29c9ce8c63dc575b308d77636c7169104e18714f03961a8",
     },
     {
+      label: "NVIDIA cuRAND",
       file: "nvidia_curand-10.4.4.72-py3-none-manylinux_2_27_x86_64.whl",
       url: `${PYPI}/07/73/3ee8e5b4cb891401e603ffd3a59b35c6afe785fd2de123afe7c7029603dc/nvidia_curand-10.4.4.72-py3-none-manylinux_2_27_x86_64.whl`,
       size: 61498332,
       sha256: "25c3457ae7a224fdd484dab90b0fc5dc0e842fab5db3012afa4a5bd2af4eb7e5",
     },
     {
+      label: "NVIDIA nvJitLink",
       file: "nvidia_nvjitlink-13.4.92-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl",
       url: `${PYPI}/1d/6b/eef7a9e32872b8f41e145bf10cddc9af26e153c338852811fe9a9baddf9e/nvidia_nvjitlink-13.4.92-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl`,
       size: 42452378,
@@ -105,11 +116,18 @@ const total = (d: Download[]) => d.reduce((n, x) => n + x.size, 0);
 export const RUNTIME_BYTES = total(RUNTIME.wheels);
 export const MODELS_BYTES = total(MODELS.files);
 
+/** What gets installed: the pinned runtime and model set (tests pass a small one). */
+export interface Catalog {
+  runtime: { name: string; wheels: Download[] };
+  models: { name: string; files: Download[] };
+}
+const CATALOG: Catalog = { runtime: RUNTIME, models: MODELS };
+
 /** What is still to install: each set is there once its folder is (the rename is the last step). */
-export function installNeeds(data: string, exists: (p: string) => boolean = existsSync): { runtime: boolean; models: boolean; bytes: number } {
-  const runtime = !exists(join(data, "runtime", RUNTIME.name));
-  const models = !exists(join(data, "models", MODELS.name));
-  return { runtime, models, bytes: (runtime ? RUNTIME_BYTES : 0) + (models ? MODELS_BYTES : 0) };
+export function installNeeds(data: string, exists: (p: string) => boolean = existsSync, c: Catalog = CATALOG): { runtime: boolean; models: boolean; bytes: number } {
+  const runtime = !exists(join(data, "runtime", c.runtime.name));
+  const models = !exists(join(data, "models", c.models.name));
+  return { runtime, models, bytes: (runtime ? total(c.runtime.wheels) : 0) + (models ? total(c.models.files) : 0) };
 }
 
 export interface InstallDeps {
@@ -117,27 +135,45 @@ export interface InstallDeps {
   // bytes done of the whole install, and what is happening ("Downloading cuDNN…")
   progress: (done: number, total: number, step: string) => void;
   abort: AbortSignal;
+  // free bytes where `data` is (null: unknown, don't check)
+  freeBytes: (dir: string) => number | null;
+}
+
+/** Free bytes on the disk holding `dir`. */
+export function freeBytes(dir: string): number | null {
+  try {
+    // loop: NOT-WORTH — one statfs per install start
+    const s = statfsSync(dir);
+    return s.bavail * s.bsize;
+  } catch {
+    // error: NOT-WORTH — unknown: the install goes ahead and a full disk is reported when it happens
+    return null;
+  }
 }
 
 /** Download and unpack whatever is missing. Resumable: run it again after a stop or a failure. */
 // loop: NOT-WORTH — a few rmSync / mkdir / rename calls per install (local disk)
-export async function runInstall(data: string, deps: InstallDeps): Promise<void> {
-  const need = installNeeds(data);
+export async function runInstall(data: string, deps: InstallDeps, c: Catalog = CATALOG): Promise<void> {
+  const need = installNeeds(data, existsSync, c);
+  const RUNTIME = c.runtime;
+  const MODELS = c.models;
+  // room for it all: the wheels and their unpacked libraries side by side, then the models (the unpacked runtime
+  // is ~1.5× its wheels); refused up front instead of failing halfway with a disk-full error
+  // loop: NOT-WORTH — one mkdir per install (the disk check needs the folder)
+  mkdirSync(data, { recursive: true });
+  const room = deps.freeBytes(data);
+  const needRoom = (need.runtime ? total(RUNTIME.wheels) * 2.5 : 0) + (need.models ? total(MODELS.files) : 0);
+  if (room !== null && room < needRoom) throw new Error(`not enough free disk space: it needs ${(needRoom / 1e9).toFixed(1)} GB in ${data}, ${(room / 1e9).toFixed(1)} GB is free`);
   const downloads = join(data, "downloads");
   // loop: NOT-WORTH — one mkdir per install
   mkdirSync(downloads, { recursive: true });
   let done = 0;
-  const fetchOne = async (d: Download, step: string) => {
+  // a model file downloads straight into the set's .partial folder, so a stopped install keeps the checked ones
+  const fetchOne = async (d: Download, step: string, path = join(downloads, d.file)) => {
     // loop: SERIAL-REQUIRED — one file at a time: the line is the limit, and progress stays one honest number
-    await downloadVerified(
-      deps.fetch,
-      { url: d.url, size: d.size, sha256: d.sha256, source: "the app's list" },
-      join(downloads, d.file),
-      (got) => deps.progress(done + got, need.bytes, step),
-      deps.abort,
-      undefined,
-      { resume: true },
-    );
+    await downloadVerified(deps.fetch, { url: d.url, size: d.size, sha256: d.sha256, source: "the app's list" }, path, (got) => deps.progress(done + got, need.bytes, step), deps.abort, undefined, {
+      resume: true,
+    });
     done += d.size;
   };
 
@@ -147,33 +183,29 @@ export async function runInstall(data: string, deps: InstallDeps): Promise<void>
     rmSync(partial, { recursive: true, force: true });
     // loop: SERIAL-REQUIRED — one wheel at a time (download, then unpack), see fetchOne
     for (const w of RUNTIME.wheels) {
-      const label = w.file.startsWith("onnxruntime")
-        ? "ONNX Runtime"
-        : `NVIDIA ${w.file
-            .split("-")[0]
-            .replace(/^nvidia_/, "")
-            .replace(/_cu13$/, "")}`;
+      const label = w.label ?? w.file;
       await fetchOne(w, `Downloading ${label}`);
       deps.progress(done, need.bytes, `Unpacking ${label}`);
       // loop: SERIAL-REQUIRED — unpacks one wheel [bounded: its size]
-      if ((await unzip(join(downloads, w.file), partial, keepFromWheel, deps.abort)) === 0) throw new Error(`${w.file} had none of the expected libraries`);
+      const unpacked = await unzip(join(downloads, w.file), partial, keepFromWheel, deps.abort);
+      // licence files alone don't count: a wheel must give at least one library
+      // loop: NOT-WORTH — the few names one wheel unpacked
+      if (!unpacked.some((n) => /\.so[.\d]*$/.test(n))) throw new Error(`${w.file} had none of the expected libraries`);
     }
     // loop: NOT-WORTH — one rename: the runtime appears whole
     renameSync(partial, join(data, "runtime", RUNTIME.name));
-    // loop: SERIAL-REQUIRED — removes the wheels once unpacked (one at a time, local unlinks)
-    for (const w of RUNTIME.wheels) rmSync(join(downloads, w.file), { force: true });
   }
+  // the wheels once the runtime is in place (also after a crash between the rename and this cleanup)
+  // loop: NOT-WORTH — eight local unlinks, once per install
+  if (existsSync(join(data, "runtime", RUNTIME.name))) for (const w of RUNTIME.wheels) rmSync(join(downloads, w.file), { force: true });
 
   if (need.models) {
     const partial = join(data, "models", `.partial-${MODELS.name}`);
     // loop: NOT-WORTH — one mkdir per install
     mkdirSync(partial, { recursive: true });
     // loop: SERIAL-REQUIRED — one file at a time, see fetchOne
-    for (const f of MODELS.files) {
-      await fetchOne(f, `Downloading the CorridorKey models (${f.file})`);
-      // loop: NOT-WORTH — one rename per checked model file
-      renameSync(join(downloads, f.file), join(partial, f.file));
-    }
+    // (a file already there from a stopped install is checked offline and kept: downloadVerified's resume)
+    for (const f of MODELS.files) await fetchOne(f, `Downloading the CorridorKey models (${f.file})`, join(partial, f.file));
     // loop: NOT-WORTH — one rename: the model set appears whole
     renameSync(partial, join(data, "models", MODELS.name));
   }

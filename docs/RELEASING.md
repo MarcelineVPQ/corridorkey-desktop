@@ -86,12 +86,16 @@ spent 29 minutes waiting on a package mirror).
    Add its `## X.Y.Z-dev.N` section to `CHANGELOG.md` (the release notes are that section). Commit on `main`.
 2. `tools/release.sh`. It checks the version shape (`X.Y.Z` = Stable, `X.Y.Z-dev.N` = Development), the lock, a
    clean `main` in step with GitHub, the CHANGELOG section and the signing key; runs `npm run check` and
-   `npm run dist:linux` (memory-capped); writes `SHA256SUMS` / `SHA512SUMS`; tags and pushes; publishes the release
-   (Development as a **prerelease**, never *Latest*; Stable as *Latest*); then `tools/build-feed.mjs` picks the
-   release per channel from GitHub's release list, downloads and hashes the AppImage and writes the feed,
-   `tools/sign-feed.mjs` signs it, `tools/verify-feed.mjs` checks it exactly as the app does, and the changed
-   feeds are committed to `main` and pushed.
+   `npm run dist:linux` (memory-capped; the engine is linked for glibc 2.28 with cargo-zigbuild, Zig in
+   `~/.local/share/corridorkey-release/zig/venv`); writes `SHA256SUMS` / `SHA512SUMS`; pushes `main`; creates the
+   release as a draft on that commit, uploads, and publishes it, which makes the `vX.Y.Z…` tag (Development as a
+   **prerelease**, never *Latest*; Stable as *Latest*); then `tools/build-feed.mjs` picks the release per channel
+   from GitHub's release list (retried until the released channel names the new version), downloads and hashes
+   the AppImage and writes the feed, `tools/sign-feed.mjs` signs it, `tools/verify-feed.mjs` checks it exactly as
+   the app does, and the changed feeds are committed to `main` and pushed.
 3. It ends with `node tools/verify-feed.mjs` on the live feeds, which must say OK for the channel you released.
+4. If it fails partway, run it again: a draft release is picked up and finished, and once the release is
+   published only the feeds are redone.
 
 Development builds ship one feature at a time on the Development channel; a stable release goes out when its
 planned set is done and Marcy has done her QC (the DS5 rhythm).

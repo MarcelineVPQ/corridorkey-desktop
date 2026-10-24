@@ -20,9 +20,11 @@ export function loadSettings(file: string, env: NodeJS.ProcessEnv): Settings {
     lastOptions: sanitizeOptions(saved.lastOptions),
     appearance: sanitizeAppearance(saved.appearance),
     outputRoot: path(saved.outputRoot),
-    engineBinary: env.CK_ENGINE_BIN || path(saved.engineBinary),
-    modelsDir: env.CK_ENGINE_MODELS || path(saved.modelsDir),
-    ortLibrary: env.CK_ENGINE_ORT || path(saved.ortLibrary),
+    // the saved choices only: CK_ENGINE_BIN / _MODELS / _ORT override them at run time (index.ts enginePaths) and are
+    // never written back (a test override used to stick in settings.json after the variable was gone)
+    engineBinary: path(saved.engineBinary),
+    modelsDir: path(saved.modelsDir),
+    ortLibrary: path(saved.ortLibrary),
   };
 }
 
@@ -34,8 +36,16 @@ export const MODEL_PIECES = ["cradio", "moge", "rvm", "stage1", "stage2"] as con
  * The engine itself checks the exact files and precision and says so in its pong ("assets").
  */
 // loop: NOT-WORTH — a few stats + one readdir per Engine-page check (when the paths are set)
-export function checkRustEngine(binary: string | null, models: string | null, exists: (p: string) => boolean = existsSync, list: (p: string) => string[] = (p) => readdirSync(p)): CheckoutCheck {
+export function checkRustEngine(
+  binary: string | null,
+  models: string | null,
+  ort: string | null = null,
+  exists: (p: string) => boolean = existsSync,
+  list: (p: string) => string[] = (p) => readdirSync(p),
+): CheckoutCheck {
   const problems: string[] = [];
+  // the engine loads ONNX Runtime at run time (the GPU build): a missing library would only fail at Start
+  if (ort && !exists(ort)) problems.push(`Missing ${ort}: ONNX Runtime's library.`);
   if (!binary) problems.push("Choose the CorridorKey engine program (corridorkey-engine).");
   else if (!exists(binary)) problems.push(`Missing ${binary}: the engine program.`);
   if (!models) problems.push("Choose the folder with the CorridorKey ONNX models.");

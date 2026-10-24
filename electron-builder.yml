@@ -1,6 +1,6 @@
 # Packaging: a Linux AppImage (x64). `npm run dist:linux` builds it into
-# release/ (electron-vite build first). Releases are built by
-# .github/workflows/release.yml on a version tag; docs/RELEASING.md.
+# release/ (the engine and electron-vite build first). Releases are built on Marcy's PC by
+# tools/release.sh; docs/RELEASING.md.
 appId: io.github.MarcelineVPQ.CorridorKeyDesktop
 productName: CorridorKey
 copyright: Copyright © 2026 MarcelineVPQ. CorridorKey © Corridor Digital.

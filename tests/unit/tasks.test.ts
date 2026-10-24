@@ -24,8 +24,38 @@ const state = (extra: Partial<AppState>): AppState =>
     rustEngine: { ok: false, problems: ["Choose the CorridorKey engine program (corridorkey-engine)."] },
     engineKind: "python",
     desktopPalette: null,
+    install: { dir: "/d", needRuntime: false, needModels: false, bytes: 0, runtimeBytes: 0, modelsBytes: 0, nvidia: true, status: "idle", step: null, done: 0, total: 0, error: null },
+    ffmpeg: { checked: true, ok: true, problem: null, command: "", canInstall: false, note: null, installing: false, installError: null },
     ...extra,
   }) as AppState;
+
+const installing = (status: "idle" | "running" | "error", error: string | null = null) => ({
+  dir: "/d",
+  needRuntime: true,
+  needModels: true,
+  bytes: 5,
+  runtimeBytes: 2,
+  modelsBytes: 3,
+  nvidia: true,
+  status,
+  step: null,
+  done: 0,
+  total: 0,
+  error,
+});
+
+describe("first-run install and ffmpeg tasks", () => {
+  it("asks for the install; while it runs there is no task (not the engine-setup one either)", () => {
+    expect(tasksOf(state({ engineKind: null, install: installing("idle") }))).toEqual([expect.objectContaining({ id: "install", section: "install" })]);
+    expect(tasksOf(state({ engineKind: null, install: installing("running") }))).toEqual([]);
+    expect(tasksOf(state({ engineKind: null, install: installing("error", "no space") }))[0]).toMatchObject({ level: "error", text: "The install stopped: no space" });
+  });
+  it("says nothing about ffmpeg before the first check has answered", () => {
+    const ff = { checked: false, ok: false, problem: null, command: "", canInstall: false, note: null, installing: false, installError: null };
+    expect(tasksOf(state({ ffmpeg: ff }))).toEqual([]);
+    expect(tasksOf(state({ ffmpeg: { ...ff, checked: true, problem: "ffmpeg isn't installed (ffprobe not found)" } }))[0]).toMatchObject({ id: "ffmpeg" });
+  });
+});
 
 describe("tasks (the one mechanism)", () => {
   it("a hint mode without its file is a task on the clip's Hint section", () => {

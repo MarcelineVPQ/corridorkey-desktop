@@ -2,8 +2,8 @@
 // Build latest.json (Stable) or latest-dev.json (Development), the update feed
 // the app reads, from what is ALREADY published on GitHub. The AppImage is
 // downloaded and hashed here, so a feed can never point at a file that doesn't
-// exist or doesn't match. Never edit the feeds by hand: run the release or the
-// "Update feed" workflow (.github/workflows/feed.yml). docs/RELEASING.md.
+// exist or doesn't match. Never edit the feeds by hand: tools/release.sh runs
+// this, signs and verifies the result. docs/RELEASING.md.
 //
 //   node tools/build-feed.mjs --channel stable|dev [--out latest.json]
 //

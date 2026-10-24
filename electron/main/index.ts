@@ -9,9 +9,10 @@ import { GPU_POLL_MS, readGpu } from "./gpu";
 import { expandPaths, probeClip, still, STILL_WIDTH, VIDEO_EXT } from "./media";
 import { clearJobTemps, Queue } from "./queue";
 import { checkCheckout, checkRustEngine, chooseEngine, loadSettings, saveSettings } from "./settings";
-import { dataDir, effectivePath, findEngineFiles } from "./engineFind";
+import { dataDir, effectivePath, findEngineFiles, isInsideApp } from "./engineFind";
 import { checkFfmpeg, ffmpegState, installFfmpeg, installPlan, readOsRelease } from "./ffmpeg";
-import { MODELS_BYTES, RUNTIME_BYTES, installNeeds, runInstall } from "./install";
+import { PROGRESS_EVERY_MS } from "./updateFlow";
+import { MODELS_BYTES, RUNTIME_BYTES, freeBytes, installNeeds, runInstall } from "./install";
 import { readDesktopPalette, watchDesktopPalette } from "./desktopTheme";
 import { Updater } from "./updater";
 import { holdAppImageMountUntilExit } from "./appImageQuit";
@@ -57,40 +58,50 @@ function enginePlaces() {
   };
 }
 let engineFiles = findEngineFiles(enginePlaces());
-/** The paths the engine runs with: each setting, or (null = Automatic) the newest found. */
+/** The engine settings' keys, one per Engine-page list. */
+const RUST_KEYS = { binary: "engineBinary", models: "modelsDir", ort: "ortLibrary" } as const;
+const isRustWhat = (w: unknown): w is keyof typeof RUST_KEYS => w === "binary" || w === "models" || w === "ort";
+/**
+ * The paths the engine runs with: CK_ENGINE_BIN / _MODELS / _ORT when set (never saved), else each setting, or
+ * (null = Automatic) the newest found.
+ */
 function enginePaths() {
+  const env = process.env;
   return {
-    binary: effectivePath(settings.engineBinary, engineFiles.binary),
-    models: effectivePath(settings.modelsDir, engineFiles.models),
-    ort: effectivePath(settings.ortLibrary, engineFiles.ort),
+    binary: env.CK_ENGINE_BIN || effectivePath(settings.engineBinary, engineFiles.binary),
+    models: env.CK_ENGINE_MODELS || effectivePath(settings.modelsDir, engineFiles.models),
+    ort: env.CK_ENGINE_ORT || effectivePath(settings.ortLibrary, engineFiles.ort),
   };
 }
-let rustEngine = checkRustEngine(enginePaths().binary, enginePaths().models);
-// ffmpeg: unknown until the first check (at start, before the window shows); then after an install
-let ffmpeg: FfmpegState = { ok: true, problem: null, command: "", canInstall: false, note: null, installing: false, installError: null };
+let rustEngine = checkRustEngine(null, null);
+// ffmpeg: "checking" until the first check (started at ready); then after an install or before a queue
+let ffmpeg: FfmpegState = { checked: false, ok: false, problem: null, command: "", canInstall: false, note: null, installing: false, installError: null };
 // the first-run install: what is missing, and its progress while it runs
-function installIdle(prev?: InstallState): InstallState {
+function installIdle(): InstallState {
   const need = installNeeds(enginePlaces().data);
   // loop: NOT-WORTH — one stat of the NVIDIA driver's proc file per check
   const nvidia = existsSync("/proc/driver/nvidia/version");
   return {
+    dir: enginePlaces().data,
     needRuntime: need.runtime,
     needModels: need.models,
     bytes: need.bytes,
     runtimeBytes: RUNTIME_BYTES,
     modelsBytes: MODELS_BYTES,
     nvidia,
-    status: prev?.status === "error" ? "error" : "idle",
+    status: "idle",
     step: null,
     done: 0,
     total: 0,
-    error: prev?.error ?? null,
+    error: null,
   };
 }
 let install = installIdle();
 let installAbort: AbortController | null = null;
+let lastInstallProgress = 0;
 async function recheckFfmpeg(): Promise<void> {
-  ffmpeg = { ...ffmpegState(await checkFfmpeg(), installPlan(readOsRelease())), installError: ffmpeg.installError };
+  // an install still running stays running (a check while it runs must not bring the Install button back)
+  ffmpeg = { ...ffmpegState(await checkFfmpeg(), installPlan(readOsRelease())), installing: ffmpeg.installing, installError: ffmpeg.installError };
   scheduleSend();
 }
 /** Re-check both engines' files (after a setting changed, or before the queue starts). */
@@ -98,8 +109,9 @@ function recheckEngines(): void {
   checkout = checkCheckout(settings.corridorKeyRoot);
   engineFiles = findEngineFiles(enginePlaces());
   const paths = enginePaths();
-  rustEngine = checkRustEngine(paths.binary, paths.models);
+  rustEngine = checkRustEngine(paths.binary, paths.models, paths.ort);
 }
+recheckEngines();
 let mainWindow: BrowserWindow | null = null;
 let windowShown = false;
 let gpu: GpuInfo | null = null;
@@ -329,30 +341,29 @@ function registerIpc(): void {
     scheduleSend();
   });
   ipcMain.handle(IPC.pickRustEngine, async (_e, whatArg: unknown) => {
-    if (whatArg !== "binary" && whatArg !== "models" && whatArg !== "ort") return;
+    if (!isRustWhat(whatArg)) return;
     const what = whatArg;
     const opts = {
       binary: { title: "The CorridorKey engine program (corridorkey-engine)", properties: ["openFile"] as const },
       models: { title: "The folder with the CorridorKey ONNX models", properties: ["openDirectory"] as const },
       ort: { title: "ONNX Runtime's library (libonnxruntime.so) for the graphics card", properties: ["openFile"] as const },
     }[what];
-    if (!opts) return;
     const r = await dialog.showOpenDialog(mainWindow!, { title: opts.title, properties: [...opts.properties] });
     if (r.canceled) return;
-    const key = { binary: "engineBinary", models: "modelsDir", ort: "ortLibrary" }[what] as "engineBinary" | "modelsDir" | "ortLibrary";
-    settings = { ...settings, [key]: r.filePaths[0] };
+    settings = { ...settings, [RUST_KEYS[what]]: r.filePaths[0] };
     recheckEngines();
     persist();
     scheduleSend();
   });
   ipcMain.handle(IPC.setRustEngine, (_e, whatArg: unknown, pathArgIn: unknown) => {
-    if (whatArg !== "binary" && whatArg !== "models" && whatArg !== "ort") return;
-    const key = { binary: "engineBinary", models: "modelsDir", ort: "ortLibrary" }[whatArg] as "engineBinary" | "modelsDir" | "ortLibrary";
+    if (!isRustWhat(whatArg)) return;
+    const key = RUST_KEYS[whatArg];
     // null = Automatic; otherwise only a path the list offers, or the one already chosen with Browse…
     // loop: NOT-WORTH — one or two found copies, once per list choice
     const offered = engineFiles[whatArg].some((f) => f.path === pathArgIn) || pathArgIn === settings[key];
     if (pathArgIn !== null && !(typeof pathArgIn === "string" && offered)) return;
-    settings = { ...settings, [key]: pathArgIn };
+    // the copy inside the app lives in the AppImage's mount, a new path every launch: saved as Automatic
+    settings = { ...settings, [key]: isInsideApp(pathArgIn, app.isPackaged ? process.resourcesPath : null) ? null : pathArgIn };
     recheckEngines();
     persist();
     scheduleSend();
@@ -366,17 +377,22 @@ function registerIpc(): void {
       await runInstall(enginePlaces().data, {
         // loop: NOT-WORTH — the fetch the install is given; downloadVerified sets a connect timeout and a stall deadline [bounded: CONNECT_TIMEOUT_MS / STALL_TIMEOUT_MS]
         fetch: (url, init) => net.fetch(url, init),
+        // at most 4 updates a second (the updater's PROGRESS_EVERY_MS), and always a new step or the end
         progress: (done, total, step) => {
+          const t = Date.now();
+          if (step === install.step && done < total && t - lastInstallProgress < PROGRESS_EVERY_MS) return;
+          lastInstallProgress = t;
           install = { ...install, done, total, step };
           scheduleSend();
         },
         abort: installAbort.signal,
+        freeBytes,
       });
       install = installIdle();
     } catch (e) {
       // error: SHOWN — the Engine page's install section and its task; a retry resumes the downloads
       // a stop is not an error: what arrived is kept and the next start resumes
-      install = installAbort?.signal.aborted ? { ...installIdle(), status: "idle", error: null } : { ...installIdle(), status: "error", error: (e as Error).message };
+      install = installAbort?.signal.aborted ? installIdle() : { ...installIdle(), status: "error", error: (e as Error).message };
     }
     installAbort = null;
     recheckEngines();

@@ -57,7 +57,7 @@ export interface UpdatePlatform {
   log(message: string): void;
 }
 
-const PROGRESS_EVERY_MS = 250;
+export const PROGRESS_EVERY_MS = 250;
 
 export class UpdateFlow {
   state: UpdateState;

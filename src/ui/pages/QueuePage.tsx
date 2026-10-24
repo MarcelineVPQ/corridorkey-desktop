@@ -41,8 +41,18 @@ export function QueuePage(props: {
           <button
             type="button"
             className="btn primary"
-            disabled={!runnable || !state.engineKind}
-            title={!state.engineKind ? "Set up the engine first (Engine page)" : !runnable ? "Add a clip that's ready to run" : undefined}
+            disabled={!runnable || !state.engineKind || !state.ffmpeg.ok}
+            title={
+              !state.engineKind
+                ? "Set up the engine first (Engine page)"
+                : !state.ffmpeg.ok
+                  ? state.ffmpeg.checked
+                    ? "Install ffmpeg first (Engine page)"
+                    : "Checking ffmpeg…"
+                  : !runnable
+                    ? "Add a clip that's ready to run"
+                    : undefined
+            }
             onClick={() => window.ck.startQueue()}
           >
             <Play size={16} /> Start queue

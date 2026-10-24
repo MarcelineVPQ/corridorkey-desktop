@@ -1,32 +1,33 @@
 import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateRawSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { downloadVerified } from "../../electron/main/download";
-import { installNeeds, keepFromWheel, MODELS, RUNTIME } from "../../electron/main/install";
+import { installNeeds, keepFromWheel, MODELS, RUNTIME, runInstall, type Catalog } from "../../electron/main/install";
 import { unzip } from "../../electron/main/unzip";
 
 /** A minimal zip (deflated entries) as a wheel looks, for the unpacker. */
-function makeZip(files: Record<string, string>): Buffer {
+function makeZip(files: Record<string, string>, stored: string[] = []): Buffer {
   const locals: Buffer[] = [];
   const central: Buffer[] = [];
   let offset = 0;
   for (const [name, text] of Object.entries(files)) {
     const data = Buffer.from(text);
-    const comp = deflateRawSync(data);
+    const method = stored.includes(name) ? 0 : 8;
+    const comp = method === 0 ? data : deflateRawSync(data);
     const n = Buffer.from(name);
     const lh = Buffer.alloc(30);
     lh.writeUInt32LE(0x04034b50, 0);
-    lh.writeUInt16LE(8, 8);
+    lh.writeUInt16LE(method, 8);
     lh.writeUInt32LE(comp.length, 18);
     lh.writeUInt32LE(data.length, 22);
     lh.writeUInt16LE(n.length, 26);
     const ch = Buffer.alloc(46);
     ch.writeUInt32LE(0x02014b50, 0);
-    ch.writeUInt16LE(8, 10);
+    ch.writeUInt16LE(method, 10);
     ch.writeUInt32LE(comp.length, 20);
     ch.writeUInt32LE(data.length, 24);
     ch.writeUInt16LE(n.length, 28);
@@ -63,11 +64,18 @@ describe("first-run install", () => {
   it("unpacks the chosen entries and refuses paths outside the folder", async () => {
     const zip = join(dir, "w.whl");
     writeFileSync(zip, makeZip({ "nvidia/cu13/lib/libx.so.13": "LIB", "nvidia/cu13/include/x.h": "H" }));
-    expect(await unzip(zip, join(dir, "out"), keepFromWheel)).toBe(1);
+    expect(await unzip(zip, join(dir, "out"), keepFromWheel)).toEqual(["nvidia/cu13/lib/libx.so.13"]);
     expect(readFileSync(join(dir, "out/nvidia/cu13/lib/libx.so.13"), "utf8")).toBe("LIB");
     expect(existsSync(join(dir, "out/nvidia/cu13/include/x.h"))).toBe(false);
     writeFileSync(zip, makeZip({ "../evil.so": "x" }));
     await expect(unzip(zip, join(dir, "out2"), () => true)).rejects.toThrow("outside the folder");
+  });
+
+  it("unpacks an empty stored file (a 0-byte licence) instead of failing the install", async () => {
+    const zip = join(dir, "e.whl");
+    writeFileSync(zip, makeZip({ "x.dist-info/licenses/LICENSE": "", "nvidia/cu13/lib/liby.so.13": "Y" }, ["x.dist-info/licenses/LICENSE"]));
+    expect(await unzip(zip, join(dir, "out4"), keepFromWheel)).toHaveLength(2);
+    expect(readFileSync(join(dir, "out4/x.dist-info/licenses/LICENSE"), "utf8")).toBe("");
   });
 
   it("stops unpacking when Stop is pressed", async () => {
@@ -142,5 +150,50 @@ describe("resumable SHA-256 download", () => {
       "refused: the download's SHA-256 doesn't match the list",
     );
     expect(existsSync(path)).toBe(false);
+  });
+});
+
+describe("runInstall", () => {
+  const files: Record<string, Buffer> = { "a.onnx": Buffer.from("A".repeat(300)), "b.onnx": Buffer.from("B".repeat(500)) };
+  const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
+  let server: Server;
+  let base = "";
+  const asked: string[] = [];
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      const name = (req.url ?? "").slice(1);
+      asked.push(name);
+      const body = files[name] ?? Buffer.alloc(0);
+      res.writeHead(files[name] ? 200 : 404, { "content-length": String(body.length) });
+      res.end(body);
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  });
+  afterAll(() => server.close());
+  const catalog = (): Catalog => ({
+    runtime: { name: "rt", wheels: [] },
+    models: { name: "m1", files: Object.entries(files).map(([f, b]) => ({ file: f, url: `${base}/${f}`, size: b.length, sha256: sha(b) })) },
+  });
+  const deps = (free: number | null = null) => ({ fetch, progress: () => undefined, abort: new AbortController().signal, freeBytes: () => free });
+
+  it("keeps the model files a stopped install already finished (fetches only the rest)", async () => {
+    const data = mkdtempSync(join(tmpdir(), "ck-run-"));
+    mkdirSync(join(data, "runtime", "rt"), { recursive: true });
+    mkdirSync(join(data, "models", ".partial-m1"), { recursive: true });
+    writeFileSync(join(data, "models", ".partial-m1", "a.onnx"), files["a.onnx"]);
+    asked.length = 0;
+    await runInstall(data, deps(), catalog());
+    expect(asked).toEqual(["b.onnx"]);
+    expect(readFileSync(join(data, "models", "m1", "a.onnx")).equals(files["a.onnx"])).toBe(true);
+    expect(existsSync(join(data, "models", ".partial-m1"))).toBe(false);
+    rmSync(data, { recursive: true, force: true });
+  });
+
+  it("refuses up front when the disk can't hold it", async () => {
+    const data = mkdtempSync(join(tmpdir(), "ck-run-"));
+    mkdirSync(join(data, "runtime", "rt"), { recursive: true });
+    await expect(runInstall(data, deps(100), catalog())).rejects.toThrow("not enough free disk space");
+    rmSync(data, { recursive: true, force: true });
   });
 });

@@ -1,14 +1,15 @@
 // Engine: what runs the model. Main view: which engine the queue uses, the
 // engine as it last answered, each engine's files, the graphics card (read
-// only while a job runs). Panel: where the ONNX Runtime engine and its models
-// live, and the CorridorKey checkout the PyTorch engine runs from (kept until
-// the ONNX engine replaces it; more when the in-app install lands, BACKLOG row 2).
+// only while a job runs). Panel: the first-run install (GPU runtime and models),
+// ffmpeg (checked, and installed on request), the lists of engine files found
+// (Automatic = the newest, Browse… for anything else), and the CorridorKey
+// checkout the PyTorch engine (the benchmark reference) runs from.
 import { Check, Cpu, Download, Film, FolderOpen, FolderCog, X } from "lucide-react";
 import type { AppState } from "../../shared/types";
 import { Accordion, Row, Section } from "../panel/Section";
 import { MainBlock, SplitView } from "../panel/SplitView";
 import { Stat } from "../JobView";
-import { gb } from "../format";
+import { gb, gbBytes } from "../format";
 
 export function EnginePage(props: { state: AppState; panelShown: boolean; narrow: boolean; glass: boolean; focus: string | null; sectionTasks: Record<string, string>; hidePanel: () => void }) {
   const { state } = props;
@@ -94,7 +95,7 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
               ? "The CorridorKey engine on ONNX Runtime."
               : kind === "python"
                 ? "The PyTorch engine from your CorridorKey2.0 folder. Set up the ONNX Runtime engine to use it instead."
-                : inst.needRuntime || inst.needModels
+                : needInstall
                   ? "Not installed yet: press Download and install under Runtime and models in the panel."
                   : "None set up yet: no engine program or models found. Choose them in the panel."}
           </p>
@@ -198,16 +199,16 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
             </div>
           ) : (
             <>
-              <p className="hint-text">CorridorKey downloads what it runs on, once, into ~/.local/share/corridorkey-desktop:</p>
+              <p className="hint-text">CorridorKey downloads what it runs on, once, into {inst.dir}:</p>
               <ul className="check-list">
                 {inst.needRuntime && (
                   <li className="hint-text">
-                    GPU runtime, {gb(inst.runtimeBytes / 1048576)} download: ONNX Runtime (Microsoft, MIT licence) and NVIDIA's CUDA and cuDNN libraries (NVIDIA licence), from pypi.org
+                    GPU runtime, {gbBytes(inst.runtimeBytes)} download: ONNX Runtime (Microsoft, MIT licence) and NVIDIA's CUDA and cuDNN libraries (NVIDIA licence), from pypi.org
                   </li>
                 )}
                 {inst.needModels && (
                   <li className="hint-text">
-                    CorridorKey models, {gb(inst.modelsBytes / 1048576)} download: by Corridor Digital, under the CorridorKey licence (free to use, never sold), from this app's GitHub releases
+                    CorridorKey models, {gbBytes(inst.modelsBytes)} download: by Corridor Digital, under the CorridorKey licence (free to use, never sold), from this app's GitHub releases
                   </li>
                 )}
               </ul>
@@ -215,7 +216,7 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
               {inst.status === "running" ? (
                 <>
                   <div className="hint-text">
-                    {inst.step} · {gb(inst.done / 1048576)} of {gb(inst.total / 1048576)}
+                    {inst.step} · {gbBytes(inst.done)} of {gbBytes(inst.total)}
                   </div>
                   <div className="bar" role="progressbar" aria-valuemin={0} aria-valuemax={inst.total} aria-valuenow={inst.done}>
                     <span style={{ width: `${pct}%` }} />
@@ -226,7 +227,7 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
                 </>
               ) : (
                 <button type="button" className="btn small" disabled={!inst.nvidia} onClick={() => void window.ck.startInstall()}>
-                  <Download size={14} /> {inst.error ? "Try again (resumes)" : `Download and install (${gb(inst.bytes / 1048576)})`}
+                  <Download size={14} /> {inst.error ? "Try again (resumes)" : `Download and install (${gbBytes(inst.bytes)})`}
                 </button>
               )}
               {inst.error && (
@@ -239,9 +240,17 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
           )
         }
       </Section>
-      <Section id="ffmpeg" icon={Film} title="ffmpeg" status={ff.ok ? "installed" : ff.installing ? "installing…" : "not installed"} task={props.sectionTasks["engine/ffmpeg"] ?? null}>
+      <Section
+        id="ffmpeg"
+        icon={Film}
+        title="ffmpeg"
+        status={!ff.checked ? "checking…" : ff.ok ? "installed" : ff.installing ? "installing…" : "not installed"}
+        task={props.sectionTasks["engine/ffmpeg"] ?? null}
+      >
         {() =>
-          ff.ok ? (
+          !ff.checked ? (
+            <p className="hint-text">Checking ffmpeg…</p>
+          ) : ff.ok ? (
             <div className="check-line ok">
               <Check size={15} aria-hidden /> ffmpeg and ffprobe found, with the H.264 and ProRes 4444 encoders
             </div>

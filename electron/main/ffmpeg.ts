@@ -11,7 +11,8 @@ import type { FfmpegState } from "../../src/shared/types";
 export type RunFn = (cmd: string, args: string[], timeoutMs: number) => Promise<string>;
 
 const CHECK_TIMEOUT_MS = 15_000;
-export const INSTALL_TIMEOUT_MS = 15 * 60_000;
+// no deadline for the install: a timeout would kill apt / pacman halfway and could leave the package database locked
+export const INSTALL_TIMEOUT_MS = 0;
 
 export const runFile: RunFn = (cmd, args, timeoutMs) =>
   new Promise((resolve, reject) => {
@@ -29,15 +30,34 @@ export interface InstallPlan {
 
 /** The install for this distro, from /etc/os-release's ID and ID_LIKE. */
 export function installPlan(osRelease: string): InstallPlan {
-  const field = (k: string) => (osRelease.match(new RegExp(`^${k}="?([^"\\n]*)"?$`, "m"))?.[1] ?? "").toLowerCase();
+  // os-release values may be bare, "double" or 'single' quoted
+  const field = (k: string) => (osRelease.match(new RegExp(`^${k}=["']?([^"'\\n]*)["']?$`, "m"))?.[1] ?? "").toLowerCase();
   // loop: NOT-WORTH — a few words from os-release
   const ids = [field("ID"), ...field("ID_LIKE").split(/\s+/)].filter(Boolean);
+  // read-only (image-based) systems: the family's package manager can't install there (SteamOS is ID_LIKE=arch,
+  // Bazzite / Silverblue / Kinoite are ID=fedora with rpm-ostree)
+  const immutable = ["steamos", "bazzite", "bluefin", "aurora"].includes(field("ID")) || /silverblue|kinoite|sericea|onyx|atomic/.test(field("VARIANT_ID"));
+  if (immutable)
+    return {
+      command: "Install ffmpeg the way your system recommends",
+      argv: null,
+      note: "This system's base is read-only, so the app can't install ffmpeg with the package manager. Your distribution's documentation says how to add it.",
+    };
   // loop: NOT-WORTH — a few os-release ids
-  if (ids.some((i) => i === "debian" || i === "ubuntu")) return { command: "sudo apt install ffmpeg", argv: ["apt-get", "install", "-y", "ffmpeg"], note: null };
+  // the package lists first: on a system that hasn't updated in a while, install alone fails with 404s
+  if (ids.some((i) => i === "debian" || i === "ubuntu"))
+    return { command: "sudo apt update && sudo apt install ffmpeg", argv: ["sh", "-c", "apt-get update && apt-get install -y ffmpeg"], note: null };
   // loop: NOT-WORTH — a few os-release ids
   if (ids.some((i) => i === "arch")) return { command: "sudo pacman -S ffmpeg", argv: ["pacman", "-S", "--noconfirm", "--needed", "ffmpeg"], note: null };
   // loop: NOT-WORTH — a few os-release ids
-  if (ids.some((i) => i === "fedora" || i === "rhel"))
+  if (ids.some((i) => i === "rhel"))
+    return {
+      command: "sudo dnf install ffmpeg",
+      argv: null,
+      note: "Rocky, Alma and other RHEL-family systems have no ffmpeg of their own. Enable EPEL and RPM Fusion (rpmfusion.org/Configuration), then run this command.",
+    };
+  // loop: NOT-WORTH — a few os-release ids
+  if (ids.some((i) => i === "fedora"))
     return {
       command: "sudo dnf install ffmpeg --allowerasing",
       argv: null,
@@ -49,22 +69,24 @@ export function installPlan(osRelease: string): InstallPlan {
   return { command: "Install ffmpeg with your distribution's package manager", argv: null, note: null };
 }
 
+const notFound = (e: unknown) => (e as { code?: unknown }).code === "ENOENT";
+
 /** Is a usable ffmpeg there: both programs, and the encoders the engine writes with. */
 export async function checkFfmpeg(run: RunFn = runFile): Promise<{ ok: boolean; problem: string | null }> {
   try {
     // loop: SERIAL-REQUIRED — one check at a time [bounded: CHECK_TIMEOUT_MS]
     await run("ffprobe", ["-version"], CHECK_TIMEOUT_MS);
-  } catch {
+  } catch (e) {
     // error: SHOWN — the Engine page's ffmpeg section and its task say so
-    return { ok: false, problem: "ffmpeg isn't installed (ffprobe not found)" };
+    return { ok: false, problem: notFound(e) ? "ffmpeg isn't installed (ffprobe not found)" : `ffprobe didn't answer (${(e as Error).message})` };
   }
   let encoders: string;
   try {
     // loop: SERIAL-REQUIRED — one check at a time [bounded: CHECK_TIMEOUT_MS]
     encoders = await run("ffmpeg", ["-hide_banner", "-encoders"], CHECK_TIMEOUT_MS);
-  } catch {
+  } catch (e) {
     // error: SHOWN — as above
-    return { ok: false, problem: "ffmpeg isn't installed" };
+    return { ok: false, problem: notFound(e) ? "ffmpeg isn't installed (ffprobe is, ffmpeg isn't)" : `ffmpeg didn't answer (${(e as Error).message})` };
   }
   // loop: NOT-WORTH — two encoder names
   const missing = ["libx264", "prores_ks"].filter((e) => !new RegExp(`\\s${e}\\s`).test(encoders));
@@ -74,7 +96,7 @@ export async function checkFfmpeg(run: RunFn = runFile): Promise<{ ok: boolean; 
 
 /** The state the Engine page shows, before any install is tried. */
 export function ffmpegState(check: { ok: boolean; problem: string | null }, plan: InstallPlan): FfmpegState {
-  return { ok: check.ok, problem: check.problem, command: plan.command, canInstall: plan.argv !== null, note: plan.note, installing: false, installError: null };
+  return { checked: true, ok: check.ok, problem: check.problem, command: plan.command, canInstall: plan.argv !== null, note: plan.note, installing: false, installError: null };
 }
 
 export function readOsRelease(): string {
@@ -91,7 +113,7 @@ export function readOsRelease(): string {
 export async function installFfmpeg(plan: InstallPlan, run: RunFn = runFile): Promise<void> {
   if (!plan.argv) throw new Error("the app can't install ffmpeg on this system");
   try {
-    // loop: SERIAL-REQUIRED — one install at a time [bounded: INSTALL_TIMEOUT_MS]
+    // loop: SERIAL-REQUIRED — one install at a time [bounded: the user's password prompt and the package manager; never killed mid-install]
     await run("pkexec", plan.argv, INSTALL_TIMEOUT_MS);
   } catch (e) {
     // error: PASSES-ON — the Engine page shows it next to the command to run by hand

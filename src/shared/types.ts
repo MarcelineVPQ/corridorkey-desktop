@@ -199,6 +199,8 @@ export interface EngineFiles {
 
 // The first-run install (electron/main/install.ts): the GPU runtime and the models into the data folder.
 export interface InstallState {
+  // where it installs (the data folder: $XDG_DATA_HOME/corridorkey-desktop)
+  dir: string;
   // what is missing, and its download size in bytes
   needRuntime: boolean;
   needModels: boolean;
@@ -217,6 +219,8 @@ export interface InstallState {
 
 // The system's ffmpeg (electron/main/ffmpeg.ts): ok = ffmpeg + ffprobe with the encoders the engine writes with.
 export interface FfmpegState {
+  // false until the first check has answered (the page says "Checking", never "installed", before that)
+  checked: boolean;
   ok: boolean;
   problem: string | null;
   // the install for this distro, to read or copy; canInstall = the app can run it (pkexec), else `note` says what first

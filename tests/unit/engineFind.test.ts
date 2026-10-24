@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dataDir, effectivePath, findEngineFiles } from "../../electron/main/engineFind";
+import { dataDir, effectivePath, findEngineFiles, isInsideApp } from "../../electron/main/engineFind";
 
 const tree = (files: Record<string, string>) => {
   const paths = Object.keys(files);
@@ -42,6 +42,25 @@ describe("finding the engine's files", () => {
       { path: "/d/runtime/ort-1.31.0/onnxruntime/capi/libonnxruntime.so.1.31.0", label: "ONNX Runtime 1.31.0 (graphics card)" },
       { path: "/d/runtime/ort-1.9.0/onnxruntime/capi/libonnxruntime.so.1.9.0", label: "ONNX Runtime 1.9.0 (CPU only)" },
     ]);
+  });
+
+  it("never offers an install still in progress (.partial-…)", () => {
+    const t = tree({
+      "/d/runtime/.partial-ort-1.31.0-cuda13/onnxruntime/capi/libonnxruntime.so.1.31.0": "",
+      "/d/runtime/.partial-ort-1.31.0-cuda13/onnxruntime/capi/libonnxruntime_providers_cuda.so": "",
+      "/d/models/.partial-2.0.0-onnx.3/models.json": "",
+    });
+    const f = findEngineFiles({ bundledBinary: null, devBinary: null, data: "/d" }, t);
+    expect(f.ort).toEqual([]);
+    expect(f.models).toEqual([]);
+    expect(effectivePath(null, f.ort)).toBeNull();
+  });
+
+  it("knows a path inside the running AppImage (never saved: it changes every launch)", () => {
+    expect(isInsideApp("/tmp/.mount_CorridAbC123/resources/engine/corridorkey-engine", "/tmp/.mount_CorridAbC123/resources")).toBe(true);
+    expect(isInsideApp("/tmp/.mount_CorridXyZ/resources/engine/corridorkey-engine", null)).toBe(true);
+    expect(isInsideApp("/home/m/engine/corridorkey-engine", "/tmp/.mount_CorridAbC123/resources")).toBe(false);
+    expect(isInsideApp(null, null)).toBe(false);
   });
 
   it("finds nothing when nothing is installed", () => {
