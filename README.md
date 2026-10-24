@@ -323,7 +323,7 @@ Every result in this README is reproducible with the tools in this repository. T
 
 | Test | What it checks | Result |
 | --- | --- | --- |
-| `npm run check` | TypeScript types, formatting, the theme gate (colours only from one place), the loop gate (every loop, timer and wait in the app and engine carries a written verdict: 653 rows), 141 unit tests (151 since the platform passes the same day), the PyTorch engine's own tests | pass |
+| `npm run check` | TypeScript types, formatting, the theme gate (colours only from one place), the loop gate (every loop, timer and wait in the app and engine carries a written verdict: 743 rows listed, 676 with a required verdict; trivial Rust iterators are exempt), 141 unit tests (151 since the platform passes the same day), the PyTorch engine's own tests | pass |
 | `npm run check:engine` | Rust formatting, clippy with every warning an error, 67 engine tests | pass |
 | CPU end to end (`e2e_cpu.sh`) | the Rust engine against PyTorch, both fp32: frame folder, H.264 and hint inputs, EXR and video outputs, low-memory mode | pass: alpha MAE 1.7e-7, low-memory mode identical |
 | GPU speed and quality, HD and 4K | `engine_bench.mjs` + `matte_compare.py`, ten clips, both engines | pass (the tables above) |
