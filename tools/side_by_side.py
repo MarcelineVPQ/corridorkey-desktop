@@ -16,7 +16,8 @@ linear values and produced a false finding): EXR is read as float by OpenCV; vid
 RGB (alpha = first channel), as tools/matte_compare.py does. EXR foregrounds are scene-linear and are compared after
 the video path's display encoding (clip(srgb(max(x, 0)), 0, 1)). Before anything is written, REF is compared with
 itself: anything but zero stops the run (a broken decode can't pass as a result).
-Needs numpy, OpenCV (with OPENCV_IO_ENABLE_OPENEXR, set here) and ffmpeg.
+Needs numpy, OpenCV (with OPENCV_IO_ENABLE_OPENEXR, set here) and ffmpeg; alpha-only EXRs (channel A) also the
+OpenEXR package (pip install OpenEXR), as OpenCV can't read them.
 """
 import argparse
 import glob
@@ -71,9 +72,23 @@ def exr_frame(folder, n):
         raise SystemExit(f"{folder}: frame {n} not found ({len(files)} frames)")
     img = cv2.imread(files[n], cv2.IMREAD_UNCHANGED)
     if img is None:
-        raise SystemExit(f"{files[n]}: OpenCV couldn't read it")
+        img = exr_matte(files[n])
     img = img.astype(np.float64)
     return img if img.ndim == 3 else img[..., None]
+
+
+def exr_matte(path):
+    """A matte stored alone as channel A (the studio convention, our alpha EXR since backlog row 30 b): OpenCV 4.11
+    returns nothing for it (measured), so it is read with OpenEXR's own Python package (pip install OpenEXR)."""
+    try:
+        import OpenEXR
+    except ImportError:
+        raise SystemExit(f"{path}: OpenCV couldn't read it; an alpha-only (channel A) EXR needs `pip install OpenEXR`")
+    with OpenEXR.File(path) as f:
+        ch = f.channels()
+        if list(ch) != ["A"]:
+            raise SystemExit(f"{path}: OpenCV couldn't read it (channels {list(ch)})")
+        return np.asarray(ch["A"].pixels, dtype=np.float32)
 
 
 class Out:

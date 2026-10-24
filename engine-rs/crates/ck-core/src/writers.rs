@@ -323,11 +323,13 @@ pub(crate) struct ExrWriter {
     frames: usize,
 }
 
-/// One EXR frame as cv2.imwrite writes it: channels R, G, B (+A) from BGR(A) data, or Y; ZIP compression.
+/// One EXR frame: channels R, G, B (+A) from BGR(A) data as cv2.imwrite writes them, or a matte alone as `A` (the
+/// studio convention: Nuke and OpenImageIO read it as alpha; cv2.imwrite's `Y` reads as grey RGB, backlog row 30 b);
+/// ZIP compression.
 pub(crate) fn write_exr(path: &Path, w: usize, h: usize, channels: usize, nhwc: &[f32], ty: ExrType) -> Result<(), crate::Error> {
     use exr::prelude::*;
     let names: &[&str] = match channels {
-        1 => &["Y"],
+        1 => &["A"],
         3 => &["B", "G", "R"],
         4 => &["B", "G", "R", "A"],
         _ => return Err(crate::Error::engine(format!("{channels} channels"))),
@@ -528,6 +530,25 @@ mod tests {
         names.sort();
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(names, ["04_5d_alpha.00065.exr", "04_5d_alpha.00066.exr", "04_5d_alpha.00067.exr"]);
+    }
+
+    #[test]
+    fn the_matte_alone_is_channel_a() {
+        use exr::prelude::*;
+        let dir = std::env::temp_dir().join(format!("ck-exr-a-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("m.exr");
+        let matte = [0.0, 0.25, 0.5, 1.0];
+        write_exr(&p, 2, 2, 1, &matte, ExrType::Half).unwrap();
+        let img = read_all_flat_layers_from_file(&p).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        let ch = &img.layer_data[0].channel_data.list;
+        // loop: NOT-WORTH — one channel
+        let names: Vec<String> = ch.iter().map(|c| c.name.to_string()).collect();
+        assert_eq!(names, ["A"]);
+        // loop: NOT-WORTH — four samples
+        let vals: Vec<f32> = ch[0].sample_data.values_as_f32().collect();
+        assert_eq!(vals, matte);
     }
 
     #[test]
