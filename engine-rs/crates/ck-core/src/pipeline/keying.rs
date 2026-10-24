@@ -456,7 +456,7 @@ impl<L: Loader> Pipeline<L> {
                 self.preload(key, &["stage2"]);
             }
             let outs = self.net("stage1")?.run(vec![
-                // loop: HOT-PATH-OK — ≤ 80 slice references; converted once inside the run (this pass: bf16 -> f32 -> f16 was two passes and an 850 MB float32 copy per 48-frame window)
+                // loop: HOT-PATH-OK — ≤ 80 slice references; converted once inside the run
                 ("rgb", vec![1, tc, 3, sh, sw], Data::Bf16(models.iter().map(|m| &m[..]).collect())),
                 ("hint", vec![1, tc, 1, sh, sw], hint),
                 ("hint_quality", vec![1, tc], hq.into()),

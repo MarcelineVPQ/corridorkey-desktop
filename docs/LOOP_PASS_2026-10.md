@@ -95,6 +95,32 @@ the first Empty; the deadline loops (`proc.rs`, `writers.rs` release) sleep 50 m
 none; the one engine retry (an automatic window that runs out of memory before any frame was written) halves the
 window each round (≤ 7 rounds).
 
+## History moved out of the code (2026-10-24)
+
+The senior Rust review (finding 16) found engine annotations that carried this pass's history ("this pass:
+was ..."), a changelog that goes stale in code. The history clause was cut from each comment; the verdict and its
+current reason stay. What each one said, in `engine-rs/crates/ck-core/src/` (line of the annotation at the cut):
+
+| Where | Code under the annotation | History clause that was cut |
+|---|---|---|
+| runtime.rs:462 | `out.par_extend(p.par_iter().with_min_len(PAR_MIN).map(\|&x\| f(x)));` | this pass: one pass, was two plus a float32 copy |
+| runtime.rs:535 | `res.push((s.iter().map(\|&x\| x as usize).collect(), Data::F16(d.to_vec())));` | this pass: was converted to float32 here, on the card's thread |
+| clip.rs:250 | `let out = crate::proc::output_timeout(&mut cmd, PROBE_TIMEOUT).map_err(\|e\| {` | added in this pass; it had no deadline |
+| render.rs:70 | `let mut rows: Vec<Row<'_, T>> = (0..h).map(\|_\| [None, None, None, None]).collect();` | this pass: per-row vectors and a join copy |
+| decode.rs:79 | `r.par_chunks_mut(w).zip(g.par_chunks_mut(w)).zip(b.par_chunks_mut(w)).zip(rgb.par_chunks(w` | this pass: was one thread |
+| pipeline/frames.rs:46 | `let out = (t0..t1).map(\|t\| self.cache[&t].clone()).collect();` | this pass: each frame was deep-copied, ~850 MB per 48-frame window |
+| pipeline/frames.rs:71 | `let out = (t0..t1).map(\|t\| self.cache[&t].clone()).collect();` | this pass: were deep copies |
+| pipeline/mod.rs:313 | `let started = crate::ahead::spawn_named(&format!("load-{piece}"), move \|\| {` | this pass; measured: 1.3-1.5 s less per job |
+| pipeline/temps.rs:72 | `self.f.seek(SeekFrom::Start((t0 * self.frame * 2) as u64)).and_then(\|_\| self.f.read_exact(` | this pass: no byte buffer + conversion |
+| pipeline/temps.rs:112 | `self.f.read_exact(bytemuck::cast_slice_mut(&mut out)).map_err(temp_err)?;` | this pass: float16, half the bytes |
+| hann.rs:53 | `sum.par_iter_mut().zip(baton.par_iter()).with_min_len(1 << 14).for_each(\|(s, b)\| *s += b.t` | this pass: no float32 copy of the window's batons |
+| hann.rs:73 | `(k, sum.into_par_iter().with_min_len(1 << 14).map(\|v\| half::f16::from_f32(v / d)).collect(` | this pass: was float32 then rounded again |
+| pipeline/keying.rs:459 | `("rgb", vec![1, tc, 3, sh, sw], Data::Bf16(models.iter().map(\|m\| &m[..]).collect())),` | this pass: bf16 -> f32 -> f16 was two passes and an 850 MB float32 copy per 48-frame window |
+| image.rs:95 | `dst.par_chunks_mut(wo).with_min_len(ROWS_MIN).enumerate().for_each(\|(y, drow)\| {` | this pass: were one thread |
+| image.rs:144 | `dst.par_chunks_mut(wo).with_min_len(ROWS_MIN).zip(ys.par_iter()).for_each(\|(drow, &(y0, y1` | this pass: were one thread |
+| image.rs:191 | `dst.par_chunks_mut(wo).with_min_len(ROWS_MIN).zip(ys.par_iter()).for_each(\|(drow, &(y0, y1` | this pass: were one thread |
+| writers.rs:271 | `Some(mut c) => match crate::proc::wait_timeout(&mut c, end.saturating_duration_since(std::` | this pass: it had no deadline |
+
 ## Special attention
 
 ### Waits without a deadline in the call (30)

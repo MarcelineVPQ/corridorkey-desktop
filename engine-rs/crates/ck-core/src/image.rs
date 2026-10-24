@@ -92,7 +92,7 @@ pub(crate) fn pad_reflect101(img: &Planar, pad: Pad) -> Planar {
     for c in 0..img.c {
         let src = img.plane(c);
         let dst = out.plane_mut(c);
-        // loop: HOT-PATH-OK — rows of one plane in parallel (this pass: were one thread); a gather over the column table
+        // loop: HOT-PATH-OK — rows of one plane in parallel; a gather over the column table
         dst.par_chunks_mut(wo).with_min_len(ROWS_MIN).enumerate().for_each(|(y, drow)| {
             let sy = reflect101(y as isize - pad.t as isize, img.h);
             let srow = &src[sy * img.w..(sy + 1) * img.w];
@@ -141,7 +141,7 @@ pub fn resize_area(img: &Planar, ho: usize, wo: usize) -> Planar {
     for c in 0..img.c {
         let src = img.plane(c);
         let dst = out.plane_mut(c);
-        // loop: HOT-PATH-OK — output rows in parallel (this pass: were one thread)
+        // loop: HOT-PATH-OK — output rows in parallel
         dst.par_chunks_mut(wo).with_min_len(ROWS_MIN).zip(ys.par_iter()).for_each(|(drow, &(y0, y1))| {
             // loop: HOT-PATH-OK — output columns of one row (wo ≤ 960)
             for (ox, &(x0, x1)) in xs.iter().enumerate() {
@@ -188,7 +188,7 @@ pub(crate) fn resize_bilinear_into(img: &Planar, ho: usize, wo: usize, dst_all: 
     for c in 0..img.c {
         let src = img.plane(c);
         let dst = &mut dst_all[c * ho * wo..(c + 1) * ho * wo];
-        // loop: HOT-PATH-OK — output rows in parallel (this pass: were one thread)
+        // loop: HOT-PATH-OK — output rows in parallel
         dst.par_chunks_mut(wo).with_min_len(ROWS_MIN).zip(ys.par_iter()).for_each(|(drow, &(y0, y1, wy0, wy1))| {
             let r0 = &src[y0 * img.w..(y0 + 1) * img.w];
             let r1 = &src[y1 * img.w..(y1 + 1) * img.w];

@@ -247,7 +247,7 @@ pub(crate) fn ffprobe(path: &Path) -> Result<VideoProbe, Error> {
         .args(["-of", "json"])
         .arg(path);
     // a local file answers in well under a second; a stalled mount or device doesn't hold the job
-    // loop: SERIAL-REQUIRED — one ffprobe per clip, PROBE_TIMEOUT 120 s (added in this pass; it had no deadline)
+    // loop: SERIAL-REQUIRED — one ffprobe per clip, PROBE_TIMEOUT 120 s
     let out = crate::proc::output_timeout(&mut cmd, PROBE_TIMEOUT).map_err(|e| {
         if e.starts_with("no answer") {
             Error::input(format!("ffprobe on {}: {e}", path.display()))

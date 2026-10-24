@@ -459,7 +459,7 @@ fn concat_parts<T: Send>(parts: &[&[half::bf16]], f: impl Fn(half::bf16) -> T + 
     let mut out = Vec::with_capacity(parts.iter().map(|p| p.len()).sum());
     // loop: HOT-PATH-OK — the window's frames (≤ 80); each frame converted in parallel chunks
     for p in parts {
-        // loop: HOT-PATH-OK — each frame converted bf16 -> f16 / f32 straight into the input tensor, parallel (this pass: one pass, was two plus a float32 copy)
+        // loop: HOT-PATH-OK — each frame converted bf16 -> f16 / f32 straight into the input tensor, parallel
         out.par_extend(p.par_iter().with_min_len(PAR_MIN).map(|&x| f(x)));
     }
     out
@@ -532,7 +532,7 @@ impl Net {
                 res.push((s.iter().map(|&x| x as usize).collect(), Data::F32(d.to_vec())));
             } else {
                 let (s, d) = v.try_extract_tensor::<half::f16>().map_err(|e| Error::ort(piece, e))?;
-                // loop: HOT-PATH-OK — the output's shape (≤ 5 dims) + one copy out of ORT's buffer, kept as float16 (this pass: was converted to float32 here, on the card's thread)
+                // loop: HOT-PATH-OK — the output's shape (≤ 5 dims) + one copy out of ORT's buffer, kept as float16
                 res.push((s.iter().map(|&x| x as usize).collect(), Data::F16(d.to_vec())));
             }
         }

@@ -43,7 +43,7 @@ impl WindowReader {
             self.cache.insert(self.next, f);
             self.next += 1;
         }
-        // loop: HOT-PATH-OK — a window's frames (≤ 80): Arc clones, no pixel copies (this pass: each frame was deep-copied, ~850 MB per 48-frame window)
+        // loop: HOT-PATH-OK — a window's frames (≤ 80): Arc clones, no pixel copies
         let out = (t0..t1).map(|t| self.cache[&t].clone()).collect();
         self.cache = self.cache.split_off(&t0);
         Ok(out)
@@ -68,7 +68,7 @@ impl HintWindows {
             self.cache.insert(self.next, Arc::new(h));
             self.next += 1;
         }
-        // loop: HOT-PATH-OK — a window's hint frames (≤ 80): Arc clones (this pass: were deep copies)
+        // loop: HOT-PATH-OK — a window's hint frames (≤ 80): Arc clones
         let out = (t0..t1).map(|t| self.cache[&t].clone()).collect();
         self.cache = self.cache.split_off(&t0);
         Ok(out)

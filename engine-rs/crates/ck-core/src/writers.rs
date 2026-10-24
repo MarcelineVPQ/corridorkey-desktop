@@ -268,7 +268,7 @@ impl Writer for VideoWriter {
             }
         }
         let rc = match self.child.take() {
-            // loop: SERIAL-REQUIRED — ffmpeg finishing the file, within FINISH_TIMEOUT 300 s (this pass: it had no deadline)
+            // loop: SERIAL-REQUIRED — ffmpeg finishing the file, within FINISH_TIMEOUT 300 s
             Some(mut c) => match crate::proc::wait_timeout(&mut c, end.saturating_duration_since(std::time::Instant::now())) {
                 Ok(Some(s)) if !timed_out => s.code().unwrap_or(-1),
                 Ok(_) => {

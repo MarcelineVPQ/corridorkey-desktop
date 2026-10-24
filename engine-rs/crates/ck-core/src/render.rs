@@ -67,7 +67,7 @@ type Row<'a, T> = [Option<&'a mut [T]>; 4];
 /// Split each selected output into its rows and run `f(y, rows)` for every row in parallel.
 fn rows_parallel<T: Send>(bufs: &mut [Vec<T>; 4], ch: [usize; 4], h: usize, w: usize, f: impl Fn(usize, Row<'_, T>) + Sync + Send) {
     use rayon::prelude::*;
-    // loop: HOT-PATH-OK — one small array per output row (h ≤ 2160), per frame; the pixels go straight into the outputs (this pass: per-row vectors and a join copy)
+    // loop: HOT-PATH-OK — one small array per output row (h ≤ 2160), per frame; the pixels go straight into the outputs
     let mut rows: Vec<Row<'_, T>> = (0..h).map(|_| [None, None, None, None]).collect();
     // loop: HOT-PATH-OK — four outputs; each split into its h row slices (pointer work, no copies)
     for (i, b) in bufs.iter_mut().enumerate() {

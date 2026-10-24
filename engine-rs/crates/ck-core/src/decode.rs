@@ -76,7 +76,7 @@ pub fn rgb8_to_planar(rgb: &[u8], h: usize, w: usize) -> Planar {
     let (r, gb) = p.data.split_at_mut(h * w);
     let (g, b) = gb.split_at_mut(h * w);
     // one pass per frame over its pixels, the rows in parallel
-    // loop: HOT-PATH-OK — one pass per decoded frame (~1.4 M pixels), rows in parallel (this pass: was one thread)
+    // loop: HOT-PATH-OK — one pass per decoded frame (~1.4 M pixels), rows in parallel
     r.par_chunks_mut(w).zip(g.par_chunks_mut(w)).zip(b.par_chunks_mut(w)).zip(rgb.par_chunks(w * 3)).with_min_len(crate::image::ROWS_MIN).for_each(
         |(((r, g), b), src)| {
             // loop: HOT-PATH-OK — one row of pixels

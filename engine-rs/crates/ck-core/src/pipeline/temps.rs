@@ -69,7 +69,7 @@ impl F16File {
     /// frames t0..t1
     pub(crate) fn get(&mut self, t0: usize, t1: usize) -> Result<Vec<half::f16>, Error> {
         let mut out = vec![half::f16::ZERO; (t1 - t0) * self.frame];
-        // loop: HOT-PATH-OK — one RVM window or baton frame from the local temp file, read straight into float16 (this pass: no byte buffer + conversion) [bounded: a local file read]
+        // loop: HOT-PATH-OK — one RVM window or baton frame from the local temp file, read straight into float16 [bounded: a local file read]
         self.f.seek(SeekFrom::Start((t0 * self.frame * 2) as u64)).and_then(|_| self.f.read_exact(bytemuck::cast_slice_mut(&mut out))).map_err(temp_err)?;
         Ok(out)
     }
@@ -109,7 +109,7 @@ impl FeatFile {
         self.f.seek(SeekFrom::Start((t0 * self.frame * size) as u64)).map_err(temp_err)?;
         Ok(if half {
             let mut out = vec![half::f16::ZERO; n];
-            // loop: HOT-PATH-OK — one window's foundation features from the local temp file, in their own type (this pass: float16, half the bytes) [bounded: a local file read]
+            // loop: HOT-PATH-OK — one window's foundation features from the local temp file, in their own type (float16 here) [bounded: a local file read]
             self.f.read_exact(bytemuck::cast_slice_mut(&mut out)).map_err(temp_err)?;
             Data::F16(out)
         } else {

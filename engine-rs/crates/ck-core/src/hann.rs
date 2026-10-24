@@ -50,7 +50,7 @@ impl BatonBlend {
         use rayon::prelude::*;
         match self.acc.get_mut(&t) {
             Some((sum, wsum)) => {
-                // loop: HOT-PATH-OK — one baton frame (2.9 M values at 1152x1280), parallel; reads stage 1's float16 directly (this pass: no float32 copy of the window's batons)
+                // loop: HOT-PATH-OK — one baton frame (2.9 M values at 1152x1280), parallel; reads stage 1's float16 directly
                 sum.par_iter_mut().zip(baton.par_iter()).with_min_len(1 << 14).for_each(|(s, b)| *s += b.to_f32() * w);
                 *wsum += w as f64;
             }
@@ -70,7 +70,7 @@ impl BatonBlend {
                 let (sum, wsum) = self.acc.remove(&k).unwrap();
                 let d = wsum.max(1e-6) as f32;
                 use rayon::prelude::*;
-                // loop: HOT-PATH-OK — frames a window finishes (≤ stride), each frame parallel; output float16 (this pass: was float32 then rounded again)
+                // loop: HOT-PATH-OK — frames a window finishes (≤ stride), each frame parallel; output float16
                 (k, sum.into_par_iter().with_min_len(1 << 14).map(|v| half::f16::from_f32(v / d)).collect())
             })
             .collect()
