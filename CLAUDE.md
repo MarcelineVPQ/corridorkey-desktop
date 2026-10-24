@@ -16,8 +16,10 @@ Built to **Marcy's 17 basic rules for programming applications** (memory
   Never run GPU work while Marcy's Sonata plays (`pgrep -fai 'mount_sonata|Sonata.AppImage'`).
 - **One theme (rule 2):** colors only from `src/styles/tokens.css`; gate `.hooks/check_theme_colors.mjs`.
 - **Loop pass (rule 7):** `// loop: VERDICT — reason` on every loop, iterator chain, timer, wait, thread and
-  main-process sync call (app, engine-rs, tools); a wait without a deadline says `[bounded: …]`. Gate
-  `tools/list_loops.mjs --check`; the pass: docs/LOOP_PASS_2026-10.md, docs/EFFICIENCY_PASS_2026-10.md.
+  main-process sync call (app, engine-rs, tools); a wait without a deadline says `[bounded: …]`. Rust exception
+  (senior review #16, 2026-10-24): a plain Rust loop or iterator chain over a small collection is exempt; waits,
+  threads, sleeps, `while`/`loop`, and loops flagged no-timeout, retry, spin, pixel, nested or alloc still need one.
+  Gate `tools/list_loops.mjs --check`; the pass: docs/LOOP_PASS_2026-10.md, docs/EFFICIENCY_PASS_2026-10.md.
 - **Isolated test copies (rule 12):** `tools/isolated.sh` (own HOME, private D-Bus, headless KWin,
   basic password store, 4 GB cap) + `tools/drive.mjs` (CDP steps + screenshots). Never the user's screen.
 - **Memory caps:** every test/build/run under `systemd-run --user --scope -p MemoryMax=…`. On Marcy's PC all of it
