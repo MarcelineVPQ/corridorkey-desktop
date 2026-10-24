@@ -16,7 +16,7 @@ import { ITEMS, RAIL, initialView, isOpen, railKey, railLayout, toggleFlags, vie
 import { usePref } from "../prefs";
 import { useGlass } from "../glass/useGlass";
 import { CLEAR_GLASS_RAIL, REGULAR_GLASS } from "../glass/variants";
-import { gb } from "../format";
+import { gib } from "../format";
 
 const ICONS = { queue: ListVideo, engine: Activity, settings: Settings, about: Info } as const;
 
@@ -144,14 +144,14 @@ export function AppRail(props: { state: AppState; page: PageId; pageDots: Partia
             </span>
           </div>
           {g && state.queueRunning && (
-            <div className="rail-status" title={`${g.name}: ${gb(g.usedMb)} of ${gb(g.totalMb)} used, ${g.utilization}% busy`}>
+            <div className="rail-status" title={`${g.name}: ${gib(g.usedMb)} of ${gib(g.totalMb)} used, ${g.utilization}% busy`}>
               <span className="rail-ic">
                 <Cpu size={17} aria-hidden />
               </span>
               <span className="rail-label rail-status-text">
                 <span>{g.name.replace(/^NVIDIA (GeForce )?/, "")}</span>
                 <span className="rail-status-sub">
-                  {gb(g.usedMb)} / {gb(g.totalMb)} · {g.utilization}%
+                  {gib(g.usedMb)} / {gib(g.totalMb)} · {g.utilization}%
                 </span>
               </span>
             </div>

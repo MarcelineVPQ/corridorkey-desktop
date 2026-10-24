@@ -7,6 +7,7 @@
 import { readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { StorageItem } from "../../src/shared/types";
+import { MODELS_DIR, RUNTIME_DIR } from "./platform";
 
 export const CACHE_MAX_AGE_DAYS = 30;
 export const CACHE_MAX_BYTES = 500e6;
@@ -37,10 +38,11 @@ export function folderBytes(dir: string): number {
   return total;
 }
 
-export function storageItems(data: string, cacheDir: string): StorageItem[] {
+/** `runtimeLabel`: what the runtime is on this system (install.ts systemSupport). */
+export function storageItems(data: string, cacheDir: string, runtimeLabel: string): StorageItem[] {
   return [
-    { id: "runtime", label: "GPU runtime (ONNX Runtime, CUDA, cuDNN)", path: join(data, "runtime"), bytes: folderBytes(join(data, "runtime")) },
-    { id: "models", label: "CorridorKey models", path: join(data, "models"), bytes: folderBytes(join(data, "models")) },
+    { id: "runtime", label: `GPU runtime (${runtimeLabel})`, path: join(data, RUNTIME_DIR), bytes: folderBytes(join(data, RUNTIME_DIR)) },
+    { id: "models", label: "CorridorKey models", path: join(data, MODELS_DIR), bytes: folderBytes(join(data, MODELS_DIR)) },
     { id: "cache", label: "Thumbnails and stills (rebuilt as needed)", path: join(cacheDir, "media"), bytes: folderBytes(join(cacheDir, "media")) },
   ];
 }

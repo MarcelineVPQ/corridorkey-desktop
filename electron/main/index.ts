@@ -2,14 +2,15 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, net, protocol, shell } from "electron";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { basename, delimiter, dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { EngineProcess } from "./engine";
 import { GPU_POLL_MS, readGpu } from "./gpu";
 import { expandPaths, probeClip, still, STILL_WIDTH, VIDEO_EXT } from "./media";
 import { clearJobTemps, Queue } from "./queue";
 import { checkCheckout, checkRustEngine, chooseEngine, loadSettings, saveSettings } from "./settings";
-import { dataDir, effectivePath, findEngineFiles, isInsideApp, modelSetVersion, windowTitle } from "./engineFind";
+import { effectivePath, findEngineFiles, isInsideApp, modelSetVersion, windowTitle } from "./engineFind";
+import { addToPathList, appDirs, engineBinName, isMac, isWin, ortLibrary, PLATFORM } from "./platform";
 import { HOMEBREW_DIRS, checkFfmpeg, ffmpegState, installFfmpeg, planFor, readOsRelease, wingetFfmpegDirs } from "./ffmpeg";
 import { PROGRESS_EVERY_MS } from "./updateFlow";
 import { MODELS_BYTES, RUNTIME_BYTES, freeBytes, installNeeds, runInstall, systemSupport } from "./install";
@@ -33,9 +34,9 @@ const MEDIA_SCHEME = "ck-media";
 // scRGB (linear, 1.0 = 80 nits), the DS5 app's measured path: KWin 6.6's color
 // manager has no "srgb" transfer function, which Chromium's default asks for;
 // scRGB (ext_linear + windows_scrgb) is the one that reaches the display.
-export const WAYLAND_REQUIRED = process.platform === "linux" && !process.env.WAYLAND_DISPLAY;
+export const WAYLAND_REQUIRED = PLATFORM === "linux" && !process.env.WAYLAND_DISPLAY;
 function applyLinuxWorkarounds(): void {
-  if (process.platform !== "linux") return;
+  if (PLATFORM !== "linux") return;
   app.commandLine.appendSwitch("ozone-platform", "wayland");
   app.commandLine.appendSwitch("force-color-profile", "scrgb-linear");
   // Follow the desktop's (fractional) display scale.
@@ -45,23 +46,20 @@ applyLinuxWorkarounds();
 protocol.registerSchemesAsPrivileged([{ scheme: MEDIA_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: false } }]);
 
 const settingsFile = join(app.getPath("userData"), "settings.json");
-const IS_WIN = process.platform === "win32";
-const IS_MAC = process.platform === "darwin";
-// Disk, not /tmp (it is RAM on many Linux desktops): XDG cache, else ~/.cache; on Windows %LOCALAPPDATA%; on macOS ~/Library/Caches.
-const cacheDir = IS_WIN
-  ? join(process.env.LOCALAPPDATA || join(app.getPath("home"), "AppData", "Local"), "corridorkey-desktop", "cache")
-  : IS_MAC
-    ? join(app.getPath("home"), "Library", "Caches", "corridorkey-desktop")
-    : join(process.env.XDG_CACHE_HOME || join(app.getPath("home"), ".cache"), "corridorkey-desktop");
+const IS_WIN = isWin();
+const IS_MAC = isMac();
+// the data folder (runtime, models) and the cache (thumbnails, stills): platform.ts appDirs
+const appFolders = appDirs(process.env, app.getPath("home"));
+const cacheDir = appFolders.cache;
 const mediaDir = join(cacheDir, "media");
 let settings = loadSettings(settingsFile, process.env);
 let checkout = checkCheckout(settings.corridorKeyRoot);
 /** Where the Engine page's lists look (engineFind.ts): the app's own engine, a dev build, the in-app install's folder. */
 function enginePlaces() {
   return {
-    bundledBinary: app.isPackaged ? join(process.resourcesPath, "engine", `corridorkey-engine${IS_WIN ? ".exe" : ""}`) : null,
-    devBinary: app.isPackaged ? null : resolve(app.getAppPath(), "engine-rs", "target", "release", `corridorkey-engine${IS_WIN ? ".exe" : ""}`),
-    data: dataDir(process.env, app.getPath("home")),
+    bundledBinary: app.isPackaged ? join(process.resourcesPath, "engine", engineBinName()) : null,
+    devBinary: app.isPackaged ? null : resolve(app.getAppPath(), "engine-rs", "target", "release", engineBinName()),
+    data: appFolders.data,
   };
 }
 let engineFiles = findEngineFiles(enginePlaces());
@@ -86,7 +84,7 @@ let ffmpeg: FfmpegState = { checked: false, ok: false, problem: null, command: "
 // the first-run install: what is missing, and its progress while it runs
 function installIdle(): InstallState {
   const need = installNeeds(enginePlaces().data);
-  const sys = systemSupport(process.platform, process.arch, existsSync, process.env);
+  const sys = systemSupport(PLATFORM, process.arch, existsSync, process.env);
   return {
     dir: enginePlaces().data,
     needRuntime: need.runtime,
@@ -110,21 +108,11 @@ let storage: StorageItem[] | null = null;
 let lastInstallProgress = 0;
 async function recheckFfmpeg(): Promise<void> {
   // Windows: winget's ffmpeg folders onto this process's PATH (a running program never sees PATH changes)
-  if (IS_WIN && process.env.LOCALAPPDATA) {
-    const have = (process.env.PATH ?? "").split(delimiter);
-    // loop: NOT-WORTH — a couple of folders per check
-    const add = wingetFfmpegDirs(process.env.LOCALAPPDATA).filter((d) => !have.includes(d));
-    if (add.length) process.env.PATH = [...add, ...have].join(delimiter);
-  }
+  if (IS_WIN && process.env.LOCALAPPDATA) process.env.PATH = addToPathList(process.env.PATH, wingetFfmpegDirs(process.env.LOCALAPPDATA), "front");
   // macOS: apps started from the Dock don't get the shell's PATH, so Homebrew's folders are added here
-  if (IS_MAC) {
-    const have = (process.env.PATH ?? "").split(delimiter);
-    // loop: NOT-WORTH — two folders per check
-    const add = HOMEBREW_DIRS.filter((d) => !have.includes(d));
-    if (add.length) process.env.PATH = [...have, ...add].join(delimiter);
-  }
+  if (IS_MAC) process.env.PATH = addToPathList(process.env.PATH, HOMEBREW_DIRS, "back");
   // an install still running stays running (a check while it runs must not bring the Install button back)
-  ffmpeg = { ...ffmpegState(await checkFfmpeg(), planFor(process.platform, readOsRelease())), installing: ffmpeg.installing, installError: ffmpeg.installError };
+  ffmpeg = { ...ffmpegState(await checkFfmpeg(), planFor(PLATFORM, readOsRelease())), installing: ffmpeg.installing, installError: ffmpeg.installError };
   scheduleSend();
 }
 /** Re-check both engines' files (after a setting changed, or before the queue starts). */
@@ -193,6 +181,7 @@ function state(): AppState {
     storage,
     desktopPalette,
     update: updater.state,
+    system: { engineBin: engineBinName(), ortLib: ortLibrary().display },
   };
 }
 
@@ -243,7 +232,8 @@ async function pollGpu(): Promise<void> {
 }
 
 function updateGpuPolling(): void {
-  const want = windowShown && queue.running;
+  // nvidia-smi comes with NVIDIA's driver: no readout on macOS (Core ML has no such tool)
+  const want = windowShown && queue.running && !IS_MAC;
   if (want && !gpuTimer) {
     void pollGpu();
     // lifetime: OK — cleared below as soon as the queue stops or the window hides
@@ -385,7 +375,7 @@ function registerIpc(): void {
     const opts = {
       binary: { title: "The CorridorKey engine program (corridorkey-engine)", properties: ["openFile"] as const },
       models: { title: "The folder with the CorridorKey ONNX models", properties: ["openDirectory"] as const },
-      ort: { title: `ONNX Runtime's library (${IS_WIN ? "onnxruntime.dll" : IS_MAC ? "libonnxruntime.dylib" : "libonnxruntime.so"}) for the graphics card`, properties: ["openFile"] as const },
+      ort: { title: `ONNX Runtime's library (${ortLibrary().display}) for the graphics card`, properties: ["openFile"] as const },
     }[what];
     const r = await dialog.showOpenDialog(mainWindow!, { title: opts.title, properties: [...opts.properties] });
     if (r.canceled) return;
@@ -439,12 +429,12 @@ function registerIpc(): void {
   });
   ipcMain.handle(IPC.stopInstall, () => installAbort?.abort());
   ipcMain.handle(IPC.measureStorage, () => {
-    storage = storageItems(enginePlaces().data, cacheDir);
+    storage = storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort);
     scheduleSend();
   });
   ipcMain.handle(IPC.removeStorage, async (_e, idIn: unknown) => {
     // loop: NOT-WORTH — three items, once per click
-    const item = storageItems(enginePlaces().data, cacheDir).find((i) => i.id === idIn);
+    const item = storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort).find((i) => i.id === idIn);
     if (!item || !mainWindow) return;
     if (queue.running || install.status === "running") {
       await dialog.showMessageBox(mainWindow, { type: "info", message: "Not while the queue or the download runs", detail: "Stop it first, then remove." });
@@ -461,7 +451,7 @@ function registerIpc(): void {
     });
     if (r.response !== 0) return;
     removeStorage(item);
-    storage = storageItems(enginePlaces().data, cacheDir);
+    storage = storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort);
     install = installIdle();
     recheckEngines();
     scheduleSend();
@@ -471,7 +461,7 @@ function registerIpc(): void {
     ffmpeg = { ...ffmpeg, installing: true, installError: null };
     scheduleSend();
     try {
-      await installFfmpeg(planFor(process.platform, readOsRelease()));
+      await installFfmpeg(planFor(PLATFORM, readOsRelease()));
       ffmpeg = { ...ffmpeg, installing: false };
     } catch (e) {
       // error: SHOWN — the Engine page's ffmpeg section shows it next to the command

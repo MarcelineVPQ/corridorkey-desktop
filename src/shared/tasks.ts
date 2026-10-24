@@ -10,7 +10,22 @@
 // and a rail press (opens the page at the first waiting section) all read it.
 // Tasks are derived from the app state, so they clear themselves when the
 // state is fixed. Nothing else draws a dot or badge (the .task look).
-import type { AppState, Job } from "./types";
+import type { AppState, FfmpegState, InstallState, Job } from "./types";
+
+/** The runtime or the models are missing from the data folder (what the install box offers to download). */
+export function installMissing(install: InstallState): boolean {
+  return install.needRuntime || install.needModels;
+}
+
+/** The first-run install is still to do: files missing and no engine ready (a PyTorch reference engine counts). */
+export function installNeeded(s: { install: InstallState; engineKind: string | null }): boolean {
+  return installMissing(s.install) && !s.engineKind;
+}
+
+/** Whether setup still has something to do (the setup page opens by itself at start while it does). */
+export function setupNeeded(s: { install: InstallState; ffmpeg: FfmpegState; engineKind: string | null }): boolean {
+  return installNeeded(s) || (s.ffmpeg.checked && !s.ffmpeg.ok);
+}
 
 // "setup" is the first start's page (pages/SetupPage.tsx): not on the rail, it opens by itself while setup has work
 export type PageId = "queue" | "engine" | "settings" | "about" | "setup";
@@ -37,8 +52,7 @@ export function tasksOf(state: AppState): Task[] {
   const tasks: Task[] = [];
   // the first-run install is what's missing (the engine's own setup task would only repeat it)
   // (while it runs there is nothing to do: no task at all)
-  const installNeeded = (state.install.needRuntime || state.install.needModels) && !state.engineKind;
-  if (installNeeded) {
+  if (installNeeded(state)) {
     if (state.install.status !== "running")
       tasks.push({
         id: "install",

@@ -13,6 +13,7 @@
 // unmounts after the last of them.
 // Call holdAppImageMountUntilExit() once from will-quit; Updater.restart()
 // also calls it before it quits into the new version.
+import { PLATFORM } from "./platform";
 import { readdirSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 
@@ -63,7 +64,7 @@ let held = false;
 /** Linux AppImage: keep the mount up until this process and all of its
  * processes have exited (above). Once per run (a second call does nothing). */
 export function holdAppImageMountUntilExit(): void {
-  if (held || process.platform !== "linux" || !process.env.APPIMAGE) return;
+  if (held || PLATFORM !== "linux" || !process.env.APPIMAGE) return;
   held = true;
   const pids = [process.pid, ...descendantPids(process.pid, procChildren)];
   // lifetime: OK — detached and unref'd: it outlives this process on purpose and ends by itself once these processes are gone (MAX_WAIT_MS at most)

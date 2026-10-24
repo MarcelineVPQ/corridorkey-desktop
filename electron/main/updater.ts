@@ -2,6 +2,7 @@
 // bound to Electron's network, files and quit. The main process owns one
 // Updater, shows its `state`, and gates restart() while the queue runs.
 // docs/RELEASING.md says how releases and the signed feeds are made.
+import { isMac, isWin, PLATFORM } from "./platform";
 import { app, net } from "electron";
 import { execFileSync, spawn } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync } from "node:fs";
@@ -9,16 +10,16 @@ import { join } from "node:path";
 import { holdAppImageMountUntilExit } from "./appImageQuit";
 import type { FetchFn } from "./download";
 import { fallbackShell, relaunchArgs, relaunchEnv, shellArgs, systemdRunArgs } from "./relaunch";
-import { feedSource } from "./updateFeed";
+import { feedSource, REPO } from "./updateFeed";
 import { UpdateFlow, type FileOps, type UpdatePlatform } from "./updateFlow";
 
 const FEED_TIMEOUT_MS = 15_000;
 
 // Why this copy can't replace itself, or null.
 function unsupportedReason(keys: readonly string[]): string | null {
-  if (process.platform === "win32") return "On Windows, new versions are on GitHub: github.com/MarcelineVPQ/corridorkey-desktop/releases (self-update is Linux only for now).";
-  if (process.platform === "darwin") return "On macOS, new versions are on GitHub: github.com/MarcelineVPQ/corridorkey-desktop/releases (self-update is Linux only for now).";
-  if (process.platform !== "linux") return "Updates are built for the Linux AppImage only.";
+  const system = isWin() ? "Windows" : isMac() ? "macOS" : null;
+  if (system) return `On ${system}, new versions are on GitHub: github.com/${REPO}/releases (self-update is Linux only for now).`;
+  if (PLATFORM !== "linux") return "Updates are built for the Linux AppImage only.";
   if (!app.isPackaged) return "Updates come with the AppImage build; this copy runs from source.";
   if (!process.env.APPIMAGE) return "Updates work only in the AppImage build; this copy isn't running as an AppImage.";
   if (!keys.length) return "No release channel is set up in this build.";

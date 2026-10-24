@@ -2,6 +2,7 @@
 // (pages/SetupPage.tsx) and the Engine page's panel, so the two never drift apart.
 import { Check, Download, X } from "lucide-react";
 import type { FfmpegState, InstallState } from "../../shared/types";
+import { installMissing } from "../../shared/tasks";
 import { Row } from "../panel/Section";
 import { gbBytes } from "../format";
 
@@ -9,7 +10,7 @@ export const installPct = (inst: InstallState) => (inst.total ? Math.floor((inst
 
 /** The GPU runtime and the models: what downloads, the button, real progress, Stop, the error. */
 export function InstallBox({ inst }: { inst: InstallState }) {
-  const needInstall = inst.needRuntime || inst.needModels;
+  const needInstall = installMissing(inst);
   const pct = installPct(inst);
   if (!needInstall)
     return (
@@ -88,9 +89,4 @@ export function FfmpegBox({ ff }: { ff: FfmpegState }) {
       )}
     </>
   );
-}
-
-/** Whether setup still has something to do (the setup page opens by itself at start while it does). */
-export function setupNeeded(s: { install: InstallState; ffmpeg: FfmpegState; engineKind: string | null }): boolean {
-  return ((s.install.needRuntime || s.install.needModels) && !s.engineKind) || (s.ffmpeg.checked && !s.ffmpeg.ok);
 }

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { dataDir, effectivePath, findEngineFiles, isInsideApp, windowTitle } from "../../electron/main/engineFind";
+import { effectivePath, findEngineFiles, isInsideApp, windowTitle } from "../../electron/main/engineFind";
+import { addToPathList, appDirs } from "../../electron/main/platform";
+
+const dataDir = (env: NodeJS.ProcessEnv, home: string, platform: NodeJS.Platform) => appDirs(env, home, platform).data;
 
 const tree = (files: Record<string, string>) => {
   const paths = Object.keys(files);
@@ -110,5 +113,19 @@ describe("finding the engine's files", () => {
   it("keeps the data folder in XDG_DATA_HOME, else ~/.local/share", () => {
     expect(dataDir({ XDG_DATA_HOME: "/x" }, "/home/m", "linux")).toBe("/x/corridorkey-desktop");
     expect(dataDir({}, "/home/m", "linux")).toBe("/home/m/.local/share/corridorkey-desktop");
+  });
+});
+
+describe("each system's folders and lists (platform.ts)", () => {
+  it("keeps the cache next to the data on every system, never in /tmp", () => {
+    expect(appDirs({ XDG_CACHE_HOME: "/c" }, "/home/m", "linux").cache).toBe("/c/corridorkey-desktop");
+    expect(appDirs({}, "/home/m", "linux").cache).toBe("/home/m/.cache/corridorkey-desktop");
+    expect(appDirs({ LOCALAPPDATA: "C:/L" }, "C:/Users/m", "win32").cache).toBe("C:/L/corridorkey-desktop/cache");
+    expect(appDirs({}, "/Users/m", "darwin").cache).toBe("/Users/m/Library/Caches/corridorkey-desktop");
+  });
+  it("adds folders to a PATH list once, in front or behind", () => {
+    expect(addToPathList("/usr/bin:/bin", ["/opt/homebrew/bin", "/usr/bin"], "back", ":")).toBe("/usr/bin:/bin:/opt/homebrew/bin");
+    expect(addToPathList("C:/W", ["C:/ff", "C:/ff"], "front", ";")).toBe("C:/ff;C:/W");
+    expect(addToPathList(undefined, ["/x"], "front", ":")).toBe("/x");
   });
 });

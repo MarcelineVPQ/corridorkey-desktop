@@ -9,6 +9,7 @@
 // rule 11, share the machine), killed for a cancel or on app quit. A running
 // job can't be interrupted inside the model, so cancel = kill the process group
 // (the engine and its ffmpeg writers) and delete the job's temp folder.
+import { addToPathList, isMac, isWin, PLATFORM } from "./platform";
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { createInterface } from "node:readline";
 import { existsSync, readdirSync } from "node:fs";
@@ -63,10 +64,10 @@ export function rustEngineEnv(
   ort: string | null,
   exists: (p: string) => boolean = existsSync,
   list: (p: string) => string[] = (p) => readdirSync(p),
-  platform: NodeJS.Platform = process.platform,
+  platform: NodeJS.Platform = PLATFORM,
 ): NodeJS.ProcessEnv {
-  const win = platform === "win32";
-  const mac = platform === "darwin";
+  const win = isWin(platform);
+  const mac = isMac(platform);
   const out: NodeJS.ProcessEnv = { ...env };
   // loop: NOT-WORTH — five names, once per engine spawn
   for (const k of ["LD_PRELOAD", "ELECTRON_RUN_AS_NODE", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES"]) delete out[k];
@@ -91,7 +92,7 @@ export function rustEngineEnv(
   if (env.CK_ENGINE_LD_LIBRARY_PATH) dirs.push(...env.CK_ENGINE_LD_LIBRARY_PATH.split(win ? ";" : ":").filter(Boolean));
   // Windows finds DLLs on PATH (the folders go first); Linux on LD_LIBRARY_PATH; macOS on DYLD_LIBRARY_PATH
   // loop: NOT-WORTH — a few folders joined, once per engine spawn
-  if (dirs.length && win) out.PATH = [...dirs, env.PATH ?? env.Path ?? ""].filter(Boolean).join(";");
+  if (dirs.length && win) out.PATH = addToPathList(env.PATH ?? env.Path, dirs, "front", ";");
   else if (dirs.length && mac) out.DYLD_LIBRARY_PATH = dirs.join(":");
   else if (dirs.length) out.LD_LIBRARY_PATH = dirs.join(":");
   return out;
@@ -125,7 +126,7 @@ export class EngineProcess {
     const { cmd, args, env } = launchCommand(this.launch);
     // detached: its own process group, so a cancel also ends the ffmpeg writers it started (Linux; on Windows
     // detached would open a console window, and taskkill /T ends the tree instead)
-    const win = process.platform === "win32";
+    const win = isWin();
     const child = this.spawnFn(cmd, args, { env, stdio: ["pipe", "pipe", "pipe"], detached: !win, windowsHide: true });
     this.child = child;
     // lifetime: OK — both readers end with the child's streams
@@ -191,7 +192,7 @@ export class EngineProcess {
   kill(): void {
     const pid = this.child?.pid;
     if (!pid || this.exited) return;
-    if (process.platform === "win32") {
+    if (isWin()) {
       // loop: NOT-WORTH — one taskkill per cancel [bounded: taskkill ends by itself]
       nodeSpawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true }).on("error", () => this.child?.kill());
       return;

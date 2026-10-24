@@ -24,15 +24,18 @@ export function parseGpuLine(line: string): Omit<GpuInfo, "processes" | "at"> | 
   return { name, totalMb: Number(total), usedMb: Number(used), utilization: Number(util) || 0 };
 }
 
-/** Parse `--query-compute-apps=pid,used_memory --format=csv,noheader,nounits`. */
-export function parseApps(text: string): { pid: number; usedMb: number }[] {
+/** Parse `--query-compute-apps=pid,process_name,used_memory --format=csv,noheader,nounits` (the name may hold commas). */
+export function parseApps(text: string): { pid: number; exe: string; usedMb: number }[] {
   return (
     text
       .split("\n")
       // loop: NOT-WORTH — a few compute processes, every GPU_POLL_MS while a job runs and the window is shown
-      .map((l) => l.split(",").map((s) => s.trim()))
-      .filter((p) => p.length >= 2 && Number.isFinite(Number(p[0])) && p[0] !== "")
-      .map(([pid, used]) => ({ pid: Number(pid), usedMb: Number(used) || 0 }))
+      // pid, the program's path as it is (commas and spaces kept), memory
+      .map((l) => /^\s*(\d+)\s*,\s*(.*?)\s*,\s*([\d.]+|\[N\/A\])\s*$/.exec(l))
+      // loop: NOT-WORTH — as above
+      .filter((m): m is RegExpExecArray => m !== null)
+      // loop: NOT-WORTH — as above
+      .map((m) => ({ pid: Number(m[1]), exe: m[2], usedMb: Number(m[3]) || 0 }))
   );
 }
 
@@ -43,7 +46,8 @@ export function processName(cmdline: string): string {
   if (/sonata-align|sonata_align|sonata-engine/.test(lower)) return "Sonata's word timing";
   if (/ck_engine\.py/.test(lower)) return "CorridorKey engine";
   const first = cmdline.split("\0")[0] || cmdline;
-  return first.split("/").pop() || "unknown";
+  // either separator: Linux paths, and Windows' as nvidia-smi gives them
+  return first.split(/[\\/]/).pop() || "unknown";
 }
 
 function cmdline(pid: number): string {
@@ -61,11 +65,12 @@ export async function readGpu(ourPids: Set<number>): Promise<GpuInfo> {
     // loop: HOT-PATH-OK — nvidia-smi every 2 s while a job runs and the window is shown; GPU_READ_TIMEOUT_MS 5 s and one read at a time (this pass)
     run("nvidia-smi", ["--query-gpu=name,memory.total,memory.used,utilization.gpu", "--format=csv,noheader,nounits"], { timeout: GPU_READ_TIMEOUT_MS }),
     // loop: HOT-PATH-OK — the same read's second query, same timeout
-    run("nvidia-smi", ["--query-compute-apps=pid,used_memory", "--format=csv,noheader,nounits"], { timeout: GPU_READ_TIMEOUT_MS }),
+    run("nvidia-smi", ["--query-compute-apps=pid,process_name,used_memory", "--format=csv,noheader,nounits"], { timeout: GPU_READ_TIMEOUT_MS }),
   ]);
   const head = parseGpuLine(gpu.stdout.split("\n")[0] ?? "");
   if (!head) throw new Error("nvidia-smi gave no GPU line");
   // loop: HOT-PATH-OK — a few compute processes, every GPU_POLL_MS only while a job runs and the window is shown
-  const processes: GpuProcess[] = parseApps(apps.stdout).map(({ pid, usedMb }) => ({ pid, usedMb, name: processName(cmdline(pid)), ours: ourPids.has(pid) }));
+  // the full command line where /proc has it (Linux: Sonata runs as python, its script names it), else nvidia-smi's program name
+  const processes: GpuProcess[] = parseApps(apps.stdout).map(({ pid, exe, usedMb }) => ({ pid, usedMb, name: processName(cmdline(pid) || exe), ours: ourPids.has(pid) }));
   return { ...head, processes, at: Date.now() };
 }

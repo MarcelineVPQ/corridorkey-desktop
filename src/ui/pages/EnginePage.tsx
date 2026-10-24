@@ -6,10 +6,11 @@
 // checkout the PyTorch engine (the benchmark reference) runs from.
 import { Check, Cpu, Download, Film, FolderOpen, FolderCog, ListChecks, X } from "lucide-react";
 import type { AppState } from "../../shared/types";
+import { installMissing } from "../../shared/tasks";
 import { Accordion, Row, Section } from "../panel/Section";
 import { MainBlock, SplitView } from "../panel/SplitView";
 import { Stat } from "../JobView";
-import { gb } from "../format";
+import { gib } from "../format";
 import { FfmpegBox, InstallBox, installPct } from "../setup/SetupParts";
 
 export function EnginePage(props: {
@@ -30,7 +31,7 @@ export function EnginePage(props: {
   const rust = state.rustEngine;
   const ff = state.ffmpeg;
   const inst = state.install;
-  const needInstall = inst.needRuntime || inst.needModels;
+  const needInstall = installMissing(inst);
   const pct = installPct(inst);
   const checks = (c: { ok: boolean; problems: string[] }, okText: string) =>
     c.ok ? (
@@ -119,7 +120,7 @@ export function EnginePage(props: {
               <Stat k="State" v={{ stopped: "Idle · no graphics memory held", starting: "Starting", ready: "Running the queue", failed: "Failed" }[state.engine.status]} />
               <Stat k="Engine" v={`${p.engine} ${p.version} · protocol ${p.protocol}`} />
               {p.torch ? <Stat k="Python / PyTorch" v={`${p.python ?? "?"} · ${p.torch}`} /> : <Stat k="Runtime" v={`ONNX Runtime ${p.ort ?? "?"} · ${p.provider ?? "?"} · ${p.precision ?? "?"}`} />}
-              <Stat k="Graphics card" v={p.gpu ? `${p.gpu}${p.vramTotalMb ? ` · ${gb(p.vramTotalMb)}` : ""}` : "none found"} />
+              <Stat k="Graphics card" v={p.gpu ? `${p.gpu}${p.vramTotalMb ? ` · ${gib(p.vramTotalMb)}` : ""}` : "none found"} />
             </div>
           ) : (
             <p className="hint-text">Not started yet this session. It starts with the queue and quits when the queue is done, so it holds no graphics memory while idle.</p>
@@ -144,14 +145,14 @@ export function EnginePage(props: {
             <>
               <div className="stats">
                 <Stat k="Card" v={state.gpu.name} />
-                <Stat k="Memory used" v={`${gb(state.gpu.usedMb)} / ${gb(state.gpu.totalMb)}`} />
+                <Stat k="Memory used" v={`${gib(state.gpu.usedMb)} / ${gib(state.gpu.totalMb)}`} />
                 <Stat k="Busy" v={`${state.gpu.utilization}%`} />
               </div>
               <ul className="gpu-procs">
                 {/* loop: HOT-PATH-OK — a few compute processes per render (GPU readout every 2 s while a job runs) */}
                 {state.gpu.processes.map((g) => (
                   <li key={g.pid}>
-                    {g.ours ? "CorridorKey engine" : g.name} — {gb(g.usedMb)}
+                    {g.ours ? "CorridorKey engine" : g.name} — {gib(g.usedMb)}
                   </li>
                 ))}
               </ul>
@@ -159,7 +160,7 @@ export function EnginePage(props: {
           ) : (
             <p className="hint-text">Read while a job runs and this window is shown (nothing is read while idle).</p>
           )}
-          {state.gpuError && <p className="hint-text">nvidia-smi: {state.gpuError}</p>}
+          {state.gpuError && <p className="hint-text">Graphics card readout: {state.gpuError}</p>}
         </MainBlock>
       </div>
     </div>
@@ -188,9 +189,9 @@ export function EnginePage(props: {
       <Section id="onnx" icon={Cpu} title="ONNX Runtime engine" status={rust.ok ? (kind === "rust" ? "in use" : "set up") : "not set up"} task={props.sectionTasks["engine/onnx"] ?? null}>
         {() => (
           <>
-            {pick("binary", "Engine program", st.engineBinary, "corridorkey-engine")}
+            {pick("binary", "Engine program", st.engineBinary, state.system.engineBin)}
             {pick("models", "Models folder", st.modelsDir, "The five CorridorKey ONNX networks (C-RADIO, MoGe, RVM, stage 1, stage 2)")}
-            {pick("ort", "ONNX Runtime library", st.ortLibrary, "libonnxruntime.so with the CUDA provider, for the graphics card build")}
+            {pick("ort", "ONNX Runtime library", st.ortLibrary, `${state.system.ortLib}, the graphics card build`)}
           </>
         )}
       </Section>

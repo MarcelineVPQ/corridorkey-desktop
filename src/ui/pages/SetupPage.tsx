@@ -4,6 +4,7 @@
 import { Check, FolderOpen, FolderPlus, ListVideo } from "lucide-react";
 import type { ReactNode } from "react";
 import type { AppState } from "../../shared/types";
+import { installNeeded } from "../../shared/tasks";
 import { MainBlock } from "../panel/SplitView";
 import { FfmpegBox, InstallBox } from "../setup/SetupParts";
 
@@ -22,7 +23,7 @@ function Step(props: { n: number; title: string; done: boolean; children: ReactN
 
 export function SetupPage(props: { state: AppState; openQueue: () => void; openGuide: () => void }) {
   const { state } = props;
-  const installed = !(state.install.needRuntime || state.install.needModels) || state.engineKind === "rust";
+  const installed = !installNeeded(state);
   const ffmpegOk = state.ffmpeg.ok;
   const hasClips = state.jobs.length > 0;
   const allDone = installed && ffmpegOk && hasClips;
@@ -33,7 +34,7 @@ export function SetupPage(props: { state: AppState; openQueue: () => void; openG
       </div>
       <div className="page-content">
         <p className="hint-text" style={{ margin: "0 0 14px" }}>
-          Three steps, once. CorridorKey keys green and blue screen footage on your own NVIDIA graphics card: it needs its runtime and models, ffmpeg to read and write video, and your clips.
+          Three steps, once. CorridorKey keys green and blue screen footage on your own graphics card: it needs its runtime and models, ffmpeg to read and write video, and your clips.
         </p>
         <Step n={1} title="Download the GPU runtime and the CorridorKey models" done={installed}>
           {!installed && <InstallBox inst={state.install} />}

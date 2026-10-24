@@ -7,7 +7,7 @@ import { missingInput } from "../../shared/tasks";
 import { JobSettings } from "../JobSettings";
 import { JobView } from "../JobView";
 import { SplitView } from "../panel/SplitView";
-import { clipFacts, gb, statusText } from "../format";
+import { clipFacts, gib, statusText } from "../format";
 
 export function QueuePage(props: {
   state: AppState;
@@ -190,9 +190,13 @@ function Detail({ job }: { job: Job }) {
   );
 }
 
+/** Another program holding this much graphics memory is named before a run (desktops and browsers hold less;
+ * the engine bench refuses to start above 1 GiB, tools/engine_bench.mjs). */
+const OTHER_GPU_USER_MB = 512;
+
 function OtherGpuUsers({ state }: { state: AppState }) {
   // loop: HOT-PATH-OK — a few compute processes per render
-  const others = state.gpu!.processes.filter((p) => !p.ours && p.usedMb >= 512);
+  const others = state.gpu!.processes.filter((p) => !p.ours && p.usedMb >= OTHER_GPU_USER_MB);
   if (others.length === 0) return null;
   return (
     <section className="notice" style={{ margin: "0 16px 12px" }}>
@@ -202,7 +206,7 @@ function OtherGpuUsers({ state }: { state: AppState }) {
         {/* loop: HOT-PATH-OK — a few compute processes per render */}
         {others.map((p) => (
           <li key={p.pid}>
-            {p.name} — {gb(p.usedMb)}
+            {p.name} — {gib(p.usedMb)}
           </li>
         ))}
       </ul>

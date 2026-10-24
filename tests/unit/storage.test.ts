@@ -22,7 +22,7 @@ describe("storage", () => {
     writeFileSync(join(dir, "data", "models", "b.json"), Buffer.alloc(24));
     expect(folderBytes(join(dir, "data", "models"))).toBe(1024);
     expect(folderBytes(join(dir, "nope"))).toBe(0);
-    const items = storageItems(join(dir, "data"), dir);
+    const items = storageItems(join(dir, "data"), dir, "ONNX Runtime, CUDA, cuDNN");
     expect(items.map((i) => [i.id, i.bytes])).toEqual([
       ["runtime", 0],
       ["models", 1024],

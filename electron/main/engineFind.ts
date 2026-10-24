@@ -7,6 +7,7 @@
 // <data> is $XDG_DATA_HOME/corridorkey-desktop (~/.local/share/corridorkey-desktop): the in-app install
 // (BACKLOG row 2) puts its downloads there. Newest first. A setting of null means "Automatic": the first
 // one found.
+import { MODELS_DIR, ortLibrary, PLATFORM, RUNTIME_DIR } from "./platform";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { EngineFileChoice, EngineFiles } from "../../src/shared/types";
@@ -24,13 +25,6 @@ const realDeps: FindDeps = {
   // loop: NOT-WORTH — reads one small manifest.json per model set, once per Engine check
   read: (p) => readFileSync(p, "utf8"),
 };
-
-/** The app's data folder: $XDG_DATA_HOME (else ~/.local/share) on Linux, %LOCALAPPDATA% on Windows, Application Support on macOS. */
-export function dataDir(env: NodeJS.ProcessEnv, home: string, platform: NodeJS.Platform = process.platform): string {
-  if (platform === "win32") return join(env.LOCALAPPDATA || join(home, "AppData", "Local"), "corridorkey-desktop");
-  if (platform === "darwin") return join(home, "Library", "Application Support", "corridorkey-desktop");
-  return join(env.XDG_DATA_HOME || join(home, ".local", "share"), "corridorkey-desktop");
-}
 
 function dirs(p: string, d: FindDeps): string[] {
   try {
@@ -57,13 +51,13 @@ function newerFirst(a: number[], b: number[]): number {
   return 0;
 }
 
-export function findEngineFiles(places: { bundledBinary: string | null; devBinary: string | null; data: string }, d: FindDeps = realDeps, platform: NodeJS.Platform = process.platform): EngineFiles {
+export function findEngineFiles(places: { bundledBinary: string | null; devBinary: string | null; data: string }, d: FindDeps = realDeps, platform: NodeJS.Platform = PLATFORM): EngineFiles {
   const binary: EngineFileChoice[] = [];
   if (places.bundledBinary && d.exists(places.bundledBinary)) binary.push({ path: places.bundledBinary, label: "Included with the app" });
   if (places.devBinary && d.exists(places.devBinary)) binary.push({ path: places.devBinary, label: "Development build (engine-rs)" });
 
   const models: (EngineFileChoice & { created: string })[] = [];
-  const modelsRoot = join(places.data, "models");
+  const modelsRoot = join(places.data, MODELS_DIR);
   // loop: NOT-WORTH — one folder per installed model set (one or two)
   for (const name of dirs(modelsRoot, d)) {
     const dir = join(modelsRoot, name);
@@ -86,34 +80,23 @@ export function findEngineFiles(places: { bundledBinary: string | null; devBinar
   models.sort((a, b) => b.created.localeCompare(a.created) || b.label.localeCompare(a.label));
 
   const ort: (EngineFileChoice & { key: number[] })[] = [];
-  const runtimeRoot = join(places.data, "runtime");
+  const runtimeRoot = join(places.data, RUNTIME_DIR);
   // loop: NOT-WORTH — one folder per installed runtime (one or two)
   for (const name of dirs(runtimeRoot, d)) {
     const capi = join(runtimeRoot, name, "onnxruntime", "capi");
-    let lib: string | undefined;
-    let version: string | undefined;
-    let gpu: boolean;
-    if (platform === "win32") {
-      // Windows: onnxruntime.dll, its version from the wheel's kept dist-info folder (onnxruntime_gpu-1.31.0.dist-info)
-      if (!d.exists(join(capi, "onnxruntime.dll"))) continue;
-      lib = "onnxruntime.dll";
-      // loop: NOT-WORTH — a few folders in one runtime
-      version = dirs(join(runtimeRoot, name), d)
+    const o = ortLibrary(platform);
+    // loop: NOT-WORTH — a dozen files in ONNX Runtime's capi folder
+    const lib = dirs(capi, d).find((f) => o.match.test(f));
+    // Windows' library name has no version: it comes from the wheel's kept dist-info folder (onnxruntime_gpu-1.31.0.dist-info)
+    const fromDistInfo = () =>
+      dirs(join(runtimeRoot, name), d)
+        // loop: NOT-WORTH — a few folders in one runtime
         .map((f) => /^onnxruntime(?:_gpu)?-([\d.]+)\.dist-info$/.exec(f)?.[1])
+        // loop: NOT-WORTH — as above
         .find(Boolean);
-      gpu = d.exists(join(capi, "onnxruntime_providers_cuda.dll"));
-    } else if (platform === "darwin") {
-      // macOS: libonnxruntime.1.31.0.dylib; Core ML (Apple's GPU and Neural Engine) is built into it
-      // loop: NOT-WORTH — a few files in ONNX Runtime's capi folder
-      lib = dirs(capi, d).find((f) => /^libonnxruntime\.\d[\d.]*\.dylib$/.test(f));
-      version = lib?.slice("libonnxruntime.".length, -".dylib".length);
-      gpu = true;
-    } else {
-      // loop: NOT-WORTH — a dozen files in ONNX Runtime's capi folder
-      lib = dirs(capi, d).find((f) => /^libonnxruntime\.so\.\d/.test(f));
-      version = lib?.slice("libonnxruntime.so.".length);
-      gpu = d.exists(join(capi, "libonnxruntime_providers_cuda.so"));
-    }
+    const version = lib && (o.version(lib) ?? fromDistInfo());
+    // macOS: Core ML (Apple's GPU and Neural Engine) is built into the library
+    const gpu = o.cudaProvider === null || d.exists(join(capi, o.cudaProvider));
     if (!lib || !version) continue;
     ort.push({ path: join(capi, lib), label: `ONNX Runtime ${version}${gpu ? " (graphics card)" : " (CPU only)"}`, key: versionKey(version) });
   }

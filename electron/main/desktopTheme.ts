@@ -3,6 +3,7 @@
 //   KDE Plasma: the full color scheme from ~/.config/kdeglobals (else its accent).
 //   Other Linux desktops: the accent from the XDG settings portal, if any.
 //   Last: Electron's system accent (Windows, macOS, some Linux desktops).
+import { PLATFORM } from "./platform";
 import { execFile } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, watch, type FSWatcher } from "node:fs";
 import { homedir } from "node:os";
@@ -42,7 +43,7 @@ function plasmaRunning(): boolean {
 // cache: OK — key=none (the desktop session); invalidated=never, the session can't change under a running app; bound=1 entry
 let kde: boolean | null = null;
 function isKde(): boolean {
-  if (process.platform !== "linux") return false;
+  if (PLATFORM !== "linux") return false;
   // loop: NOT-WORTH — one stat, once per app start (cached in `kde`)
   kde ??= isKdeSession(process.env, existsSync(kdeGlobals), plasmaRunning);
   // loop: NOT-WORTH — one stat per palette read (Desktop theme only, on a theme change)
@@ -113,7 +114,7 @@ export async function readDesktopPalette(): Promise<DesktopPalette | null> {
     const accent = kdeAccent(text);
     if (accent) return { source: "accent", isDark, accent };
   }
-  const accent = (process.platform === "linux" ? await portalAccent() : null) ?? systemAccent();
+  const accent = (PLATFORM === "linux" ? await portalAccent() : null) ?? systemAccent();
   return accent ? { source: "accent", isDark, accent } : null;
 }
 

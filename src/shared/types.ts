@@ -276,6 +276,8 @@ export interface AppState {
   // the desktop's colors (Desktop theme / desktop accent); null = couldn't be read or not asked
   desktopPalette: DesktopPalette | null;
   update: UpdateState;
+  // this system's file names, for the Engine page's hints (electron/main/platform.ts)
+  system: { engineBin: string; ortLib: string };
 }
 
 export interface CorridorKeyApi {

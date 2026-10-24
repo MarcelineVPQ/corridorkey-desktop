@@ -2,7 +2,7 @@
 // edge (the house layout of the DS5 app and Sonata). Drop clips anywhere.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppState } from "../shared/types";
-import { dots, jobToSelect, tasksOf, type PageId } from "../shared/tasks";
+import { dots, jobToSelect, tasksOf, type PageId, setupNeeded } from "../shared/tasks";
 import { AppRail } from "./rail/AppRail";
 import { railPress } from "./rail/railModel";
 import { NARROW } from "./panel/SplitView";
@@ -13,7 +13,6 @@ import { EnginePage } from "./pages/EnginePage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { AboutPage } from "./pages/AboutPage";
 import { SetupPage } from "./pages/SetupPage";
-import { setupNeeded } from "./setup/SetupParts";
 
 export function App() {
   const [state, setState] = useState<AppState | null>(null);

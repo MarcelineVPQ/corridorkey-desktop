@@ -6,6 +6,8 @@
 // After a Stop or a failure, pressing the button again resumes: finished files are checked offline and kept,
 // a partial one continues where it stopped. A set only appears in the lists once all of it is in place
 // (built in a `.partial-…` folder, then renamed; engineFind skips dot folders).
+import { DOWNLOADS_DIR, LIBRARY_FILE, MODELS_DIR, PLATFORM, RUNTIME_DIR } from "./platform";
+import { REPO } from "./updateFeed";
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statfsSync } from "node:fs";
 import { join } from "node:path";
 import { downloadVerified, type FetchFn } from "./download";
@@ -175,6 +177,8 @@ export interface SystemSupport {
   problem: string | null;
   // the runtime download, as the setup page describes it
   runtime: string;
+  // what it is, in a few words (App settings, Storage)
+  runtimeShort: string;
 }
 
 const NVIDIA_RUNTIME = "ONNX Runtime (Microsoft, MIT licence) and NVIDIA's CUDA and cuDNN libraries (NVIDIA licence), from pypi.org";
@@ -190,11 +194,12 @@ export function systemSupport(platform: NodeJS.Platform, arch: string, exists: (
       ok,
       problem: ok ? null : "This Mac has an Intel processor. CorridorKey Desktop runs on Macs with Apple Silicon (M1 or newer).",
       runtime: "ONNX Runtime (Microsoft, MIT licence) with Apple's Core ML, from pypi.org",
+      runtimeShort: "ONNX Runtime with Core ML",
     };
   }
   // loop: NOT-WORTH — one stat of the NVIDIA driver's file per check
   const ok = platform === "win32" ? exists(join(env.SystemRoot || "C:\\Windows", "System32", "nvml.dll")) : exists("/proc/driver/nvidia/version");
-  return { ok, problem: ok ? null : "No NVIDIA graphics driver is loaded. CorridorKey Desktop runs on NVIDIA graphics cards.", runtime: NVIDIA_RUNTIME };
+  return { ok, problem: ok ? null : "No NVIDIA graphics driver is loaded. CorridorKey Desktop runs on NVIDIA graphics cards.", runtime: NVIDIA_RUNTIME, runtimeShort: "ONNX Runtime, CUDA, cuDNN" };
 }
 
 /** What to keep from a wheel: ONNX Runtime's libraries, NVIDIA's libraries, and every licence file. */
@@ -213,10 +218,12 @@ export function keepFromWheel(name: string): boolean {
   return /\.dist-info\/(licenses\/.+|LICENSE[^/]*)$/i.test(name);
 }
 
-const RELEASE = "https://github.com/MarcelineVPQ/corridorkey-desktop/releases/download/models-2.0.0-onnx.3";
+// the model set, and this repository's release that holds it (models-<set>)
+const MODEL_SET = "2.0.0-onnx.3";
+const RELEASE = `https://github.com/${REPO}/releases/download/models-${MODEL_SET}`;
 const model = (file: string, size: number, sha256: string): Download => ({ file, url: `${RELEASE}/${file}`, size, sha256 });
 export const MODELS = {
-  name: "2.0.0-onnx.3",
+  name: MODEL_SET,
   files: [
     model("ck2-cradio-fp16.onnx", 789360, "25e8656dffc2c639f1557b092ea5d2738d7c4002b495195f93ba41a3610b0334"),
     model("ck2-cradio-fp16.onnx.data", 1724414688, "8f76c92ddf779b70745fc985820e7e312f7eb07ec82b4e20119062798f952b9f"),
@@ -235,7 +242,7 @@ export const MODELS = {
 
 // loop: NOT-WORTH — sums a dozen sizes, once per plan
 const total = (d: Download[]) => d.reduce((n, x) => n + x.size, 0);
-export const RUNTIME_BYTES = total(runtimeFor(process.platform).wheels);
+export const RUNTIME_BYTES = total(runtimeFor(PLATFORM).wheels);
 export const MODELS_BYTES = total(MODELS.files);
 
 /** What gets installed: the pinned runtime and model set (tests pass a small one). */
@@ -243,12 +250,12 @@ export interface Catalog {
   runtime: { name: string; wheels: Download[] };
   models: { name: string; files: Download[] };
 }
-const CATALOG: Catalog = { runtime: runtimeFor(process.platform), models: MODELS };
+const CATALOG: Catalog = { runtime: runtimeFor(PLATFORM), models: MODELS };
 
 /** What is still to install: each set is there once its folder is (the rename is the last step). */
 export function installNeeds(data: string, exists: (p: string) => boolean = existsSync, c: Catalog = CATALOG): { runtime: boolean; models: boolean; bytes: number } {
-  const runtime = !exists(join(data, "runtime", c.runtime.name));
-  const models = !exists(join(data, "models", c.models.name));
+  const runtime = !exists(join(data, RUNTIME_DIR, c.runtime.name));
+  const models = !exists(join(data, MODELS_DIR, c.models.name));
   return { runtime, models, bytes: (runtime ? total(c.runtime.wheels) : 0) + (models ? total(c.models.files) : 0) };
 }
 
@@ -286,7 +293,7 @@ export async function runInstall(data: string, deps: InstallDeps, c: Catalog = C
   const room = deps.freeBytes(data);
   const needRoom = (need.runtime ? total(RUNTIME.wheels) * 2.5 : 0) + (need.models ? total(MODELS.files) : 0);
   if (room !== null && room < needRoom) throw new Error(`not enough free disk space: it needs ${(needRoom / 1e9).toFixed(1)} GB in ${data}, ${(room / 1e9).toFixed(1)} GB is free`);
-  const downloads = join(data, "downloads");
+  const downloads = join(data, DOWNLOADS_DIR);
   // loop: NOT-WORTH — one mkdir per install
   mkdirSync(downloads, { recursive: true });
   let done = 0;
@@ -300,7 +307,7 @@ export async function runInstall(data: string, deps: InstallDeps, c: Catalog = C
   };
 
   if (need.runtime) {
-    const partial = join(data, "runtime", `.partial-${RUNTIME.name}`);
+    const partial = join(data, RUNTIME_DIR, `.partial-${RUNTIME.name}`);
     // loop: NOT-WORTH — clears a half-unpacked runtime once per install
     rmSync(partial, { recursive: true, force: true });
     // loop: SERIAL-REQUIRED — one wheel at a time (download, then unpack), see fetchOne
@@ -312,24 +319,24 @@ export async function runInstall(data: string, deps: InstallDeps, c: Catalog = C
       const unpacked = await unzip(join(downloads, w.file), partial, keepFromWheel, deps.abort);
       // licence files alone don't count: a wheel must give at least one library
       // loop: NOT-WORTH — the few names one wheel unpacked
-      if (!unpacked.some((n) => /\.(so[.\d]*|dll|dylib)$/.test(n))) throw new Error(`${w.file} had none of the expected libraries`);
+      if (!unpacked.some((n) => LIBRARY_FILE.test(n))) throw new Error(`${w.file} had none of the expected libraries`);
     }
     // loop: NOT-WORTH — one rename: the runtime appears whole
-    renameSync(partial, join(data, "runtime", RUNTIME.name));
+    renameSync(partial, join(data, RUNTIME_DIR, RUNTIME.name));
   }
   // the wheels once the runtime is in place (also after a crash between the rename and this cleanup)
   // loop: NOT-WORTH — eight local unlinks, once per install
-  if (existsSync(join(data, "runtime", RUNTIME.name))) for (const w of RUNTIME.wheels) rmSync(join(downloads, w.file), { force: true });
+  if (existsSync(join(data, RUNTIME_DIR, RUNTIME.name))) for (const w of RUNTIME.wheels) rmSync(join(downloads, w.file), { force: true });
 
   if (need.models) {
-    const partial = join(data, "models", `.partial-${MODELS.name}`);
+    const partial = join(data, MODELS_DIR, `.partial-${MODELS.name}`);
     // loop: NOT-WORTH — one mkdir per install
     mkdirSync(partial, { recursive: true });
     // loop: SERIAL-REQUIRED — one file at a time, see fetchOne
     // (a file already there from a stopped install is checked offline and kept: downloadVerified's resume)
     for (const f of MODELS.files) await fetchOne(f, `Downloading the CorridorKey models (${f.file})`, join(partial, f.file));
     // loop: NOT-WORTH — one rename: the model set appears whole
-    renameSync(partial, join(data, "models", MODELS.name));
+    renameSync(partial, join(data, MODELS_DIR, MODELS.name));
   }
   // loop: NOT-WORTH — one readdir of the (now empty) downloads folder
   if (readdirSync(downloads).length === 0) rmSync(downloads, { recursive: true, force: true });

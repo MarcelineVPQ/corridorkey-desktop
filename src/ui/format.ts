@@ -58,6 +58,7 @@ export function gbBytes(bytes: number): string {
   return `${(bytes / 1e9).toFixed(1)} GB`;
 }
 
-export function gb(mb: number): string {
-  return `${(mb / 1024).toFixed(1)} GB`;
+/** Graphics memory in GiB (2^30 bytes), from the driver's MiB: the unit cards are sold in ("16 GB" = 16 GiB). */
+export function gib(mb: number): string {
+  return `${(mb / 1024).toFixed(1)} GiB`;
 }

@@ -58,8 +58,8 @@ export function JobView({ job }: { job: Job }) {
             <Stat k="Temporal window" v={`${m.hannChunk} / ${m.hannStride}`} />
             <Stat k="Low-memory mode" v={m.lowVram ? "on" : "off"} />
             <Stat k="Chosen" v={m.auto ? "automatically" : "manually"} />
-            {m.budgetGb !== null && <Stat k="Free when it started" v={`${m.budgetGb.toFixed(1)} GB`} />}
-            {m.estimateGb !== null && <Stat k="Runtime's peak estimate" v={`${m.estimateGb.toFixed(1)} GB`} />}
+            {m.budgetGb !== null && <Stat k="Free when it started" v={`${m.budgetGb.toFixed(1)} GiB`} />}
+            {m.estimateGb !== null && <Stat k="Runtime's peak estimate" v={`${m.estimateGb.toFixed(1)} GiB`} />}
           </div>
         </MainBlock>
       )}
@@ -124,7 +124,7 @@ function errorTitle(code: string | undefined): string {
     case "assets":
       return "Model files are missing";
     case "no-gpu":
-      return "No NVIDIA graphics card found";
+      return "No supported graphics card found";
     default:
       return "The job failed";
   }

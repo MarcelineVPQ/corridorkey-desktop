@@ -173,11 +173,7 @@ function updateStatus(u: UpdateState): string {
 
 function Updates({ u, queueRunning }: { u: UpdateState; queueRunning: boolean }) {
   if (u.status === "unsupported") {
-    return (
-      <p className="hint-text">
-        {u.feed ? "This copy runs from source; updates install into the AppImage." : "There's no release channel for CorridorKey Desktop yet. Updates turn on with the first published release."}
-      </p>
-    );
+    return <p className="hint-text">{u.error ?? "Updates aren't available in this copy."}</p>;
   }
   return (
     <>
