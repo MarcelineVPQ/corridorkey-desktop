@@ -94,7 +94,9 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
               ? "The CorridorKey engine on ONNX Runtime."
               : kind === "python"
                 ? "The PyTorch engine from your CorridorKey2.0 folder. Set up the ONNX Runtime engine to use it instead."
-                : "None set up yet: no engine program or models found. Choose them in the panel."}
+                : inst.needRuntime || inst.needModels
+                  ? "Not installed yet: press Download and install under Runtime and models in the panel."
+                  : "None set up yet: no engine program or models found. Choose them in the panel."}
           </p>
         </MainBlock>
         <MainBlock title="Engine">

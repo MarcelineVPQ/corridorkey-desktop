@@ -70,7 +70,7 @@ export function listZip(file: string): ZipEntry[] {
 }
 
 /** Unpack the entries `keep` picks into `dest` (paths as in the zip). Returns how many were unpacked. */
-export async function unzip(file: string, dest: string, keep: (name: string) => boolean): Promise<number> {
+export async function unzip(file: string, dest: string, keep: (name: string) => boolean, abort?: AbortSignal): Promise<number> {
   // loop: NOT-WORTH — filters a few hundred directory entries once per wheel
   const entries = listZip(file).filter((e) => !e.name.endsWith("/") && keep(e.name));
   // loop: NOT-WORTH — opens the zip once per unpack
@@ -78,6 +78,8 @@ export async function unzip(file: string, dest: string, keep: (name: string) => 
   try {
     // loop: SERIAL-REQUIRED — one file at a time, streamed (they are hundreds of MB; disk-bound)
     for (const e of entries) {
+      // a Stop takes effect between files and inside one (the CUDA libraries take seconds each)
+      abort?.throwIfAborted();
       const target = normalize(join(dest, e.name));
       if (!target.startsWith(normalize(dest) + sep)) throw new Error(`refused a path outside the folder: ${e.name}`);
       if (e.method !== 0 && e.method !== 8) throw new Error(`${e.name}: compression method ${e.method} isn't supported`);
@@ -89,7 +91,7 @@ export async function unzip(file: string, dest: string, keep: (name: string) => 
       const source = createReadStream(file, { start, end: start + e.compressedSize - 1 });
       const sink = createWriteStream(target, { mode: e.mode || 0o644 });
       // loop: SERIAL-REQUIRED — the stream of one file [bounded: the entry's size]
-      await (e.method === 8 ? pipeline(source, createInflateRaw(), sink) : pipeline(source, sink));
+      await (e.method === 8 ? pipeline(source, createInflateRaw(), sink, { signal: abort }) : pipeline(source, sink, { signal: abort }));
     }
   } finally {
     // loop: NOT-WORTH — closes the zip once per unpack

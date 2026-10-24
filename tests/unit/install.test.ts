@@ -70,6 +70,15 @@ describe("first-run install", () => {
     await expect(unzip(zip, join(dir, "out2"), () => true)).rejects.toThrow("outside the folder");
   });
 
+  it("stops unpacking when Stop is pressed", async () => {
+    const zip = join(dir, "s.whl");
+    writeFileSync(zip, makeZip({ "nvidia/cu13/lib/liba.so.13": "A", "nvidia/cu13/lib/libb.so.13": "B" }));
+    const stop = new AbortController();
+    stop.abort();
+    await expect(unzip(zip, join(dir, "out3"), keepFromWheel, stop.signal)).rejects.toThrow();
+    expect(existsSync(join(dir, "out3/nvidia/cu13/lib/libb.so.13"))).toBe(false);
+  });
+
   it("knows what is missing from the data folder", () => {
     const has = (p: string[]) => (x: string) => p.includes(x);
     expect(installNeeds("/d", has([])).bytes).toBe(RUNTIME.wheels.reduce((n, w) => n + w.size, 0) + MODELS.files.reduce((n, f) => n + f.size, 0));
@@ -115,6 +124,15 @@ describe("resumable SHA-256 download", () => {
   it("lets a download run past the connect deadline (it covers only the server's answer)", async () => {
     const path = join(dir, "slow");
     await downloadVerified(fetch, { url: url.replace(/\/f$/, "/slow"), size: body.length, sha256, source: "the list" }, path, () => undefined, undefined, undefined, { connectMs: 100 });
+    expect(readFileSync(path).equals(body)).toBe(true);
+  });
+
+  it("keeps a complete earlier download without going online", async () => {
+    const path = join(dir, "done");
+    writeFileSync(path, body);
+    const before = ranges.length;
+    await downloadVerified(fetch, { url, size: body.length, sha256, source: "the list" }, path, () => undefined, undefined, undefined, { resume: true });
+    expect(ranges.length).toBe(before);
     expect(readFileSync(path).equals(body)).toBe(true);
   });
 

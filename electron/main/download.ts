@@ -57,8 +57,16 @@ export async function downloadVerified(
   let have = 0;
   if (opts.resume) {
     have = await hashExisting(path, hash);
+    if (have === want.size) {
+      // already complete (a stop after it arrived): keep it if it checks out, without going online
+      if (hash.digest("hex") === expectHex) {
+        progress(have, want.size);
+        return;
+      }
+      hash = createHash(algorithm);
+    }
     if (have >= want.size) {
-      // a complete (or oversized) leftover: check it from scratch
+      // a complete leftover that doesn't check out, or an oversized one: start over
       // loop: NOT-WORTH — removes one stale partial download (a local unlink)
       rmSync(path, { force: true });
       hash = createHash(algorithm);

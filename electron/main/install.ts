@@ -156,7 +156,7 @@ export async function runInstall(data: string, deps: InstallDeps): Promise<void>
       await fetchOne(w, `Downloading ${label}`);
       deps.progress(done, need.bytes, `Unpacking ${label}`);
       // loop: SERIAL-REQUIRED — unpacks one wheel [bounded: its size]
-      if ((await unzip(join(downloads, w.file), partial, keepFromWheel)) === 0) throw new Error(`${w.file} had none of the expected libraries`);
+      if ((await unzip(join(downloads, w.file), partial, keepFromWheel, deps.abort)) === 0) throw new Error(`${w.file} had none of the expected libraries`);
     }
     // loop: NOT-WORTH — one rename: the runtime appears whole
     renameSync(partial, join(data, "runtime", RUNTIME.name));
