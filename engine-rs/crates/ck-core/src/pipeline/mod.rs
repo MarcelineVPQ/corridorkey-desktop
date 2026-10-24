@@ -8,13 +8,14 @@
 //!
 //! Low-VRAM mode stages it: foundations first (to temp_dir), then stage 1 (states to temp_dir), then
 //! stage 2, with only that phase's networks loaded.
+mod frames;
 pub mod network;
 
 use crate::ahead::Ahead;
 use crate::clip::{probe_frame_dir, probe_video, raw_clip_name, ClipMeta, Source};
 use crate::color::{bf16_round, LinearAdjust};
 use crate::config::ArenaShrink;
-use crate::decode::{load_initial_hint, FrameReader, HintReader, Prefetch, Prepped};
+use crate::decode::{load_initial_hint, Prefetch, Prepped};
 use crate::hann::{taper_weights, window_starts, BatonBlend};
 use crate::image::{resize_area, resize_bilinear, Planar};
 use crate::job::{suffix, JobConfig};
@@ -25,6 +26,7 @@ use crate::tensorrt::{BATON_CH, CRADIO_CH, MOGE_CH, RVM_CH};
 use crate::vram::{estimate_peak_vram_gb, select_vram_profile};
 use crate::writers::{ExrType, ExrWriter, VideoWriter, Writer};
 use crate::Error;
+use frames::{FrameSource, HintWindows, WindowReader};
 use network::{Loader, Network, OrtLoader};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
@@ -232,54 +234,6 @@ fn bf16_to_f32(v: &[half::bf16], out: &mut Vec<f32>) {
     out.resize(start + v.len(), 0.0);
     // loop: HOT-PATH-OK — one frame's display view to float32 (RVM / foundation inputs), parallel
     out[start..].par_iter_mut().with_min_len(1 << 14).zip(v.par_iter()).for_each(|(o, x)| *o = x.to_f32());
-}
-
-/// Sequential window access to the decoded frames (SequentialVideoWindowReader / ...FrameDirWindowReader).
-struct WindowReader {
-    reader: Prefetch,
-    cache: BTreeMap<usize, Prepped>,
-    next: usize,
-}
-
-impl WindowReader {
-    fn open(meta: &ClipMeta) -> Result<WindowReader, Error> {
-        Ok(WindowReader { reader: Prefetch::new("frame-decode", FrameReader::open(meta)?, 8)?, cache: BTreeMap::new(), next: 0 })
-    }
-    /// Frames t0..t1 (decoding up to t1); frames before t0 are dropped.
-    fn window(&mut self, t0: usize, t1: usize) -> Result<Vec<Prepped>, Error> {
-        // loop: SERIAL-REQUIRED — frames decode in order
-        while self.next < t1 {
-            let f = self.reader.next_frame()?.ok_or_else(|| Error::input(format!("decoded only {} frames", self.next)))?;
-            self.cache.insert(self.next, f);
-            self.next += 1;
-        }
-        // loop: HOT-PATH-OK — a window's frames (≤ 80): Arc clones, no pixel copies (this pass: each frame was deep-copied, ~850 MB per 48-frame window)
-        let out = (t0..t1).map(|t| self.cache[&t].clone()).collect();
-        self.cache = self.cache.split_off(&t0);
-        Ok(out)
-    }
-}
-
-/// Full hint, read in window order with its own cache.
-struct HintWindows {
-    reader: HintReader,
-    cache: BTreeMap<usize, Arc<Vec<f32>>>,
-    next: usize,
-}
-
-impl HintWindows {
-    fn window(&mut self, t0: usize, t1: usize) -> Result<Vec<Arc<Vec<f32>>>, Error> {
-        // loop: SERIAL-REQUIRED — hint frames decode in order
-        while self.next < t1 {
-            let h = self.reader.next_frame()?;
-            self.cache.insert(self.next, Arc::new(h));
-            self.next += 1;
-        }
-        // loop: HOT-PATH-OK — a window's hint frames (≤ 80): Arc clones (this pass: were deep copies)
-        let out = (t0..t1).map(|t| self.cache[&t].clone()).collect();
-        self.cache = self.cache.split_off(&t0);
-        Ok(out)
-    }
 }
 
 fn f1(v: f64) -> String {
@@ -740,7 +694,7 @@ impl Pipeline<OrtLoader> {
         // docs/ENGINE_RUST.md).
         // loop: SERIAL-REQUIRED — one attempt at a time [bounded: the window halves each round, and only while nothing was written: ≤ log2(80) ≈ 7 rounds]
         loop {
-            res = self.keying(job, &meta, &key, trt_ref, load_stage, chunk, stride, low_vram, &clip, &mut writers, &mut report, sink);
+            res = self.keying(job, &meta, &meta, &key, trt_ref, load_stage, chunk, stride, low_vram, &clip, &mut writers, &mut report, sink);
             // loop: NOT-WORTH — ≤ four writers, once per attempt
             let nothing_written = writers.iter().all(|(_, w)| w.frames() == 0);
             match &res {
@@ -972,6 +926,7 @@ impl<L: Loader> Pipeline<L> {
         &mut self,
         job: &JobConfig,
         meta: &ClipMeta,
+        frames: &dyn FrameSource,
         key: &ModelKey,
         trt: Option<&dyn Fn(&str) -> TrtSettings>,
         load_stage: &str,
@@ -1046,7 +1001,7 @@ impl<L: Loader> Pipeline<L> {
             let ntok = 1 + (he / 16) * (we / 16);
             let mut state: Data<'static> = Data::F32(vec![0f32; ntok * RVM_CH]);
             // the small frames are made ahead on their own thread (they don't depend on the state)
-            let mut reader = Prefetch::new("rvm-decode", FrameReader::open(meta)?.display_only(), 8)?;
+            let mut reader = Prefetch::new("rvm-decode", frames.open(true)?, 8)?;
             let dec = crate::ahead::Seconds::default();
             let dec2 = dec.clone();
             let mut small_frames = Ahead::spawn("rvm-inputs", 4, move || {
@@ -1095,7 +1050,7 @@ impl<L: Loader> Pipeline<L> {
             let mut cf = FeatFile::create(&cradio_path, CRADIO_CH * h64 * w64)?;
             let mut mf = FeatFile::create(&moge_path, MOGE_CH * h64 * w64)?;
             // the resized inputs are made ahead on their own thread
-            let mut reader = Prefetch::new("found-decode", FrameReader::open(meta)?.display_only(), 8)?;
+            let mut reader = Prefetch::new("found-decode", frames.open(true)?, 8)?;
             let dec = crate::ahead::Seconds::default();
             let dec2 = dec.clone();
             let mut done_frames = 0;
@@ -1154,9 +1109,9 @@ impl<L: Loader> Pipeline<L> {
         // and RVM features, or the foundations' resized inputs) are made on their own thread while the card runs
         // the window before (at most one window ahead: a rendezvous channel)
         let mut windows = {
-            let mut reader = WindowReader::open(meta)?;
+            let mut reader = WindowReader::open(frames)?;
             let mut hints = match crate::clip::none_path(job.hint_video.as_deref()) {
-                Some(p) => Some(HintWindows { reader: HintReader::open(Path::new(p), meta)?, cache: BTreeMap::new(), next: 0 }),
+                Some(p) => Some(HintWindows::open(Path::new(p), meta)?),
                 None => None,
             };
             let mut found_files = found_files.take();
@@ -1339,7 +1294,7 @@ impl<L: Loader> Pipeline<L> {
             self.unload();
             self.ensure(key, &["stage2"], trt, sink, load_stage)?;
             // frames and stored states read and made into stage-2 inputs on their own thread, ahead of the card
-            let mut reader = Prefetch::new("s2-decode", FrameReader::open(meta)?, 8)?;
+            let mut reader = Prefetch::new("s2-decode", frames.open(false)?, 8)?;
             // the frame converted here, on the producer thread, to the type stage 2 takes
             let rgb_f16 = self.net("stage2")?.wants_f16("rgb");
             let (itx, irx) = std::sync::mpsc::sync_channel::<Result<(Data<'static>, Data<'static>), Error>>(2);

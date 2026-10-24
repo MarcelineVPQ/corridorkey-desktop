@@ -371,6 +371,23 @@ pub(crate) fn prep_frame_views(display_or_linear: Planar, exr_linear: bool, meta
     Prepped { model: std::sync::Arc::new(model), display: std::sync::Arc::new(display) }
 }
 
+/// A clip's frames in order, ready for the networks (a `FrameReader`, or a test's frames made in memory).
+pub(crate) trait FrameStream: Send + 'static {
+    /// The next frame (None after the last).
+    fn next_frame(&mut self) -> Result<Option<Prepped>, Error>;
+    /// Seconds spent so far decoding and preprocessing.
+    fn seconds(&self) -> f64;
+}
+
+impl FrameStream for FrameReader {
+    fn next_frame(&mut self) -> Result<Option<Prepped>, Error> {
+        FrameReader::next_frame(self)
+    }
+    fn seconds(&self) -> f64 {
+        self.seconds
+    }
+}
+
 /// Sequential frames of a clip (video or folder), decoded and preprocessed in order.
 pub(crate) struct FrameReader {
     /// measured: seconds decoding + preprocessing
@@ -453,8 +470,8 @@ impl FrameReader {
     }
 }
 
-/// A FrameReader on its own thread, a few frames ahead (the runtime prefetches its prepass chunks the same way):
-/// decoding overlaps the networks.
+/// A frame stream (a FrameReader) on its own thread, a few frames ahead (the runtime prefetches its prepass chunks
+/// the same way): decoding overlaps the networks.
 pub(crate) struct Prefetch {
     frames: crate::ahead::Ahead<Prepped>,
     /// the reader's own decode + preprocessing seconds
@@ -463,13 +480,13 @@ pub(crate) struct Prefetch {
 
 impl Prefetch {
     /// `reader` on a thread named `name`, `depth` frames ahead (a panic in the decoder is the next frame's error).
-    pub(crate) fn new(name: &str, mut reader: FrameReader, depth: usize) -> Result<Prefetch, Error> {
+    pub(crate) fn new(name: &str, mut reader: Box<dyn FrameStream>, depth: usize) -> Result<Prefetch, Error> {
         let seconds = crate::ahead::Seconds::default();
         let s2 = seconds.clone();
         // loop: SERIAL-REQUIRED — the prefetch thread: decodes in order; ends at the clip's end, an error, or a dropped receiver
         let frames = crate::ahead::Ahead::spawn(name, depth, move || {
             let item = reader.next_frame();
-            s2.set(reader.seconds);
+            s2.set(reader.seconds());
             item
         })?;
         Ok(Prefetch { frames, seconds })
