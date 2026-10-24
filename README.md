@@ -124,6 +124,7 @@ Each engine build on the way is labelled as a dev step:
 | **0.0.2-dev** | 2026-10-21 | the speed work: the slow parts of the graphs rewritten exactly, memory pools kept warm (models `onnx.2`) |
 | **0.0.3-dev** | 2026-10-24 | as shipped in 1.0 (models `onnx.3`) |
 | **0.0.4-dev** | 2026-10-24 | 4K EXR frames decoded four at once, freed memory returned after every job (results below) |
+| **0.0.5-dev** | 2026-10-24 | TensorRT re-measured on today's engine (opt-in, not in the app yet; results below) |
 
 The same HD bench, run on different days as the engine improved (totals, seconds; Original = PyTorch):
 
@@ -162,6 +163,36 @@ the EXR header instead of decoding a frame. The same 4K shot (04_5h, 120 frames)
 Both 4K outputs (alpha and foreground) are bit-identical to 0.0.3-dev's (same MD5 of every decoded frame). The keying
 itself is unchanged: from here only faster kernels (TensorRT, next) make 4K faster. HD video clips don't use
 this path (ffmpeg decodes them) and are unchanged: walking_sitting 54.5 → 55.2 s, within run-to-run spread.
+
+### 0.0.5-dev: TensorRT on today's engine
+
+The TensorRT path, re-measured on the 0.0.4-dev engine and today's models (`onnx.3`, TensorRT 10.16.1), against
+CUDA on the same day, back to back. TensorRT engines already built (each resolution's one-time build took 3.4–3.7
+minutes the first time):
+
+| Clip (HD) | CUDA: window · total | TensorRT: window · total | Change | TensorRT graphics memory / RAM |
+| --- | --- | --- | --- | --- |
+| godiva_close | 80/40 low · 37.3 s | 24/12 · **30.9 s** | −17 % | 7.33 / 3.52 GB |
+| locked_backdrop | 48/24 low · 19.1 s | 16/8 · **15.9 s** | −17 % | 7.36 / 4.46 GB |
+| metal_glasses | 48/24 low · 25.8 s | 16/8 · **20.2 s** | −22 % | 7.36 / 4.93 GB |
+| smoke | 48/24 low · 46.5 s | 16/8 · **33.3 s** | −28 % | 7.36 / 4.96 GB |
+| walking_sitting | 48/24 low · 58.4 s | 16/8 · **40.8 s** | −30 % | 7.36 / 4.85 GB |
+| with_motion_blur | 80/40 low · 11.8 s | 16/8 · **9.5 s** | −19 % | 7.36 / 3.88 GB |
+
+**Not shipped yet, because of the mattes.** TensorRT's memory limits give it shorter temporal windows (16 or 24
+frames, against CUDA's 48 or 80), and the window changes the matte more than precision does. TensorRT against CUDA
+(`tools/matte_compare.py`):
+
+| Clip | alpha MAE | % of pixels off by more than 1/255 | alpha PSNR |
+| --- | --- | --- | --- |
+| godiva_close | 2.06e-2 | 27.0 % | 25.2 dB |
+| locked_backdrop | 8.18e-4 | 5.7 % | 48.5 dB |
+| metal_glasses | 3.51e-3 | 9.5 % | 34.7 dB |
+| smoke | 7.55e-3 | 12.8 % | 28.6 dB |
+| walking_sitting | 2.93e-3 | 2.6 % | 28.9 dB |
+| with_motion_blur | 3.39e-4 | 2.9 % | 53.4 dB |
+
+The next step lets TensorRT run the same long windows as CUDA, so its mattes match before it reaches the app.
 
 ### TensorRT (measured, not in 1.0)
 
