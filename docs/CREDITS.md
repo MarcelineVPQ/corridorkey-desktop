@@ -14,4 +14,4 @@ CorridorKey builds on three foundation models: [C-RADIO](https://github.com/NVla
 
 ## This app
 
-Built by 42 Pixel Studios. Liquid Glass technique credits Shu Ding's liquid-glass and Max Rovensky's liquid-glass-react (MIT). Icons: Lucide (ISC).
+The app icon is CorridorKey's own, from [corridorkey.com](https://corridorkey.com), © Corridor Digital. Built by 42 Pixel Studios. Liquid Glass technique credits Shu Ding's liquid-glass and Max Rovensky's liquid-glass-react (MIT). Icons: Lucide (ISC).

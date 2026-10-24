@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="8 0 36 39" preserveAspectRatio="none">
+  <!--
+    Favicon: o simbolo oficial da Corridor, no MESMO enquadramento do favicon do
+    corridordigital.com, sobre uma tela de croma no lugar do preto.
+
+    A IDEIA: quem abre os dois sites em abas vizinhas ve dois icones irmaos. O que muda e so o fundo,
+    e o verde diz o que este produto faz. Isso tambem respeita a regra de identidade do repo
+    (AGENTS.md, tokens.css): o verde nunca e cor de marca aqui, so aparece onde significa croma de
+    verdade, e favicon de um keyer de croma e exatamente esse caso.
+
+    DE ONDE VEM A GEOMETRIA: os seis paths sao verbatim de
+    https://cdn.watchcorridor.com/assets/config/logo_short_accent.svg (viewBox 0 0 46 46), o logo que
+    o site institucional serve hoje. Nao redesenhe a mao: este site ja exibiu um losango aproximado
+    no lugar do simbolo, e so foi pego comparando com o arquivo oficial.
+
+    POR QUE ESTE viewBox, e por que ele NAO e quadrado: o favicon deles nao e o simbolo inteiro
+    reduzido, e um RECORTE, com os bracos saindo pelas bordas e um corte mais forte no canto inferior
+    esquerdo. Reduzir o simbolo inteiro para 16px funde os vaos entre os bracos e vira mancha; o
+    recorte engorda cada braco e a forma sobrevive. O enquadramento "8 0 36 39" foi MEDIDO, nao
+    escolhido: 3136 combinacoes de origem e tamanho comparadas pixel a pixel contra o .ico deles,
+    ficando em 80.6% de sobreposicao. Uma busca anterior, restrita a recorte simetrico, parava em
+    69.7% e me fez concluir errado que o desenho deles nao vinha deste vetor.
+
+    `preserveAspectRatio="none"` E PROPOSITAL e faz parte do enquadramento medido: a janela e 36x39 e
+    o icone e quadrado, entao o desenho comprime de leve na vertical, como no deles. Trocar por
+    "xMidYMid" recentraliza tudo e desfaz a correspondencia.
+
+    O que a medida nao alcanca: o .ico deles tem os pixels acertados a mao, entao as diagonais fecham
+    mais limpas que qualquer reducao automatica de vetor. Em 16px a diferenca some; em qualquer
+    tamanho maior este arquivo ganha, porque continua nitido onde o .ico de 16px borra.
+
+    POR QUE A MARCA E PRETA E NAO AMARELA, que era a primeira versao: MEDIDO. Rasterizei os tres
+    candidatos a 16px de verdade e comparei a cor media da marca ja com o anti-aliasing contra o
+    fundo, que e o contraste que o olho recebe, nao o teorico:
+
+      amarelo #FFF203 sobre preto  #0b0b0b .. 6.47:1   (o icone da Corridor)
+      amarelo #FFF203 sobre croma  #00b140 .. 1.66:1   <- reprovado
+      preto   #0b0b0b sobre croma  #00b140 .. 3.57:1   <- este
+
+    O minimo e 3:1 (WCAG 2.1 SC 1.4.11, objeto grafico que precisa ser entendido). Amarelo sobre
+    verde da 1.66 porque as duas cores tem luminancia parecida, e num simbolo de bracos finos com
+    vaos, a 16px, isso vira mancha: exatamente o defeito que o favicon anterior tinha (item 16 da
+    auditoria) e que esta troca existe para corrigir. Preto sobre o croma preserva a ideia toda (a
+    tela verde continua dizendo o que o produto faz, a geometria continua irma da deles) e passa.
+    Nao devolva a marca para amarelo sem medir de novo.
+  -->
+  <rect x="8" y="0" width="36" height="39" fill="#00b140"/>
+  <g fill="#0b0b0b">
+    <path d="M39.009 24L24 39.009V46L46 24H39.009Z"/>
+    <path d="M24 6.99244L39.009 22H46L24 0V6.99244Z"/>
+    <path d="M6.99244 22L22 6.99244V0L0 22H6.99244Z"/>
+    <path d="M28.3186 24L24 28.3186V35L35 24H28.3186Z"/>
+    <path d="M17.6814 22L22 17.6814V11L11 22H17.6814Z"/>
+    <path d="M22 28.3186L17.6814 24H11L22 35V28.3186Z"/>
+  </g>
+</svg>

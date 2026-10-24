@@ -29,6 +29,9 @@ linux:
     - target: AppImage
       arch: [x64]
   category: AudioVideo
+  # CorridorKey's own icon, from corridorkey.com/favicon.svg (Corridor Digital's; Marcy 2026-10-24: it's their app).
+  # build/icon.png = rsvg-convert -w 512 -h 512 build/icon.svg -o build/icon.png
+  icon: build/icon.png
   # The window's WM_CLASS matches the .desktop entry (DS5 does the same).
   syncDesktopName: true
   synopsis: Free desktop app for CorridorKey 2.0
