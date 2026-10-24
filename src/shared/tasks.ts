@@ -10,7 +10,7 @@
 // and a rail press (opens the page at the first waiting section) all read it.
 // Tasks are derived from the app state, so they clear themselves when the
 // state is fixed. Nothing else draws a dot or badge (the .task look).
-import type { AppState, FfmpegState, InstallState, Job } from "./types";
+import type { AppState, EngineKind, FfmpegState, InstallState, Job } from "./types";
 import { CANT_READ_CLIP, ENGINE_FAILED, INSTALL_STEP } from "./texts";
 
 /** The runtime or the models are missing from the data folder (what the install box offers to download). */
@@ -19,12 +19,12 @@ export function installMissing(install: InstallState): boolean {
 }
 
 /** The first-run install is still to do: files missing and no engine ready (a PyTorch reference engine counts). */
-export function installNeeded(s: { install: InstallState; engineKind: string | null }): boolean {
+export function installNeeded(s: { install: InstallState; engineKind: EngineKind | null }): boolean {
   return installMissing(s.install) && !s.engineKind;
 }
 
 /** Whether setup still has something to do (the setup page opens by itself at start while it does). */
-export function setupNeeded(s: { install: InstallState; ffmpeg: FfmpegState; engineKind: string | null }): boolean {
+export function setupNeeded(s: { install: InstallState; ffmpeg: FfmpegState; engineKind: EngineKind | null }): boolean {
   return installNeeded(s) || (s.ffmpeg.checked && !s.ffmpeg.ok);
 }
 

@@ -11,7 +11,7 @@ import { isAppImageMount } from "./relaunch";
 import { MODELS_DIR, ortLibrary, PLATFORM, RUNTIME_DIR } from "./platform";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { EngineFileChoice, EngineFiles } from "../../src/shared/types";
+import type { EngineFileChoice, EngineFiles, EngineKind } from "../../src/shared/types";
 
 export interface FindDeps {
   exists: (p: string) => boolean;
@@ -142,7 +142,7 @@ export function modelSetVersion(dir: string | null, d: FindDeps = realDeps): str
  * follows when Corridor updates the model) and the engine, so it is clear this isn't the PyTorch original (Marcy
  * 2026-10-24: "CorridorKey 2.0 — Rust + ONNX").
  */
-export function windowTitle(kind: "rust" | "python" | null, modelsVersion: string | null): string {
+export function windowTitle(kind: EngineKind | null, modelsVersion: string | null): string {
   if (kind === "python") return "CorridorKey — PyTorch (reference)";
   const v = modelsVersion ? /^(\d+\.\d+)/.exec(modelsVersion)?.[1] : undefined;
   return `CorridorKey${v ? ` ${v}` : ""} — Rust + ONNX`;

@@ -6,6 +6,7 @@
 // After a Stop or a failure, pressing the button again resumes: finished files are checked offline and kept,
 // a partial one continues where it stopped. A set only appears in the lists once all of it is in place
 // (built in a `.partial-…` folder, then renamed; engineFind skips dot folders).
+import type { EngineKind } from "../../src/shared/types";
 import { gbBytes } from "../../src/shared/units";
 import { lowerFirst, INSTALL_FIRST } from "../../src/shared/texts";
 import { DOWNLOADS_DIR, LIBRARY_FILE, MODELS_DIR, PLATFORM, RUNTIME_DIR } from "./platform";
@@ -511,7 +512,7 @@ export function trtReady(ort: string | null, models: string | null, exists: (p: 
 export const trtSupported = (platform: NodeJS.Platform) => platform === "linux";
 
 /** Whether a job asks the engine for TensorRT: Linux, the setting on, the Rust engine (never PyTorch), its parts installed. */
-export function useTensorrt(s: { platform: NodeJS.Platform; setting: boolean; engine: "rust" | "python" | null; ready: boolean }): boolean {
+export function useTensorrt(s: { platform: NodeJS.Platform; setting: boolean; engine: EngineKind | null; ready: boolean }): boolean {
   return trtSupported(s.platform) && s.setting && s.engine === "rust" && s.ready;
 }
 

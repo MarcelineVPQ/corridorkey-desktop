@@ -2,7 +2,7 @@
 // Every control maps to one engine option (docs/ENGINE_PROTOCOL.md) and
 // changes what the run does (rule 4). Locked once the clip has run.
 import { Clapperboard, Film, FolderOpen, MemoryStick, Wand2, X } from "lucide-react";
-import type { Job, JobOptions, OutputName } from "../shared/types";
+import type { HintFileKind, Job, JobOptions, OutputName } from "../shared/types";
 import { OUTPUT_NAMES } from "../shared/types";
 import { AS_USED, lowerFirst } from "../shared/texts";
 import { Accordion, Row, Section, Segmented } from "./panel/Section";
@@ -31,7 +31,7 @@ export function JobSettings({ job, focus, sectionTasks, onChange }: { job: Job; 
   const o = job.options;
   const set = (patch: Partial<JobOptions>) => onChange({ ...o, ...patch });
   const locked = job.status !== "waiting" ? lowerFirst(AS_USED) : null;
-  const pick = async (kind: "hint-image" | "hint-video") => {
+  const pick = async (kind: HintFileKind) => {
     const path = await window.ck.pickFile(kind);
     if (path) set(kind === "hint-image" ? { hintFirstFrame: path, hintMode: "first-frame" } : { hintVideo: path, hintMode: "video" });
   };

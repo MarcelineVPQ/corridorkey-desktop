@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import { run } from "./run";
-import type { ClipInfo } from "../../src/shared/types";
+import type { ClipInfo, ClipKind } from "../../src/shared/types";
 
 export const VIDEO_EXT = new Set([".mp4", ".mov", ".mkv", ".avi", ".mxf", ".webm", ".m4v"]);
 export const FRAME_EXT = new Set([".exr", ".png", ".jpg", ".jpeg"]);
@@ -66,8 +66,8 @@ export function hasFrames(dir: string): boolean {
 }
 
 /** Expand dropped paths into clips: videos, frame folders, and folders of clips (one level). */
-export function expandPaths(paths: string[]): { path: string; kind: "video" | "frames" }[] {
-  const out: { path: string; kind: "video" | "frames" }[] = [];
+export function expandPaths(paths: string[]): { path: string; kind: ClipKind }[] {
+  const out: { path: string; kind: ClipKind }[] = [];
   // loop: NOT-WORTH — a handful of dropped paths, once per drop
   for (const p of paths) {
     // loop: NOT-WORTH — one stat per dropped path, once per drop (blocking but local; the drop is a user action)
@@ -131,7 +131,7 @@ export function findFirstFrameHint(clip: string): string | null {
 }
 
 /** Full hint video: <clip>_AlphaHint.<video ext>; for a <shot>/Input folder, <shot>/AlphaHint. */
-export function findHintVideo(clip: string, kind: "video" | "frames"): string | null {
+export function findHintVideo(clip: string, kind: ClipKind): string | null {
   if (kind === "frames") {
     const shot = dirname(clip);
     if (basename(clip).toLowerCase() !== "input") return null;
@@ -202,7 +202,7 @@ export async function still(cacheDir: string, source: string, seconds: number, w
   return out;
 }
 
-export async function probeClip(path: string, kind: "video" | "frames", cacheDir: string, mediaUrl: (file: string) => string): Promise<ClipInfo> {
+export async function probeClip(path: string, kind: ClipKind, cacheDir: string, mediaUrl: (file: string) => string): Promise<ClipInfo> {
   const info: ClipInfo = {
     path,
     name: clipName(path),

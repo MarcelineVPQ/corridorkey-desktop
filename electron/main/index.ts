@@ -18,7 +18,19 @@ import { pruneCache, removeStorage, storageItems, TRT_ENGINES_DIR } from "./stor
 import { readDesktopPalette, watchDesktopPalette } from "./desktopTheme";
 import { Updater } from "./updater";
 import { holdAppImageMountUntilExit } from "./appImageQuit";
-import { LOG_SHOWN, type AppState, type FfmpegState, type GpuInfo, type InstallState, type StorageItem, type Job, type JobOptions, type OutputName, type TrtState } from "../../src/shared/types";
+import {
+  LOG_SHOWN,
+  type AppState,
+  type EngineKind,
+  type FfmpegState,
+  type GpuInfo,
+  type InstallState,
+  type StorageItem,
+  type Job,
+  type JobOptions,
+  type OutputName,
+  type TrtState,
+} from "../../src/shared/types";
 import { NOT_WHILE_BUSY } from "../../src/shared/texts";
 import type { DesktopPalette } from "../../src/ui/theme/palette";
 import { IPC } from "./ipc";
@@ -168,7 +180,7 @@ function engineScript(): string {
 }
 
 // which engine the queue started (TensorRT is asked of the Rust engine only)
-let runningKind: "rust" | "python" | null = null;
+let runningKind: EngineKind | null = null;
 const queue = new Queue({
   makeEngine: (onReply, onExit) => {
     // the Rust engine when it is set up; the PyTorch engine (CorridorKey checkout) until it replaces it

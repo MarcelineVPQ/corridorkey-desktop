@@ -5,7 +5,7 @@
 // (Automatic = the newest, Browse… for anything else), and the CorridorKey
 // checkout the PyTorch engine (the benchmark reference) runs from.
 import { Check, Cpu, Download, Film, FolderOpen, FolderCog, ListChecks, X, Zap } from "lucide-react";
-import type { AppState } from "../../shared/types";
+import type { AppState, EngineFileKind } from "../../shared/types";
 import { installMissing } from "../../shared/tasks";
 import { downloadingStatus, ENGINE_FAILED, NO_VRAM_HELD } from "../../shared/texts";
 import { Accordion, Row, Section } from "../panel/Section";
@@ -64,7 +64,7 @@ export function EnginePage(props: {
   // A list of what was found (newest first), Automatic on top, Browse… for anything else (Marcy 2026-10-23:
   // choose from a list, not only a file browser). The path in use shows under it.
   const BROWSE = "::browse";
-  const pick = (what: "binary" | "models" | "ort", label: string, setting: string | null, hint: string) => {
+  const pick = (what: EngineFileKind, label: string, setting: string | null, hint: string) => {
     const found = state.engineFiles[what];
     const inUse = state.enginePaths[what];
     // loop: NOT-WORTH — one or two found copies per render

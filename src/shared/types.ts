@@ -42,10 +42,13 @@ export const DEFAULT_OPTIONS: JobOptions = {
   frameDirLinear: false,
 };
 
+// a video file, or a folder of frames (a frame sequence)
+export type ClipKind = "video" | "frames";
+
 export interface ClipInfo {
   path: string;
   name: string;
-  kind: "video" | "frames";
+  kind: ClipKind;
   width: number | null;
   height: number | null;
   fps: number | null;
@@ -203,6 +206,11 @@ export interface EngineFiles {
   models: EngineFileChoice[];
   ort: EngineFileChoice[];
 }
+// one of the engine's files: its program, the models folder, ONNX Runtime's library (an Engine-page list each)
+export type EngineFileKind = keyof EngineFiles;
+
+// An install's state (the runtime and models, TensorRT's parts): waiting, downloading, or stopped by an error.
+export type InstallStatus = "idle" | "running" | "error";
 
 // The first-run install (electron/main/install.ts): the GPU runtime and the models into the data folder.
 export interface InstallState {
@@ -220,7 +228,7 @@ export interface InstallState {
   gpuProblem: string | null;
   // the runtime download, as the setup page describes it (CUDA libraries, or Core ML on macOS)
   runtimeWhat: string;
-  status: "idle" | "running" | "error";
+  status: InstallStatus;
   step: string | null;
   done: number;
   total: number;
@@ -242,7 +250,7 @@ export interface TrtState {
   // what is still to download, and the whole TensorRT download on a fresh install (the hint)
   bytes: number;
   fullBytes: number;
-  status: "idle" | "running" | "error";
+  status: InstallStatus;
   step: string | null;
   done: number;
   total: number;
@@ -297,7 +305,7 @@ export interface AppState {
   tensorrt: TrtState;
   // null until App settings asks for it (measuring walks the folders)
   storage: StorageItem[] | null;
-  enginePaths: { binary: string | null; models: string | null; ort: string | null };
+  enginePaths: Record<EngineFileKind, string | null>;
   // the desktop's colors (Desktop theme / desktop accent); null = couldn't be read or not asked
   desktopPalette: DesktopPalette | null;
   update: UpdateState;
@@ -305,17 +313,20 @@ export interface AppState {
   system: { engineBin: string; ortLib: string; platform: string };
 }
 
+// the hint file a dialog picks: the first-frame matte image, or the hint video (or frame folder)
+export type HintFileKind = "hint-image" | "hint-video";
+
 export interface CorridorKeyApi {
   getState(): Promise<AppState>;
   onState(listener: (state: AppState) => void): () => void;
   addPaths(paths: string[]): Promise<void>;
   // "files": video files; "folder": frame sequences and folders of clips (one dialog can't pick both)
   pickClips(kind: "files" | "folder"): Promise<void>;
-  pickFile(kind: "hint-image" | "hint-video"): Promise<string | null>;
+  pickFile(kind: HintFileKind): Promise<string | null>;
   pickCheckout(): Promise<void>;
-  pickRustEngine(what: "binary" | "models" | "ort"): Promise<void>;
+  pickRustEngine(what: EngineFileKind): Promise<void>;
   // null = Automatic; a path must be one the list offers (or the current setting)
-  setRustEngine(what: "binary" | "models" | "ort", path: string | null): Promise<void>;
+  setRustEngine(what: EngineFileKind, path: string | null): Promise<void>;
   installFfmpeg(): Promise<void>;
   // "tensorrt": the opt-in TensorRT parts (once the runtime and models are installed); else the runtime and models
   startInstall(part?: "tensorrt"): Promise<void>;

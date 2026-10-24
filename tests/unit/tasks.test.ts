@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { dots, jobToSelect, missingInput, tasksOf } from "../../src/shared/tasks";
-import { DEFAULT_OPTIONS } from "../../src/shared/types";
+import { DEFAULT_OPTIONS, type InstallStatus } from "../../src/shared/types";
 import { appState as state, clipInfo, ffmpegState, installState, job, trtState } from "./fixtures";
 
 // the runtime and models missing (2 + 3 bytes), the install idle, running or stopped with an error
-const installing = (status: "idle" | "running" | "error", error: string | null = null) =>
-  installState({ needRuntime: true, needModels: true, bytes: 5, runtimeBytes: 2, modelsBytes: 3, status, error });
+const installing = (status: InstallStatus, error: string | null = null) => installState({ needRuntime: true, needModels: true, bytes: 5, runtimeBytes: 2, modelsBytes: 3, status, error });
 
 describe("TensorRT task", () => {
   // switched on, its libraries and models still to download
