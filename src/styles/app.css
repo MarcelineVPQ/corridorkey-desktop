@@ -563,3 +563,7 @@ select {
   pointer-events: none;
   z-index: 10;
 }
+/* text the user may copy (a command to run) */
+.selectable {
+  user-select: text;
+}

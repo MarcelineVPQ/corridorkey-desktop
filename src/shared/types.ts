@@ -197,6 +197,18 @@ export interface EngineFiles {
   ort: EngineFileChoice[];
 }
 
+// The system's ffmpeg (electron/main/ffmpeg.ts): ok = ffmpeg + ffprobe with the encoders the engine writes with.
+export interface FfmpegState {
+  ok: boolean;
+  problem: string | null;
+  // the install for this distro, to read or copy; canInstall = the app can run it (pkexec), else `note` says what first
+  command: string;
+  canInstall: boolean;
+  note: string | null;
+  installing: boolean;
+  installError: string | null;
+}
+
 export interface CheckoutCheck {
   ok: boolean;
   problems: string[];
@@ -216,6 +228,7 @@ export interface AppState {
   engineKind: EngineKind | null;
   // what the Engine page's lists offer, and the paths the engine runs with (a setting of null = Automatic)
   engineFiles: EngineFiles;
+  ffmpeg: FfmpegState;
   enginePaths: { binary: string | null; models: string | null; ort: string | null };
   // the desktop's colors (Desktop theme / desktop accent); null = couldn't be read or not asked
   desktopPalette: DesktopPalette | null;
@@ -232,6 +245,7 @@ export interface CorridorKeyApi {
   pickRustEngine(what: "binary" | "models" | "ort"): Promise<void>;
   // null = Automatic; a path must be one the list offers (or the current setting)
   setRustEngine(what: "binary" | "models" | "ort", path: string | null): Promise<void>;
+  installFfmpeg(): Promise<void>;
   pathForFile(file: File): string;
   setJobOptions(id: string, options: JobOptions): Promise<void>;
   removeJob(id: string): Promise<void>;

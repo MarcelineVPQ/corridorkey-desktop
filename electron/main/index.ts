@@ -10,10 +10,11 @@ import { expandPaths, probeClip, still, STILL_WIDTH, VIDEO_EXT } from "./media";
 import { clearJobTemps, Queue } from "./queue";
 import { checkCheckout, checkRustEngine, chooseEngine, loadSettings, saveSettings } from "./settings";
 import { dataDir, effectivePath, findEngineFiles } from "./engineFind";
+import { checkFfmpeg, ffmpegState, installFfmpeg, installPlan, readOsRelease } from "./ffmpeg";
 import { readDesktopPalette, watchDesktopPalette } from "./desktopTheme";
 import { Updater } from "./updater";
 import { holdAppImageMountUntilExit } from "./appImageQuit";
-import type { AppState, GpuInfo, Job, JobOptions, OutputName } from "../../src/shared/types";
+import type { AppState, FfmpegState, GpuInfo, Job, JobOptions, OutputName } from "../../src/shared/types";
 import type { DesktopPalette } from "../../src/ui/theme/palette";
 import { IPC } from "./ipc";
 import { idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir } from "./validate";
@@ -64,6 +65,12 @@ function enginePaths() {
   };
 }
 let rustEngine = checkRustEngine(enginePaths().binary, enginePaths().models);
+// ffmpeg: unknown until the first check (at start, before the window shows); then after an install
+let ffmpeg: FfmpegState = { ok: true, problem: null, command: "", canInstall: false, note: null, installing: false, installError: null };
+async function recheckFfmpeg(): Promise<void> {
+  ffmpeg = { ...ffmpegState(await checkFfmpeg(), installPlan(readOsRelease())), installError: ffmpeg.installError };
+  scheduleSend();
+}
 /** Re-check both engines' files (after a setting changed, or before the queue starts). */
 function recheckEngines(): void {
   checkout = checkCheckout(settings.corridorKeyRoot);
@@ -117,6 +124,7 @@ function state(): AppState {
     engineKind: chooseEngine(rustEngine, checkout),
     engineFiles,
     enginePaths: enginePaths(),
+    ffmpeg,
     desktopPalette,
     update: updater.state,
   };
@@ -326,6 +334,19 @@ function registerIpc(): void {
     persist();
     scheduleSend();
   });
+  ipcMain.handle(IPC.installFfmpeg, async () => {
+    if (ffmpeg.ok || ffmpeg.installing) return;
+    ffmpeg = { ...ffmpeg, installing: true, installError: null };
+    scheduleSend();
+    try {
+      await installFfmpeg(installPlan(readOsRelease()));
+      ffmpeg = { ...ffmpeg, installing: false };
+    } catch (e) {
+      // error: SHOWN — the Engine page's ffmpeg section shows it next to the command
+      ffmpeg = { ...ffmpeg, installing: false, installError: (e as Error).message };
+    }
+    await recheckFfmpeg();
+  });
   ipcMain.handle(IPC.setJobOptions, (_e, idIn: unknown, optionsIn: unknown) => {
     const id = idArg(idIn);
     if (!id) return;
@@ -342,9 +363,10 @@ function registerIpc(): void {
     const v = idArg(id);
     if (v) queue.retry(v);
   });
-  ipcMain.handle(IPC.startQueue, () => {
+  ipcMain.handle(IPC.startQueue, async () => {
     recheckEngines();
-    if (!chooseEngine(rustEngine, checkout)) return scheduleSend();
+    await recheckFfmpeg();
+    if (!chooseEngine(rustEngine, checkout) || !ffmpeg.ok) return scheduleSend();
     return queue.start();
   });
   ipcMain.handle(IPC.stopQueue, () => queue.stop());
@@ -446,6 +468,7 @@ app.whenReady().then(() => {
     app.quit();
     return;
   }
+  void recheckFfmpeg();
   protocol.handle(MEDIA_SCHEME, (req) => {
     const file = decodeURIComponent(new URL(req.url).pathname.slice(1));
     if (!resolve(file).startsWith(mediaDir + "/")) return new Response("not found", { status: 404 });

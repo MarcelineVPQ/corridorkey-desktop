@@ -36,6 +36,8 @@ export function tasksOf(state: AppState): Task[] {
   const tasks: Task[] = [];
   // no engine set up: the ONNX Runtime engine is the one to set up (the PyTorch checkout still works meanwhile)
   if (!state.engineKind) tasks.push({ id: "engine-setup", page: "engine", section: "onnx", level: "task", text: state.rustEngine?.problems[0] ?? "Set up the CorridorKey engine" });
+  // no usable ffmpeg: nothing can be read or written (the Engine page offers the install)
+  if (state.ffmpeg && !state.ffmpeg.ok && state.ffmpeg.problem) tasks.push({ id: "ffmpeg", page: "engine", section: "ffmpeg", level: "task", text: state.ffmpeg.problem });
   if (state.engine.status === "failed") tasks.push({ id: "engine", page: "engine", section: "", level: "error", text: `The engine didn't start: ${state.engine.error ?? "unknown error"}` });
   // loop: NOT-WORTH — a queue of tens of clips, on each state change (≤ 10/s while running)
   for (const job of state.jobs) {

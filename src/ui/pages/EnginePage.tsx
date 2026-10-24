@@ -3,7 +3,7 @@
 // only while a job runs). Panel: where the ONNX Runtime engine and its models
 // live, and the CorridorKey checkout the PyTorch engine runs from (kept until
 // the ONNX engine replaces it; more when the in-app install lands, BACKLOG row 2).
-import { Check, Cpu, FolderOpen, FolderCog, X } from "lucide-react";
+import { Check, Cpu, Film, FolderOpen, FolderCog, X } from "lucide-react";
 import type { AppState } from "../../shared/types";
 import { Accordion, Row, Section } from "../panel/Section";
 import { MainBlock, SplitView } from "../panel/SplitView";
@@ -17,6 +17,7 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
   const st = state.settings;
   const kind = state.engineKind;
   const rust = state.rustEngine;
+  const ff = state.ffmpeg;
   const checks = (c: { ok: boolean; problems: string[] }, okText: string) =>
     c.ok ? (
       <div className="check-line ok">
@@ -178,6 +179,33 @@ export function EnginePage(props: { state: AppState; panelShown: boolean; narrow
 
   const panel = (
     <Accordion page="engine" focus={props.focus}>
+      <Section id="ffmpeg" icon={Film} title="ffmpeg" status={ff.ok ? "installed" : ff.installing ? "installing…" : "not installed"} task={props.sectionTasks["engine/ffmpeg"] ?? null}>
+        {() =>
+          ff.ok ? (
+            <div className="check-line ok">
+              <Check size={15} aria-hidden /> ffmpeg and ffprobe found, with the H.264 and ProRes 4444 encoders
+            </div>
+          ) : (
+            <>
+              <p className="hint-text">CorridorKey reads and writes video with ffmpeg. {ff.problem}.</p>
+              {ff.note && <p className="hint-text">{ff.note}</p>}
+              <Row label="Install command" hint={ff.canInstall ? "The app runs it for you; your desktop asks for your password" : "Run it in a terminal"}>
+                <div className="path selectable">{ff.command}</div>
+              </Row>
+              {ff.canInstall && (
+                <button type="button" className="btn small" disabled={ff.installing} onClick={() => void window.ck.installFfmpeg()}>
+                  {ff.installing ? "Installing…" : "Install ffmpeg"}
+                </button>
+              )}
+              {ff.installError && (
+                <div className="check-line error">
+                  <X size={15} aria-hidden /> {ff.installError}
+                </div>
+              )}
+            </>
+          )
+        }
+      </Section>
       <Section id="onnx" icon={Cpu} title="ONNX Runtime engine" status={rust.ok ? (kind === "rust" ? "in use" : "set up") : "not set up"} task={props.sectionTasks["engine/onnx"] ?? null}>
         {() => (
           <>
