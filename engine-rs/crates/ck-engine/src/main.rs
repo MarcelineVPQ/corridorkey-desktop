@@ -21,7 +21,7 @@ struct Ort {
 
 impl Backend for Ort {
     fn pong(&mut self) -> Value {
-        let rt = self.pipeline.rt;
+        let rt = self.pipeline.rt();
         let prov = rt.provider();
         let precision = prov.map(|p| rt.precision(p));
         json!({

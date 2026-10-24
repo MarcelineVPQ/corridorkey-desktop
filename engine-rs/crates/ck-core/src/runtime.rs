@@ -7,6 +7,7 @@
 //! (`.onnx.data`) sit next to their file.
 use crate::config::{ArenaShrink, Device, EngineConfig, GraphOpt};
 use crate::gpu::{nvidia, GpuInfo};
+use crate::pipeline::network::NetCounters;
 use crate::Error;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
@@ -328,8 +329,8 @@ pub(crate) struct TrtSettings {
     pub(crate) dir: PathBuf,
 }
 
-/// A loaded network: its session and how its inputs want to be fed.
-pub(crate) struct Net {
+/// A loaded network: its session and how its inputs want to be fed (the pipeline's `Network`).
+pub struct Net {
     pub(crate) piece: &'static str,
     // (end_profiling on drop when `profiling`)
     pub(crate) session: Session,
@@ -339,12 +340,9 @@ pub(crate) struct Net {
     shrink_options: Option<ort::session::RunOptions>,
     /// whether runs use `shrink_options` (the pipeline sets it from `shrinks` for what is loaded)
     pub(crate) shrink: bool,
-    /// measured: seconds in session.run, seconds converting inputs/outputs, calls (reset per job)
-    pub(crate) run_s: f64,
-    pub(crate) convert_s: f64,
-    pub(crate) calls: usize,
-    /// seconds of this session's first run (cuDNN's algorithm search happens there)
-    pub(crate) first_s: Option<f64>,
+    /// measured: seconds in session.run, seconds converting inputs/outputs, calls, the first run's seconds (reset
+    /// per job)
+    pub(crate) counters: NetCounters,
     /// CK_ENGINE_PROFILE is set: the session writes its profile when dropped
     profiling: bool,
 }
@@ -377,7 +375,7 @@ pub(crate) fn shrinks(piece: &str, setting: &ArenaShrink, shared: bool) -> bool 
 /// Tensor data in the type it already has: nothing is converted until a network needs another type, and
 /// then in one pass. Every conversion is exact where the old float32 path was (bfloat16 and float16 values
 /// are exact in float32; float32 -> float16 rounds once, as before).
-pub(crate) enum Data<'a> {
+pub enum Data<'a> {
     F32(Vec<f32>),
     F16(Vec<half::f16>),
     /// bfloat16 frames, concatenated in order (the decoded frames' model view: stage 1 and 2's rgb)
@@ -472,7 +470,7 @@ fn concat_parts<T: Send>(parts: &[&[half::bf16]], f: impl Fn(half::bf16) -> T + 
 }
 
 /// An input: name, shape, data.
-pub(crate) type Input<'a> = (&'a str, Vec<usize>, Data<'a>);
+pub type Input<'a> = (&'a str, Vec<usize>, Data<'a>);
 
 impl Net {
     pub(crate) fn load(rt: &Runtime, piece: &'static str, prov: Provider, file: &Path, vram_cap: Option<u64>) -> Result<Net, Error> {
@@ -496,10 +494,7 @@ impl Net {
             f16_inputs,
             shrink_options,
             shrink: false,
-            first_s: None,
-            run_s: 0.0,
-            convert_s: 0.0,
-            calls: 0,
+            counters: NetCounters::default(),
             profiling: rt.cfg.profile.is_some(),
         })
     }
@@ -547,10 +542,11 @@ impl Net {
             }
         }
         drop(outs);
-        self.calls += 1;
-        self.first_s.get_or_insert((t2 - t1).as_secs_f64());
-        self.run_s += (t2 - t1).as_secs_f64();
-        self.convert_s += (t1 - t0).as_secs_f64() + t2.elapsed().as_secs_f64();
+        let c = &mut self.counters;
+        c.calls += 1;
+        c.first_s.get_or_insert((t2 - t1).as_secs_f64());
+        c.run_s += (t2 - t1).as_secs_f64();
+        c.convert_s += (t1 - t0).as_secs_f64() + t2.elapsed().as_secs_f64();
         Ok(res)
     }
 }

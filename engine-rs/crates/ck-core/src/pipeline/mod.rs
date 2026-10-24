@@ -8,20 +8,24 @@
 //!
 //! Low-VRAM mode stages it: foundations first (to temp_dir), then stage 1 (states to temp_dir), then
 //! stage 2, with only that phase's networks loaded.
+pub mod network;
+
 use crate::ahead::Ahead;
 use crate::clip::{probe_frame_dir, probe_video, raw_clip_name, ClipMeta, Source};
 use crate::color::{bf16_round, LinearAdjust};
+use crate::config::ArenaShrink;
 use crate::decode::{load_initial_hint, FrameReader, HintReader, Prefetch, Prepped};
 use crate::hann::{taper_weights, window_starts, BatonBlend};
 use crate::image::{resize_area, resize_bilinear, Planar};
 use crate::job::{suffix, JobConfig};
 use crate::outputs::{Geometry, RenderWorker};
 use crate::render::{make_checker, RenderOpts};
-use crate::runtime::{Data, ModelSet, Net, Precision, Provider, Runtime, TrtSettings};
+use crate::runtime::{Data, ModelSet, Precision, Provider, Runtime, TrtSettings};
 use crate::tensorrt::{BATON_CH, CRADIO_CH, MOGE_CH, RVM_CH};
 use crate::vram::{estimate_peak_vram_gb, select_vram_profile};
 use crate::writers::{ExrType, ExrWriter, VideoWriter, Writer};
 use crate::Error;
+use network::{Loader, Network, OrtLoader};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
@@ -82,28 +86,42 @@ pub(crate) struct ModelKey {
     pub(crate) vram_cap: Option<u64>,
 }
 
-/// A network loading ahead on its own thread: (network, the key it is for, the load: the session and its seconds).
-type PendingLoad = (&'static str, ModelKey, std::thread::JoinHandle<Result<(Net, f64), Error>>);
+/// A network loading ahead on its own thread: (network, the key it is for, the load: the network and its seconds).
+type PendingLoad<N> = (&'static str, ModelKey, std::thread::JoinHandle<Result<(N, f64), Error>>);
 
-pub struct Pipeline {
-    pub rt: &'static Runtime,
+/// One network's measured totals in this job, kept across low-VRAM unloads (its `NetCounters` folded in).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct NetTotals {
+    pub(crate) run_s: f64,
+    pub(crate) convert_s: f64,
+    pub(crate) calls: usize,
+    /// seconds of the first calls (each session's first run after a fold)
+    pub(crate) first_s: f64,
+}
+
+/// One job at a time, end to end. `L` loads the networks: ONNX Runtime sessions in the engine (`OrtLoader`, the
+/// default), fakes in the tests.
+pub struct Pipeline<L: Loader = OrtLoader> {
+    loader: L,
     pub models: ModelSet,
+    /// CK_ENGINE_ARENA_SHRINK, read once at startup (the runtime's settings)
+    arena_shrink: ArenaShrink,
     key: Option<ModelKey>,
-    nets: HashMap<&'static str, Net>,
+    nets: HashMap<&'static str, L::Net>,
     /// TensorRT jobs: networks TensorRT could not build, and why (they run on CUDA)
     trt_fallbacks: BTreeMap<&'static str, String>,
     /// TensorRT jobs: seconds each network took to build its engine (built in this job) or to load it (reused)
     trt_seconds: BTreeMap<&'static str, (f64, bool)>,
     /// measured once per process: graphics memory the CUDA context and libraries take (bytes), outside any arena
     gpu_overhead: Option<u64>,
-    /// this job's measured seconds per network (run, convert, calls), kept across low-VRAM unloads
-    stats: BTreeMap<&'static str, (f64, f64, usize, f64)>,
+    /// this job's measured seconds per network, kept across low-VRAM unloads
+    stats: BTreeMap<&'static str, NetTotals>,
     /// this job's seconds spent loading sessions, in all and per network
     load_s: f64,
     load_each: BTreeMap<&'static str, f64>,
     /// low-VRAM phases: the next phase's networks loading on their own thread while this phase runs, with the
     /// key they are for; `ensure` takes them (waiting if they aren't done)
-    pending: Vec<PendingLoad>,
+    pending: Vec<PendingLoad<L::Net>>,
     /// this job's seconds of session loads done ahead on their own thread
     preload_s: f64,
     /// this job's main-thread seconds around stage 2: [inputs, waiting for the render thread]
@@ -268,11 +286,24 @@ fn f1(v: f64) -> String {
     format!("{v:.1}")
 }
 
-impl Pipeline {
+impl Pipeline<OrtLoader> {
+    /// The engine's pipeline: ONNX Runtime sessions in the process's runtime `rt`.
     pub fn new(rt: &'static Runtime, models: ModelSet) -> Pipeline {
+        Pipeline::with_loader(OrtLoader { rt }, models, rt.cfg.arena_shrink.clone())
+    }
+
+    /// The process's runtime (its settings, provider and card).
+    pub fn rt(&self) -> &'static Runtime {
+        self.loader.rt
+    }
+}
+
+impl<L: Loader> Pipeline<L> {
+    pub(crate) fn with_loader(loader: L, models: ModelSet, arena_shrink: ArenaShrink) -> Pipeline<L> {
         Pipeline {
-            rt,
+            loader,
             models,
+            arena_shrink,
             key: None,
             nets: HashMap::new(),
             trt_fallbacks: BTreeMap::new(),
@@ -303,16 +334,17 @@ impl Pipeline {
     fn fold_stats(&mut self) {
         // loop: NOT-WORTH — at most five networks
         for (p, n) in self.nets.iter_mut() {
-            let e = self.stats.entry(*p).or_insert((0.0, 0.0, 0, 0.0));
-            e.0 += n.run_s;
-            e.1 += n.convert_s;
-            e.2 += n.calls;
-            if n.calls > 0 {
-                e.3 += n.first_s.take().unwrap_or(0.0);
+            let e = self.stats.entry(*p).or_default();
+            let c = n.counters();
+            e.run_s += c.run_s;
+            e.convert_s += c.convert_s;
+            e.calls += c.calls;
+            if c.calls > 0 {
+                e.first_s += c.first_s.take().unwrap_or(0.0);
             }
-            n.run_s = 0.0;
-            n.convert_s = 0.0;
-            n.calls = 0;
+            c.run_s = 0.0;
+            c.convert_s = 0.0;
+            c.calls = 0;
         }
     }
 
@@ -364,7 +396,8 @@ impl Pipeline {
                 let tried = match (self.trt_fallbacks.get(piece), settings.as_ref()) {
                     (Some(why), _) => Err(why.clone()),
                     (None, Some(st)) => {
-                        Net::load(self.rt, piece, Provider::TensorRt, &crate::tensorrt::stub_path(&st.dir, piece), cap)
+                        self.loader
+                            .load(piece, Provider::TensorRt, &crate::tensorrt::stub_path(&st.dir, piece), cap)
                             // loop: NOT-WORTH — first line of an error message
                             .map_err(|e| format!("loading its engine: {}", e.message.lines().next().unwrap_or("")))
                     }
@@ -377,15 +410,15 @@ impl Pipeline {
                             sink.log(&format!("  TensorRT could not run {piece}; it runs on CUDA: {why}"));
                             self.trt_fallbacks.insert(piece, why);
                         }
-                        Net::load(self.rt, piece, Provider::Cuda, &file, cap)?
+                        self.loader.load(piece, Provider::Cuda, &file, cap)?
                     }
                 }
             } else {
-                Net::load(self.rt, piece, key.provider, &file, cap)?
+                self.loader.load(piece, key.provider, &file, cap)?
             };
             eprintln!(
                 "  loaded {piece} ({}, {}) in {:.1} s, arena limit {}: {}",
-                net.provider.name(),
+                net.provider().name(),
                 key.precision.name(),
                 t.elapsed().as_secs_f64(),
                 cap.map(|c| format!("{:.2} GiB", c as f64 / 1073741824.0)).unwrap_or_else(|| "none".into()),
@@ -429,11 +462,11 @@ impl Pipeline {
             }
             let Some(file) = self.models.file(piece, key.precision) else { continue };
             let cap = self.arena_limit(key, piece);
-            let (rt, prov, prec) = (self.rt, key.provider, key.precision);
+            let (loader, prov, prec) = (self.loader.clone(), key.provider, key.precision);
             // loop: PARALLELIZE — the next low-VRAM phase's network loads while this phase runs (this pass; measured: 1.3-1.5 s less per job)
             let started = crate::ahead::spawn_named(&format!("load-{piece}"), move || {
                 let t = Instant::now();
-                let net = Net::load(rt, piece, prov, &file, cap)?;
+                let net = loader.load(piece, prov, &file, cap)?;
                 eprintln!("  loaded {piece} ahead ({}, {}) in {:.1} s on its own thread", prov.name(), prec.name(), t.elapsed().as_secs_f64());
                 Ok((net, t.elapsed().as_secs_f64()))
             });
@@ -466,10 +499,10 @@ impl Pipeline {
     /// Arena shrinkage for what is loaded now (`crate::runtime::shrinks`).
     fn set_shrink(&mut self) {
         let shared = self.nets.contains_key("stage1") && self.nets.contains_key("stage2");
-        let setting = &self.rt.cfg.arena_shrink;
+        let setting = &self.arena_shrink;
         // loop: NOT-WORTH — at most five networks
         for (p, n) in self.nets.iter_mut() {
-            n.shrink = n.provider != Provider::Cpu && crate::runtime::shrinks(p, setting, shared);
+            n.set_shrink(n.provider() != Provider::Cpu && crate::runtime::shrinks(p, setting, shared));
         }
     }
 
@@ -491,17 +524,19 @@ impl Pipeline {
         Some(cap.saturating_sub(overhead).saturating_sub(others).saturating_sub(512 << 20).max(256 << 20))
     }
 
-    fn net(&mut self, piece: &str) -> Result<&mut Net, Error> {
+    fn net(&mut self, piece: &str) -> Result<&mut L::Net, Error> {
         self.nets.get_mut(piece).ok_or_else(|| Error::engine(format!("{piece} is not loaded")))
     }
+}
 
+impl Pipeline<OrtLoader> {
     /// Run one job. Replies go to `sink` (progress, clip, memory, provider, frames, log); the result or the
     /// failure is returned for the engine to send.
     pub fn run(&mut self, job: &JobConfig, sink: &mut dyn Sink) -> Result<JobResult, Error> {
         // the engine-wide default budget (CK_ENGINE_VRAM_BUDGET_GB) for a job that sets none
         let mut job = job.clone();
         if job.vram_budget_gb.is_none() {
-            job.vram_budget_gb = self.rt.cfg.vram_budget_gb;
+            job.vram_budget_gb = self.loader.rt.cfg.vram_budget_gb;
         }
         let r = self.run_job(&job, sink);
         // the job's frames, windows and writers are freed by now: give that host memory back too, not only
@@ -512,10 +547,10 @@ impl Pipeline {
 
     fn run_job(&mut self, job: &JobConfig, sink: &mut dyn Sink) -> Result<JobResult, Error> {
         let job_t = Instant::now();
-        let Some(provider) = self.rt.provider() else {
+        let Some(provider) = self.loader.rt.provider() else {
             return Err(Error::no_gpu("CorridorKey needs an NVIDIA graphics card with CUDA.".into()));
         };
-        let precision = self.rt.precision(provider);
+        let precision = self.loader.rt.precision(provider);
         let missing = self.models.missing(precision);
         if !missing.is_empty() {
             return Err(Error::assets(format!("missing ONNX model(s) {} ({}) in {}", missing.join(", "), precision.name(), self.models.dir.display())));
@@ -778,7 +813,7 @@ impl Pipeline {
         let fallback = |why: String, msg: &mut Value| {
             msg["fallback_reason"] = json!(why);
         };
-        if base.provider != Provider::Cuda || !self.rt.tensorrt_ep {
+        if base.provider != Provider::Cuda || !self.loader.rt.tensorrt_ep {
             let why = if base.provider != Provider::Cuda {
                 "TensorRT needs the graphics card".to_string()
             } else {
@@ -793,7 +828,7 @@ impl Pipeline {
             sink.send(msg);
             return Ok((base.clone(), None));
         };
-        let gpu = self.rt.gpu.clone().unwrap();
+        let gpu = self.loader.rt.gpu.clone().unwrap();
         let trt_ver = crate::gpu::tensorrt_version().unwrap_or_else(|| "unknown".into());
         let trt_prec = Precision::Fp16;
         // loop: NOT-WORTH — five networks, once per TensorRT job
@@ -803,8 +838,8 @@ impl Pipeline {
             sink.send(msg);
             return Ok((base.clone(), None));
         }
-        let root = self.rt.cfg.trt_cache.clone();
-        let dir = crate::tensorrt::cache_dir(&root, &gpu.name, &gpu.driver, &trt_ver, &self.rt.ort_version, "fp16");
+        let root = self.loader.rt.cfg.trt_cache.clone();
+        let dir = crate::tensorrt::cache_dir(&root, &gpu.name, &gpu.driver, &trt_ver, &self.loader.rt.ort_version, "fp16");
         let stale = crate::tensorrt::stale_dirs(&root, &dir, &gpu.name);
         if !stale.is_empty() {
             // loop: NOT-WORTH — a few stale cache folders, once per TensorRT job
@@ -841,7 +876,7 @@ impl Pipeline {
         self.key = Some(key.clone());
         let Some(dir) = key.trt_cache.clone() else { return Ok(()) };
         let timing = dir.parent().map(|p| p.join("timing.cache")).unwrap_or_else(|| dir.join("timing.cache"));
-        let builder = crate::tensorrt::builder_path(self.rt.cfg.trt_build.as_deref());
+        let builder = crate::tensorrt::builder_path(self.loader.rt.cfg.trt_build.as_deref());
         // TensorRT's working memory while it builds: 60 % of the job's budget (else of the card's free memory), at
         // most 8 GiB. Measured 2026-10-24: stage 1 for 48-frame windows at 1152x1280 needs a 6.1 GB tactic (a
         // 4 GiB cap found none; 7 GiB built it, peak 13.9 GB on the card). A build that still finds no tactic
@@ -864,7 +899,7 @@ impl Pipeline {
         // one engine process builds this range at a time; one that waited finds what the other built
         let mut lock = None;
         if !todo.is_empty() && builder.is_some() {
-            let per_build = self.rt.cfg.trt_build_timeout + std::time::Duration::from_secs(120);
+            let per_build = self.loader.rt.cfg.trt_build_timeout + std::time::Duration::from_secs(120);
             let waiting = || {
                 sink.send(json!({"type": "progress", "stage": "optimize", "detail": "waiting for another CorridorKey engine building this range"}));
                 sink.log("  TensorRT: another CorridorKey engine is building this range's engines; waiting for it");
@@ -906,7 +941,7 @@ impl Pipeline {
             if let Some(l) = &lock {
                 l.touch();
             }
-            match crate::tensorrt::build_engine(b, &onnx, piece, bucket, &pdir, workspace_mb, &timing, self.rt.cfg.trt_build_timeout) {
+            match crate::tensorrt::build_engine(b, &onnx, piece, bucket, &pdir, workspace_mb, &timing, self.loader.rt.cfg.trt_build_timeout) {
                 Ok(secs) => {
                     std::fs::copy(&stub, crate::tensorrt::stub_path(&pdir, piece)).map_err(|e| Error::engine(format!("{}: {e}", pdir.display())))?;
                     std::fs::write(crate::tensorrt::source_path(&pdir, piece), &source).map_err(|e| Error::engine(format!("{}: {e}", pdir.display())))?;
@@ -928,7 +963,9 @@ impl Pipeline {
         }
         Ok(())
     }
+}
 
+impl<L: Loader> Pipeline<L> {
     /// Steps 2-4 (and the low-VRAM staging).
     #[allow(clippy::too_many_arguments)]
     fn keying(
@@ -951,9 +988,10 @@ impl Pipeline {
         let mut decode_s = 0.0;
         let mut render_s = 0.0;
         self.nets.values_mut().for_each(|n| {
-            n.run_s = 0.0;
-            n.convert_s = 0.0;
-            n.calls = 0;
+            let c = n.counters();
+            c.run_s = 0.0;
+            c.convert_s = 0.0;
+            c.calls = 0;
         });
         self.stats.clear();
         self.drop_pending();
@@ -989,7 +1027,7 @@ impl Pipeline {
         self.ensure(key, first, trt, sink, load_stage)?;
         if key.provider == Provider::TensorRt {
             // loop: NOT-WORTH — five networks, once per TensorRT job
-            let pieces: BTreeMap<&str, &str> = self.nets.iter().map(|(k, n)| (*k, n.provider.name())).collect();
+            let pieces: BTreeMap<&str, &str> = self.nets.iter().map(|(k, n)| (*k, n.provider().name())).collect();
             // loop: NOT-WORTH — five networks, once per TensorRT job
             let built: BTreeMap<&str, f64> = self.trt_seconds.iter().filter(|(_, v)| v.1).map(|(k, v)| (*k, v.0)).collect();
             sink.send(json!({"type": "provider", "provider": if self.trt_fallbacks.is_empty() { "tensorrt" } else if self.trt_fallbacks.len() == pieces.len() { "cuda" } else { "tensorrt+cuda" },
@@ -1358,7 +1396,7 @@ impl Pipeline {
         ];
         // loop: NOT-WORTH — five networks
         for p in crate::runtime::PIECES {
-            if let Some((run_s, convert_s, calls, first_s)) = self.stats.get(p) {
+            if let Some(NetTotals { run_s, convert_s, calls, first_s }) = self.stats.get(p) {
                 parts.push(format!("{p} {run_s:.1} s run (first calls {first_s:.1} s) + {convert_s:.1} s convert ({calls} calls)"));
             }
         }
