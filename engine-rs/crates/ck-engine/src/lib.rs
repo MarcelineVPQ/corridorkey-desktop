@@ -211,7 +211,7 @@ fn run_job<B: Backend, W: Write>(backend: &mut B, req: &Value, jid: &str, r: &mu
         })),
         Err(e) => {
             eprintln!("job {jid} failed: {e}");
-            r.send(json!({"type": "error", "code": e.code, "message": e.message}));
+            r.send(json!({"type": "error", "code": e.code.as_str(), "message": e.message}));
         }
     }
     r.job = None;

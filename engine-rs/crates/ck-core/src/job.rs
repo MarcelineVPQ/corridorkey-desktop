@@ -223,12 +223,12 @@ mod tests {
 
     #[test]
     fn bad_options_are_input_errors() {
-        assert_eq!(parse(&req(json!({"outputs": ["alpha", "matte"]}))).unwrap_err().code, "input");
-        assert_eq!(parse(&req(json!({"hann_chunk": "x"}))).unwrap_err().code, "input");
-        assert_eq!(parse(&req(json!({"output_format": "gif"}))).unwrap_err().code, "input");
-        assert_eq!(parse(&req(json!({"exr_dtype": "int"}))).unwrap_err().code, "input");
-        assert_eq!(parse(&req(json!({"vram_budget_gb": 0}))).unwrap_err().code, "input");
-        assert_eq!(parse(&req(json!({"hann_chunk": 2, "hann_stride": 4}))).unwrap_err().code, "input");
+        assert_eq!(parse(&req(json!({"outputs": ["alpha", "matte"]}))).unwrap_err().code.as_str(), "input");
+        assert_eq!(parse(&req(json!({"hann_chunk": "x"}))).unwrap_err().code.as_str(), "input");
+        assert_eq!(parse(&req(json!({"output_format": "gif"}))).unwrap_err().code.as_str(), "input");
+        assert_eq!(parse(&req(json!({"exr_dtype": "int"}))).unwrap_err().code.as_str(), "input");
+        assert_eq!(parse(&req(json!({"vram_budget_gb": 0}))).unwrap_err().code.as_str(), "input");
+        assert_eq!(parse(&req(json!({"hann_chunk": 2, "hann_stride": 4}))).unwrap_err().code.as_str(), "input");
         assert_eq!(parse(&req(json!({"hann_chunk": 4, "hann_stride": 4}))).unwrap().hann_stride, 4);
         assert_eq!(parse(&req(json!({"vram_budget_gb": 12}))).unwrap().vram_budget_gb, Some(12.0));
         let c = parse(&req(json!({"outputs": ["fg", "checker", "alpha"], "tensorrt": true}))).unwrap();
@@ -242,10 +242,10 @@ mod tests {
         assert_eq!((c.hint_quality, c.carry_hint_quality, c.despill_strength), (0.0, 1.0, 1.0));
         // loop: NOT-WORTH — a test's few options
         for o in [json!({"hint_quality": 1.01}), json!({"despill_strength": -1}), json!({"carry_hint_quality": "NaN"}), json!({"num_frames": "inf"})] {
-            assert_eq!(parse(&req(o.clone())).unwrap_err().code, "bad-request", "{o}");
+            assert_eq!(parse(&req(o.clone())).unwrap_err().code.as_str(), "bad-request", "{o}");
         }
         // not a number at all stays an input error
-        assert_eq!(parse(&req(json!({"despill_strength": "lots"}))).unwrap_err().code, "input");
+        assert_eq!(parse(&req(json!({"despill_strength": "lots"}))).unwrap_err().code.as_str(), "input");
     }
 
     #[test]

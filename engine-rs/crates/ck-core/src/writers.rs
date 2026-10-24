@@ -78,7 +78,8 @@ pub(crate) trait Writer: Send {
     fn release(&mut self) -> Result<(), Error>;
 }
 
-type Shared = Arc<Mutex<Option<String>>>;
+/// The first failure of a writer's thread, with its code (a full disk is `output`, not `engine`).
+type Shared = Arc<Mutex<Option<Error>>>;
 
 // The video writers hand ffmpeg the samples' bytes as they are in memory (bgr48le): little-endian hosts only.
 #[cfg(not(target_endian = "little"))]
@@ -118,7 +119,7 @@ impl VideoWriter {
             for buf in rx {
                 // the samples' own bytes: little-endian on the hosts this runs on (bgr48le / bgra64le)
                 if let Err(e) = stdin.write_all(bytemuck::cast_slice(&buf)) {
-                    *e2.lock().unwrap() = Some(format!("ffmpeg writer: {e}"));
+                    *e2.lock().unwrap() = Some(Error::engine(format!("ffmpeg writer: {e}")));
                     return;
                 }
             }
@@ -142,7 +143,7 @@ impl Writer for VideoWriter {
     }
     fn write_many(&mut self, batch: Batch, n: usize) -> Result<(), Error> {
         if let Some(e) = self.err.lock().unwrap().clone() {
-            return Err(Error::engine(e));
+            return Err(e);
         }
         let Batch::U16(v) = batch else { return Err(Error::engine("video writer expects uint16 frames".into())) };
         if v.len() != n * self.frame_len {
@@ -186,7 +187,7 @@ impl Writer for VideoWriter {
             None => 0,
         };
         if let Some(e) = self.err.lock().unwrap().clone() {
-            return Err(Error::engine(e));
+            return Err(e);
         }
         if rc != 0 {
             return Err(Error::engine(format!("ffmpeg writer failed with exit code {rc}: {}", self.path.display())));
@@ -224,13 +225,13 @@ pub(crate) struct ExrWriter {
 }
 
 /// One EXR frame as cv2.imwrite writes it: channels R, G, B (+A) from BGR(A) data, or Y; ZIP compression.
-pub(crate) fn write_exr(path: &Path, w: usize, h: usize, channels: usize, nhwc: &[f32], ty: ExrType) -> Result<(), String> {
+pub(crate) fn write_exr(path: &Path, w: usize, h: usize, channels: usize, nhwc: &[f32], ty: ExrType) -> Result<(), crate::Error> {
     use exr::prelude::*;
     let names: &[&str] = match channels {
         1 => &["Y"],
         3 => &["B", "G", "R"],
         4 => &["B", "G", "R", "A"],
-        _ => return Err(format!("{channels} channels")),
+        _ => return Err(crate::Error::engine(format!("{channels} channels"))),
     };
     let chans: Vec<AnyChannel<FlatSamples>> = names
         // loop: HOT-PATH-OK — EXR only: ≤ four channels per frame, each one pass (the exr crate takes owned channel buffers)
@@ -253,12 +254,15 @@ pub(crate) fn write_exr(path: &Path, w: usize, h: usize, channels: usize, nhwc: 
         // loop: NOT-WORTH — ≤ four channels per frame
         AnyChannels::sort(chans.into_iter().collect()),
     );
-    Image::from_layer(layer).write().to_file(path).map_err(|e| format!("{}: {e}", path.display()))
+    Image::from_layer(layer).write().to_file(path).map_err(|e| match e {
+        exr::error::Error::Io(io) => crate::Error::write("an EXR frame", path, &io),
+        other => crate::Error::engine(format!("{}: {other}", path.display())),
+    })
 }
 
 impl ExrWriter {
     pub(crate) fn new(dir: &Path, w: usize, h: usize, channels: usize, ty: ExrType, frame_name: &str) -> Result<ExrWriter, Error> {
-        std::fs::create_dir_all(dir).map_err(|e| Error::engine(format!("{}: {e}", dir.display())))?;
+        std::fs::create_dir_all(dir).map_err(|e| Error::write("the output folder", dir, &e))?;
         let (tx, rx) = sync_channel::<(usize, usize, Vec<f32>)>(2);
         let err: Shared = Arc::new(Mutex::new(None));
         let (e2, d2, name) = (err.clone(), dir.to_path_buf(), frame_name.to_string());
@@ -271,7 +275,7 @@ impl ExrWriter {
                 for j in 0..n {
                     let p = d2.join(format!("{name}_{:06}.exr", idx0 + j));
                     if let Err(e) = write_exr(&p, w, h, channels, &data[j * len..(j + 1) * len], ty) {
-                        *e2.lock().unwrap() = Some(format!("EXR write failed: {e}"));
+                        *e2.lock().unwrap() = Some(Error { message: format!("EXR write failed: {}", e.message), ..e });
                         return;
                     }
                 }
@@ -287,7 +291,7 @@ impl Writer for ExrWriter {
     }
     fn write_many(&mut self, batch: Batch, n: usize) -> Result<(), Error> {
         if let Some(e) = self.err.lock().unwrap().clone() {
-            return Err(Error::engine(e));
+            return Err(e);
         }
         let Batch::F32(v) = batch else { return Err(Error::engine("EXR writer expects float32 frames".into())) };
         if v.len() != n * self.frame_len {
@@ -307,7 +311,7 @@ impl Writer for ExrWriter {
             let _ = t.join();
         }
         match self.err.lock().unwrap().clone() {
-            Some(e) => Err(Error::engine(e)),
+            Some(e) => Err(e),
             None => Ok(()),
         }
     }

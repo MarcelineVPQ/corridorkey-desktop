@@ -84,11 +84,11 @@ pub(crate) fn model_bytes(file: &Path) -> u64 {
 }
 
 impl ModelSet {
-    pub fn open(dir: &Path) -> Result<ModelSet, String> {
+    pub fn open(dir: &Path) -> Result<ModelSet, Error> {
         let mpath = dir.join("models.json");
         let manifest = if mpath.exists() {
-            let s = std::fs::read_to_string(&mpath).map_err(|e| format!("{}: {e}", mpath.display()))?;
-            serde_json::from_str(&s).map_err(|e| format!("{}: {e}", mpath.display()))?
+            let s = std::fs::read_to_string(&mpath).map_err(|e| Error::assets(format!("{}: {e}", mpath.display())))?;
+            serde_json::from_str(&s).map_err(|e| Error::assets(format!("{}: {e}", mpath.display())))?
         } else {
             BTreeMap::new()
         };
@@ -190,8 +190,8 @@ static GLOBAL: std::sync::OnceLock<Result<Runtime, String>> = std::sync::OnceLoc
 impl Runtime {
     /// The process's runtime (one ORT environment per process). `ort_lib`: libonnxruntime.so for a
     /// load-dynamic build (else CK_ENGINE_ORT / ORT_DYLIB_PATH).
-    pub fn init(ort_lib: Option<&Path>, want: &str) -> Result<&'static Runtime, String> {
-        GLOBAL.get_or_init(|| Runtime::new(ort_lib, want)).as_ref().map_err(|e| e.clone())
+    pub fn init(ort_lib: Option<&Path>, want: &str) -> Result<&'static Runtime, Error> {
+        GLOBAL.get_or_init(|| Runtime::new(ort_lib, want)).as_ref().map_err(|e| Error::engine(e.clone()))
     }
 
     fn new(ort_lib: Option<&Path>, want: &str) -> Result<Runtime, String> {

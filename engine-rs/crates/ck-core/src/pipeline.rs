@@ -127,11 +127,15 @@ impl Drop for Temps {
 }
 
 fn open_rw(p: &Path) -> Result<File, Error> {
-    std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(p).map_err(|e| Error::engine(format!("{}: {e}", p.display())))
+    std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(p).map_err(|e| Error::write("a temporary file", p, &e))
 }
 
 fn temp_err(e: std::io::Error) -> Error {
-    Error::engine(format!("temp file: {e}"))
+    match crate::write_failure(&e) {
+        // the temporary folder's disk filled up (the RVM features and states take GBs on long clips)
+        Some(why) => Error::new(crate::ErrorCode::Output, format!("Can't write the job's temporary files: {why} ({e})")),
+        None => Error::engine(format!("temp file: {e}")),
+    }
 }
 
 /// A float16 (T, C*H*W) array on disk (the runtime's np.memmap files): written and read as raw float16, no
@@ -518,8 +522,8 @@ impl Pipeline {
             self.ensure(&base_key, &crate::runtime::PIECES, None, sink, "load")?;
         }
         sink.send(json!({"type": "progress", "stage": "probe"}));
-        std::fs::create_dir_all(&job.temp_dir).map_err(|e| Error::engine(format!("{}: {e}", job.temp_dir.display())))?;
-        std::fs::create_dir_all(&job.output_dir).map_err(|e| Error::engine(format!("{}: {e}", job.output_dir.display())))?;
+        std::fs::create_dir_all(&job.temp_dir).map_err(|e| Error::write("the temporary folder", &job.temp_dir, &e))?;
+        std::fs::create_dir_all(&job.output_dir).map_err(|e| Error::write("the output folder", &job.output_dir, &e))?;
         let is_dir = Path::new(&job.input).is_dir();
         let mut meta = if is_dir {
             probe_frame_dir(Path::new(&job.input), job.num_frames, job.frame_dir_fps, job.frame_dir_linear)?
@@ -684,7 +688,7 @@ impl Pipeline {
             // loop: NOT-WORTH — ≤ four writers, once per attempt
             let nothing_written = writers.iter().all(|(_, w)| w.frames() == 0);
             match &res {
-                Err(e) if e.code == "oom" && !job.manual && nothing_written && chunk > 1 => {
+                Err(e) if e.code == crate::ErrorCode::Oom && !job.manual && nothing_written && chunk > 1 => {
                     let (old_chunk, old_stride) = (chunk, stride);
                     chunk = (chunk / 2).max(1);
                     stride = (chunk / 2).max(1);

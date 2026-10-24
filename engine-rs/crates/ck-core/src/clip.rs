@@ -395,13 +395,13 @@ mod tests {
         // portrait: refused for the landscape-only sets (failed inside C-RADIO), taken from 2.0.0-onnx.3 on
         // loop: NOT-WORTH — a few test shapes
         for (sh, sw) in [(384, 256), (1280, 768), (1920, 1152), (3840, 2176)] {
-            assert_eq!(model_shape_supported(sh, sw, sw, sh, false).unwrap_err().code, "input", "{sh}x{sw}");
+            assert_eq!(model_shape_supported(sh, sw, sw, sh, false).unwrap_err().code.as_str(), "input", "{sh}x{sw}");
             assert_eq!(model_shape_supported(sh, sw, sw, sh, true), Ok(()), "{sh}x{sw}");
         }
         // a 128 px side failed in stage 1 with every set, onnx.3 included
         // loop: NOT-WORTH — a few test shapes
         for (sh, sw) in [(384, 128), (128, 384), (128, 128)] {
-            assert_eq!(model_shape_supported(sh, sw, sw, sh, true).unwrap_err().code, "input", "{sh}x{sw}");
+            assert_eq!(model_shape_supported(sh, sw, sw, sh, true).unwrap_err().code.as_str(), "input", "{sh}x{sw}");
         }
     }
 

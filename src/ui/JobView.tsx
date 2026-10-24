@@ -123,6 +123,8 @@ function errorTitle(code: string | undefined): string {
       return "Model files are missing";
     case "no-gpu":
       return "No supported graphics card found";
+    case "output":
+      return "The results couldn't be written";
     default:
       return "The job failed";
   }

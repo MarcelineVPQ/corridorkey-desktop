@@ -102,7 +102,7 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
 ← {"type":"log","id":"j1","text":"    Hann stage1: chunk=24, stride=12, ..."}
 ← {"type":"result","id":"j1","outputs":["/clips/out_shot/shot_alpha.mp4",...],
    "settings_file":"/clips/out_shot/shot_settings.txt","seconds":312.4}
-← {"type":"error","id":"j1","code":"oom|input|assets|no-gpu|cancelled|engine","message":"..."}
+← {"type":"error","id":"j1","code":"oom|input|assets|no-gpu|cancelled|output|engine|bad-request","message":"..."}
 ```
 
 - `progress.p` is the stage's own fraction when the stage reports one (stage-1
@@ -130,6 +130,9 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
   `{"type":"error","code":"bad-request","message":"..."}` and the engine keeps
   running. After a job's `error` the engine also keeps running and takes the
   next job.
+- `output` (Rust engine, additive): the results or the job's temporary files can't be
+  written: the folder isn't writable, the drive is read-only or its disk is full (the
+  message says which). Before, these were `engine`.
 - Rust engine: a request line that isn't UTF-8 text, a `cancel` without an `id`, a
   `run` option outside its documented range (`hint_quality`, `carry_hint_quality`,
   `despill_strength`: 0–1) or a number that isn't finite (`"nan"`, `"inf"`) is a

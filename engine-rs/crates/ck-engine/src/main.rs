@@ -79,15 +79,15 @@ fn main() {
     let rt = match Runtime::init(ort_lib.as_deref(), &device) {
         Ok(rt) => rt,
         Err(e) => {
-            eprintln!("engine failed to start: {e}");
-            out.send(json!({"type": "error", "code": "engine", "message": format!("engine failed to start: {e}")}));
+            eprintln!("engine failed to start: {}", e.message);
+            out.send(json!({"type": "error", "code": "engine", "message": format!("engine failed to start: {}", e.message)}));
             std::process::exit(1);
         }
     };
     let set = match ModelSet::open(&PathBuf::from(&models)) {
         Ok(s) => s,
         Err(e) => {
-            out.send(json!({"type": "error", "code": "engine", "message": format!("engine failed to start: {e}")}));
+            out.send(json!({"type": "error", "code": "engine", "message": format!("engine failed to start: {}", e.message)}));
             std::process::exit(1);
         }
     };
