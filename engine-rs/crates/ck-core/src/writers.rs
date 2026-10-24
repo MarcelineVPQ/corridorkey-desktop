@@ -1,5 +1,6 @@
 //! The output writers (video_io.ThreadedVideoWriter, ExrSequenceWriter): each encodes on its own thread with
 //! a queue of at most 2 batches. Same ffmpeg commands, codecs, pixel formats and file names as the runtime.
+use crate::clip::FrameNumbers;
 use crate::Error;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -359,7 +360,8 @@ pub(crate) fn write_exr(path: &Path, w: usize, h: usize, channels: usize, nhwc: 
 }
 
 impl ExrWriter {
-    pub(crate) fn new(dir: &Path, w: usize, h: usize, channels: usize, ty: ExrType, frame_name: &str) -> Result<ExrWriter, Error> {
+    /// Frames are named `<frame_name>.<number>.exr` with the job's frame numbers (clip.rs FrameNumbers).
+    pub(crate) fn new(dir: &Path, w: usize, h: usize, channels: usize, ty: ExrType, frame_name: &str, numbers: Arc<FrameNumbers>) -> Result<ExrWriter, Error> {
         std::fs::create_dir_all(dir).map_err(|e| Error::write("the output folder", dir, &e))?;
         let (tx, rx) = sync_channel::<(usize, usize, Vec<f32>)>(2);
         let err: Shared = Arc::new(Mutex::new(None));
@@ -371,7 +373,11 @@ impl ExrWriter {
                 let len = w * h * channels;
                 // loop: HOT-PATH-OK — the frames of one batch (1 at the default batch size)
                 for j in 0..n {
-                    let p = d2.join(format!("{name}_{:06}.exr", idx0 + j));
+                    let Some(file) = numbers.file_name(&name, idx0 + j) else {
+                        *e2.lock().unwrap() = Some(Error::engine(format!("EXR write failed: frame {} has no frame number", idx0 + j)));
+                        return;
+                    };
+                    let p = d2.join(file);
                     if let Err(e) = write_exr(&p, w, h, channels, &data[j * len..(j + 1) * len], ty) {
                         *e2.lock().unwrap() = Some(Error { message: format!("EXR write failed: {}", e.message), ..e });
                         return;
@@ -505,6 +511,23 @@ mod tests {
         }
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(tags, vec!["bt709,iec61966-2-1,bt709", "bt709,linear,bt709"]);
+    }
+
+    #[test]
+    fn exr_frames_carry_the_source_numbers() {
+        // a plate's frames 65, 66, 67 (04_5d_00065.exr ...): the outputs keep them, name.NNNNN.exr (backlog row 30 a)
+        let dir = std::env::temp_dir().join(format!("ck-exr-names-{}", std::process::id()));
+        let src = crate::clip::Source::Frames((65..68).map(|i| PathBuf::from(format!("/p/04_5d_{i:05}.exr"))).collect());
+        let numbers = Arc::new(FrameNumbers::for_source(&src, 3));
+        let mut wr = ExrWriter::new(&dir, 2, 1, 1, ExrType::Half, "04_5d_alpha", numbers).unwrap();
+        wr.write_many(Batch::F32(vec![0.5; 2 * 2]), 2).unwrap();
+        wr.write_many(Batch::F32(vec![0.5; 2]), 1).unwrap();
+        wr.release().unwrap();
+        // loop: NOT-WORTH — three test files
+        let mut names: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(names, ["04_5d_alpha.00065.exr", "04_5d_alpha.00066.exr", "04_5d_alpha.00067.exr"]);
     }
 
     #[test]

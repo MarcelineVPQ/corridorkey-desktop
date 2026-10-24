@@ -349,8 +349,118 @@ pub(crate) fn probe_frame_dir(dir: &Path, num_frames: i64, fps: f64, exr_linear:
     Ok(ClipMeta::with_shape(Source::Frames(paths), fps, h, w, n, exr_linear))
 }
 
+/// The first frame number of a video's (or an unnumbered folder's) EXR sequence: the VFX convention.
+pub(crate) const FIRST_FRAME: u64 = 1001;
+
+/// How a job's EXR frames are numbered (backlog row 30 a): `<stem>.<number>.exr`, the number zero-padded to `width`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FrameNumbers {
+    /// one per output frame, in order
+    pub numbers: Vec<u64>,
+    /// the zero padding (at least 4)
+    pub width: usize,
+    /// the numbers are the input frames' own
+    pub from_source: bool,
+    /// why a frame folder's own numbers weren't used (None: they were, or the input is a video)
+    pub fallback: Option<String>,
+}
+
+/// The trailing run of digits of a file's stem ("04_5d_00065.exr" -> "00065"), if there is one.
+fn trailing_digits(p: &Path) -> Option<&str> {
+    let stem = p.file_stem()?.to_str()?;
+    let start = stem.len() - stem.bytes().rev().take_while(|c| c.is_ascii_digit()).count();
+    (start < stem.len()).then(|| &stem[start..])
+}
+
+impl FrameNumbers {
+    /// A frame folder keeps its frames' own numbers (the trailing digits of each stem) and their padding (at
+    /// least 4); a video, or a folder where any frame has no number or the numbers don't strictly increase, counts
+    /// from FIRST_FRAME for the whole job.
+    pub fn for_source(source: &Source, n: usize) -> FrameNumbers {
+        let paths = match source {
+            Source::Frames(p) => p,
+            Source::Video(_) => return FrameNumbers::counted(n, None),
+        };
+        let mut numbers = Vec::with_capacity(paths.len());
+        let mut width = 4;
+        // loop: NOT-WORTH — one pass over the folder's names, once per job
+        for p in paths.iter().take(n) {
+            let name = p.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+            // more than 18 digits don't fit a u64's 19: no number (the fallback) rather than a wrapped one
+            let Some(num) = trailing_digits(p).filter(|d| d.len() <= 18).and_then(|d| d.parse::<u64>().ok().map(|v| (v, d.len()))) else {
+                return FrameNumbers::counted(n, Some(format!("{name} has no frame number")));
+            };
+            if let Some(&last) = numbers.last() {
+                if num.0 <= last {
+                    return FrameNumbers::counted(n, Some(format!("the frame numbers don't increase ({name} after {last})")));
+                }
+            }
+            numbers.push(num.0);
+            width = width.max(num.1);
+        }
+        FrameNumbers { numbers, width, from_source: true, fallback: None }
+    }
+
+    /// FIRST_FRAME + index, padded to 4 (wider when the last number needs it).
+    fn counted(n: usize, fallback: Option<String>) -> FrameNumbers {
+        // loop: NOT-WORTH — one number per frame, once per job
+        let numbers: Vec<u64> = (0..n as u64).map(|i| FIRST_FRAME + i).collect();
+        let width = numbers.last().map(|v| v.to_string().len()).unwrap_or(4).max(4);
+        FrameNumbers { numbers, width, from_source: false, fallback }
+    }
+
+    /// The file name of output frame `i`: `<stem>.<number>.exr` (None past the clip's frames).
+    pub fn file_name(&self, stem: &str, i: usize) -> Option<String> {
+        self.numbers.get(i).map(|v| format!("{stem}.{v:0w$}.exr", w = self.width))
+    }
+
+    /// The range in words, for `_settings.txt` and the log: "source (65-184)" or "1001-1120".
+    pub fn describe(&self) -> String {
+        let range = match (self.numbers.first(), self.numbers.last()) {
+            (Some(a), Some(b)) => format!("{a}-{b}"),
+            _ => "none".into(),
+        };
+        if self.from_source {
+            format!("source ({range})")
+        } else {
+            range
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn exr_frame_numbers() {
+        let frames = |names: &[&str]| Source::Frames(names.iter().map(|n| PathBuf::from(format!("/plates/04_5d/{n}"))).collect());
+        // a folder's own numbers and padding
+        let f = FrameNumbers::for_source(&frames(&["04_5d_00065.exr", "04_5d_00066.exr", "04_5d_00184.exr"]), 3);
+        assert_eq!((f.numbers.clone(), f.width, f.from_source, f.fallback.clone()), (vec![65, 66, 184], 5, true, None));
+        assert_eq!(f.file_name("04_5d_alpha", 0).unwrap(), "04_5d_alpha.00065.exr");
+        assert_eq!(f.describe(), "source (65-184)");
+        // padding at least 4; plate.1001.exr style names; unpadded names get one width
+        let f = FrameNumbers::for_source(&frames(&["plate.1001.exr", "plate.1002.exr"]), 2);
+        assert_eq!((f.file_name("plate_alpha", 1).unwrap(), f.from_source), ("plate_alpha.1002.exr".to_string(), true));
+        let f = FrameNumbers::for_source(&frames(&["f_9.png", "f_10.png", "f_12000.png"]), 3);
+        assert_eq!((f.width, f.file_name("x", 0).unwrap(), f.file_name("x", 2).unwrap()), (5, "x.00009.exr".to_string(), "x.12000.exr".to_string()));
+        // num_frames: only the job's frames
+        assert_eq!(FrameNumbers::for_source(&frames(&["a_0007.png", "a_0008.png", "b.png"]), 2).numbers, vec![7, 8]);
+        // a frame without a number, or numbers that don't strictly increase: 1001+ for the whole job, with the reason
+        let f = FrameNumbers::for_source(&frames(&["a_0001.png", "a_0002b.png"]), 2);
+        assert_eq!((f.numbers.clone(), f.width, f.from_source), (vec![1001, 1002], 4, false));
+        assert_eq!(f.fallback.as_deref(), Some("a_0002b.png has no frame number"));
+        let f = FrameNumbers::for_source(&frames(&["a_10.png", "b_010.png"]), 2);
+        assert_eq!((f.numbers.clone(), f.fallback.as_deref()), (vec![1001, 1002], Some("the frame numbers don't increase (b_010.png after 10)")));
+        assert!(FrameNumbers::for_source(&frames(&["a_1234567890123456789.png"]), 1).fallback.is_some());
+        // a video: 1001 + index, padding 4, wider when the count needs it
+        let v = FrameNumbers::for_source(&Source::Video(PathBuf::from("/c/a.mp4")), 120);
+        assert_eq!((v.numbers[0], v.numbers[119], v.width, v.from_source, v.fallback.clone()), (1001, 1120, 4, false, None));
+        assert_eq!((v.file_name("a_fg", 0).unwrap(), v.describe()), ("a_fg.1001.exr".to_string(), "1001-1120".to_string()));
+        let v = FrameNumbers::for_source(&Source::Video(PathBuf::from("/c/a.mp4")), 9000);
+        assert_eq!((v.width, v.file_name("a", 8999).unwrap()), (5, "a.10000.exr".to_string()));
+        assert_eq!(v.file_name("a", 9000), None);
+    }
 
     #[test]
     fn bit_depth_from_ffprobe() {

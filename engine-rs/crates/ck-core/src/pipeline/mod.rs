@@ -566,6 +566,14 @@ impl Pipeline<OrtLoader> {
         let (h, w) = (meta.h, meta.w);
         let fps = meta.fps;
         let mut writers: Vec<(String, Box<dyn Writer>)> = Vec::new();
+        // EXR frames carry the source's frame numbers (a frame folder's own, else 1001 + index; backlog row 30 a)
+        let exr_numbers = job.exr.then(|| std::sync::Arc::new(crate::clip::FrameNumbers::for_source(&meta.source, meta.num_frames)));
+        if let Some(n) = &exr_numbers {
+            match &n.fallback {
+                Some(why) => sink.log(&format!("  EXR frame numbers: {} ({why}: numbered from 1001 instead)", n.describe())),
+                None => sink.log(&format!("  EXR frame numbers: {}", n.describe())),
+            }
+        }
         // loop: NOT-WORTH — at most four outputs
         for name in &job.outputs {
             let sfx = suffix(name, job.despill_strength);
@@ -578,7 +586,8 @@ impl Pipeline<OrtLoader> {
                     3
                 };
                 let ty = if job.exr_float { ExrType::Float } else { ExrType::Half };
-                Box::new(ExrWriter::new(&job.output_dir.join(format!("{clip}_{sfx}_exr")), w, h, ch, ty, &sfx)?)
+                let numbers = exr_numbers.clone().ok_or_else(|| Error::engine("EXR frame numbers missing".into()))?;
+                Box::new(ExrWriter::new(&job.output_dir.join(format!("{clip}_{sfx}_exr")), w, h, ch, ty, &format!("{clip}_{sfx}"), numbers)?)
             } else {
                 let ext = if name == "cutout" { "mov" } else { "mp4" };
                 let ch = if name == "cutout" { 4 } else { 3 };
@@ -611,6 +620,7 @@ impl Pipeline<OrtLoader> {
                 low_vram,
                 num_frames: job.num_frames,
                 decoders: &decoders,
+                exr_frames: exr_numbers.as_ref().map(|n| n.describe()),
             });
             if let Err(e) = std::fs::write(&settings_path, text) {
                 sink.log(&format!("[WARNING] Failed to write settings file: {e}"));

@@ -60,6 +60,8 @@ pub(crate) struct SettingsLog<'a> {
     pub(crate) num_frames: i64,
     /// the decoders the frames are read with (additive lines at the end)
     pub(crate) decoders: &'a crate::decode::Decoders,
+    /// EXR jobs: how the frames are numbered (clip.rs FrameNumbers::describe; an additive line at the end)
+    pub(crate) exr_frames: Option<String>,
 }
 
 pub(crate) fn settings_text(s: &SettingsLog) -> String {
@@ -100,12 +102,48 @@ pub(crate) fn settings_text(s: &SettingsLog) -> String {
     t.push_str(&format!("JPEG Decoder: {}\n", s.decoders.jpeg));
     t.push_str(&format!("FFmpeg: {}\n", s.decoders.ffmpeg));
     t.push_str(&format!("FFprobe: {}\n", s.decoders.ffprobe));
+    if let Some(f) = &s.exr_frames {
+        t.push_str(&format!("EXR Frame Numbers: {f}\n"));
+    }
     t
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exr_frame_numbers_line() {
+        let d = crate::decode::Decoders { jpeg: "j".into(), ffmpeg: "8.0".into(), ffprobe: "8.0".into() };
+        let log = |exr_frames: Option<String>| {
+            settings_text(&SettingsLog {
+                input: "/c/a",
+                output_dir: "/o",
+                w: 8,
+                h: 8,
+                fps: 24.0,
+                outputs: &["alpha".to_string()],
+                output_format: "exr",
+                exr_dtype: "half",
+                hint_first_frame: None,
+                hint_video: None,
+                hint_quality: 0.95,
+                carry_hint: true,
+                carry_hint_quality: 0.95,
+                despill_strength: 0.5,
+                cutout_linear: false,
+                frame_dir_linear: false,
+                hann_chunk: 4,
+                hann_stride: 2,
+                low_vram: false,
+                num_frames: -1,
+                decoders: &d,
+                exr_frames,
+            })
+        };
+        assert!(log(Some("source (65-184)".into())).ends_with("FFprobe: 8.0\nEXR Frame Numbers: source (65-184)\n"));
+        assert!(log(None).ends_with("FFprobe: 8.0\n"));
+    }
 
     #[test]
     fn python_float_repr() {

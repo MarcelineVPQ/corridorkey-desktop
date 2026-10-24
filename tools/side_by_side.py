@@ -21,6 +21,7 @@ Needs numpy, OpenCV (with OPENCV_IO_ENABLE_OPENEXR, set here) and ffmpeg.
 import argparse
 import glob
 import os
+import re
 import subprocess
 import sys
 
@@ -56,8 +57,16 @@ def video_frame(path, n):
     return np.frombuffer(raw, np.uint16).reshape(h, w, 3).astype(np.float64) / 65535.0
 
 
+def frame_key(path):
+    """Frame order: the trailing number of the name (clip_alpha.0065.exr, alpha_000000.exr), compared as a number,
+    so names with different zero padding still sort in frame order."""
+    m = re.search(r"(\d+)\D*$", os.path.basename(path))
+    return (int(m.group(1)) if m else -1, path)
+
+
 def exr_frame(folder, n):
-    files = sorted(glob.glob(os.path.join(glob.escape(folder), "*.exr")))
+    # loop: NOT-WORTH — sorts one folder's names once per frame asked for
+    files = sorted(glob.glob(os.path.join(glob.escape(folder), "*.exr")), key=frame_key)
     if n >= len(files):
         raise SystemExit(f"{folder}: frame {n} not found ({len(files)} frames)")
     img = cv2.imread(files[n], cv2.IMREAD_UNCHANGED)
