@@ -9,8 +9,8 @@
 import { gbBytes } from "../../src/shared/units";
 import { DOWNLOADS_DIR, LIBRARY_FILE, MODELS_DIR, PLATFORM, RUNTIME_DIR } from "./platform";
 import { REPO } from "./updateFeed";
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statfsSync } from "node:fs";
-import { join } from "node:path";
+import { constants, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statfsSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { downloadVerified, type FetchFn } from "./download";
 import { unzip } from "./unzip";
 
@@ -215,8 +215,10 @@ export function systemSupport(platform: NodeJS.Platform, arch: string, exists: (
 
 /** What to keep from a wheel: ONNX Runtime's libraries, NVIDIA's libraries, and every licence file. */
 export function keepFromWheel(name: string): boolean {
-  if (/^onnxruntime\/capi\/libonnxruntime(\.so\.|_providers_(cuda|shared)\.so$)/.test(name)) return true;
-  // Windows: the DLLs (the TensorRT provider stays out, as on Linux)
+  // Linux also keeps ONNX Runtime's TensorRT provider (1 MB, in the wheel already downloaded): the opt-in TensorRT
+  // install then needs only NVIDIA's TensorRT libraries and the TensorRT models (installs from before 1.0 fetch it then)
+  if (/^onnxruntime\/capi\/libonnxruntime(\.so\.|_providers_(cuda|shared|tensorrt)\.so$)/.test(name)) return true;
+  // Windows: the DLLs (the TensorRT provider stays out: TensorRT is Linux-only in 1.0)
   if (/^onnxruntime\/capi\/onnxruntime(_providers_(cuda|shared))?\.dll$/.test(name)) return true;
   if (/^nvidia\/[^/]+\/bin\/(x86_64\/)?[^/]+\.dll$/.test(name)) return true;
   // the package's metadata: the Engine page reads ONNX Runtime's version from its dist-info folder on Windows
@@ -233,8 +235,11 @@ export function keepFromWheel(name: string): boolean {
 
 // the model set, and this repository's release that holds it (models-<set>)
 const MODEL_SET = "2.0.0-onnx.3";
-const RELEASE = `https://github.com/${REPO}/releases/download/models-${MODEL_SET}`;
-const model = (file: string, size: number, sha256: string): Download => ({ file, url: `${RELEASE}/${file}`, size, sha256 });
+const release = (set: string) => `https://github.com/${REPO}/releases/download/models-${set}`;
+const inRelease =
+  (set: string) =>
+  (file: string, size: number, sha256: string): Download => ({ file, url: `${release(set)}/${file}`, size, sha256 });
+const model = inRelease(MODEL_SET);
 export const MODELS = {
   name: MODEL_SET,
   files: [
@@ -293,6 +298,28 @@ export function freeBytes(dir: string): number | null {
   }
 }
 
+/**
+ * One verified, resumable download at a time, counted into one progress number of `bytes` (`counted` false: a file
+ * already on this disk, checked offline, which the plan didn't count as a download).
+ */
+function fetcher(deps: InstallDeps, bytes: number, downloads: string) {
+  let done = 0;
+  const fetchOne = async (d: Download, step: string, path = join(downloads, d.file), counted = true) => {
+    // loop: SERIAL-REQUIRED — one file at a time: the line is the limit, and progress stays one honest number
+    await downloadVerified(
+      deps.fetch,
+      { url: d.url, size: d.size, sha256: d.sha256, source: "the app's list" },
+      path,
+      (got) => counted && deps.progress(done + got, bytes, step),
+      deps.abort,
+      undefined,
+      { resume: true },
+    );
+    if (counted) done += d.size;
+  };
+  return { fetchOne, done: () => done };
+}
+
 /** Download and unpack whatever is missing. Resumable: run it again after a stop or a failure. */
 // loop: NOT-WORTH — a few rmSync / mkdir / rename calls per install (local disk)
 export async function runInstall(data: string, deps: InstallDeps, c: Catalog = CATALOG): Promise<void> {
@@ -309,15 +336,8 @@ export async function runInstall(data: string, deps: InstallDeps, c: Catalog = C
   const downloads = join(data, DOWNLOADS_DIR);
   // loop: NOT-WORTH — one mkdir per install
   mkdirSync(downloads, { recursive: true });
-  let done = 0;
   // a model file downloads straight into the set's .partial folder, so a stopped install keeps the checked ones
-  const fetchOne = async (d: Download, step: string, path = join(downloads, d.file)) => {
-    // loop: SERIAL-REQUIRED — one file at a time: the line is the limit, and progress stays one honest number
-    await downloadVerified(deps.fetch, { url: d.url, size: d.size, sha256: d.sha256, source: "the app's list" }, path, (got) => deps.progress(done + got, need.bytes, step), deps.abort, undefined, {
-      resume: true,
-    });
-    done += d.size;
-  };
+  const { fetchOne, done } = fetcher(deps, need.bytes, downloads);
 
   if (need.runtime) {
     const partial = join(data, RUNTIME_DIR, `.partial-${RUNTIME.name}`);
@@ -327,7 +347,7 @@ export async function runInstall(data: string, deps: InstallDeps, c: Catalog = C
     for (const w of RUNTIME.wheels) {
       const label = w.label ?? w.file;
       await fetchOne(w, `Downloading ${label}`);
-      deps.progress(done, need.bytes, `Unpacking ${label}`);
+      deps.progress(done(), need.bytes, `Unpacking ${label}`);
       // loop: SERIAL-REQUIRED — unpacks one wheel [bounded: its size]
       const unpacked = await unzip(join(downloads, w.file), partial, keepFromWheel, deps.abort);
       // licence files alone don't count: a wheel must give at least one library
@@ -353,4 +373,284 @@ export async function runInstall(data: string, deps: InstallDeps, c: Catalog = C
   }
   // loop: NOT-WORTH — one readdir of the (now empty) downloads folder
   if (readdirSync(downloads).length === 0) rmSync(downloads, { recursive: true, force: true });
+}
+
+// TensorRT (opt-in, Linux only in 1.0; docs/ENGINE_RUST.md "TensorRT"): three parts, each put where the engine
+// already looks, so the engine needs no new setting:
+//   libraries: NVIDIA's tensorrt-cu13-libs wheel (pypi.nvidia.com), only what ck-trt-build and ONNX Runtime's
+//     TensorRT provider load, as <runtime>/tensorrt_libs (engine.ts rustEngineEnv puts it on LD_LIBRARY_PATH);
+//   provider: libonnxruntime_providers_tensorrt.so next to libonnxruntime (the runtime install keeps it since 1.0;
+//     a runtime installed before that gets it from the ONNX Runtime wheel again);
+//   models: the TensorRT-ready set (release models-2.0.0-onnx.3-trt) in the normal set's folder, its models.json keys
+//     merged into the set's: the engine finds TensorRT files only through its one --models folder's models.json
+//     (engine-rs runtime.rs ModelSet::trt_file / trt_stub). The set's own models.json stays as models-tensorrt.json:
+//     the list of what is TensorRT's (Storage removes exactly that) and the mark that the set is whole (written last).
+export const TRT_PROVIDER = "libonnxruntime_providers_tensorrt.so";
+export const TRT_LIBS_DIR = "tensorrt_libs";
+export const TRT_MODELS_LIST = "models-tensorrt.json";
+/** The wheel's licence folder, kept next to the libraries. */
+export const TRT_DIST_INFO = /^tensorrt_cu\d+_libs-[\d.]+\.dist-info$/;
+const TRT_MODEL_SET = "2.0.0-onnx.3-trt";
+const trtModel = inRelease(TRT_MODEL_SET);
+export const TENSORRT = {
+  libs: {
+    label: "NVIDIA TensorRT",
+    file: "tensorrt_cu13_libs-10.16.1.11-py3-none-manylinux_2_28_x86_64.whl",
+    url: "https://pypi.nvidia.com/tensorrt-cu13-libs/tensorrt_cu13_libs-10.16.1.11-py3-none-manylinux_2_28_x86_64.whl",
+    size: 3728705565,
+    sha256: "91142c8ab3c58bed213cf1a563a6eb4e4f0ac529d05b5f909073acece0e3b712",
+  } as Download,
+  models: {
+    name: TRT_MODEL_SET,
+    files: [
+      trtModel("ck2-cradio-trt-fp16-ctx.onnx", 600, "6276830bfeaa0226819f27064eb22c29e1fdad6ae5e4b16d2ed7daa4347b8cb9"),
+      trtModel("ck2-cradio-trt-fp16.onnx", 742927, "1e6acbb7e9bd5f5fffe19fab97fbb5df3e9627b7082b4b7846b239f77ecfbe7a"),
+      // the same bytes as the normal set's ck2-cradio-fp16.onnx.data: copied from it, not downloaded (localTwin)
+      trtModel("ck2-cradio-trt-fp16.onnx.data", 1724414688, "8f76c92ddf779b70745fc985820e7e312f7eb07ec82b4e20119062798f952b9f"),
+      trtModel("ck2-moge-trt-fp16-ctx.onnx", 598, "66a27beb74a7141af4e847827df84aac8fe7ea0eee5d9a91e888dc89f4fb2325"),
+      trtModel("ck2-moge-trt-fp16.onnx", 758942, "f829f950d01b66a0f85bbe0b61eebfbd2785934cac1707ad383c39fc40057338"),
+      trtModel("ck2-moge-trt-fp16.onnx.data", 348664320, "594e001b6fedc6fde1f43f654c4f317f4f2392b59d65bb8be3593852d7a31450"),
+      trtModel("ck2-rvm-trt-fp16-ctx.onnx", 994, "754658db43823a5175cde0873bfcd2b249aec89c4918298fd26ab3a63c14852c"),
+      trtModel("ck2-rvm-trt-fp16.onnx", 844775, "b84a19f10febb5a8e84dc379a23b6749104b79fef0dda944cba625a72af18135"),
+      trtModel("ck2-rvm-trt-fp16.onnx.data", 132768256, "e03b51246f2ec801857f0611b6421da7a521b7a3bcc768a97e0c7388d2d1aa67"),
+      trtModel("ck2-stage1-trt-fp16-ctx.onnx", 1785, "5b27c10f7ae9493f228e40adeee57a83b21c5c40b4903dfe659f7130572848a9"),
+      trtModel("ck2-stage1-trt-fp16.onnx", 4140214, "530047e1e485b434317cdb1121b041df4ba886f68d63391225251dda8f5d9414"),
+      trtModel("ck2-stage1-trt-fp16.onnx.data", 1843256576, "9a7ec9640197594da2da1128bea93b1d0342bac47fc17db7d9485bf794d6205f"),
+      trtModel("ck2-stage2-trt-fp16-ctx.onnx", 843, "2eb0af9f07b7e7a380efcedc98cc314fa13162d51f3b9c17234c39ff9d9ac381"),
+      trtModel("ck2-stage2-trt-fp16.onnx", 1992893, "5f36395d344f88fa71d37afdd6445a9f7aa538ce8746b06b696b469578abab96"),
+      trtModel("ck2-stage2-trt-fp16.onnx.data", 804806144, "280baab4bf70bd4398b8f257c85ce0e8b85fbd21c22bdcfe4c29690d6378212b"),
+      // last: it becomes models-tensorrt.json once every file is in place (TRT_MODELS_LIST)
+      trtModel("models.json", 476, "c5d65827ad8043fd67915d9cc37ff2110c559ce60450da86742de8c81eb74643"),
+    ],
+  },
+};
+
+/**
+ * What to keep from NVIDIA's TensorRT wheel: the runtime (libnvinfer), the ONNX parser and the plugins, the builder's
+ * kernels for Linux (Turing sm75 to Blackwell sm120, PTX for newer cards; the win_ ones only build Windows engines),
+ * and the licence: 2.6 GB of the wheel's 4.4 GB.
+ */
+export function keepTensorrt(name: string): boolean {
+  if (/^tensorrt_libs\/lib(nvinfer|nvinfer_plugin|nvonnxparser)\.so\.\d+$/.test(name)) return true;
+  if (/^tensorrt_libs\/libnvinfer_builder_resource_(ptx|sm\d+)\.so\.[\d.]+$/.test(name)) return true;
+  return /^tensorrt_cu\d+_libs-[\d.]+\.dist-info\/LICENSE[^/]*$/.test(name);
+}
+
+/** What the TensorRT install puts on top of an installed runtime and model set (tests pass a small one). */
+export interface TrtCatalog extends Catalog {
+  libs: Download;
+  trtModels: { name: string; files: Download[] };
+}
+const TRT_CATALOG: TrtCatalog = { ...CATALOG, libs: TENSORRT.libs, trtModels: TENSORRT.models };
+
+/** Where the TensorRT parts go: into the installed runtime and model set. */
+export function trtPaths(data: string, c: Catalog = TRT_CATALOG) {
+  const runtime = join(data, RUNTIME_DIR, c.runtime.name);
+  const models = join(data, MODELS_DIR, c.models.name);
+  return { runtime, libs: join(runtime, TRT_LIBS_DIR), provider: join(runtime, "onnxruntime", "capi", TRT_PROVIDER), models, list: join(models, TRT_MODELS_LIST) };
+}
+
+/** A TensorRT file the normal set already has (C-RADIO's weights are the same bytes): copied, not downloaded. */
+function localTwin(f: Download, c: Catalog): Download | undefined {
+  // loop: NOT-WORTH — a dozen model files, once per plan
+  return c.models.files.find((m) => m.sha256 === f.sha256 && m.size === f.size);
+}
+
+/** The ONNX Runtime wheel, which holds the TensorRT provider. */
+function ortWheel(c: Catalog): Download {
+  // loop: NOT-WORTH — eight wheels, once per plan
+  const w = c.runtime.wheels.find((x) => /^onnxruntime/.test(x.file));
+  if (!w) throw new Error("this system's runtime has no ONNX Runtime wheel");
+  return w;
+}
+
+export interface TrtNeeds {
+  libs: boolean;
+  provider: boolean;
+  models: boolean;
+  // what is still to download (files the normal set already has are copied, not counted)
+  bytes: number;
+}
+
+/** What the TensorRT install still has to do (each part is there once its last step ran). */
+export function trtNeeds(data: string, exists: (p: string) => boolean = existsSync, c: TrtCatalog = TRT_CATALOG): TrtNeeds {
+  const p = trtPaths(data, c);
+  const libs = !exists(p.libs);
+  const provider = !exists(p.provider);
+  const models = !exists(p.list);
+  const copied = (f: Download) => {
+    const twin = localTwin(f, c);
+    return !!twin && exists(join(p.models, twin.file));
+  };
+  // loop: NOT-WORTH — sixteen model files, once per plan
+  const modelBytes = total(c.trtModels.files.filter((f) => !copied(f)));
+  return { libs, provider, models, bytes: (libs ? c.libs.size : 0) + (provider ? ortWheel(c).size : 0) + (models ? modelBytes : 0) };
+}
+
+// loop: NOT-WORTH — sixteen model files, once at load
+const TRT_MODEL_DOWNLOAD = TENSORRT.models.files.filter((f) => !localTwin(f, CATALOG));
+/** The TensorRT download on top of a 1.0 runtime and model set (what the setting's hint names). */
+export const TRT_BYTES = TENSORRT.libs.size + total(TRT_MODEL_DOWNLOAD);
+
+/**
+ * The TensorRT parts are there for the files the engine runs with (its ONNX Runtime library and models folder): only
+ * then does a job ask for TensorRT.
+ */
+export function trtReady(ort: string | null, models: string | null, exists: (p: string) => boolean = existsSync): boolean {
+  if (!ort || !models) return false;
+  const capi = dirname(ort);
+  // loop: NOT-WORTH — three stats per check
+  return exists(join(capi, TRT_PROVIDER)) && exists(join(dirname(dirname(capi)), TRT_LIBS_DIR)) && exists(join(models, TRT_MODELS_LIST));
+}
+
+/** TensorRT in 1.0: Linux (Windows needs its own engine builder, later; macOS has no TensorRT). */
+export const trtSupported = (platform: NodeJS.Platform) => platform === "linux";
+
+/** Whether a job asks the engine for TensorRT: Linux, the setting on, the Rust engine (never PyTorch), its parts installed. */
+export function useTensorrt(s: { platform: NodeJS.Platform; setting: boolean; engine: "rust" | "python" | null; ready: boolean }): boolean {
+  return trtSupported(s.platform) && s.setting && s.engine === "rust" && s.ready;
+}
+
+/** models.json as the engine reads it: {"<precision or tensorrt-…>": {"<network>": "<file>"}}. */
+type ModelsJson = Record<string, Record<string, string>>;
+// loop: NOT-WORTH — reads one small models.json per install / removal
+const readJson = (p: string): ModelsJson => JSON.parse(readFileSync(p, "utf8")) as ModelsJson;
+/** Write a file whole or not at all (temp file + rename). */
+function writeAtomic(p: string, text: string): void {
+  // loop: NOT-WORTH — one small file written once per install / removal
+  writeFileSync(`${p}.tmp`, text);
+  // loop: NOT-WORTH — one rename, as above
+  renameSync(`${p}.tmp`, p);
+}
+
+/** Download and put in place whatever TensorRT part is missing. Resumable, as runInstall. */
+export async function runTrtInstall(data: string, deps: InstallDeps, c: TrtCatalog = TRT_CATALOG): Promise<void> {
+  const p = trtPaths(data, c);
+  // loop: NOT-WORTH — two stats per install start
+  if (!existsSync(p.runtime) || !existsSync(p.models)) throw new Error("install the GPU runtime and the CorridorKey models first");
+  const need = trtNeeds(data, existsSync, c);
+  // room: the wheel and its kept libraries side by side (2.6 of 3.7 GB), the ONNX Runtime wheel, the models (copies included)
+  const room = deps.freeBytes(data);
+  const needRoom = (need.libs ? c.libs.size * 1.8 : 0) + (need.provider ? ortWheel(c).size : 0) + (need.models ? total(c.trtModels.files) : 0);
+  if (room !== null && room < needRoom) throw new Error(`not enough free disk space: it needs ${gbBytes(needRoom)} in ${data}, ${gbBytes(room)} is free`);
+  const downloads = join(data, DOWNLOADS_DIR);
+  // loop: NOT-WORTH — one mkdir per install
+  mkdirSync(downloads, { recursive: true });
+  const { fetchOne, done } = fetcher(deps, need.bytes, downloads);
+
+  if (need.libs) {
+    const partial = join(p.runtime, `.partial-${TRT_LIBS_DIR}`);
+    // loop: NOT-WORTH — clears a half-unpacked TensorRT once per install
+    rmSync(partial, { recursive: true, force: true });
+    await fetchOne(c.libs, `Downloading ${c.libs.label}`);
+    deps.progress(done(), need.bytes, `Unpacking ${c.libs.label}`);
+    // loop: SERIAL-REQUIRED — unpacks one wheel [bounded: its size]
+    const unpacked = await unzip(join(downloads, c.libs.file), partial, keepTensorrt, deps.abort);
+    // loop: NOT-WORTH — the few names the wheel unpacked
+    if (!unpacked.some((n) => /^tensorrt_libs\/libnvinfer\.so\./.test(n))) throw new Error(`${c.libs.file} had none of the expected libraries`);
+    // the licence folder first, the libraries last: the folder's rename is the mark that they are in place
+    // loop: NOT-WORTH — the partial folder's two entries
+    for (const d of readdirSync(partial).filter((n) => TRT_DIST_INFO.test(n))) {
+      // loop: NOT-WORTH — one licence folder replaced
+      rmSync(join(p.runtime, d), { recursive: true, force: true });
+      // loop: NOT-WORTH — one rename
+      renameSync(join(partial, d), join(p.runtime, d));
+    }
+    // loop: NOT-WORTH — one rename: the libraries appear whole
+    renameSync(join(partial, TRT_LIBS_DIR), p.libs);
+    // loop: NOT-WORTH — removes the emptied partial folder
+    rmSync(partial, { recursive: true, force: true });
+  }
+  // loop: NOT-WORTH — one local unlink once the libraries are in place (also after a crash before it)
+  if (existsSync(p.libs)) rmSync(join(downloads, c.libs.file), { force: true });
+
+  if (need.provider) {
+    const w = ortWheel(c);
+    const partial = join(p.runtime, ".partial-tensorrt-provider");
+    // loop: NOT-WORTH — clears a half-unpacked provider once per install
+    rmSync(partial, { recursive: true, force: true });
+    await fetchOne(w, `Downloading ${w.label ?? w.file} (its TensorRT part)`);
+    // loop: SERIAL-REQUIRED — unpacks one file from the wheel [bounded: its size]
+    await unzip(join(downloads, w.file), partial, (n) => n === `onnxruntime/capi/${TRT_PROVIDER}`, deps.abort);
+    const got = join(partial, "onnxruntime", "capi", TRT_PROVIDER);
+    // loop: NOT-WORTH — one stat
+    if (!existsSync(got)) throw new Error(`${w.file} had no ${TRT_PROVIDER}`);
+    // loop: NOT-WORTH — one rename: the provider appears whole
+    renameSync(got, p.provider);
+    // loop: NOT-WORTH — removes the partial folder and the wheel (local unlinks)
+    rmSync(partial, { recursive: true, force: true });
+    // loop: NOT-WORTH — as above
+    rmSync(join(downloads, w.file), { force: true });
+  }
+
+  if (need.models) {
+    const partial = join(data, MODELS_DIR, `.partial-${c.trtModels.name}`);
+    // loop: NOT-WORTH — one mkdir per install
+    mkdirSync(partial, { recursive: true });
+    // loop: SERIAL-REQUIRED — one file at a time, see fetcher
+    for (const f of c.trtModels.files) {
+      const target = join(partial, f.file);
+      const twin = localTwin(f, c);
+      const twinPath = twin ? join(p.models, twin.file) : null;
+      // loop: NOT-WORTH — a few stats per model file
+      const fromTwin = !!twinPath && existsSync(twinPath);
+      // loop: NOT-WORTH — one stat per model file
+      if (!existsSync(target)) {
+        // a crash after the moves below left it in the set's folder already: taken back, and checked again
+        // loop: NOT-WORTH — one stat + rename per model file
+        if (f.file !== "models.json" && existsSync(join(p.models, f.file))) renameSync(join(p.models, f.file), target);
+        else if (fromTwin) {
+          deps.progress(done(), need.bytes, `Copying ${f.file} from the CorridorKey models`);
+          // loop: NOT-WORTH — one local copy (a reflink where the file system has them) [bounded: 1.7 GB]
+          copyFileSync(twinPath!, target, constants.COPYFILE_FICLONE);
+        }
+      }
+      await fetchOne(f, fromTwin ? `Checking ${f.file}` : `Downloading the TensorRT models (${f.file})`, target, !fromTwin);
+    }
+    // loop: NOT-WORTH — sixteen local renames, once per install
+    for (const f of c.trtModels.files) if (f.file !== "models.json") renameSync(join(partial, f.file), join(p.models, f.file));
+    // the set's models.json gains the TensorRT keys; the TensorRT list is written last (the mark that all is in place)
+    const merged = { ...readJson(join(p.models, "models.json")), ...readJson(join(partial, "models.json")) };
+    writeAtomic(join(p.models, "models.json"), JSON.stringify(merged, null, 2) + "\n");
+    // loop: NOT-WORTH — one rename: the TensorRT models count as installed from here
+    renameSync(join(partial, "models.json"), p.list);
+    // loop: NOT-WORTH — removes the emptied partial folder
+    rmSync(partial, { recursive: true, force: true });
+  }
+  // loop: NOT-WORTH — one readdir of the (now empty) downloads folder
+  if (readdirSync(downloads).length === 0) rmSync(downloads, { recursive: true, force: true });
+}
+
+/**
+ * Remove the TensorRT parts (App settings, Storage): the libraries and their licence, the TensorRT model files and
+ * their models.json keys. The 1 MB provider stays with the runtime it came with.
+ */
+export function removeTensorrt(data: string, c: TrtCatalog = TRT_CATALOG): void {
+  const p = trtPaths(data, c);
+  let keys: string[] = [];
+  try {
+    keys = Object.keys(readJson(p.list));
+  } catch {
+    // error: NOT-WORTH — no list (a half install): the TensorRT keys are found by name below
+  }
+  // the mark first: from here on the parts count as not installed
+  // loop: NOT-WORTH — one local unlink per user click
+  rmSync(p.list, { force: true });
+  const modelsJson = join(p.models, "models.json");
+  // loop: NOT-WORTH — one stat per user click
+  if (existsSync(modelsJson)) {
+    // loop: NOT-WORTH — a few keys
+    const left = Object.fromEntries(Object.entries(readJson(modelsJson)).filter(([k]) => !keys.includes(k) && !k.startsWith("tensorrt-")));
+    writeAtomic(modelsJson, JSON.stringify(left, null, 2) + "\n");
+  }
+  // loop: NOT-WORTH — sixteen local unlinks per user click
+  for (const f of c.trtModels.files) if (f.file !== "models.json") rmSync(join(p.models, f.file), { force: true });
+  // loop: NOT-WORTH — removes a stopped install's folder, per user click
+  rmSync(join(data, MODELS_DIR, `.partial-${c.trtModels.name}`), { recursive: true, force: true });
+  // loop: NOT-WORTH — removes the libraries folder (a few dozen files), per user click
+  rmSync(p.libs, { recursive: true, force: true });
+  // loop: NOT-WORTH — as above, a stopped unpack
+  rmSync(join(p.runtime, `.partial-${TRT_LIBS_DIR}`), { recursive: true, force: true });
+  // loop: NOT-WORTH — the runtime folder's few entries, per user click
+  if (existsSync(p.runtime)) for (const d of readdirSync(p.runtime).filter((n) => TRT_DIST_INFO.test(n))) rmSync(join(p.runtime, d), { recursive: true, force: true });
 }

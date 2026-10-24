@@ -64,6 +64,16 @@ export function tasksOf(state: AppState): Task[] {
   }
   // no engine set up: the ONNX Runtime engine is the one to set up (the PyTorch checkout still works meanwhile)
   else if (!state.engineKind) tasks.push({ id: "engine-setup", page: "engine", section: "onnx", level: "task", text: state.rustEngine?.problems[0] ?? "Set up the CorridorKey engine" });
+  // TensorRT switched on but its parts aren't there (once the runtime and models are): jobs run on CUDA meanwhile
+  const trt = state.tensorrt;
+  if (trt?.on && !installMissing(state.install) && (trt.needLibs || trt.needProvider || trt.needModels) && trt.status !== "running")
+    tasks.push({
+      id: "tensorrt",
+      page: "engine",
+      section: "tensorrt",
+      level: trt.status === "error" ? "error" : "task",
+      text: trt.error ? `The TensorRT download stopped: ${trt.error}` : "Download TensorRT's parts (jobs run on CUDA until then), or switch it off",
+    });
   // no usable ffmpeg: nothing can be read or written (the Engine page offers the install)
   if (state.ffmpeg.checked && !state.ffmpeg.ok && state.ffmpeg.problem) tasks.push({ id: "ffmpeg", page: "engine", section: "ffmpeg", level: "task", text: state.ffmpeg.problem });
   if (state.engine.status === "failed") tasks.push({ id: "engine", page: "engine", section: "", level: "error", text: `The engine didn't start: ${state.engine.error ?? "unknown error"}` });

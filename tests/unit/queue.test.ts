@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { clearJobTemps, engineOptions, Queue, type EngineHandle } from "../../electron/main/queue";
+import { clearJobTemps, engineOptions, providerText, Queue, type EngineHandle } from "../../electron/main/queue";
 import type { EngineReply } from "../../electron/main/engine";
 import { DEFAULT_OPTIONS, type Job } from "../../src/shared/types";
 
@@ -35,7 +35,7 @@ function job(id: string, extra: Partial<Job> = {}): Job {
   };
 }
 
-function harness(opts: { pongProtocol?: number; failStart?: boolean; slowStart?: boolean; tempRoot?: string } = {}) {
+function harness(opts: { pongProtocol?: number; failStart?: boolean; slowStart?: boolean; tempRoot?: string; tensorrt?: () => boolean } = {}) {
   const sent: Record<string, unknown>[] = [];
   let reply: (r: EngineReply) => void = () => {};
   let exit: (c: number | null, s: NodeJS.Signals | null, t: string[]) => void = () => {};
@@ -70,6 +70,7 @@ function harness(opts: { pongProtocol?: number; failStart?: boolean; slowStart?:
       return h;
     },
     tempDirFor: (id) => join(opts.tempRoot ?? "/nonexistent-ck-test", id),
+    tensorrt: opts.tensorrt,
     changed: () => {},
     finished: () => {},
     now: () => clock,
@@ -333,5 +334,48 @@ describe("engineOptions", () => {
     expect(auto).not.toHaveProperty("hint_first_frame");
     const manual = engineOptions({ ...DEFAULT_OPTIONS, hintMode: "first-frame", hintFirstFrame: "/h.png", memory: { auto: false, hannChunk: 8, hannStride: 4, lowVram: true } }, "frames");
     expect(manual).toMatchObject({ hann_chunk: 8, hann_stride: 4, low_vram: true, hint_first_frame: "/h.png", frame_dir_fps: 24 });
+  });
+
+  it("asks for TensorRT only when told to (never false-but-present: the PyTorch engine never sees the key)", () => {
+    expect(engineOptions(DEFAULT_OPTIONS, "video")).not.toHaveProperty("tensorrt");
+    expect(engineOptions(DEFAULT_OPTIONS, "video", false)).not.toHaveProperty("tensorrt");
+    expect(engineOptions(DEFAULT_OPTIONS, "video", true)).toMatchObject({ tensorrt: true });
+  });
+});
+
+describe("TensorRT in the queue", () => {
+  it("sends tensorrt: true per job while the app says so, and nothing otherwise", async () => {
+    let on = true;
+    const h = harness({ tensorrt: () => on });
+    h.q.add(job("a"));
+    h.q.add(job("b"));
+    await h.q.start();
+    await h.flush();
+    expect((h.sent[0].options as Record<string, unknown>).tensorrt).toBe(true);
+    on = false;
+    h.reply({ type: "result", id: "a", outputs: [] });
+    await h.flush();
+    expect(h.sent[1].options).not.toHaveProperty("tensorrt");
+  });
+
+  it("puts what really ran into the job's log (provider replies), and nothing for a plain CUDA job", async () => {
+    const h = harness({ tensorrt: () => true });
+    h.q.add(job("a"));
+    await h.q.start();
+    await h.flush();
+    h.reply({ type: "provider", id: "a", provider: "cuda", precision: "fp16", tensorrt_requested: false });
+    h.reply({ type: "provider", id: "a", provider: "tensorrt", precision: "fp16", tensorrt_requested: true, range: "h640-1152_w768-1280_t1-48_f1-4", cache: "build" });
+    h.reply({ type: "provider", id: "a", provider: "tensorrt+cuda", pieces: ["rvm", "stage1"], fallbacks: { stage1: "out of graphics memory while building" }, build_s: { rvm: 20.4, stage1: 0 } });
+    expect(h.q.jobs[0].log).toEqual([
+      "TensorRT: building the engines for this resolution (h640-1152_w768-1280_t1-48_f1-4), once.",
+      "Runs on TensorRT (engines built in 20 s, kept for this resolution); on CUDA: stage1 (out of graphics memory while building).",
+    ]);
+  });
+
+  it("says why TensorRT wasn't used", () => {
+    expect(providerText({ type: "provider", provider: "cuda", tensorrt_requested: true, fallback_reason: "the models folder has no TensorRT-ready models" })).toBe(
+      "TensorRT not used: the models folder has no TensorRT-ready models. Runs on CUDA.",
+    );
+    expect(providerText({ type: "provider", provider: "tensorrt", fallbacks: {}, build_s: {} })).toBe("Runs on TensorRT.");
   });
 });

@@ -2,13 +2,18 @@
 // stewards of the user's desktop and file system"), and the cache's own pruning at start.
 //   runtime: <data>/runtime (the GPU runtime the setup downloads, ~2.4 GB)
 //   models:  <data>/models  (the CorridorKey models, ~3.3 GB)
+//   tensorrt: the opt-in TensorRT parts inside those two (install.ts: its libraries in the runtime, its models in the
+//            set's folder), measured on their own and taken out of the runtime's and models' sizes (Linux only)
 //   cache:   <cache>/media  (clip thumbnails and result stills; rebuilt as needed)
 // Settings (userData/settings.json) are a few KB and stay; job temp folders are cleared at start (queue.ts).
 import { readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { StorageItem } from "../../src/shared/types";
-import { MODELS_DIR, RUNTIME_DIR } from "./platform";
+import { MODELS_DIR, PLATFORM, RUNTIME_DIR } from "./platform";
+import { removeTensorrt, TENSORRT, TRT_DIST_INFO, TRT_MODELS_LIST, trtPaths, type TrtCatalog } from "./install";
 
+/** The TensorRT engines the engine builds for this card, in the app's cache folder (index.ts passes it as trtCache). */
+export const TRT_ENGINES_DIR = "tensorrt";
 export const CACHE_MAX_AGE_DAYS = 30;
 export const CACHE_MAX_BYTES = 500e6;
 
@@ -38,17 +43,54 @@ export function folderBytes(dir: string): number {
   return total;
 }
 
-/** `runtimeLabel`: what the runtime is on this system (install.ts systemSupport). */
-export function storageItems(data: string, cacheDir: string, runtimeLabel: string): StorageItem[] {
-  return [
-    { id: "runtime", label: `GPU runtime (${runtimeLabel})`, path: join(data, RUNTIME_DIR), bytes: folderBytes(join(data, RUNTIME_DIR)) },
-    { id: "models", label: "CorridorKey models", path: join(data, MODELS_DIR), bytes: folderBytes(join(data, MODELS_DIR)) },
-    { id: "cache", label: "Thumbnails and stills (rebuilt as needed)", path: join(cacheDir, "media"), bytes: folderBytes(join(cacheDir, "media")) },
-  ];
+/** The TensorRT parts' bytes: in the runtime (libraries, licence) and in the model set (its files and list). */
+export function tensorrtBytes(data: string, c?: TrtCatalog): { runtime: number; models: number } {
+  const p = trtPaths(data, c);
+  let licence = 0;
+  try {
+    // loop: NOT-WORTH — the runtime folder's few entries, only when App settings shows Storage
+    for (const d of readdirSync(p.runtime).filter((n) => TRT_DIST_INFO.test(n))) licence += folderBytes(join(p.runtime, d));
+  } catch {
+    // error: NOT-WORTH — no runtime installed: nothing of TensorRT's there
+  }
+  // loop: NOT-WORTH — sixteen names, only when App settings shows Storage
+  const files = [TRT_MODELS_LIST, ...(c?.trtModels ?? TENSORRT.models).files.map((x) => x.file).filter((n) => n !== "models.json")];
+  let models = 0;
+  // loop: NOT-WORTH — sixteen stats, only when App settings shows Storage
+  for (const f of files) models += statSync(join(p.models, f), { throwIfNoEntry: false })?.size ?? 0;
+  return { runtime: folderBytes(p.libs) + licence, models };
 }
 
-/** Remove one item's folder. The runtime and models come back through the setup's download. */
-export function removeStorage(item: StorageItem): void {
+/** `runtimeLabel`: what the runtime is on this system (install.ts systemSupport). TensorRT: Linux only. */
+export function storageItems(data: string, cacheDir: string, runtimeLabel: string, platform: NodeJS.Platform = PLATFORM, c?: TrtCatalog): StorageItem[] {
+  const trt = platform === "linux" ? tensorrtBytes(data, c) : { runtime: 0, models: 0 };
+  const items: StorageItem[] = [
+    { id: "runtime", label: `GPU runtime (${runtimeLabel})`, path: join(data, RUNTIME_DIR), bytes: folderBytes(join(data, RUNTIME_DIR)) - trt.runtime },
+    { id: "models", label: "CorridorKey models", path: join(data, MODELS_DIR), bytes: folderBytes(join(data, MODELS_DIR)) - trt.models },
+  ];
+  // the engines built for this card (engine.ts trtCache: <cache>/tensorrt) belong to it too
+  if (platform === "linux")
+    items.push({
+      id: "tensorrt",
+      label: "TensorRT (NVIDIA's libraries, the TensorRT models, the engines built for your card)",
+      path: trtPaths(data, c).libs,
+      bytes: trt.runtime + trt.models + folderBytes(join(cacheDir, TRT_ENGINES_DIR)),
+    });
+  items.push({ id: "cache", label: "Thumbnails and stills (rebuilt as needed)", path: join(cacheDir, "media"), bytes: folderBytes(join(cacheDir, "media")) });
+  return items;
+}
+
+/**
+ * Remove one item. The runtime and models come back through the setup's download, TensorRT through its switch.
+ * TensorRT's parts live inside the runtime and the model set: install.ts removes exactly those.
+ */
+export function removeStorage(item: StorageItem, data: string, cacheDir: string, c?: TrtCatalog): void {
+  if (item.id === "tensorrt") {
+    removeTensorrt(data, c);
+    // loop: NOT-WORTH — removes the built engines (a few files per resolution), per user click
+    rmSync(join(cacheDir, TRT_ENGINES_DIR), { recursive: true, force: true });
+    return;
+  }
   // loop: NOT-WORTH — one folder removed per user click (a confirm dialog first)
   rmSync(item.path, { recursive: true, force: true });
 }

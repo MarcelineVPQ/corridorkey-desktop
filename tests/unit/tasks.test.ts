@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { dots, jobToSelect, missingInput, tasksOf } from "../../src/shared/tasks";
-import { DEFAULT_APPEARANCE, DEFAULT_OPTIONS, type AppState, type Job } from "../../src/shared/types";
+import { DEFAULT_APPEARANCE, DEFAULT_OPTIONS, type AppState, type Job, type TrtState } from "../../src/shared/types";
 
 const job = (id: string, extra: Partial<Job> = {}): Job =>
   ({
@@ -59,6 +59,34 @@ const installing = (status: "idle" | "running" | "error", error: string | null =
   done: 0,
   total: 0,
   error,
+});
+
+describe("TensorRT task", () => {
+  const trt = (extra: Partial<TrtState>): TrtState => ({
+    supported: true,
+    on: true,
+    ready: false,
+    needLibs: true,
+    needProvider: false,
+    needModels: true,
+    bytes: 1,
+    fullBytes: 1,
+    status: "idle",
+    step: null,
+    done: 0,
+    total: 0,
+    error: null,
+    ...extra,
+  });
+  it("asks for TensorRT's parts once it is switched on (on top of the runtime and models), never while off", () => {
+    expect(tasksOf(state({ tensorrt: trt({}) }))).toEqual([expect.objectContaining({ id: "tensorrt", page: "engine", section: "tensorrt", level: "task" })]);
+    expect(tasksOf(state({ tensorrt: trt({ on: false }) }))).toEqual([]);
+    expect(tasksOf(state({ tensorrt: trt({ status: "running" }) }))).toEqual([]);
+    expect(tasksOf(state({ tensorrt: trt({ needLibs: false, needModels: false, ready: true }) }))).toEqual([]);
+    expect(tasksOf(state({ tensorrt: trt({ status: "error", error: "no space" }) }))[0]).toMatchObject({ level: "error", text: "The TensorRT download stopped: no space" });
+    // the runtime and models come first: their task, not TensorRT's
+    expect(tasksOf(state({ engineKind: null, install: installing("idle"), tensorrt: trt({}) })).map((t) => t.id)).toEqual(["install"]);
+  });
 });
 
 describe("first-run install and ffmpeg tasks", () => {

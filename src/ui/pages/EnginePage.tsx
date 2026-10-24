@@ -4,14 +4,14 @@
 // ffmpeg (checked, and installed on request), the lists of engine files found
 // (Automatic = the newest, Browse… for anything else), and the CorridorKey
 // checkout the PyTorch engine (the benchmark reference) runs from.
-import { Check, Cpu, Download, Film, FolderOpen, FolderCog, ListChecks, X } from "lucide-react";
+import { Check, Cpu, Download, Film, FolderOpen, FolderCog, ListChecks, X, Zap } from "lucide-react";
 import type { AppState } from "../../shared/types";
 import { installMissing } from "../../shared/tasks";
 import { Accordion, Row, Section } from "../panel/Section";
 import { MainBlock, SplitView } from "../panel/SplitView";
 import { Stat } from "../JobView";
 import { gib } from "../format";
-import { FfmpegBox, InstallBox, installPct } from "../setup/SetupParts";
+import { FfmpegBox, InstallBox, installPct, TrtBox } from "../setup/SetupParts";
 
 export function EnginePage(props: {
   state: AppState;
@@ -33,6 +33,18 @@ export function EnginePage(props: {
   const inst = state.install;
   const needInstall = installMissing(inst);
   const pct = installPct(inst);
+  const trt = state.tensorrt;
+  const trtStatus = !trt.supported
+    ? state.system.platform === "darwin"
+      ? "not on Macs"
+      : "Linux only in this version"
+    : trt.status === "running"
+      ? `downloading ${installPct(trt)}%`
+      : !trt.on
+        ? "off"
+        : trt.ready
+          ? "on"
+          : "on · not installed yet";
   const checks = (c: { ok: boolean; problems: string[] }, okText: string) =>
     c.ok ? (
       <div className="check-line ok">
@@ -121,6 +133,7 @@ export function EnginePage(props: {
               <Stat k="Engine" v={`${p.engine} ${p.version} · protocol ${p.protocol}`} />
               {p.torch ? <Stat k="Python / PyTorch" v={`${p.python ?? "?"} · ${p.torch}`} /> : <Stat k="Runtime" v={`ONNX Runtime ${p.ort ?? "?"} · ${p.provider ?? "?"} · ${p.precision ?? "?"}`} />}
               <Stat k="Graphics card" v={p.gpu ? `${p.gpu}${p.vramTotalMb ? ` · ${gib(p.vramTotalMb)}` : ""}` : "none found"} />
+              {trt.supported && !p.torch && <Stat k="TensorRT" v={trt.on ? (trt.ready ? "On: jobs ask for it" : "On, not installed: jobs run on CUDA") : "Off"} />}
             </div>
           ) : (
             <p className="hint-text">Not started yet this session. It starts with the queue and quits when the queue is done, so it holds no graphics memory while idle.</p>
@@ -176,6 +189,9 @@ export function EnginePage(props: {
         task={props.sectionTasks["engine/install"] ?? null}
       >
         {() => <InstallBox inst={inst} />}
+      </Section>
+      <Section id="tensorrt" icon={Zap} title="TensorRT" status={trtStatus} task={props.sectionTasks["engine/tensorrt"] ?? null}>
+        {() => <TrtBox trt={trt} inst={inst} platform={state.system.platform} />}
       </Section>
       <Section
         id="ffmpeg"

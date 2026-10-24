@@ -1,12 +1,33 @@
 import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateRawSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { downloadVerified } from "../../electron/main/download";
-import { installNeeds, keepFromWheel, MODELS, RUNTIME, RUNTIME_MAC, RUNTIME_WIN, runInstall, runtimeFor, systemSupport, type Catalog } from "../../electron/main/install";
+import {
+  installNeeds,
+  keepFromWheel,
+  keepTensorrt,
+  MODELS,
+  removeTensorrt,
+  RUNTIME,
+  RUNTIME_MAC,
+  RUNTIME_WIN,
+  runInstall,
+  runTrtInstall,
+  runtimeFor,
+  systemSupport,
+  TENSORRT,
+  TRT_BYTES,
+  trtNeeds,
+  trtReady,
+  trtSupported,
+  useTensorrt,
+  type Catalog,
+  type TrtCatalog,
+} from "../../electron/main/install";
 import { unzip } from "../../electron/main/unzip";
 
 /** A minimal zip (deflated entries) as a wheel looks, for the unpacker. */
@@ -54,7 +75,8 @@ describe("first-run install", () => {
   it("keeps the runtime libraries and licences from a wheel, nothing else", () => {
     expect(keepFromWheel("onnxruntime/capi/libonnxruntime.so.1.31.0")).toBe(true);
     expect(keepFromWheel("onnxruntime/capi/libonnxruntime_providers_cuda.so")).toBe(true);
-    expect(keepFromWheel("onnxruntime/capi/libonnxruntime_providers_tensorrt.so")).toBe(false);
+    // kept since 1.0: the opt-in TensorRT install then needs no second ONNX Runtime download
+    expect(keepFromWheel("onnxruntime/capi/libonnxruntime_providers_tensorrt.so")).toBe(true);
     expect(keepFromWheel("onnxruntime/capi/onnxruntime_pybind11_state.cpython-312-x86_64-linux-gnu.so")).toBe(false);
     expect(keepFromWheel("nvidia/cu13/lib/libcublasLt.so.13")).toBe(true);
     expect(keepFromWheel("nvidia/cudnn/include/cudnn.h")).toBe(false);
@@ -220,6 +242,187 @@ describe("runInstall", () => {
     mkdirSync(join(data, "runtime", "rt"), { recursive: true });
     await expect(runInstall(data, deps(100), catalog())).rejects.toThrow("not enough free disk space");
     rmSync(data, { recursive: true, force: true });
+  });
+
+  // TensorRT on top of an installed runtime ("rt") and model set ("m1", whose a.onnx doubles as a TensorRT file)
+  const trtCatalog = (): TrtCatalog => {
+    const serve = (name: string, body: Buffer) => {
+      files[name] = body;
+      return { file: name, url: `${base}/${name}`, size: body.length, sha256: sha(body) };
+    };
+    const trtWheel = makeZip({
+      "tensorrt_libs/__init__.py": "",
+      "tensorrt_libs/libnvinfer.so.10": "nvinfer",
+      "tensorrt_libs/libnvonnxparser.so.10": "parser",
+      "tensorrt_libs/libnvinfer_builder_resource_sm120.so.10.16.1": "sm120",
+      "tensorrt_libs/libnvinfer_builder_resource_win_sm120.so.10.16.1": "windows only",
+      "tensorrt_cu13_libs-10.16.1.11.dist-info/LICENSE.txt": "NVIDIA",
+      "tensorrt_cu13_libs-10.16.1.11.dist-info/RECORD": "",
+    });
+    const ortWheel = makeZip({ "onnxruntime/capi/libonnxruntime.so.1.31.0": "ort", "onnxruntime/capi/libonnxruntime_providers_tensorrt.so": "trt provider" });
+    const list = Buffer.from(JSON.stringify({ "tensorrt-fp16": { rvm: "rvm-trt.onnx", stage2: "a-trt.onnx" }, "tensorrt-fp16-ctx": { rvm: "rvm-trt-ctx.onnx" } }));
+    return {
+      runtime: { name: "rt", wheels: [serve("onnxruntime_gpu-1.31.0-x.whl", ortWheel)] },
+      models: catalog().models,
+      libs: { ...serve("trt.whl", trtWheel), label: "NVIDIA TensorRT" },
+      trtModels: {
+        name: "m1-trt",
+        files: [
+          serve("rvm-trt.onnx", Buffer.from("R".repeat(40))),
+          serve("rvm-trt-ctx.onnx", Buffer.from("ctx")),
+          // the same bytes as the set's a.onnx: copied, never downloaded
+          { ...serve("a-trt.onnx", files["a.onnx"]) },
+          serve("models.json", list),
+        ],
+      },
+    };
+  };
+  const installedBase = () => {
+    const data = mkdtempSync(join(tmpdir(), "ck-trt-"));
+    mkdirSync(join(data, "runtime", "rt", "onnxruntime", "capi"), { recursive: true });
+    writeFileSync(join(data, "runtime", "rt", "onnxruntime", "capi", "libonnxruntime.so.1.31.0"), "ort");
+    mkdirSync(join(data, "models", "m1"), { recursive: true });
+    writeFileSync(join(data, "models", "m1", "a.onnx"), files["a.onnx"]);
+    writeFileSync(join(data, "models", "m1", "models.json"), JSON.stringify({ fp16: { stage2: "a.onnx" } }));
+    return data;
+  };
+
+  it("installs TensorRT's parts where the engine looks, copying what the model set already has", async () => {
+    const c = trtCatalog();
+    const data = installedBase();
+    const need = trtNeeds(data, existsSync, c);
+    // the copied file isn't counted as a download
+    expect(need).toEqual({ libs: true, provider: true, models: true, bytes: c.libs.size + c.runtime.wheels[0].size + 40 + 3 + c.trtModels.files[3].size });
+    asked.length = 0;
+    await runTrtInstall(data, deps(), c);
+    expect(asked).toEqual(["trt.whl", "onnxruntime_gpu-1.31.0-x.whl", "rvm-trt.onnx", "rvm-trt-ctx.onnx", "models.json"]);
+    const rt = join(data, "runtime", "rt");
+    expect(readdirSync(join(rt, "tensorrt_libs")).sort()).toEqual(["libnvinfer.so.10", "libnvinfer_builder_resource_sm120.so.10.16.1", "libnvonnxparser.so.10"]);
+    expect(readdirSync(join(rt, "tensorrt_cu13_libs-10.16.1.11.dist-info"))).toEqual(["LICENSE.txt"]);
+    expect(readFileSync(join(rt, "onnxruntime", "capi", "libonnxruntime_providers_tensorrt.so"), "utf8")).toBe("trt provider");
+    const m1 = join(data, "models", "m1");
+    expect(readFileSync(join(m1, "a-trt.onnx")).equals(files["a.onnx"])).toBe(true);
+    // the engine reads one models.json: the set's keys and TensorRT's, merged
+    expect(JSON.parse(readFileSync(join(m1, "models.json"), "utf8"))).toEqual({
+      fp16: { stage2: "a.onnx" },
+      "tensorrt-fp16": { rvm: "rvm-trt.onnx", stage2: "a-trt.onnx" },
+      "tensorrt-fp16-ctx": { rvm: "rvm-trt-ctx.onnx" },
+    });
+    expect(existsSync(join(m1, "models-tensorrt.json"))).toBe(true);
+    expect(readdirSync(join(data, "models")).sort()).toEqual(["m1"]);
+    expect(existsSync(join(data, "downloads"))).toBe(false);
+    expect(trtNeeds(data, existsSync, c)).toMatchObject({ libs: false, provider: false, models: false });
+    expect(trtReady(join(rt, "onnxruntime", "capi", "libonnxruntime.so.1.31.0"), m1)).toBe(true);
+
+    // removing takes exactly TensorRT's files and keys; the provider stays with its runtime
+    removeTensorrt(data, c);
+    expect(JSON.parse(readFileSync(join(m1, "models.json"), "utf8"))).toEqual({ fp16: { stage2: "a.onnx" } });
+    expect(readdirSync(m1).sort()).toEqual(["a.onnx", "models.json"]);
+    expect(readdirSync(rt).sort()).toEqual(["onnxruntime"]);
+    expect(existsSync(join(rt, "onnxruntime", "capi", "libonnxruntime_providers_tensorrt.so"))).toBe(true);
+    expect(trtNeeds(data, existsSync, c)).toMatchObject({ libs: true, provider: false, models: true });
+    rmSync(data, { recursive: true, force: true });
+  });
+
+  it("downloads no ONNX Runtime wheel when the runtime already has the TensorRT provider (installed since 1.0)", async () => {
+    const c = trtCatalog();
+    const data = installedBase();
+    writeFileSync(join(data, "runtime", "rt", "onnxruntime", "capi", "libonnxruntime_providers_tensorrt.so"), "kept by the runtime install");
+    asked.length = 0;
+    await runTrtInstall(data, deps(), c);
+    expect(asked).not.toContain("onnxruntime_gpu-1.31.0-x.whl");
+    rmSync(data, { recursive: true, force: true });
+  });
+
+  it("resumes a TensorRT install whose model files were already moved into the set (a crash before the last step)", async () => {
+    const c = trtCatalog();
+    const data = installedBase();
+    await runTrtInstall(data, deps(), c);
+    const m1 = join(data, "models", "m1");
+    // as if it stopped after the moves: no list yet, the models.json without TensorRT's keys
+    rmSync(join(m1, "models-tensorrt.json"));
+    writeFileSync(join(m1, "models.json"), JSON.stringify({ fp16: { stage2: "a.onnx" } }));
+    asked.length = 0;
+    await runTrtInstall(data, deps(), c);
+    expect(asked).toEqual(["models.json"]);
+    expect(JSON.parse(readFileSync(join(m1, "models.json"), "utf8"))).toHaveProperty("tensorrt-fp16");
+    rmSync(data, { recursive: true, force: true });
+  });
+
+  it("asks for the runtime and models first", async () => {
+    const data = mkdtempSync(join(tmpdir(), "ck-trt-"));
+    await expect(runTrtInstall(data, deps(), trtCatalog())).rejects.toThrow("install the GPU runtime and the CorridorKey models first");
+    rmSync(data, { recursive: true, force: true });
+  });
+});
+
+describe("TensorRT catalogue and rules", () => {
+  it("pins NVIDIA's wheel and the TensorRT model release by URL, size and SHA-256", () => {
+    expect(TENSORRT.libs.url).toBe(`https://pypi.nvidia.com/tensorrt-cu13-libs/${TENSORRT.libs.file}`);
+    expect([TENSORRT.libs.size, TENSORRT.libs.sha256]).toEqual([3728705565, "91142c8ab3c58bed213cf1a563a6eb4e4f0ac529d05b5f909073acece0e3b712"]);
+    expect(TENSORRT.models.files).toHaveLength(16);
+    for (const f of TENSORRT.models.files) {
+      expect(f.url).toBe(`https://github.com/MarcelineVPQ/corridorkey-desktop/releases/download/models-2.0.0-onnx.3-trt/${f.file}`);
+      expect(f.sha256).toMatch(/^[0-9a-f]{64}$/);
+    }
+    // the list goes last: its arrival is the mark that the set is whole
+    expect(TENSORRT.models.files.at(-1)?.file).toBe("models.json");
+    // C-RADIO's TensorRT weights are the normal set's bytes: copied, not downloaded (1.72 GB less)
+    const cradio = TENSORRT.models.files.find((f) => f.file === "ck2-cradio-trt-fp16.onnx.data")!;
+    expect(MODELS.files.find((f) => f.file === "ck2-cradio-fp16.onnx.data")).toMatchObject({ size: cradio.size, sha256: cradio.sha256 });
+    // loop: NOT-WORTH — sixteen sizes
+    const models = TENSORRT.models.files.reduce((n, f) => n + f.size, 0);
+    expect(TRT_BYTES).toBe(TENSORRT.libs.size + models - cradio.size);
+    expect(TRT_BYTES).toBe(6866685908);
+  });
+
+  it("builds the shipped ck-trt-build against the same TensorRT wheel users download", () => {
+    const script = readFileSync(new URL("../../tools/build_trt_builder.sh", import.meta.url), "utf8");
+    expect(script).toContain(`WHEEL=${TENSORRT.libs.file}\n`);
+    expect(script).toContain(`SHA256=${TENSORRT.libs.sha256}\n`);
+    expect(TENSORRT.libs.url).toBe(`https://pypi.nvidia.com/tensorrt-cu13-libs/${TENSORRT.libs.file}`);
+  });
+
+  it("keeps the libraries the builder and ONNX Runtime's provider load, for Linux cards, and the licence", () => {
+    for (const keep of [
+      "tensorrt_libs/libnvinfer.so.10",
+      "tensorrt_libs/libnvinfer_plugin.so.10",
+      "tensorrt_libs/libnvonnxparser.so.10",
+      "tensorrt_libs/libnvinfer_builder_resource_sm75.so.10.16.1",
+      "tensorrt_libs/libnvinfer_builder_resource_sm120.so.10.16.1",
+      "tensorrt_libs/libnvinfer_builder_resource_ptx.so.10.16.1",
+      "tensorrt_cu13_libs-10.16.1.11.dist-info/LICENSE.txt",
+    ])
+      expect(keepTensorrt(keep)).toBe(true);
+    for (const drop of [
+      "tensorrt_libs/__init__.py",
+      "tensorrt_libs/libnvinfer_builder_resource_win_sm120.so.10.16.1",
+      "tensorrt_libs/libnvinfer_builder_resource_win_ptx.so.10.16.1",
+      "tensorrt_cu13_libs-10.16.1.11.dist-info/RECORD",
+      "../tensorrt_libs/libnvinfer.so.10",
+    ])
+      expect(keepTensorrt(drop)).toBe(false);
+  });
+
+  it("asks the engine for TensorRT only on Linux, with the setting on, the Rust engine and the parts installed", () => {
+    const yes = { platform: "linux" as const, setting: true, engine: "rust" as const, ready: true };
+    expect(useTensorrt(yes)).toBe(true);
+    expect(useTensorrt({ ...yes, ready: false })).toBe(false);
+    expect(useTensorrt({ ...yes, setting: false })).toBe(false);
+    expect(useTensorrt({ ...yes, engine: "python" })).toBe(false);
+    expect(useTensorrt({ ...yes, platform: "win32" })).toBe(false);
+    expect(useTensorrt({ ...yes, platform: "darwin" })).toBe(false);
+    expect([trtSupported("linux"), trtSupported("win32"), trtSupported("darwin")]).toEqual([true, false, false]);
+  });
+
+  it("is ready only when the engine's own files have all three parts", () => {
+    const ort = "/d/runtime/rt/onnxruntime/capi/libonnxruntime.so.1.31.0";
+    const all = ["/d/runtime/rt/onnxruntime/capi/libonnxruntime_providers_tensorrt.so", "/d/runtime/rt/tensorrt_libs", "/d/models/m1/models-tensorrt.json"];
+    const has = (p: string[]) => (x: string) => p.includes(x);
+    expect(trtReady(ort, "/d/models/m1", has(all))).toBe(true);
+    // loop: NOT-WORTH — three cases
+    for (const missing of all) expect(trtReady(ort, "/d/models/m1", has(all.filter((x) => x !== missing)))).toBe(false);
+    expect(trtReady(null, "/d/models/m1", has(all))).toBe(false);
   });
 });
 

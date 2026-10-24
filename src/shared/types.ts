@@ -171,6 +171,8 @@ export interface Settings {
   engineBinary: string | null;
   modelsDir: string | null;
   ortLibrary: string | null;
+  // run jobs on TensorRT (the Rust engine, Linux; off by default): sent to the engine only once its parts are installed
+  tensorrt: boolean;
 }
 
 export type EngineKind = "rust" | "python";
@@ -225,9 +227,31 @@ export interface InstallState {
   error: string | null;
 }
 
+// The opt-in TensorRT parts (electron/main/install.ts, after "TensorRT"): NVIDIA's libraries, ONNX Runtime's
+// TensorRT provider, the TensorRT models; installed on top of the runtime and models.
+export interface TrtState {
+  // Linux in 1.0: Windows needs its own engine builder (later), macOS has no TensorRT
+  supported: boolean;
+  // the setting
+  on: boolean;
+  // the parts are there for the files the engine runs with: only then does a job ask for TensorRT
+  ready: boolean;
+  needLibs: boolean;
+  needProvider: boolean;
+  needModels: boolean;
+  // what is still to download, and the whole TensorRT download on a fresh install (the hint)
+  bytes: number;
+  fullBytes: number;
+  status: "idle" | "running" | "error";
+  step: string | null;
+  done: number;
+  total: number;
+  error: string | null;
+}
+
 // What the app keeps on disk (electron/main/storage.ts), measured when App settings shows Storage.
 export interface StorageItem {
-  id: "runtime" | "models" | "cache";
+  id: "runtime" | "models" | "tensorrt" | "cache";
   label: string;
   path: string;
   bytes: number;
@@ -270,6 +294,7 @@ export interface AppState {
   engineFiles: EngineFiles;
   ffmpeg: FfmpegState;
   install: InstallState;
+  tensorrt: TrtState;
   // null until App settings asks for it (measuring walks the folders)
   storage: StorageItem[] | null;
   enginePaths: { binary: string | null; models: string | null; ort: string | null };
@@ -277,7 +302,7 @@ export interface AppState {
   desktopPalette: DesktopPalette | null;
   update: UpdateState;
   // this system's file names, for the Engine page's hints (electron/main/platform.ts)
-  system: { engineBin: string; ortLib: string };
+  system: { engineBin: string; ortLib: string; platform: string };
 }
 
 export interface CorridorKeyApi {
@@ -292,8 +317,11 @@ export interface CorridorKeyApi {
   // null = Automatic; a path must be one the list offers (or the current setting)
   setRustEngine(what: "binary" | "models" | "ort", path: string | null): Promise<void>;
   installFfmpeg(): Promise<void>;
-  startInstall(): Promise<void>;
+  // "tensorrt": the opt-in TensorRT parts (once the runtime and models are installed); else the runtime and models
+  startInstall(part?: "tensorrt"): Promise<void>;
   stopInstall(): Promise<void>;
+  // the TensorRT setting (Linux; ignored elsewhere)
+  setTensorrt(on: boolean): Promise<void>;
   measureStorage(): Promise<void>;
   // asks for confirmation first (a system dialog); refused while the queue or the install runs
   removeStorage(id: StorageItem["id"]): Promise<void>;

@@ -9,16 +9,16 @@ import { GPU_POLL_MS, readGpu } from "./gpu";
 import { expandPaths, probeClip, still, STILL_WIDTH, VIDEO_EXT, HINT_IMAGE_EXT } from "./media";
 import { clearJobTemps, Queue } from "./queue";
 import { checkCheckout, checkRustEngine, chooseEngine, loadSettings, saveSettings } from "./settings";
-import { effectivePath, findEngineFiles, isInsideApp, modelSetVersion, windowTitle } from "./engineFind";
+import { effectivePath, findEngineFiles, findTrtBuilder, isInsideApp, modelSetVersion, windowTitle } from "./engineFind";
 import { addToPathList, appDirs, engineBinName, isMac, isWin, ortLibrary, PLATFORM } from "./platform";
 import { HOMEBREW_DIRS, checkFfmpeg, ffmpegState, installFfmpeg, planFor, readOsRelease, wingetFfmpegDirs } from "./ffmpeg";
 import { PROGRESS_EVERY_MS } from "./updateFlow";
-import { MODELS_BYTES, RUNTIME_BYTES, freeBytes, installNeeds, runInstall, systemSupport } from "./install";
-import { pruneCache, removeStorage, storageItems } from "./storage";
+import { MODELS_BYTES, RUNTIME_BYTES, TRT_BYTES, freeBytes, installNeeds, runInstall, runTrtInstall, systemSupport, trtNeeds, trtReady, trtSupported, useTensorrt, type InstallDeps } from "./install";
+import { pruneCache, removeStorage, storageItems, TRT_ENGINES_DIR } from "./storage";
 import { readDesktopPalette, watchDesktopPalette } from "./desktopTheme";
 import { Updater } from "./updater";
 import { holdAppImageMountUntilExit } from "./appImageQuit";
-import { LOG_SHOWN, type AppState, type FfmpegState, type GpuInfo, type InstallState, type StorageItem, type Job, type JobOptions, type OutputName } from "../../src/shared/types";
+import { LOG_SHOWN, type AppState, type FfmpegState, type GpuInfo, type InstallState, type StorageItem, type Job, type JobOptions, type OutputName, type TrtState } from "../../src/shared/types";
 import type { DesktopPalette } from "../../src/ui/theme/palette";
 import { IPC } from "./ipc";
 import { idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir } from "./validate";
@@ -103,6 +103,25 @@ function installIdle(): InstallState {
   };
 }
 let install = installIdle();
+// the opt-in TensorRT parts: what is installed, for the setting's install box; progress while its install runs
+function trtParts(): Omit<TrtState, "status" | "step" | "done" | "total" | "error"> {
+  const supported = trtSupported(PLATFORM);
+  const need = trtNeeds(enginePlaces().data);
+  const paths = enginePaths();
+  return {
+    supported,
+    on: supported && settings.tensorrt,
+    ready: supported && trtReady(paths.ort, paths.models),
+    needLibs: need.libs,
+    needProvider: need.provider,
+    needModels: need.models,
+    bytes: need.bytes,
+    fullBytes: TRT_BYTES,
+  };
+}
+const trtIdle = (): TrtState => ({ ...trtParts(), status: "idle", step: null, done: 0, total: 0, error: null });
+let trt = trtIdle();
+// one install at a time (the runtime and models, or TensorRT's parts): one Stop
 let installAbort: AbortController | null = null;
 let storage: StorageItem[] | null = null;
 let lastInstallProgress = 0;
@@ -121,6 +140,8 @@ function recheckEngines(): void {
   engineFiles = findEngineFiles(enginePlaces());
   const paths = enginePaths();
   rustEngine = checkRustEngine(paths.binary, paths.models, paths.ort);
+  // the TensorRT parts follow the engine's files (a running install keeps its progress)
+  trt = { ...trt, ...trtParts() };
   mainWindow?.setTitle(currentTitle());
 }
 /** The window title for what is set up now (engineFind.ts windowTitle). */
@@ -145,17 +166,22 @@ function engineScript(): string {
   return app.isPackaged ? join(process.resourcesPath, "app.asar.unpacked", "engine", "ck_engine.py") : resolve(app.getAppPath(), "engine", "ck_engine.py");
 }
 
+// which engine the queue started (TensorRT is asked of the Rust engine only)
+let runningKind: "rust" | "python" | null = null;
 const queue = new Queue({
   makeEngine: (onReply, onExit) => {
     // the Rust engine when it is set up; the PyTorch engine (CorridorKey checkout) until it replaces it
-    if (chooseEngine(rustEngine, checkout) === "rust") {
+    runningKind = chooseEngine(rustEngine, checkout);
+    if (runningKind === "rust") {
       const paths = enginePaths();
-      return new EngineProcess({ kind: "rust", binary: paths.binary!, models: paths.models!, ort: paths.ort, env: process.env, trtCache: join(cacheDir, "tensorrt") }, onReply, onExit);
+      const trtBuild = findTrtBuilder(paths.binary, app.isPackaged ? null : resolve(app.getAppPath(), "engine-rs", "target", "dist"));
+      return new EngineProcess({ kind: "rust", binary: paths.binary!, models: paths.models!, ort: paths.ort, env: process.env, trtCache: join(cacheDir, TRT_ENGINES_DIR), trtBuild }, onReply, onExit);
     }
     const root = settings.corridorKeyRoot!;
     return new EngineProcess({ python: join(root, "venv", "bin", "python"), script: engineScript(), packageRoot: root, env: process.env }, onReply, onExit);
   },
   tempDirFor: (id) => join(cacheDir, "jobs", id),
+  tensorrt: () => useTensorrt({ platform: PLATFORM, setting: settings.tensorrt, engine: runningKind, ready: trtReady(enginePaths().ort, enginePaths().models) }),
   changed: () => scheduleSend(),
   finished: (job) => void makeStills(job),
 });
@@ -178,10 +204,11 @@ function state(): AppState {
     enginePaths: enginePaths(),
     ffmpeg,
     install,
+    tensorrt: trt,
     storage,
     desktopPalette,
     update: updater.state,
-    system: { engineBin: engineBinName(), ortLib: ortLibrary().display },
+    system: { engineBin: engineBinName(), ortLib: ortLibrary().display, platform: PLATFORM },
   };
 }
 
@@ -397,34 +424,51 @@ function registerIpc(): void {
     persist();
     scheduleSend();
   });
-  ipcMain.handle(IPC.startInstall, async () => {
-    if (install.status === "running" || !install.gpuOk) return;
+  ipcMain.handle(IPC.startInstall, async (_e, partIn: unknown) => {
+    const isTrt = partIn === "tensorrt";
+    if (installAbort || !install.gpuOk) return;
+    // TensorRT goes on top of the runtime and models (its switch shows the box only then), on Linux
+    if (isTrt && (!trt.supported || install.needRuntime || install.needModels)) return;
     installAbort = new AbortController();
-    install = { ...install, status: "running", error: null, step: "Starting", done: 0, total: install.bytes };
+    if (isTrt) trt = { ...trt, status: "running", error: null, step: "Starting", done: 0, total: trt.bytes };
+    else install = { ...install, status: "running", error: null, step: "Starting", done: 0, total: install.bytes };
     scheduleSend();
+    let lastStep: string | null = null;
+    const deps: InstallDeps = {
+      // loop: NOT-WORTH — the fetch the install is given; downloadVerified sets a connect timeout and a stall deadline [bounded: CONNECT_TIMEOUT_MS / STALL_TIMEOUT_MS]
+      fetch: (url, init) => net.fetch(url, init),
+      // at most 4 updates a second (the updater's PROGRESS_EVERY_MS), and always a new step or the end
+      progress: (done, total, step) => {
+        const t = Date.now();
+        if (step === lastStep && done < total && t - lastInstallProgress < PROGRESS_EVERY_MS) return;
+        lastInstallProgress = t;
+        lastStep = step;
+        if (isTrt) trt = { ...trt, done, total, step };
+        else install = { ...install, done, total, step };
+        scheduleSend();
+      },
+      abort: installAbort.signal,
+      freeBytes,
+    };
+    let error: string | null = null;
     try {
-      await runInstall(enginePlaces().data, {
-        // loop: NOT-WORTH — the fetch the install is given; downloadVerified sets a connect timeout and a stall deadline [bounded: CONNECT_TIMEOUT_MS / STALL_TIMEOUT_MS]
-        fetch: (url, init) => net.fetch(url, init),
-        // at most 4 updates a second (the updater's PROGRESS_EVERY_MS), and always a new step or the end
-        progress: (done, total, step) => {
-          const t = Date.now();
-          if (step === install.step && done < total && t - lastInstallProgress < PROGRESS_EVERY_MS) return;
-          lastInstallProgress = t;
-          install = { ...install, done, total, step };
-          scheduleSend();
-        },
-        abort: installAbort.signal,
-        freeBytes,
-      });
-      install = installIdle();
+      await (isTrt ? runTrtInstall(enginePlaces().data, deps) : runInstall(enginePlaces().data, deps));
     } catch (e) {
-      // error: SHOWN — the Engine page's install section and its task; a retry resumes the downloads
+      // error: SHOWN — the install box (Engine page) and its task; a retry resumes the downloads
       // a stop is not an error: what arrived is kept and the next start resumes
-      install = installAbort?.signal.aborted ? installIdle() : { ...installIdle(), status: "error", error: (e as Error).message };
+      error = installAbort?.signal.aborted ? null : (e as Error).message;
     }
     installAbort = null;
+    install = { ...installIdle(), ...(!isTrt && error ? { status: "error" as const, error } : {}) };
+    trt = { ...trtIdle(), ...(isTrt && error ? { status: "error" as const, error } : {}) };
     recheckEngines();
+    scheduleSend();
+  });
+  ipcMain.handle(IPC.setTensorrt, (_e, on: unknown) => {
+    if (!trtSupported(PLATFORM)) return;
+    settings = { ...settings, tensorrt: on === true };
+    trt = { ...trt, ...trtParts() };
+    persist();
     scheduleSend();
   });
   ipcMain.handle(IPC.stopInstall, () => installAbort?.abort());
@@ -436,23 +480,33 @@ function registerIpc(): void {
     // loop: NOT-WORTH — three items, once per click
     const item = storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort).find((i) => i.id === idIn);
     if (!item || !mainWindow) return;
-    if (queue.running || install.status === "running") {
+    if (queue.running || installAbort) {
       await dialog.showMessageBox(mainWindow, { type: "info", message: "Not while the queue or the download runs", detail: "Stop it first, then remove." });
       return;
     }
-    const again = item.id === "cache" ? "It is rebuilt as needed." : "The setup downloads it again when you need it.";
+    const again =
+      item.id === "cache"
+        ? "It is rebuilt as needed."
+        : item.id === "tensorrt"
+          ? "Jobs run on CUDA without it; the TensorRT switch (Engine settings) downloads it again."
+          : "The setup downloads it again when you need it.";
+    const what =
+      item.id === "tensorrt"
+        ? `NVIDIA's TensorRT libraries in ${item.path}, the TensorRT models next to the CorridorKey models and the engines built in ${join(cacheDir, TRT_ENGINES_DIR)}`
+        : item.path;
     const r = await dialog.showMessageBox(mainWindow, {
       type: "question",
       buttons: ["Remove", "Cancel"],
       defaultId: 1,
       cancelId: 1,
-      message: `Remove the ${item.label.toLowerCase()}?`,
-      detail: `This deletes ${item.path} (${(item.bytes / 1e9).toFixed(2)} GB). ${again}`,
+      message: item.id === "tensorrt" ? "Remove TensorRT?" : `Remove the ${item.label.toLowerCase()}?`,
+      detail: `This deletes ${what} (${(item.bytes / 1e9).toFixed(2)} GB). ${again}`,
     });
     if (r.response !== 0) return;
-    removeStorage(item);
+    removeStorage(item, enginePlaces().data, cacheDir);
     storage = storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort);
     install = installIdle();
+    trt = trtIdle();
     recheckEngines();
     scheduleSend();
   });

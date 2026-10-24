@@ -29,7 +29,8 @@ export function SettingsPage(props: { state: AppState; panelShown: boolean; narr
   // Storage is measured when this page opens (walking the folders), and again after a removal
   useEffect(() => void window.ck.measureStorage(), []);
   const storage = state.storage;
-  // loop: NOT-WORTH — three folders per render
+  const busy = state.queueRunning || state.install.status === "running" || state.tensorrt.status === "running";
+  // loop: NOT-WORTH — four items per render
   const storageTotal = storage ? storage.reduce((n, i) => n + i.bytes, 0) : null;
 
   const main = (
@@ -115,15 +116,18 @@ export function SettingsPage(props: { state: AppState; panelShown: boolean; narr
                   <button
                     type="button"
                     className="btn small"
-                    disabled={!i.bytes || state.queueRunning || state.install.status === "running"}
-                    title={state.queueRunning || state.install.status === "running" ? "Not while the queue or the download runs" : undefined}
+                    disabled={!i.bytes || busy}
+                    title={busy ? "Not while the queue or the download runs" : undefined}
                     onClick={() => void window.ck.removeStorage(i.id)}
                   >
                     <Trash2 size={14} /> Remove…
                   </button>
                 </Row>
               ))}
-              <p className="hint-text">Removing asks first. The runtime and models come back through the setup when you need them; your settings and results are never touched here.</p>
+              <p className="hint-text">
+                Removing asks first. The runtime and models come back through the setup when you need them{state.tensorrt.supported ? ", TensorRT through its switch (Engine settings)" : ""}; your
+                settings and results are never touched here.
+              </p>
             </>
           )
         }

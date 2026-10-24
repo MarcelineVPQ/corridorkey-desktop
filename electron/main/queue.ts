@@ -28,11 +28,16 @@ export interface QueueDeps {
   tempDirFor(jobId: string): string;
   changed(): void;
   finished(job: Job): void;
+  // ask the running engine for TensorRT (asked per job: the Rust engine, the setting on, its parts installed)
+  tensorrt?: () => boolean;
   now?: () => number;
 }
 
-/** The engine's `options` object for a job (docs/ENGINE_PROTOCOL.md). */
-export function engineOptions(o: JobOptions, kind: "video" | "frames"): Record<string, unknown> {
+/**
+ * The engine's `options` object for a job (docs/ENGINE_PROTOCOL.md). `tensorrt`: the Rust engine runs it on
+ * TensorRT (index.ts sends it only with the setting on and the TensorRT parts installed; never to the PyTorch engine).
+ */
+export function engineOptions(o: JobOptions, kind: "video" | "frames", tensorrt = false): Record<string, unknown> {
   const out: Record<string, unknown> = {
     hint_quality: o.hintQuality,
     carry_hint: o.carryHint,
@@ -53,7 +58,24 @@ export function engineOptions(o: JobOptions, kind: "video" | "frames"): Record<s
     out.frame_dir_fps = o.frameDirFps;
     out.frame_dir_linear = o.frameDirLinear;
   }
+  if (tensorrt) out.tensorrt = true;
   return out;
+}
+
+/** The job log's line for a `provider` reply about TensorRT (null for a plain job: nothing to add). */
+export function providerText(r: EngineReply): string | null {
+  if (typeof r.fallback_reason === "string") return `TensorRT not used: ${r.fallback_reason}. Runs on ${String(r.provider ?? "cuda").toUpperCase()}.`;
+  if (r.fallbacks && typeof r.fallbacks === "object") {
+    // loop: NOT-WORTH — at most five networks, once per TensorRT job
+    const fell = Object.entries(r.fallbacks as Record<string, unknown>).map(([k, why]) => `${k} (${String(why)})`);
+    // loop: NOT-WORTH — as above
+    const built = Object.values((r.build_s ?? {}) as Record<string, unknown>).reduce<number>((n, s) => n + (typeof s === "number" ? s : 0), 0);
+    const head = r.provider === "tensorrt" ? "Runs on TensorRT" : r.provider === "cuda" ? "TensorRT couldn't take any network: runs on CUDA" : "Runs on TensorRT";
+    return `${head}${built > 0 ? ` (engines built in ${Math.round(built)} s, kept for this resolution)` : ""}${fell.length && r.provider !== "cuda" ? `; on CUDA: ${fell.join(", ")}` : fell.length ? `: ${fell.join(", ")}` : ""}.`;
+  }
+  if (r.tensorrt_requested === true && typeof r.range === "string")
+    return r.cache === "build" ? `TensorRT: building the engines for this resolution (${r.range}), once.` : `TensorRT: engines for this resolution (${r.range}) reused.`;
+  return null;
 }
 
 const STAGES = new Set<Stage>(["load", "optimize", "probe", "rvm", "foundations", "keying"]);
@@ -244,7 +266,7 @@ export class Queue {
       input: job.clip.path,
       output_dir: staging,
       temp_dir: this.deps.tempDirFor(job.id),
-      options: engineOptions(job.options, job.clip.kind),
+      options: engineOptions(job.options, job.clip.kind, this.deps.tensorrt?.() ?? false),
     });
   }
 
@@ -277,6 +299,13 @@ export class Queue {
         const frames = job.framesDone - this.rateStart.frames;
         const seconds = (at - this.rateStart.at) / 1000;
         if (frames >= RATE_MIN_FRAMES && seconds >= RATE_MIN_SECONDS) job.framesPerSecond = frames / seconds;
+        break;
+      }
+      case "provider": {
+        const text = providerText(r);
+        if (!text) return;
+        job.log.push(text);
+        if (job.log.length > LOG_LINES) job.log.splice(0, job.log.length - LOG_LINES);
         break;
       }
       case "log":

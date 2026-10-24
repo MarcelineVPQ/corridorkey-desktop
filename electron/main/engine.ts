@@ -39,6 +39,8 @@ export interface RustLaunch {
   env: NodeJS.ProcessEnv;
   // the TensorRT engine cache (the app's cache folder + "tensorrt"); a CK_ENGINE_TRT_CACHE in `env` wins
   trtCache?: string;
+  // ck-trt-build, TensorRT's engine builder (engineFind.ts findTrtBuilder); a CK_ENGINE_TRT_BUILD in `env` wins
+  trtBuild?: string | null;
 }
 
 export type EngineLaunch = PythonLaunch | RustLaunch;
@@ -114,6 +116,8 @@ export function launchCommand(launch: EngineLaunch): { cmd: string; args: string
     const env = rustEngineEnv(launch.env, launch.ort);
     // TensorRT engines go to the app's own cache folder on every system (engine-rs pipeline.rs trt_root)
     if (launch.trtCache && !launch.env.CK_ENGINE_TRT_CACHE) env.CK_ENGINE_TRT_CACHE = launch.trtCache;
+    // the builder the app ships next to the engine (the engine also looks there itself; a dev engine has none beside it)
+    if (launch.trtBuild && !launch.env.CK_ENGINE_TRT_BUILD) env.CK_ENGINE_TRT_BUILD = launch.trtBuild;
     return { cmd: launch.binary, args, env };
   }
   return { cmd: launch.python, args: ["-u", launch.script, "--package-root", launch.packageRoot], env: engineEnv(launch.env) };

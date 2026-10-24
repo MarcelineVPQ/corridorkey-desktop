@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { effectivePath, findEngineFiles, isInsideApp, windowTitle } from "../../electron/main/engineFind";
+import { effectivePath, findEngineFiles, findTrtBuilder, isInsideApp, windowTitle } from "../../electron/main/engineFind";
 import { addToPathList, appDirs } from "../../electron/main/platform";
 
 const dataDir = (env: NodeJS.ProcessEnv, home: string, platform: NodeJS.Platform) => appDirs(env, home, platform).data;
@@ -127,5 +127,17 @@ describe("each system's folders and lists (platform.ts)", () => {
     expect(addToPathList("/usr/bin:/bin", ["/opt/homebrew/bin", "/usr/bin"], "back", ":")).toBe("/usr/bin:/bin:/opt/homebrew/bin");
     expect(addToPathList("C:/W", ["C:/ff", "C:/ff"], "front", ";")).toBe("C:/ff;C:/W");
     expect(addToPathList(undefined, ["/x"], "front", ":")).toBe("/x");
+  });
+});
+
+describe("TensorRT's builder", () => {
+  it("is found next to the engine (the AppImage's resources/engine), else in the release build's folder", () => {
+    const has = (p: string[]) => (x: string) => p.includes(x);
+    expect(findTrtBuilder("/app/resources/engine/corridorkey-engine", null, has(["/app/resources/engine/ck-trt-build"]))).toBe("/app/resources/engine/ck-trt-build");
+    expect(findTrtBuilder("/src/engine-rs/target/release/corridorkey-engine", "/src/engine-rs/target/dist", has(["/src/engine-rs/target/dist/ck-trt-build"]))).toBe(
+      "/src/engine-rs/target/dist/ck-trt-build",
+    );
+    expect(findTrtBuilder("/e/corridorkey-engine", "/dist", has([]))).toBeNull();
+    expect(findTrtBuilder(null, null, has([]))).toBeNull();
   });
 });

@@ -10,7 +10,7 @@
 import { isAppImageMount } from "./relaunch";
 import { MODELS_DIR, ortLibrary, PLATFORM, RUNTIME_DIR } from "./platform";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { EngineFileChoice, EngineFiles } from "../../src/shared/types";
 
 export interface FindDeps {
@@ -106,6 +106,19 @@ export function findEngineFiles(places: { bundledBinary: string | null; devBinar
 
   // loop: NOT-WORTH — strips the sort keys from a few entries
   return { binary, models: models.map(({ path, label }) => ({ path, label })), ort: ort.map(({ path, label }) => ({ path, label })) };
+}
+
+/** TensorRT's engine builder's file name (Linux only in 1.0). */
+export const TRT_BUILDER = "ck-trt-build";
+
+/**
+ * ck-trt-build for the engine at `binary`: next to it (the AppImage ships both in resources/engine), else the release
+ * build's copy (tools/build_trt_builder.sh, engine-rs/target/dist) for a development engine. null: none, and a
+ * TensorRT job's networks run on CUDA, saying why.
+ */
+export function findTrtBuilder(binary: string | null, distDir: string | null, exists: (p: string) => boolean = existsSync): string | null {
+  // loop: NOT-WORTH — two candidates, two stats per engine start
+  return [binary ? join(dirname(binary), TRT_BUILDER) : null, distDir ? join(distDir, TRT_BUILDER) : null].find((p): p is string => !!p && exists(p)) ?? null;
 }
 
 /** A path inside the running AppImage's mount (resources/…): it changes every launch, so it is never saved. */

@@ -1,8 +1,9 @@
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { folderBytes, pruneCache, storageItems } from "../../electron/main/storage";
+import type { TrtCatalog } from "../../electron/main/install";
+import { folderBytes, pruneCache, removeStorage, storageItems } from "../../electron/main/storage";
 
 describe("storage", () => {
   const dir = mkdtempSync(join(tmpdir(), "ck-storage-"));
@@ -22,12 +23,61 @@ describe("storage", () => {
     writeFileSync(join(dir, "data", "models", "b.json"), Buffer.alloc(24));
     expect(folderBytes(join(dir, "data", "models"))).toBe(1024);
     expect(folderBytes(join(dir, "nope"))).toBe(0);
-    const items = storageItems(join(dir, "data"), dir, "ONNX Runtime, CUDA, cuDNN");
+    const items = storageItems(join(dir, "data"), dir, "ONNX Runtime, CUDA, cuDNN", "win32");
     expect(items.map((i) => [i.id, i.bytes])).toEqual([
       ["runtime", 0],
       ["models", 1024],
       ["cache", 0],
     ]);
+  });
+
+  it("measures TensorRT's parts as their own item (Linux), out of the runtime's and models' sizes, and removes only them", () => {
+    const data = join(dir, "trt");
+    const rt = join(data, "runtime", "rt");
+    const m1 = join(data, "models", "m1");
+    mkdirSync(join(rt, "tensorrt_libs"), { recursive: true });
+    mkdirSync(join(rt, "tensorrt_cu13_libs-10.16.1.11.dist-info"), { recursive: true });
+    mkdirSync(join(rt, "onnxruntime", "capi"), { recursive: true });
+    mkdirSync(m1, { recursive: true });
+    writeFileSync(join(rt, "onnxruntime", "capi", "libonnxruntime.so.1.31.0"), Buffer.alloc(100));
+    writeFileSync(join(rt, "tensorrt_libs", "libnvinfer.so.10"), Buffer.alloc(700));
+    writeFileSync(join(rt, "tensorrt_cu13_libs-10.16.1.11.dist-info", "LICENSE.txt"), Buffer.alloc(10));
+    writeFileSync(join(m1, "a.onnx"), Buffer.alloc(300));
+    writeFileSync(join(m1, "models.json"), JSON.stringify({ fp16: { rvm: "a.onnx" }, "tensorrt-fp16": { rvm: "t.onnx" } }));
+    writeFileSync(join(m1, "t.onnx"), Buffer.alloc(200));
+    writeFileSync(join(m1, "models-tensorrt.json"), JSON.stringify({ "tensorrt-fp16": { rvm: "t.onnx" } }));
+    const c: TrtCatalog = {
+      runtime: { name: "rt", wheels: [{ file: "onnxruntime_gpu.whl", url: "", size: 1, sha256: "" }] },
+      models: { name: "m1", files: [] },
+      libs: { file: "trt.whl", url: "", size: 1, sha256: "" },
+      trtModels: {
+        name: "m1-trt",
+        files: [
+          { file: "t.onnx", url: "", size: 200, sha256: "" },
+          { file: "models.json", url: "", size: 1, sha256: "" },
+        ],
+      },
+    };
+    const list = statSync(join(m1, "models-tensorrt.json")).size;
+    const modelsJson = statSync(join(m1, "models.json")).size;
+    // the engines built for the card count with TensorRT too
+    const cache = join(dir, "cache2");
+    mkdirSync(join(cache, "tensorrt", "h1024"), { recursive: true });
+    writeFileSync(join(cache, "tensorrt", "h1024", "stage2.engine"), Buffer.alloc(50));
+    const items = storageItems(data, cache, "ONNX Runtime, CUDA, cuDNN", "linux", c);
+    expect(items.map((i) => [i.id, i.bytes])).toEqual([
+      ["runtime", 100],
+      ["models", 300 + modelsJson],
+      ["tensorrt", 710 + 200 + list + 50],
+      ["cache", 0],
+    ]);
+    removeStorage(items[2], data, cache, c);
+    expect(readdirSync(cache)).toEqual([]);
+    expect(readdirSync(rt)).toEqual(["onnxruntime"]);
+    expect(readdirSync(m1).sort()).toEqual(["a.onnx", "models.json"]);
+    expect(JSON.parse(readFileSync(join(m1, "models.json"), "utf8"))).toEqual({ fp16: { rvm: "a.onnx" } });
+    // no TensorRT item off Linux: there is no switch to bring it back there
+    expect(storageItems(data, dir, "x", "darwin").map((i) => i.id)).toEqual(["runtime", "models", "cache"]);
   });
 
   it("prunes cached stills older than 30 days, then the oldest until under the cap", () => {

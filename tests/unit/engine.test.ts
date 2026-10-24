@@ -78,6 +78,14 @@ describe("engine launch", () => {
     expect(o.env.CK_ENGINE_TRT_CACHE).toBe("/mine");
   });
 
+  it("hands the Rust engine the shipped TensorRT builder, unless the environment names one", () => {
+    const c = launchCommand({ kind: "rust", binary: "/e/corridorkey-engine", models: "/m", ort: null, env: {}, trtBuild: "/e/ck-trt-build" });
+    expect(c.env.CK_ENGINE_TRT_BUILD).toBe("/e/ck-trt-build");
+    const o = launchCommand({ kind: "rust", binary: "/e/corridorkey-engine", models: "/m", ort: null, env: { CK_ENGINE_TRT_BUILD: "/mine" }, trtBuild: "/e/ck-trt-build" });
+    expect(o.env.CK_ENGINE_TRT_BUILD).toBe("/mine");
+    expect(launchCommand({ kind: "rust", binary: "/e/corridorkey-engine", models: "/m", ort: null, env: {}, trtBuild: null }).env).not.toHaveProperty("CK_ENGINE_TRT_BUILD");
+  });
+
   it("finds the CUDA, cuDNN and TensorRT libraries of a pip-wheel layout next to ONNX Runtime", () => {
     const site = "/v/lib/python3.12/site-packages";
     const have = new Set([`${site}/nvidia`, `${site}/nvidia/cu13/lib`, `${site}/nvidia/cudnn/lib`, `${site}/tensorrt_libs`]);

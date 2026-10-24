@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { checkRustEngine, chooseEngine, loadSettings } from "../../electron/main/settings";
 
@@ -38,6 +41,17 @@ describe("Rust engine setup", () => {
     expect(chooseEngine(ok, ok)).toBe("rust");
     expect(chooseEngine(no, ok)).toBe("python");
     expect(chooseEngine(no, no)).toBeNull();
+  });
+
+  it("keeps TensorRT off unless the file says true", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ck-settings-"));
+    const f = join(dir, "settings.json");
+    expect(loadSettings(f, {}).tensorrt).toBe(false);
+    writeFileSync(f, JSON.stringify({ tensorrt: "yes" }));
+    expect(loadSettings(f, {}).tensorrt).toBe(false);
+    writeFileSync(f, JSON.stringify({ tensorrt: true }));
+    expect(loadSettings(f, {}).tensorrt).toBe(true);
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it("never loads the CK_ENGINE_* overrides into the saved settings (they'd stick after the variable is gone)", () => {

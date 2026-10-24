@@ -25,6 +25,7 @@ export function loadSettings(file: string, env: NodeJS.ProcessEnv): Settings {
     engineBinary: path(saved.engineBinary),
     modelsDir: path(saved.modelsDir),
     ortLibrary: path(saved.ortLibrary),
+    tensorrt: saved.tensorrt === true,
   };
 }
 
