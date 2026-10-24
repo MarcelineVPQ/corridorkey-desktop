@@ -2,8 +2,8 @@
 
 ## 1.0.0
 
-The first release: a free Linux desktop app for CorridorKey 2.0, Corridor Digital's AI green and blue
-screen keyer, on its own Rust + ONNX Runtime engine.
+The first release: a free desktop app for CorridorKey 2.0, Corridor Digital's AI green and blue
+screen keyer, on its own Rust + ONNX Runtime engine, for Linux, Windows and macOS (Apple Silicon).
 
 - First app: clip queue (videos, frame folders, batch folders, companion hints found next to
   clips), per-clip hint/output/memory settings, one engine process for the queue, live progress

@@ -16,7 +16,7 @@ and wrapped it in a desktop app that installs itself.
 On my RTX 5080 it keys 4K at about two frames a second: 2.4-2.7× faster than the original on the same machine
 (1.5-1.8× at HD), with the same mattes, less graphics memory and RAM, and less than half the install. Every number
 is below, with the clips and the commands to check them yourself. TensorRT is next, for more speed still. Rust and ONNX Runtime
-also mean one engine for every platform: NVIDIA on Linux and Windows today, and Apple Silicon through Core ML next.
+also mean one engine for every platform: NVIDIA on Linux and Windows, and Apple Silicon through Core ML.
 
 It's free, it stays free, and it's Corridor's model. Huge thanks to Niko, Zachary Harris and the Corridor crew.
 Windows testers wanted: see Requirements.
@@ -30,23 +30,26 @@ Corridor Digital's AI green-screen keyer (model by Zachary Harris). Drop clips i
 mode and outputs, and watch real progress: frames written, the temporal window the runtime
 chose from your free graphics memory, and stills of the results.
 
-Status: 1.0 is almost ready (Linux and Windows); macOS is planned next.
+Status: 1.0 is almost ready, for Linux, Windows and macOS (Apple Silicon).
 
 ## Requirements
 
 - Linux (the AppImage) or Windows 10/11 (the installer), x64, with an NVIDIA graphics card (RTX 30-series or newer).
+- macOS 14 or newer on Apple Silicon (M1 or newer; the disk image). Intel Macs aren't supported.
 - Nothing else to set up: the engine comes with the app, and on first start the setup downloads the GPU runtime and
-  the CorridorKey models (a 4.9 GB download, once). If `ffmpeg` is missing, it offers to install it (apt or pacman on
-  Linux, `winget` on Windows).
+  the CorridorKey models (a 4.9 GB download on Linux and Windows, about 3.3 GB on macOS, once). If `ffmpeg` is
+  missing, it offers to install it (apt or pacman on Linux, `winget` on Windows, Homebrew on macOS).
 
 **Windows, honestly:** the Windows build is tested in a Windows 11 virtual machine: it installs, opens, runs its setup
 (the downloads, ffmpeg through winget) and works through its pages. That machine has no NVIDIA graphics card, so
 **keying on an NVIDIA card under Windows has not been tested yet**: we don't have a real Windows PC with one. Every
 speed and quality number in this README was measured on Linux. If you try it on Windows, please tell us how it goes.
 
-**macOS is planned next.** A great many VFX artists work on Macs. The plan: Apple Silicon, with the engine on ONNX
-Runtime's Core ML backend (Apple's GPU and Neural Engine) and a signed `.dmg`, built and tested on real Apple
-Silicon machines (GitHub's macOS runners).
+**macOS, honestly:** a great many VFX artists work on Macs, so macOS is part of 1.0. The app runs on Apple Silicon,
+with the engine on ONNX Runtime's Core ML backend (Apple's GPU and Neural Engine), and it's built, installed and
+driven page by page on GitHub's Apple Silicon runners. The Core ML engine is being finished now. Those runners are
+virtual machines without the GPU or the Neural Engine, so **Mac keying speed will come from testers**, like Windows
+keying. The disk image will be signed and notarized by Apple.
 
 ## Install size
 
@@ -298,7 +301,7 @@ Every result in this README is reproducible with the tools in this repository. T
 
 | Test | What it checks | Result |
 | --- | --- | --- |
-| `npm run check` | TypeScript types, formatting, the theme gate (colours only from one place), the loop gate (every loop, timer and wait in the app and engine carries a written verdict: 653 rows), 141 unit tests, the PyTorch engine's own tests | pass |
+| `npm run check` | TypeScript types, formatting, the theme gate (colours only from one place), the loop gate (every loop, timer and wait in the app and engine carries a written verdict: 653 rows), 141 unit tests (151 since the platform passes the same day), the PyTorch engine's own tests | pass |
 | `npm run check:engine` | Rust formatting, clippy with every warning an error, 67 engine tests | pass |
 | CPU end to end (`e2e_cpu.sh`) | the Rust engine against PyTorch, both fp32: frame folder, H.264 and hint inputs, EXR and video outputs, low-memory mode | pass: alpha MAE 1.7e-7, low-memory mode identical |
 | GPU speed and quality, HD and 4K | `engine_bench.mjs` + `matte_compare.py`, ten clips, both engines | pass (the tables above) |
@@ -355,7 +358,7 @@ against this app's own engine. As of 2026-10-24:
 | [#11](https://github.com/nikopueringer/CorridorKey2.0/pull/11) | The automatic memory window runs out of graphics memory on a first run (RTX 5090, 2048×1152) | **Handled differently.** The engine caps ONNX Runtime's memory to the budget and, if an automatic window still runs out before any frame is written, halves it and restarts (up to ~7 times). No retry was needed in any run here; not tested on a 32 GB card |
 | [#9](https://github.com/nikopueringer/CorridorKey2.0/pull/9) | Halves the original's graphics memory (bf16 weights, no gradients), same output | **Not needed:** the engine already runs fp16 weights. If it is merged, the original's memory numbers in the Speed tables will drop; we will re-measure |
 | [#8](https://github.com/nikopueringer/CorridorKey2.0/pull/8) | A desktop GUI (Qt) on top of the original's Python pipeline | A different approach: this app installs itself and runs its own engine, no Python |
-| [#10](https://github.com/nikopueringer/CorridorKey2.0/pull/10), [#6](https://github.com/nikopueringer/CorridorKey2.0/pull/6), [#7](https://github.com/nikopueringer/CorridorKey2.0/pull/7) | Apple Silicon (MPS), AMD (ROCm) support | Not in 1.0: NVIDIA only. **macOS (Apple Silicon) is planned next**, on ONNX Runtime's Core ML backend; AMD would need ONNX Runtime's ROCm or MIGraphX build |
+| [#10](https://github.com/nikopueringer/CorridorKey2.0/pull/10), [#6](https://github.com/nikopueringer/CorridorKey2.0/pull/6), [#7](https://github.com/nikopueringer/CorridorKey2.0/pull/7) | Apple Silicon (MPS), AMD (ROCm) support | **macOS (Apple Silicon) is part of 1.0**, on ONNX Runtime's Core ML backend instead of PyTorch's MPS. AMD isn't in 1.0; it would use ONNX Runtime's MIGraphX (Linux) or DirectML (Windows) build |
 | [#3](https://github.com/nikopueringer/CorridorKey2.0/pull/3) | Python version requirements | Not applicable (no Python) |
 
 ## Why it's built this way
@@ -379,12 +382,12 @@ against this app's own engine. As of 2026-10-24:
 
 CorridorKey writes only these folders (plus the results you ask for, next to your clips or in the folder you chose):
 
-| What | Linux | Windows |
-| --- | --- | --- |
-| The app | the AppImage you downloaded (and, after updates, the previous version next to it) | the install folder (Apps & features) |
-| GPU runtime and models (~5.7 GB) | `~/.local/share/corridorkey-desktop` | `%LOCALAPPDATA%\corridorkey-desktop` |
-| Thumbnails, stills, job temp files | `~/.cache/corridorkey-desktop` | `%LOCALAPPDATA%\corridorkey-desktop\cache` |
-| Settings (a few KB) | `~/.config/corridorkey-desktop` | `%APPDATA%\corridorkey-desktop` |
+| What | Linux | Windows | macOS |
+| --- | --- | --- | --- |
+| The app | the AppImage you downloaded (and, after updates, the previous version next to it) | the install folder (Apps & features) | `CorridorKey.app` in Applications |
+| GPU runtime and models (~5.7 GB; ~3.3 GB on macOS) | `~/.local/share/corridorkey-desktop` | `%LOCALAPPDATA%\corridorkey-desktop` | `~/Library/Application Support/corridorkey-desktop` |
+| Thumbnails, stills, job temp files | `~/.cache/corridorkey-desktop` | `%LOCALAPPDATA%\corridorkey-desktop\cache` | `~/Library/Caches/corridorkey-desktop` |
+| Settings (a few KB) | `~/.config/corridorkey-desktop` | `%APPDATA%\corridorkey-desktop` | `~/Library/Application Support/corridorkey-desktop` (with the data) |
 
 - **App settings → Storage** shows each folder's real size and removes the runtime, the models or the cache (it asks
   first; the setup downloads them again when needed).
@@ -393,6 +396,7 @@ CorridorKey writes only these folders (plus the results you ask for, next to you
 - **Windows:** uninstalling from Apps & features asks whether to remove the downloaded runtime, models, cache and
   settings too.
 - **Linux:** delete the AppImage, then the three folders above.
+- **macOS:** move CorridorKey to the Bin, then delete its two folders above (Finder: Go → Go to Folder…).
 
 ## Develop
 

@@ -100,6 +100,22 @@ spent 29 minutes waiting on a package mirror).
 4. If it fails partway, run it again: a draft release is picked up and finished, and once the release is
    published only the feeds are redone.
 
+### macOS (Apple Silicon)
+
+There is no Mac here and no cross-build from Linux without Apple's SDK, so the macOS disk image is built on
+GitHub's macOS runner: `gh workflow run macos.yml --ref main` (on demand only, never on every push). It runs the
+app's and the engine's checks on macOS, builds the engine for `aarch64-apple-darwin` and the arm64 `.dmg`
+(`npm run dist:mac`), installs it as a user does (a quarantined download into /Applications, Gatekeeper's answers
+recorded), starts it and screenshots every page. The image and the screenshots are the run's artifacts; download
+the image with `gh run download` and upload it to the release with the others. The runner is a virtual Mac without
+the GPU or the Neural Engine: it proves the build and the app, not keying speed.
+
+Signing: until Marcy's Apple Developer ID is approved the image is unsigned (`identity: null` in
+electron-builder.yml) and Gatekeeper refuses the first open. Once it is: create a Developer ID Application
+certificate (the request can be made on Linux with openssl and uploaded in the developer account) and an App Store
+Connect API key, store them as the repository's secrets, and the workflow signs with the hardened runtime,
+notarizes and staples the image.
+
 Development builds ship one feature at a time on the Development channel; a stable release goes out when its
 planned set is done and Marcy has done her QC (the DS5 rhythm).
 

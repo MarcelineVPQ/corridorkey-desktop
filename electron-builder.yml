@@ -1,6 +1,7 @@
-# Packaging: a Linux AppImage, a Windows installer (x64) and a macOS disk image (Apple Silicon). `npm run dist:linux` / `npm run dist:win` build them
-# into release/ (the engine and electron-vite build first). Releases are built on Marcy's PC by
-# tools/release.sh; docs/RELEASING.md.
+# Packaging: a Linux AppImage, a Windows installer (x64) and a macOS disk image (Apple Silicon). `npm run dist:linux`
+# / `npm run dist:win` / `npm run dist:mac` build them into release/ (the engine and electron-vite build first).
+# Linux and Windows releases are built on Marcy's PC by tools/release.sh; the macOS image on GitHub's macOS runner
+# (.github/workflows/macos.yml). docs/RELEASING.md.
 appId: io.github.MarcelineVPQ.CorridorKeyDesktop
 productName: CorridorKey
 copyright: Copyright © 2026 MarcelineVPQ. CorridorKey © Corridor Digital.
