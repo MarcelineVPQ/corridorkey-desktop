@@ -96,6 +96,13 @@ The engine runs `ffmpeg` / `ffprobe` from the system: they are not bundled.
   `CK_ENGINE_PROFILE=<dir>` (ORT per-node profile; on CUDA it times kernel launches, not GPU work),
   `CK_ENGINE_THREADS`; TensorRT: `CK_ENGINE_TRT_CACHE` (engine folder; the app passes its cache folder + `tensorrt`, else the system cache folder: `~/.cache`, `%LOCALAPPDATA%\corridorkey-desktop\cache`, `~/Library/Caches`), `CK_ENGINE_TRT_BUILD` (ck-trt-build,
   else next to the engine binary), `CK_ENGINE_TRT_BUILD_TIMEOUT_S` (one engine build's deadline, default 1800 s).
+  Also `CK_ENGINE_DEVICE` (auto | cuda | cpu, = `--device`), `CK_ENGINE_PRECISION` (fp16 | fp32), `CK_ENGINE_MODELS`,
+  `CK_ENGINE_ORT` / `ORT_DYLIB_PATH`. All are read once at startup (`ck-core/src/config.rs`, `EngineConfig`; flags win
+  over the environment, an empty value is unset); an unknown value stops the engine with an error naming the
+  variable (it used to fall back to the default silently). The settings go to stderr at startup and into the pong
+  (`config`). `ORT_ENABLE_CUDNN_FLASH_ATTENTION` stays an environment variable set first thing in `main`, before
+  any thread: the CUDA provider's `sdpa_kernel` option would replace ORT's whole kernel choice, not only switch
+  cuDNN's off.
 - No open-ended waits: ffprobe 120 s, `ffmpeg -version` 30 s, each TensorRT build `CK_ENGINE_TRT_BUILD_TIMEOUT_S`, a
   writer finishing its file 300 s (then ffmpeg is killed and the job fails saying so) (`proc.rs`,
   docs/LOOP_PASS_2026-10.md).

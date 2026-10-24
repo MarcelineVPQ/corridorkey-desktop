@@ -90,7 +90,8 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
    "assets":{"weights":true,"foundation_stats":true,"rvm":true,"moge":true,"cradio":true}}
 ← {"type":"pong","version":"0.2.0","protocol":1,"engine":"onnxruntime","device":"cuda","gpu":"NVIDIA GeForce RTX 5080",
    "vram_total_mb":16303,"provider":"cuda","precision":"fp16","ort":"1.31.0","tensorrt_available":true,
-   "models_dir":"/models","assets":{"cradio":true,"moge":true,"rvm":true,"stage1":true,"stage2":true},"python":null,"torch":null}
+   "models_dir":"/models","assets":{"cradio":true,"moge":true,"rvm":true,"stage1":true,"stage2":true},"python":null,"torch":null,
+   "config":{"device":"auto","precision":null,"graph_opt":"all","arena_shrink":"auto","trt_cache":"...",...}}
 ← {"type":"progress","id":"j1","stage":"load|optimize|probe|rvm|foundations|keying","p":0.42,"detail":"window 3/9"}
 ← {"type":"provider","id":"j1","provider":"cuda|tensorrt|tensorrt+cuda|cpu","precision":"fp16","tensorrt_requested":false,
    "fallback_reason":"...","range":"h1024-1280_w1792-2176_t1-12","cache":"build|reused","pieces":{...},"fallbacks":{...},
@@ -116,6 +117,8 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
   job's `vram_budget_gb`), `budget_source` (`gpu`, or `host` on the CPU
   provider) and `estimate_basis` (`pytorch-bf16-table`: the estimate is the
   upstream runtime's PyTorch table, not an ONNX Runtime measurement).
+- `config` (Rust engine pong, additive): the settings the engine runs with, read once at
+  startup from its command line and `CK_ENGINE_*` variables (docs/ENGINE_RUST.md "Knobs").
 - `provider` (Rust engine, additive) says what really runs the job: the
   provider and precision, and for TensorRT the shape range, whether its
   engines are built or reused, and every network that fell back to CUDA, with why.

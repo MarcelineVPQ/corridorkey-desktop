@@ -466,10 +466,10 @@ impl Pipeline {
     /// Arena shrinkage for what is loaded now (`crate::runtime::shrinks`).
     fn set_shrink(&mut self) {
         let shared = self.nets.contains_key("stage1") && self.nets.contains_key("stage2");
-        let setting = std::env::var("CK_ENGINE_ARENA_SHRINK").ok();
+        let setting = &self.rt.cfg.arena_shrink;
         // loop: NOT-WORTH — at most five networks
         for (p, n) in self.nets.iter_mut() {
-            n.shrink = n.provider != Provider::Cpu && crate::runtime::shrinks(p, setting.as_deref(), shared);
+            n.shrink = n.provider != Provider::Cpu && crate::runtime::shrinks(p, setting, shared);
         }
     }
 
@@ -498,7 +498,12 @@ impl Pipeline {
     /// Run one job. Replies go to `sink` (progress, clip, memory, provider, frames, log); the result or the
     /// failure is returned for the engine to send.
     pub fn run(&mut self, job: &JobConfig, sink: &mut dyn Sink) -> Result<JobResult, Error> {
-        let r = self.run_job(job, sink);
+        // the engine-wide default budget (CK_ENGINE_VRAM_BUDGET_GB) for a job that sets none
+        let mut job = job.clone();
+        if job.vram_budget_gb.is_none() {
+            job.vram_budget_gb = self.rt.cfg.vram_budget_gb;
+        }
+        let r = self.run_job(&job, sink);
         // the job's frames, windows and writers are freed by now: give that host memory back too, not only
         // the sessions' (unload), so the next job in the queue starts from the same footprint
         trim_host_memory();
@@ -795,7 +800,7 @@ impl Pipeline {
             sink.send(msg);
             return Ok((base.clone(), None));
         }
-        let root = trt_root();
+        let root = self.rt.cfg.trt_cache.clone();
         let dir = crate::tensorrt::cache_dir(&root, &gpu.name, &gpu.driver, &trt_ver, &self.rt.ort_version, "fp16");
         let stale = crate::tensorrt::stale_dirs(&root, &dir, &gpu.name);
         if !stale.is_empty() {
@@ -833,7 +838,7 @@ impl Pipeline {
         self.key = Some(key.clone());
         let Some(dir) = key.trt_cache.clone() else { return Ok(()) };
         let timing = dir.parent().map(|p| p.join("timing.cache")).unwrap_or_else(|| dir.join("timing.cache"));
-        let builder = crate::tensorrt::builder_path();
+        let builder = crate::tensorrt::builder_path(self.rt.cfg.trt_build.as_deref());
         // TensorRT's working memory while it builds: 60 % of the job's budget (else of the card's free memory), at
         // most 8 GiB. Measured 2026-10-24: stage 1 for 48-frame windows at 1152x1280 needs a 6.1 GB tactic (a
         // 4 GiB cap found none; 7 GiB built it, peak 13.9 GB on the card). A build that still finds no tactic
@@ -856,7 +861,7 @@ impl Pipeline {
         // one engine process builds this range at a time; one that waited finds what the other built
         let mut lock = None;
         if !todo.is_empty() && builder.is_some() {
-            let per_build = crate::tensorrt::build_timeout() + std::time::Duration::from_secs(120);
+            let per_build = self.rt.cfg.trt_build_timeout + std::time::Duration::from_secs(120);
             let waiting = || {
                 sink.send(json!({"type": "progress", "stage": "optimize", "detail": "waiting for another CorridorKey engine building this range"}));
                 sink.log("  TensorRT: another CorridorKey engine is building this range's engines; waiting for it");
@@ -898,7 +903,7 @@ impl Pipeline {
             if let Some(l) = &lock {
                 l.touch();
             }
-            match crate::tensorrt::build_engine(b, &onnx, piece, bucket, &pdir, workspace_mb, &timing) {
+            match crate::tensorrt::build_engine(b, &onnx, piece, bucket, &pdir, workspace_mb, &timing, self.rt.cfg.trt_build_timeout) {
                 Ok(secs) => {
                     std::fs::copy(&stub, crate::tensorrt::stub_path(&pdir, piece)).map_err(|e| Error::engine(format!("{}: {e}", pdir.display())))?;
                     std::fs::write(crate::tensorrt::source_path(&pdir, piece), &source).map_err(|e| Error::engine(format!("{}: {e}", pdir.display())))?;
@@ -1475,12 +1480,8 @@ pub(crate) fn trim_host_memory() {
 /// The TensorRT engine cache root: CK_ENGINE_TRT_CACHE (the app passes its cache folder's `tensorrt`), else the
 /// system's cache folder (the app's own, electron/main/platform.ts appDirs): Linux $XDG_CACHE_HOME (or
 /// ~/.cache)/corridorkey-desktop/tensorrt, Windows %LOCALAPPDATA%\corridorkey-desktop\cache\tensorrt, macOS
-/// ~/Library/Caches/corridorkey-desktop/tensorrt.
-pub(crate) fn trt_root() -> PathBuf {
-    trt_root_for(std::env::consts::OS, |k| std::env::var(k).ok())
-}
-
-/// `trt_root` for system `os` ("linux", "windows", "macos") and an environment lookup.
+/// ~/Library/Caches/corridorkey-desktop/tensorrt. For system `os` ("linux", "windows", "macos") and an environment
+/// lookup; read once at startup (config.rs, EngineConfig::trt_cache).
 pub(crate) fn trt_root_for(os: &str, env: impl Fn(&str) -> Option<String>) -> PathBuf {
     let var = |k: &str| env(k).filter(|s| !s.is_empty()).map(PathBuf::from);
     if let Some(p) = var("CK_ENGINE_TRT_CACHE") {

@@ -6,13 +6,14 @@
 //! --ort (CK_ENGINE_ORT, ORT_DYLIB_PATH): ONNX Runtime's library, for the GPU build that loads it at run time.
 //! --device (CK_ENGINE_DEVICE): auto = the graphics card (no card: jobs fail with `no-gpu`, as the
 //!   PyTorch engine); cpu = ONNX Runtime's CPU provider (tests; slow).
+//! Every other setting is a CK_ENGINE_* variable (docs/ENGINE_RUST.md "Knobs"), read once (ck_core::config).
+use ck_core::config::EngineConfig;
 use ck_core::job::JobConfig;
 use ck_core::pipeline::{JobResult, Pipeline, Sink};
 use ck_core::runtime::{ModelSet, Runtime};
 use ck_core::Error;
 use ck_engine::{serve, Backend, Replies, ENGINE_VERSION, PROTOCOL};
 use serde_json::{json, Value};
-use std::path::PathBuf;
 
 struct Ort {
     pipeline: Pipeline,
@@ -34,7 +35,9 @@ impl Backend for Ort {
             "ort": rt.ort_version,
             "models_dir": self.pipeline.models.dir,
             "assets": precision.map(|p| json!(self.pipeline.models.assets(p))).unwrap_or(json!({})),
-            "python": null, "torch": null
+            "python": null, "torch": null,
+            // the settings it runs with (additive): its command line and CK_ENGINE_* variables, as read at startup
+            "config": rt.cfg.to_json()
         })
     }
     fn run(&mut self, job: &JobConfig, sink: &mut dyn Sink) -> Result<JobResult, Error> {
@@ -45,20 +48,14 @@ impl Backend for Ort {
     }
 }
 
-fn arg_value(args: &[String], name: &str) -> Option<String> {
-    // loop: NOT-WORTH — the command line, once per process
-    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned()).or_else(|| {
-        let p = format!("{name}=");
-        // loop: NOT-WORTH — the command line, once per process
-        args.iter().find_map(|a| a.strip_prefix(&p).map(|s| s.to_string()))
-    })
-}
-
 fn main() {
+    // the environment ONNX Runtime reads itself, set while no other thread exists (config::set_process_env)
+    ck_core::config::set_process_env();
     // end with the app on every system (ck_core::proc::end_with_parent). First thing, on the main thread, before any
     // other thread exists: on Linux the parent-death signal is armed for this process from here on, and the protocol
     // loop (`serve`) stays on this thread so the children it starts with proc::die_with_parent (the TensorRT
-    // builder) die with it: PR_SET_PDEATHSIG follows the spawning thread, not the process.
+    // builder) die with it: PR_SET_PDEATHSIG follows the spawning thread, not the process. (Read here, before the
+    // settings, so even a bad setting doesn't leave an engine without a parent.)
     ck_core::proc::end_with_parent(ck_core::proc::parent_pid_from(std::env::var("CK_ENGINE_PARENT_PID").ok().as_deref()));
     let args: Vec<String> = std::env::args().collect();
     // loop: NOT-WORTH — the command line, once per process
@@ -72,14 +69,21 @@ fn main() {
         return;
     }
     let mut out = Replies::new(std::io::stdout());
-    let models = arg_value(&args, "--models").or_else(|| std::env::var("CK_ENGINE_MODELS").ok());
-    let Some(models) = models else {
+    // every setting, once: the command line and CK_ENGINE_* (an unknown value stops the engine, saying which)
+    let cfg = match EngineConfig::parse(&args, &|k| std::env::var(k).ok(), std::env::consts::OS) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("engine failed to start: {e}");
+            out.send(json!({"type": "error", "code": "engine", "message": format!("engine failed to start: {e}")}));
+            std::process::exit(1);
+        }
+    };
+    eprintln!("corridorkey-engine {ENGINE_VERSION} settings: {}", cfg.to_json());
+    let Some(models) = cfg.models.clone() else {
         out.send(json!({"type": "error", "code": "engine", "message": "engine failed to start: --models (or CK_ENGINE_MODELS) is required"}));
         std::process::exit(1);
     };
-    let ort_lib = arg_value(&args, "--ort").map(PathBuf::from);
-    let device = arg_value(&args, "--device").or_else(|| std::env::var("CK_ENGINE_DEVICE").ok()).unwrap_or_else(|| "auto".into());
-    let rt = match Runtime::init(ort_lib.as_deref(), &device) {
+    let rt = match Runtime::init(&cfg) {
         Ok(rt) => rt,
         Err(e) => {
             eprintln!("engine failed to start: {}", e.message);
@@ -87,14 +91,19 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let set = match ModelSet::open(&PathBuf::from(&models)) {
+    let set = match ModelSet::open(&models) {
         Ok(s) => s,
         Err(e) => {
             out.send(json!({"type": "error", "code": "engine", "message": format!("engine failed to start: {}", e.message)}));
             std::process::exit(1);
         }
     };
-    eprintln!("corridorkey-engine {ENGINE_VERSION}: ONNX Runtime {}, provider {:?}, models {}", rt.ort_version, rt.provider().map(|p| p.name()), models);
+    eprintln!(
+        "corridorkey-engine {ENGINE_VERSION}: ONNX Runtime {}, provider {:?}, models {}",
+        rt.ort_version,
+        rt.provider().map(|p| p.name()),
+        models.display()
+    );
     let mut backend = Ort { pipeline: Pipeline::new(rt, set) };
     serve(&mut backend, std::io::BufReader::new(std::io::stdin()), std::io::stdout());
 }

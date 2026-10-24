@@ -34,7 +34,7 @@ pub struct JobConfig {
     /// opt-in TensorRT (docs/BACKLOG.md row 12); off by default
     pub tensorrt: bool,
     /// graphics memory this job may use (GB): caps the automatic window's budget and the providers' arenas;
-    /// None = the free memory (CK_ENGINE_VRAM_BUDGET_GB sets an engine-wide default)
+    /// None = the free memory (the engine's CK_ENGINE_VRAM_BUDGET_GB, config.rs, is applied by Pipeline::run)
     pub vram_budget_gb: Option<f64>,
 }
 
@@ -220,7 +220,8 @@ pub fn parse(req: &Value) -> Result<JobConfig, Error> {
         vram_budget_gb: match num(o, "vram_budget_gb")? {
             Some(v) if v > 0.0 => Some(v),
             Some(v) => return Err(Error::input(format!("vram_budget_gb must be above 0, got {v}"))),
-            None => std::env::var("CK_ENGINE_VRAM_BUDGET_GB").ok().and_then(|v| v.trim().parse::<f64>().ok()).filter(|v| *v > 0.0),
+            // the engine-wide default (CK_ENGINE_VRAM_BUDGET_GB) is the pipeline's to apply: parsing reads no environment
+            None => None,
         },
     })
 }

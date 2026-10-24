@@ -4,6 +4,7 @@
 pub(crate) mod ahead;
 pub mod clip;
 pub mod color;
+pub mod config;
 pub mod decode;
 pub mod gpu;
 pub mod hann;

@@ -87,12 +87,11 @@ pub(crate) fn profile(piece: &str, b: &Bucket) -> Option<(String, String, String
     Some((at(b.h.0, b.w.0, t.0), at(b.h.1, b.w.1, t.1), at(b.h.1, b.w.1, t.1)))
 }
 
-/// The engine builder: CK_ENGINE_TRT_BUILD, else `ck-trt-build` (`ck-trt-build.exe` on Windows) next to this program.
-pub(crate) fn builder_path() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("CK_ENGINE_TRT_BUILD") {
-        if !p.is_empty() {
-            return Some(PathBuf::from(p));
-        }
+/// The engine builder: `explicit` (CK_ENGINE_TRT_BUILD, config.rs), else `ck-trt-build` (`ck-trt-build.exe` on
+/// Windows) next to this program.
+pub(crate) fn builder_path(explicit: Option<&Path>) -> Option<PathBuf> {
+    if let Some(p) = explicit {
+        return Some(p.to_path_buf());
     }
     let exe = std::env::current_exe().ok()?;
     let p = exe.parent()?.join(builder_name());
@@ -104,15 +103,11 @@ pub(crate) fn builder_name() -> String {
     format!("ck-trt-build{}", std::env::consts::EXE_SUFFIX)
 }
 
-/// The longest one engine build may take: CK_ENGINE_TRT_BUILD_TIMEOUT_S, default 1800 s (measured builds on the
-/// RTX 5080: 23-93 s per network; slower cards take longer, a hung build is stopped and the network runs on CUDA).
-pub(crate) fn build_timeout() -> std::time::Duration {
-    let s = std::env::var("CK_ENGINE_TRT_BUILD_TIMEOUT_S").ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(1800);
-    std::time::Duration::from_secs(s.max(1))
-}
-
 /// Build `piece`'s engine for bucket `b` into `dir` (`<piece>.engine`) with ck-trt-build, a child process (its
 /// host memory goes back when it ends). Ok(seconds), Err(why). `workspace_mb`: TensorRT's working-memory limit.
+/// `timeout`: the longest the build may take (CK_ENGINE_TRT_BUILD_TIMEOUT_S, default 1800 s; measured builds on
+/// the RTX 5080: 23-93 s per network; a hung build is stopped and the network runs on CUDA).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_engine(
     builder: &Path,
     onnx: &Path,
@@ -121,6 +116,7 @@ pub(crate) fn build_engine(
     dir: &Path,
     workspace_mb: u64,
     timing_cache: &Path,
+    timeout: std::time::Duration,
 ) -> Result<f64, BuildError> {
     let (min, opt, max) = profile(piece, b).ok_or_else(|| BuildError::transient("unknown network".into()))?;
     std::fs::create_dir_all(dir).map_err(|e| BuildError::transient(format!("{}: {e}", dir.display())))?;
@@ -137,9 +133,9 @@ pub(crate) fn build_engine(
         .args(["--min", &min, "--opt", &opt, "--max", &max, "--workspace-mb", &workspace_mb.to_string()])
         .arg("--timing-cache")
         .arg(timing_cache);
-    // loop: SERIAL-REQUIRED — one engine build at a time (the builder needs the card to itself); deadline build_timeout() 1800 s (this pass: it had none)
+    // loop: SERIAL-REQUIRED — one engine build at a time (the builder needs the card to itself); deadline `timeout` (CK_ENGINE_TRT_BUILD_TIMEOUT_S, 1800 s)
     // a timeout or a builder that can't start is never remembered as a failed build
-    let out = crate::proc::output_timeout(&mut cmd, build_timeout()).map_err(|e| BuildError::transient(format!("ck-trt-build: {e}")))?;
+    let out = crate::proc::output_timeout(&mut cmd, timeout).map_err(|e| BuildError::transient(format!("ck-trt-build: {e}")))?;
     // loop: NOT-WORTH — the builder's output lines, once per build
     let line = String::from_utf8_lossy(&out.stdout).lines().last().unwrap_or("").to_string();
     if out.status.success() && line.contains("\"ok\":true") {

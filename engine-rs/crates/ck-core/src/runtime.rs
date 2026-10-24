@@ -5,6 +5,7 @@
 //! folder has one ({"fp16": {"stage1": "stage1_op23fp16.onnx", ...}, "fp32": {...}}), else by the first
 //! existing default name (`<piece>_fp16.onnx`, the spike's `<piece>_op23fp16.onnx`, ...). External weights
 //! (`.onnx.data`) sit next to their file.
+use crate::config::{ArenaShrink, Device, EngineConfig, GraphOpt};
 use crate::gpu::{nvidia, GpuInfo};
 use crate::Error;
 use ort::session::builder::GraphOptimizationLevel;
@@ -43,13 +44,6 @@ impl Precision {
         match self {
             Precision::Fp16 => "fp16",
             Precision::Fp32 => "fp32",
-        }
-    }
-    pub(crate) fn parse(s: &str) -> Option<Precision> {
-        match s {
-            "fp16" => Some(Precision::Fp16),
-            "fp32" => Some(Precision::Fp32),
-            _ => None,
         }
     }
 }
@@ -180,46 +174,35 @@ pub struct Runtime {
     pub(crate) cuda_ep: bool,
     pub tensorrt_ep: bool,
     pub ort_version: String,
-    /// asked for with --device / CK_ENGINE_DEVICE: auto | cuda | cpu
-    pub(crate) want: String,
-    pub(crate) threads: usize,
+    /// the engine's settings, read once at startup (config.rs); everything below the protocol loop reads them here
+    pub cfg: EngineConfig,
 }
 
 static GLOBAL: std::sync::OnceLock<Result<Runtime, String>> = std::sync::OnceLock::new();
 
 impl Runtime {
-    /// The process's runtime (one ORT environment per process). `ort_lib`: libonnxruntime.so for a
-    /// load-dynamic build (else CK_ENGINE_ORT / ORT_DYLIB_PATH).
-    pub fn init(ort_lib: Option<&Path>, want: &str) -> Result<&'static Runtime, Error> {
-        GLOBAL.get_or_init(|| Runtime::new(ort_lib, want)).as_ref().map_err(|e| Error::engine(e.clone()))
+    /// The process's runtime (one ORT environment per process), with the engine's settings: `cfg.ort` is
+    /// libonnxruntime for a load-dynamic build.
+    pub fn init(cfg: &EngineConfig) -> Result<&'static Runtime, Error> {
+        GLOBAL.get_or_init(|| Runtime::new(cfg)).as_ref().map_err(|e| Error::engine(e.clone()))
     }
 
-    fn new(ort_lib: Option<&Path>, want: &str) -> Result<Runtime, String> {
-        // Attention on ORT's own flash kernels, not cuDNN's (ORT reads this when the sessions are made). Measured
-        // (RTX 5080, ORT 1.31, 1280x1152): with cuDNN's, every switch between two sessions costs 250-400 ms of
-        // host time on the next run (stage 2 after a stage-1 window: 54 -> ~350 ms; stage 1 at T=8 ~250 -> ~530 ms),
-        // which normal mode does every window; ORT's kernels have no such cost and are as fast (stage 1 at T=24
-        // 907 vs 915 ms of GPU time). Set ORT_ENABLE_CUDNN_FLASH_ATTENTION yourself to choose.
-        if std::env::var_os("ORT_ENABLE_CUDNN_FLASH_ATTENTION").is_none() {
-            std::env::set_var("ORT_ENABLE_CUDNN_FLASH_ATTENTION", "0");
-        }
+    fn new(cfg: &EngineConfig) -> Result<Runtime, String> {
+        // (ORT_ENABLE_CUDNN_FLASH_ATTENTION: set by main before any thread, config::set_process_env)
         #[allow(unused_mut, unused_assignments)]
         let mut version: Option<String> = None;
         #[cfg(feature = "ort-dynamic")]
         let builder = {
-            let lib = ort_lib
+            let lib = cfg
+                .ort
+                .as_ref()
                 .map(|p| p.to_string_lossy().into_owned())
-                .or_else(|| std::env::var("CK_ENGINE_ORT").ok())
-                .or_else(|| std::env::var("ORT_DYLIB_PATH").ok())
                 .ok_or_else(|| "this build loads ONNX Runtime at run time: pass --ort (or CK_ENGINE_ORT) with libonnxruntime.so".to_string())?;
             version = dylib_version(Path::new(&lib));
             ort::init_from(&lib).map_err(|e| format!("{lib}: {e}"))?
         };
         #[cfg(not(feature = "ort-dynamic"))]
-        let builder = {
-            let _ = ort_lib;
-            ort::init()
-        };
+        let builder = ort::init();
         let env = builder.with_name("corridorkey-engine").build().map_err(|e| e.to_string())?;
         let version = version.unwrap_or_else(|| ort_version(ort::info()));
         #[cfg(feature = "cuda")]
@@ -236,16 +219,15 @@ impl Runtime {
         };
         #[cfg(not(feature = "tensorrt"))]
         let tensorrt_ep = false;
-        let gpu = if want == "cpu" { None } else { nvidia() };
-        let threads = std::env::var("CK_ENGINE_THREADS").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(0);
-        Ok(Runtime { env, gpu, cuda_ep, tensorrt_ep, ort_version: version, want: want.to_string(), threads })
+        let gpu = if cfg.device == Device::Cpu { None } else { nvidia() };
+        Ok(Runtime { env, gpu, cuda_ep, tensorrt_ep, ort_version: version, cfg: cfg.clone() })
     }
 
     /// The normal provider: CUDA with a card and the CUDA EP (or when asked), the CPU only when asked.
     /// None: no usable GPU (the protocol's `no-gpu`).
     pub fn provider(&self) -> Option<Provider> {
-        match self.want.as_str() {
-            "cpu" => Some(Provider::Cpu),
+        match self.cfg.device {
+            Device::Cpu => Some(Provider::Cpu),
             _ if self.gpu.is_some() && self.cuda_ep => Some(Provider::Cuda),
             _ => None,
         }
@@ -253,7 +235,7 @@ impl Runtime {
 
     /// fp16 on the GPU, fp32 on the CPU; CK_ENGINE_PRECISION overrides.
     pub fn precision(&self, prov: Provider) -> Precision {
-        match std::env::var("CK_ENGINE_PRECISION").ok().as_deref().and_then(Precision::parse) {
+        match self.cfg.precision {
             Some(p) => p,
             None if prov == Provider::Cpu => Precision::Fp32,
             None => Precision::Fp16,
@@ -264,14 +246,14 @@ impl Runtime {
         let mut b = Session::builder(&self.env).map_err(|e| e.to_string())?;
         // the `ort` crate's Level3 is ORT_ENABLE_LAYOUT; All is ORT_ENABLE_ALL (what Python's default is).
         // CK_ENGINE_GRAPH_OPT = all | layout | extended (a measurement knob)
-        let level = match std::env::var("CK_ENGINE_GRAPH_OPT").as_deref() {
-            Ok("layout") => GraphOptimizationLevel::Level3,
-            Ok("extended") => GraphOptimizationLevel::Level2,
-            _ => GraphOptimizationLevel::All,
+        let level = match self.cfg.graph_opt {
+            GraphOpt::Layout => GraphOptimizationLevel::Level3,
+            GraphOpt::Extended => GraphOptimizationLevel::Level2,
+            GraphOpt::All => GraphOptimizationLevel::All,
         };
         b = b.with_optimization_level(level).map_err(|e| e.to_string())?;
-        if self.threads > 0 {
-            b = b.with_intra_threads(self.threads).map_err(|e| e.to_string())?;
+        if self.cfg.threads > 0 {
+            b = b.with_intra_threads(self.cfg.threads).map_err(|e| e.to_string())?;
         }
         Ok(b)
     }
@@ -282,16 +264,16 @@ impl Runtime {
         let _ = vram_cap;
         let mut b = self.builder()?;
         // CK_ENGINE_PROFILE=<folder>: ONNX Runtime's per-node profile of each session (a measurement knob)
-        if let Ok(dir) = std::env::var("CK_ENGINE_PROFILE") {
+        if let Some(dir) = &self.cfg.profile {
             let stem = file.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-            b = b.with_profiling(Path::new(&dir).join(stem)).map_err(|e| e.to_string())?;
+            b = b.with_profiling(dir.join(stem)).map_err(|e| e.to_string())?;
         }
         match prov {
             Provider::Cpu => {}
             Provider::Cuda => {
                 #[cfg(feature = "cuda")]
                 {
-                    b = b.with_execution_providers([cuda_ep(vram_cap).build().error_on_failure()]).map_err(|e| e.to_string())?;
+                    b = b.with_execution_providers([cuda_ep(&self.cfg, vram_cap).build().error_on_failure()]).map_err(|e| e.to_string())?;
                 }
                 #[cfg(not(feature = "cuda"))]
                 return Err("this engine was built without the CUDA execution provider".into());
@@ -302,7 +284,7 @@ impl Runtime {
                 #[cfg(feature = "tensorrt")]
                 {
                     let ep = ort::ep::TensorRT::default().with_device_id(0);
-                    b = b.with_execution_providers([ep.build().error_on_failure(), cuda_ep(vram_cap).build()]).map_err(|e| e.to_string())?;
+                    b = b.with_execution_providers([ep.build().error_on_failure(), cuda_ep(&self.cfg, vram_cap).build()]).map_err(|e| e.to_string())?;
                 }
                 #[cfg(not(feature = "tensorrt"))]
                 {
@@ -315,7 +297,7 @@ impl Runtime {
 }
 
 #[cfg(feature = "cuda")]
-fn cuda_ep(vram_cap: Option<u64>) -> ort::ep::CUDA {
+fn cuda_ep(cfg: &EngineConfig, vram_cap: Option<u64>) -> ort::ep::CUDA {
     let mut ep = ort::ep::CUDA::default();
     if let Some(c) = vram_cap {
         ep = ep.with_memory_limit(c as usize);
@@ -324,13 +306,14 @@ fn cuda_ep(vram_cap: Option<u64>) -> ort::ep::CUDA {
     // same stage 1 / stage 2 run times as ORT's exhaustive default, and no first-call outliers (RVM's first call
     // 0.4 s every run; exhaustive 0.2-3.0 s, job totals 21.8-22.1 s against 22.2-26.1 s).
     // CK_ENGINE_CUDNN_SEARCH = exhaustive | heuristic | default, CK_ENGINE_CUDNN_MAX_WORKSPACE = 0 | 1
-    match std::env::var("CK_ENGINE_CUDNN_SEARCH").as_deref() {
-        Ok("exhaustive") => ep = ep.with_conv_algorithm_search(ort::ep::cuda::ConvAlgorithmSearch::Exhaustive),
-        Ok("default") => ep = ep.with_conv_algorithm_search(ort::ep::cuda::ConvAlgorithmSearch::Default),
-        _ => ep = ep.with_conv_algorithm_search(ort::ep::cuda::ConvAlgorithmSearch::Heuristic),
-    }
-    if let Ok(v) = std::env::var("CK_ENGINE_CUDNN_MAX_WORKSPACE") {
-        ep = ep.with_conv_max_workspace(v != "0");
+    use crate::config::CudnnSearch;
+    ep = ep.with_conv_algorithm_search(match cfg.cudnn_search {
+        CudnnSearch::Exhaustive => ort::ep::cuda::ConvAlgorithmSearch::Exhaustive,
+        CudnnSearch::Default => ort::ep::cuda::ConvAlgorithmSearch::Default,
+        CudnnSearch::Heuristic => ort::ep::cuda::ConvAlgorithmSearch::Heuristic,
+    });
+    if let Some(v) = cfg.cudnn_max_workspace {
+        ep = ep.with_conv_max_workspace(v);
     }
     ep.with_device_id(0)
         // the arena grows by what is asked: less held graphics memory
@@ -348,7 +331,7 @@ pub(crate) struct TrtSettings {
 /// A loaded network: its session and how its inputs want to be fed.
 pub(crate) struct Net {
     pub(crate) piece: &'static str,
-    // (end_profiling on drop when CK_ENGINE_PROFILE is set)
+    // (end_profiling on drop when `profiling`)
     pub(crate) session: Session,
     pub(crate) provider: Provider,
     f16_inputs: Vec<String>,
@@ -362,11 +345,13 @@ pub(crate) struct Net {
     pub(crate) calls: usize,
     /// seconds of this session's first run (cuDNN's algorithm search happens there)
     pub(crate) first_s: Option<f64>,
+    /// CK_ENGINE_PROFILE is set: the session writes its profile when dropped
+    profiling: bool,
 }
 
 impl Drop for Net {
     fn drop(&mut self) {
-        if std::env::var("CK_ENGINE_PROFILE").is_ok() {
+        if self.profiling {
             if let Ok(f) = self.session.end_profiling() {
                 eprintln!("  profile of {}: {f}", self.piece);
             }
@@ -379,13 +364,13 @@ impl Drop for Net {
 /// (`shared`, the normal mode), so their working memory doesn't add up. A network that has the card to itself
 /// (the low-VRAM phases) keeps its arena: measured, a shrunk arena allocates its buffers again on the next run,
 /// 159 ms per stage-2 call against 60 ms kept (1280x1152, docs/ENGINE_RUST.md).
-pub(crate) fn shrinks(piece: &str, setting: Option<&str>, shared: bool) -> bool {
-    match setting.map(|s| s.trim()) {
-        Some("all") | Some("1") => true,
-        Some("0") | Some("none") => false,
-        // loop: NOT-WORTH — a short environment list, once per session load
-        Some(list) if !list.is_empty() => list.split(',').any(|p| p.trim() == piece),
-        _ => shared,
+pub(crate) fn shrinks(piece: &str, setting: &ArenaShrink, shared: bool) -> bool {
+    match setting {
+        ArenaShrink::All => true,
+        ArenaShrink::None => false,
+        // loop: NOT-WORTH — a short list of network names, once per session load
+        ArenaShrink::List(list) => list.iter().any(|p| p == piece),
+        ArenaShrink::Auto => shared,
     }
 }
 
@@ -489,7 +474,19 @@ impl Net {
         } else {
             None
         };
-        Ok(Net { piece, session, provider: prov, f16_inputs, shrink_options, shrink: false, first_s: None, run_s: 0.0, convert_s: 0.0, calls: 0 })
+        Ok(Net {
+            piece,
+            session,
+            provider: prov,
+            f16_inputs,
+            shrink_options,
+            shrink: false,
+            first_s: None,
+            run_s: 0.0,
+            convert_s: 0.0,
+            calls: 0,
+            profiling: rt.cfg.profile.is_some(),
+        })
     }
 
     /// Whether the graph takes input `name` as float16.
@@ -547,10 +544,11 @@ mod tests {
 
     #[test]
     fn arena_shrink_setting() {
-        assert!(shrinks("stage1", None, true) && shrinks("stage2", None, true));
-        assert!(!shrinks("stage2", None, false) && !shrinks("rvm", None, false));
-        assert!(shrinks("stage2", Some("all"), false) && !shrinks("stage1", Some("0"), true));
-        assert!(shrinks("rvm", Some("rvm,stage1"), false) && !shrinks("moge", Some("rvm,stage1"), true));
+        let l = ArenaShrink::List(vec!["rvm".into(), "stage1".into()]);
+        assert!(shrinks("stage1", &ArenaShrink::Auto, true) && shrinks("stage2", &ArenaShrink::Auto, true));
+        assert!(!shrinks("stage2", &ArenaShrink::Auto, false) && !shrinks("rvm", &ArenaShrink::Auto, false));
+        assert!(shrinks("stage2", &ArenaShrink::All, false) && !shrinks("stage1", &ArenaShrink::None, true));
+        assert!(shrinks("rvm", &l, false) && !shrinks("moge", &l, true));
     }
 
     #[test]
