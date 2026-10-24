@@ -14,6 +14,9 @@ export type FetchFn = (url: string, init?: { signal?: AbortSignal; headers?: Rec
 
 export const CONNECT_TIMEOUT_MS = 20_000;
 export const STALL_TIMEOUT_MS = 60_000;
+// the errors said in two places each (the connect deadline and a failed fetch; the header's size and the body's)
+const NO_ANSWER = "the download server didn't answer";
+const tooBig = (source: string) => new Error(`the download is bigger than ${source} says; refused`);
 
 export interface Expected {
   url: string;
@@ -82,12 +85,12 @@ export async function downloadVerified(
   const connect = new AbortController();
   // lifetime: OK — cleared as soon as the server answers (or the fetch fails)
   // loop: NOT-WORTH — one connect deadline per download [bounded: CONNECT_TIMEOUT_MS]
-  const connectTimer = setTimeout(() => connect.abort(new DOMException("the download server didn't answer", "TimeoutError")), opts.connectMs ?? CONNECT_TIMEOUT_MS);
+  const connectTimer = setTimeout(() => connect.abort(new DOMException(NO_ANSWER, "TimeoutError")), opts.connectMs ?? CONNECT_TIMEOUT_MS);
   const headers = have > 0 ? { Range: `bytes=${have}-` } : undefined;
   const response = await fetchFn(want.url, { signal: abort ? AbortSignal.any([abort, connect.signal]) : connect.signal, ...(headers ? { headers } : {}) })
     .catch((cause: unknown) => {
       // error: PASSES-ON — rethrown in plain words to the updater / installer, which show it
-      throw connect.signal.aborted || (cause instanceof Error && cause.name === "TimeoutError") ? new Error("the download server didn't answer") : cause;
+      throw connect.signal.aborted || (cause instanceof Error && cause.name === "TimeoutError") ? new Error(NO_ANSWER) : cause;
     })
     .finally(() => clearTimeout(connectTimer));
   if (!response.ok || !response.body) throw new Error(`the download failed (HTTP ${response.status})`);
@@ -96,7 +99,7 @@ export async function downloadVerified(
     hash = createHash(algorithm);
     have = 0;
   }
-  if (have + Number(response.headers.get("content-length") ?? 0) > want.size) throw new Error(`the download is bigger than ${source} says; refused`);
+  if (have + Number(response.headers.get("content-length") ?? 0) > want.size) throw tooBig(source);
   const reader = response.body.getReader();
   const file = createWriteStream(path, { mode: 0o644, flags: have > 0 ? "a" : "w" });
   // The first write error, surfaced at the next await instead of as an uncaught event.
@@ -134,7 +137,7 @@ export async function downloadVerified(
       if (writeError) throw writeError;
       if (done) break;
       got += value.byteLength;
-      if (got > want.size) throw new Error(`the download is bigger than ${source} says; refused`);
+      if (got > want.size) throw tooBig(source);
       hash.update(value);
       // lifetime: OK — fires once on drain; the stream is destroyed if `failed` wins instead
       if (!file.write(value)) await Promise.race([new Promise<void>((r) => file.once("drain", () => r())), failed]);

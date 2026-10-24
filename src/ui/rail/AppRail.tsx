@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "re
 import { Activity, Cpu, Info, ListVideo, Lock, LockOpen, PanelRightClose, PanelRightOpen, Settings } from "lucide-react";
 import type { AppState } from "../../shared/types";
 import type { PageId } from "../../shared/tasks";
+import { NO_VRAM_HELD } from "../../shared/texts";
 import { ITEMS, RAIL, initialView, isOpen, railKey, railLayout, toggleFlags, viewReduce, type RailEvent } from "./railModel";
 import { usePref } from "../prefs";
 import { useGlass } from "../glass/useGlass";
@@ -83,7 +84,7 @@ export function AppRail(props: { state: AppState; page: PageId; pageDots: Partia
         ? { cls: "warn", sym: "…", text: "Engine starting", sub: state.engineKind === "python" ? "loading Python and CUDA" : "starting ONNX Runtime" }
         : e.status === "failed"
           ? { cls: "error", sym: "!", text: "Engine failed", sub: "see Engine" }
-          : { cls: "idle", sym: "–", text: "Engine idle", sub: "no graphics memory held" };
+          : { cls: "idle", sym: "–", text: "Engine idle", sub: NO_VRAM_HELD };
   const g = state.gpu;
 
   return (

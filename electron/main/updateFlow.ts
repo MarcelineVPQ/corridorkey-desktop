@@ -24,6 +24,7 @@
 //   at start, none on a channel switch; only check(true) goes online.
 import { basename, dirname, join } from "node:path";
 import type { UpdateChannel, UpdateState } from "../../src/shared/types";
+import { lowerFirst, NO_RELEASE_CHANNEL } from "../../src/shared/texts";
 import { downloadVerified, type FetchFn } from "./download";
 import { CHECK_EVERY_MS, downloadAllowed, feedSignedBy, FIRST_CHECK_MS, freshUrl, offers, parseFeed, STABLE_LINK, staleFiles, type Feed, type FeedSource } from "./updateFeed";
 import { loadUpdatePrefs, saveUpdatePrefs } from "./updatePrefs";
@@ -190,7 +191,7 @@ export class UpdateFlow {
     const stale = () => seq !== this.checkSeq || channel !== this.state.channel;
     this.set({ status: "checking", error: null, progress: null });
     try {
-      if (!this.state.feed) throw new Error("no release channel is set up in this build");
+      if (!this.state.feed) throw new Error(lowerFirst(NO_RELEASE_CHANNEL));
       const feed = await this.readFeed(returning ? "stable" : channel, asked);
       if (stale()) return;
       this.offer = feed;

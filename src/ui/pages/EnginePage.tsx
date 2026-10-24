@@ -7,6 +7,7 @@
 import { Check, Cpu, Download, Film, FolderOpen, FolderCog, ListChecks, X, Zap } from "lucide-react";
 import type { AppState } from "../../shared/types";
 import { installMissing } from "../../shared/tasks";
+import { downloadingStatus, ENGINE_FAILED, NO_VRAM_HELD } from "../../shared/texts";
 import { Accordion, Row, Section } from "../panel/Section";
 import { MainBlock, SplitView } from "../panel/SplitView";
 import { Stat } from "../JobView";
@@ -39,7 +40,7 @@ export function EnginePage(props: {
       ? "not on Macs"
       : "Linux only in this version"
     : trt.status === "running"
-      ? `downloading ${installPct(trt)}%`
+      ? downloadingStatus(installPct(trt))
       : !trt.on
         ? "off"
         : trt.ready
@@ -108,7 +109,7 @@ export function EnginePage(props: {
       <div className="page-content">
         {state.engine.status === "failed" && (
           <section className="notice error">
-            <h3>The engine didn't start</h3>
+            <h3>{ENGINE_FAILED}</h3>
             <div>{state.engine.error}</div>
           </section>
         )}
@@ -129,7 +130,7 @@ export function EnginePage(props: {
         <MainBlock title="Engine">
           {p ? (
             <div className="stats">
-              <Stat k="State" v={{ stopped: "Idle · no graphics memory held", starting: "Starting", ready: "Running the queue", failed: "Failed" }[state.engine.status]} />
+              <Stat k="State" v={{ stopped: `Idle · ${NO_VRAM_HELD}`, starting: "Starting", ready: "Running the queue", failed: "Failed" }[state.engine.status]} />
               <Stat k="Engine" v={`${p.engine} ${p.version} · protocol ${p.protocol}`} />
               {p.torch ? <Stat k="Python / PyTorch" v={`${p.python ?? "?"} · ${p.torch}`} /> : <Stat k="Runtime" v={`ONNX Runtime ${p.ort ?? "?"} · ${p.provider ?? "?"} · ${p.precision ?? "?"}`} />}
               <Stat k="Graphics card" v={p.gpu ? `${p.gpu}${p.vramTotalMb ? ` · ${gib(p.vramTotalMb)}` : ""}` : "none found"} />
@@ -185,7 +186,7 @@ export function EnginePage(props: {
         id="install"
         icon={Download}
         title="Runtime and models"
-        status={inst.status === "running" ? `downloading ${pct}%` : needInstall ? "not installed" : "installed"}
+        status={inst.status === "running" ? downloadingStatus(pct) : needInstall ? "not installed" : "installed"}
         task={props.sectionTasks["engine/install"] ?? null}
       >
         {() => <InstallBox inst={inst} />}

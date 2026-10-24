@@ -5,10 +5,14 @@
 import { useEffect } from "react";
 import { Download, FolderOpen, FolderOutput, HardDrive, Palette, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import type { Appearance, AppState, UpdateState } from "../../shared/types";
+import { NOT_WHILE_BUSY } from "../../shared/texts";
 import { Accordion, Row, Section, Segmented } from "../panel/Section";
 import { MainBlock, SplitView } from "../panel/SplitView";
 import { Stat } from "../JobView";
 import { gbBytes } from "../format";
+
+// where results go without an output folder (the readout, the Results status and its button)
+const NEXT_TO_CLIP = "Next to each clip";
 
 const THEME_TEXT = { system: "System", light: "Light", dark: "Dark", desktop: "Desktop" } as const;
 
@@ -43,7 +47,7 @@ export function SettingsPage(props: { state: AppState; panelShown: boolean; narr
           <div className="stats">
             <Stat k="Theme" v={`${THEME_TEXT[a.theme]}${a.glass ? " · Glass" : ""}`} />
             <Stat k="Accent" v={a.accent === "desktop" ? "Desktop's accent" : "CorridorKey green"} />
-            <Stat k="Results go" v={state.settings.outputRoot ? "Into one folder" : "Next to each clip"} />
+            <Stat k="Results go" v={state.settings.outputRoot ? "Into one folder" : NEXT_TO_CLIP} />
             <Stat k="Version" v={versionText(state.version)} />
           </div>
           {desktopNote && <p className="hint-text">{desktopNote}</p>}
@@ -84,7 +88,7 @@ export function SettingsPage(props: { state: AppState; panelShown: boolean; narr
         )}
       </Section>
 
-      <Section id="results" icon={FolderOutput} title="Results" status={state.settings.outputRoot ? `Into ${state.settings.outputRoot}` : "Next to each clip (out_<clip>)"}>
+      <Section id="results" icon={FolderOutput} title="Results" status={state.settings.outputRoot ? `Into ${state.settings.outputRoot}` : `${NEXT_TO_CLIP} (out_<clip>)`}>
         {() => (
           <Row label="Where results go" hint="For clips added from now on">
             <div className="file-pick">
@@ -93,7 +97,7 @@ export function SettingsPage(props: { state: AppState; panelShown: boolean; narr
               </button>
               {state.settings.outputRoot && (
                 <button type="button" className="btn small" onClick={() => window.ck.clearOutputRoot()}>
-                  Next to each clip
+                  {NEXT_TO_CLIP}
                 </button>
               )}
             </div>
@@ -113,13 +117,7 @@ export function SettingsPage(props: { state: AppState; panelShown: boolean; narr
               {/* loop: NOT-WORTH — three folders per render */}
               {storage.map((i) => (
                 <Row key={i.id} label={`${i.label} · ${i.bytes ? gbBytes(i.bytes) : "empty"}`} hint={i.path}>
-                  <button
-                    type="button"
-                    className="btn small"
-                    disabled={!i.bytes || busy}
-                    title={busy ? "Not while the queue or the download runs" : undefined}
-                    onClick={() => void window.ck.removeStorage(i.id)}
-                  >
+                  <button type="button" className="btn small" disabled={!i.bytes || busy} title={busy ? NOT_WHILE_BUSY : undefined} onClick={() => void window.ck.removeStorage(i.id)}>
                     <Trash2 size={14} /> Remove…
                   </button>
                 </Row>

@@ -5,6 +5,7 @@ import { Check, FolderOpen, FolderPlus, ListVideo } from "lucide-react";
 import type { ReactNode } from "react";
 import type { AppState } from "../../shared/types";
 import { installNeeded } from "../../shared/tasks";
+import { INSTALL_STEP } from "../../shared/texts";
 import { MainBlock } from "../panel/SplitView";
 import { FfmpegBox, InstallBox } from "../setup/SetupParts";
 
@@ -36,7 +37,7 @@ export function SetupPage(props: { state: AppState; openQueue: () => void; openG
         <p className="hint-text" style={{ margin: "0 0 14px" }}>
           Three steps, once. CorridorKey keys green and blue screen footage on your own graphics card: it needs its runtime and models, ffmpeg to read and write video, and your clips.
         </p>
-        <Step n={1} title="Download the GPU runtime and the CorridorKey models" done={installed}>
+        <Step n={1} title={INSTALL_STEP} done={installed}>
           {!installed && <InstallBox inst={state.install} />}
         </Step>
         <Step n={2} title="ffmpeg, for reading and writing video" done={ffmpegOk}>

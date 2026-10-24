@@ -11,6 +11,7 @@
 // Tasks are derived from the app state, so they clear themselves when the
 // state is fixed. Nothing else draws a dot or badge (the .task look).
 import type { AppState, FfmpegState, InstallState, Job } from "./types";
+import { CANT_READ_CLIP, ENGINE_FAILED, INSTALL_STEP } from "./texts";
 
 /** The runtime or the models are missing from the data folder (what the install box offers to download). */
 export function installMissing(install: InstallState): boolean {
@@ -59,7 +60,7 @@ export function tasksOf(state: AppState): Task[] {
         page: "engine",
         section: "install",
         level: state.install.status === "error" ? "error" : "task",
-        text: state.install.error ? `The install stopped: ${state.install.error}` : "Download the GPU runtime and the CorridorKey models",
+        text: state.install.error ? `The install stopped: ${state.install.error}` : INSTALL_STEP,
       });
   }
   // no engine set up: the ONNX Runtime engine is the one to set up (the PyTorch checkout still works meanwhile)
@@ -76,12 +77,12 @@ export function tasksOf(state: AppState): Task[] {
     });
   // no usable ffmpeg: nothing can be read or written (the Engine page offers the install)
   if (state.ffmpeg.checked && !state.ffmpeg.ok && state.ffmpeg.problem) tasks.push({ id: "ffmpeg", page: "engine", section: "ffmpeg", level: "task", text: state.ffmpeg.problem });
-  if (state.engine.status === "failed") tasks.push({ id: "engine", page: "engine", section: "", level: "error", text: `The engine didn't start: ${state.engine.error ?? "unknown error"}` });
+  if (state.engine.status === "failed") tasks.push({ id: "engine", page: "engine", section: "", level: "error", text: `${ENGINE_FAILED}: ${state.engine.error ?? "unknown error"}` });
   // loop: NOT-WORTH — a queue of tens of clips, on each state change (≤ 10/s while running)
   for (const job of state.jobs) {
     // a clip the app can't read (bug hunt 2026-10 A9): its reason is on the row; the user removes or replaces it
     if (job.clip.probeError && job.status === "waiting")
-      tasks.push({ id: `unreadable:${job.id}`, page: "queue", section: "", level: "error", text: `${job.clip.name}: Can't read this clip (${job.clip.probeError})`, jobId: job.id });
+      tasks.push({ id: `unreadable:${job.id}`, page: "queue", section: "", level: "error", text: `${job.clip.name}: ${CANT_READ_CLIP} (${job.clip.probeError})`, jobId: job.id });
     const need = missingInput(job);
     if (need) tasks.push({ id: `hint:${job.id}`, page: "queue", section: "hint", level: "task", text: `${job.clip.name}: ${need}`, jobId: job.id });
   }

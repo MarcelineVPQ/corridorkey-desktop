@@ -7,6 +7,7 @@
 // a partial one continues where it stopped. A set only appears in the lists once all of it is in place
 // (built in a `.partial-…` folder, then renamed; engineFind skips dot folders).
 import { gbBytes } from "../../src/shared/units";
+import { lowerFirst, INSTALL_FIRST } from "../../src/shared/texts";
 import { DOWNLOADS_DIR, LIBRARY_FILE, MODELS_DIR, PLATFORM, RUNTIME_DIR } from "./platform";
 import { REPO } from "./updateFeed";
 import { constants, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statfsSync, writeFileSync } from "node:fs";
@@ -260,6 +261,9 @@ export const MODELS = {
 
 // loop: NOT-WORTH — sums a dozen sizes, once per plan
 const total = (d: Download[]) => d.reduce((n, x) => n + x.size, 0);
+// the install's refusals, the same for the runtime and models and for TensorRT's parts
+const noRoom = (need: number, dir: string, free: number) => new Error(`not enough free disk space: it needs ${gbBytes(need)} in ${dir}, ${gbBytes(free)} is free`);
+const noLibraries = (file: string) => new Error(`${file} had none of the expected libraries`);
 export const RUNTIME_BYTES = total(runtimeFor(PLATFORM).wheels);
 export const MODELS_BYTES = total(MODELS.files);
 
@@ -332,7 +336,7 @@ export async function runInstall(data: string, deps: InstallDeps, c: Catalog = C
   mkdirSync(data, { recursive: true });
   const room = deps.freeBytes(data);
   const needRoom = (need.runtime ? total(RUNTIME.wheels) * 2.5 : 0) + (need.models ? total(MODELS.files) : 0);
-  if (room !== null && room < needRoom) throw new Error(`not enough free disk space: it needs ${gbBytes(needRoom)} in ${data}, ${gbBytes(room)} is free`);
+  if (room !== null && room < needRoom) throw noRoom(needRoom, data, room);
   const downloads = join(data, DOWNLOADS_DIR);
   // loop: NOT-WORTH — one mkdir per install
   mkdirSync(downloads, { recursive: true });
@@ -352,7 +356,7 @@ export async function runInstall(data: string, deps: InstallDeps, c: Catalog = C
       const unpacked = await unzip(join(downloads, w.file), partial, keepFromWheel, deps.abort);
       // licence files alone don't count: a wheel must give at least one library
       // loop: NOT-WORTH — the few names one wheel unpacked
-      if (!unpacked.some((n) => LIBRARY_FILE.test(n))) throw new Error(`${w.file} had none of the expected libraries`);
+      if (!unpacked.some((n) => LIBRARY_FILE.test(n))) throw noLibraries(w.file);
     }
     // loop: NOT-WORTH — one rename: the runtime appears whole
     renameSync(partial, join(data, RUNTIME_DIR, RUNTIME.name));
@@ -527,12 +531,12 @@ function writeAtomic(p: string, text: string): void {
 export async function runTrtInstall(data: string, deps: InstallDeps, c: TrtCatalog = TRT_CATALOG): Promise<void> {
   const p = trtPaths(data, c);
   // loop: NOT-WORTH — two stats per install start
-  if (!existsSync(p.runtime) || !existsSync(p.models)) throw new Error("install the GPU runtime and the CorridorKey models first");
+  if (!existsSync(p.runtime) || !existsSync(p.models)) throw new Error(lowerFirst(INSTALL_FIRST));
   const need = trtNeeds(data, existsSync, c);
   // room: the wheel and its kept libraries side by side (2.6 of 3.7 GB), the ONNX Runtime wheel, the models (copies included)
   const room = deps.freeBytes(data);
   const needRoom = (need.libs ? c.libs.size * 1.8 : 0) + (need.provider ? ortWheel(c).size : 0) + (need.models ? total(c.trtModels.files) : 0);
-  if (room !== null && room < needRoom) throw new Error(`not enough free disk space: it needs ${gbBytes(needRoom)} in ${data}, ${gbBytes(room)} is free`);
+  if (room !== null && room < needRoom) throw noRoom(needRoom, data, room);
   const downloads = join(data, DOWNLOADS_DIR);
   // loop: NOT-WORTH — one mkdir per install
   mkdirSync(downloads, { recursive: true });
@@ -547,7 +551,7 @@ export async function runTrtInstall(data: string, deps: InstallDeps, c: TrtCatal
     // loop: SERIAL-REQUIRED — unpacks one wheel [bounded: its size]
     const unpacked = await unzip(join(downloads, c.libs.file), partial, keepTensorrt, deps.abort);
     // loop: NOT-WORTH — the few names the wheel unpacked
-    if (!unpacked.some((n) => /^tensorrt_libs\/libnvinfer\.so\./.test(n))) throw new Error(`${c.libs.file} had none of the expected libraries`);
+    if (!unpacked.some((n) => /^tensorrt_libs\/libnvinfer\.so\./.test(n))) throw noLibraries(c.libs.file);
     // the licence folder first, the libraries last: the folder's rename is the mark that they are in place
     // loop: NOT-WORTH — the partial folder's two entries
     for (const d of readdirSync(partial).filter((n) => TRT_DIST_INFO.test(n))) {

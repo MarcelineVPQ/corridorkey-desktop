@@ -5,6 +5,7 @@ import { ProgressBar } from "../ProgressBar";
 import { FolderPlus, Play, Plus, Square, Trash2 } from "lucide-react";
 import type { AppState, Job } from "../../shared/types";
 import { missingInput } from "../../shared/tasks";
+import { AS_USED, CANT_READ_CLIP } from "../../shared/texts";
 import { JobSettings } from "../JobSettings";
 import { JobView } from "../JobView";
 import { SplitView } from "../panel/SplitView";
@@ -100,7 +101,7 @@ export function QueuePage(props: {
         )
       }
       panelTitle={job ? job.clip.name : "Clip settings"}
-      panelSub={job ? (job.status === "waiting" ? "Settings for this clip" : "As used for this run") : undefined}
+      panelSub={job ? (job.status === "waiting" ? "Settings for this clip" : AS_USED) : undefined}
       shown={props.panelShown}
       narrow={props.narrow}
       glass={props.glass}
@@ -177,7 +178,7 @@ function Detail({ job }: { job: Job }) {
       </div>
       {job.clip.probeError && (
         <section className="notice error">
-          <h3>Can't read this clip</h3>
+          <h3>{CANT_READ_CLIP}</h3>
           <div>{job.clip.probeError}</div>
         </section>
       )}

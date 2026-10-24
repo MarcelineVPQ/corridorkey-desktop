@@ -70,7 +70,7 @@ export function providerText(r: EngineReply): string | null {
     const fell = Object.entries(r.fallbacks as Record<string, unknown>).map(([k, why]) => `${k} (${String(why)})`);
     // loop: NOT-WORTH — as above
     const built = Object.values((r.build_s ?? {}) as Record<string, unknown>).reduce<number>((n, s) => n + (typeof s === "number" ? s : 0), 0);
-    const head = r.provider === "tensorrt" ? "Runs on TensorRT" : r.provider === "cuda" ? "TensorRT couldn't take any network: runs on CUDA" : "Runs on TensorRT";
+    const head = r.provider === "cuda" ? "TensorRT couldn't take any network: runs on CUDA" : "Runs on TensorRT";
     return `${head}${built > 0 ? ` (engines built in ${Math.round(built)} s, kept for this resolution)` : ""}${fell.length && r.provider !== "cuda" ? `; on CUDA: ${fell.join(", ")}` : fell.length ? `: ${fell.join(", ")}` : ""}.`;
   }
   if (r.tensorrt_requested === true && typeof r.range === "string")

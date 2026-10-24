@@ -4,6 +4,7 @@
 import { Clapperboard, Film, FolderOpen, MemoryStick, Wand2, X } from "lucide-react";
 import type { Job, JobOptions, OutputName } from "../shared/types";
 import { OUTPUT_NAMES } from "../shared/types";
+import { AS_USED, lowerFirst } from "../shared/texts";
 import { Accordion, Row, Section, Segmented } from "./panel/Section";
 
 const OUTPUT_TEXT: Record<OutputName, { label: string; help: string }> = {
@@ -29,7 +30,7 @@ const HINT_TEXT = { none: "No hint", "first-frame": "First-frame matte", video: 
 export function JobSettings({ job, focus, sectionTasks, onChange }: { job: Job; focus: string | null; sectionTasks: Record<string, string>; onChange: (o: JobOptions) => void }) {
   const o = job.options;
   const set = (patch: Partial<JobOptions>) => onChange({ ...o, ...patch });
-  const locked = job.status !== "waiting" ? "as used for this run" : null;
+  const locked = job.status !== "waiting" ? lowerFirst(AS_USED) : null;
   const pick = async (kind: "hint-image" | "hint-video") => {
     const path = await window.ck.pickFile(kind);
     if (path) set(kind === "hint-image" ? { hintFirstFrame: path, hintMode: "first-frame" } : { hintVideo: path, hintMode: "video" });

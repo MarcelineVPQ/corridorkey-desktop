@@ -3,6 +3,7 @@
 import { Check, Download, X } from "lucide-react";
 import type { FfmpegState, InstallState, TrtState } from "../../shared/types";
 import { installMissing } from "../../shared/tasks";
+import { INSTALL_FIRST } from "../../shared/texts";
 import { Row } from "../panel/Section";
 import { gbBytes } from "../format";
 import { ProgressBar } from "../ProgressBar";
@@ -97,7 +98,7 @@ export function TrtBox({ trt, inst, platform }: { trt: TrtState; inst: InstallSt
       </p>
       {trt.on &&
         (baseMissing ? (
-          <p className="hint-text">Install the GPU runtime and the CorridorKey models first (Runtime and models, above).</p>
+          <p className="hint-text">{INSTALL_FIRST} (Runtime and models, above).</p>
         ) : needParts || trt.status !== "idle" ? (
           <>
             <ul className="check-list">

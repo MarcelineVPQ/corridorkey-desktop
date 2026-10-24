@@ -12,6 +12,7 @@ import type { FetchFn } from "./download";
 import { fallbackShell, relaunchArgs, relaunchEnv, shellArgs, systemdRunArgs } from "./relaunch";
 import { feedSource, REPO } from "./updateFeed";
 import { UpdateFlow, type FileOps, type UpdatePlatform } from "./updateFlow";
+import { NO_RELEASE_CHANNEL } from "../../src/shared/texts";
 
 const FEED_TIMEOUT_MS = 15_000;
 
@@ -22,7 +23,7 @@ function unsupportedReason(keys: readonly string[]): string | null {
   if (PLATFORM !== "linux") return "Updates are built for the Linux AppImage only.";
   if (!app.isPackaged) return "Updates come with the AppImage build; this copy runs from source.";
   if (!process.env.APPIMAGE) return "Updates work only in the AppImage build; this copy isn't running as an AppImage.";
-  if (!keys.length) return "No release channel is set up in this build.";
+  if (!keys.length) return `${NO_RELEASE_CHANNEL}.`;
   return null;
 }
 

@@ -1,6 +1,7 @@
 // Text for numbers shown in the UI. Measured values only; when something
 // isn't known yet the UI says so instead of guessing (rule 1).
 import type { ClipInfo, Job, Stage } from "../shared/types";
+import { CANT_READ_CLIP } from "../shared/texts";
 
 export function clipFacts(c: ClipInfo): string {
   const parts: string[] = [];
@@ -40,7 +41,7 @@ export const STAGE_ORDER: Stage[] = ["start", "load", "probe", "optimize", "rvm"
 export function statusText(job: Job): string {
   switch (job.status) {
     case "waiting":
-      return job.clip.probeError ? "Can't read this clip" : "Waiting";
+      return job.clip.probeError ? CANT_READ_CLIP : "Waiting";
     case "running":
       if (job.stage === "keying" && job.framesTotal) return `${job.framesDone} / ${job.framesTotal} frames`;
       return job.stage ? STAGE_TEXT[job.stage] : "Starting";

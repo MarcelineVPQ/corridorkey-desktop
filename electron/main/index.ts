@@ -19,6 +19,7 @@ import { readDesktopPalette, watchDesktopPalette } from "./desktopTheme";
 import { Updater } from "./updater";
 import { holdAppImageMountUntilExit } from "./appImageQuit";
 import { LOG_SHOWN, type AppState, type FfmpegState, type GpuInfo, type InstallState, type StorageItem, type Job, type JobOptions, type OutputName, type TrtState } from "../../src/shared/types";
+import { NOT_WHILE_BUSY } from "../../src/shared/texts";
 import type { DesktopPalette } from "../../src/ui/theme/palette";
 import { IPC } from "./ipc";
 import { idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir } from "./validate";
@@ -481,7 +482,7 @@ function registerIpc(): void {
     const item = storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort).find((i) => i.id === idIn);
     if (!item || !mainWindow) return;
     if (queue.running || installAbort) {
-      await dialog.showMessageBox(mainWindow, { type: "info", message: "Not while the queue or the download runs", detail: "Stop it first, then remove." });
+      await dialog.showMessageBox(mainWindow, { type: "info", message: NOT_WHILE_BUSY, detail: "Stop it first, then remove." });
       return;
     }
     const again =
