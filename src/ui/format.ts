@@ -53,10 +53,8 @@ export function statusText(job: Job): string {
   }
 }
 
-/** A byte count in decimal GB (10^9 bytes), as disks and downloads are sold and as `du --si` shows. */
-export function gbBytes(bytes: number): string {
-  return `${(bytes / 1e9).toFixed(1)} GB`;
-}
+// decimal GB for disks and downloads: one definition, shared with the main process
+export { gbBytes } from "../shared/units";
 
 /** Graphics memory in GiB (2^30 bytes), from the driver's MiB: the unit cards are sold in ("16 GB" = 16 GiB). */
 export function gib(mb: number): string {

@@ -6,6 +6,7 @@
 // After a Stop or a failure, pressing the button again resumes: finished files are checked offline and kept,
 // a partial one continues where it stopped. A set only appears in the lists once all of it is in place
 // (built in a `.partial-…` folder, then renamed; engineFind skips dot folders).
+import { gbBytes } from "../../src/shared/units";
 import { DOWNLOADS_DIR, LIBRARY_FILE, MODELS_DIR, PLATFORM, RUNTIME_DIR } from "./platform";
 import { REPO } from "./updateFeed";
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statfsSync } from "node:fs";
@@ -304,7 +305,7 @@ export async function runInstall(data: string, deps: InstallDeps, c: Catalog = C
   mkdirSync(data, { recursive: true });
   const room = deps.freeBytes(data);
   const needRoom = (need.runtime ? total(RUNTIME.wheels) * 2.5 : 0) + (need.models ? total(MODELS.files) : 0);
-  if (room !== null && room < needRoom) throw new Error(`not enough free disk space: it needs ${(needRoom / 1e9).toFixed(1)} GB in ${data}, ${(room / 1e9).toFixed(1)} GB is free`);
+  if (room !== null && room < needRoom) throw new Error(`not enough free disk space: it needs ${gbBytes(needRoom)} in ${data}, ${gbBytes(room)} is free`);
   const downloads = join(data, DOWNLOADS_DIR);
   // loop: NOT-WORTH — one mkdir per install
   mkdirSync(downloads, { recursive: true });

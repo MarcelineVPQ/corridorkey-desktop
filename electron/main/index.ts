@@ -6,7 +6,7 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { EngineProcess } from "./engine";
 import { GPU_POLL_MS, readGpu } from "./gpu";
-import { expandPaths, probeClip, still, STILL_WIDTH, VIDEO_EXT } from "./media";
+import { expandPaths, probeClip, still, STILL_WIDTH, VIDEO_EXT, HINT_IMAGE_EXT } from "./media";
 import { clearJobTemps, Queue } from "./queue";
 import { checkCheckout, checkRustEngine, chooseEngine, loadSettings, saveSettings } from "./settings";
 import { effectivePath, findEngineFiles, isInsideApp, modelSetVersion, windowTitle } from "./engineFind";
@@ -357,7 +357,7 @@ function registerIpc(): void {
       title: kind === "hint-image" ? "First-frame hint (matte image)" : "Hint video or frame folder",
       properties: kind === "hint-image" ? ["openFile"] : ["openFile", "openDirectory"],
       // loop: NOT-WORTH — a few extensions, once per file dialog
-      filters: kind === "hint-image" ? [{ name: "Matte image", extensions: ["png", "jpg", "jpeg", "exr"] }] : [{ name: "Video", extensions: [...VIDEO_EXT].map((e) => e.slice(1)) }],
+      filters: kind === "hint-image" ? [{ name: "Matte image", extensions: [...HINT_IMAGE_EXT].map((e) => e.slice(1)) }] : [{ name: "Video", extensions: [...VIDEO_EXT].map((e) => e.slice(1)) }],
     });
     return r.canceled ? null : r.filePaths[0];
   });

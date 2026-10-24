@@ -2,14 +2,10 @@
 // process with its name, so the app can say who else is using the card
 // (rule 11). Read on demand only: at queue start and every GPU_POLL_MS while
 // a job runs AND the window is shown. Nothing reads it while idle or hidden.
-import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { promisify } from "node:util";
+import { run } from "./run";
 import type { GpuInfo, GpuProcess } from "../../src/shared/types";
 
-const execFileP = promisify(execFile);
-// windowsHide: on Windows a console program started from the app would flash a terminal window
-const run = (cmd: string, args: string[], opts: { timeout?: number; maxBuffer?: number }) => execFileP(cmd, args, { ...opts, windowsHide: true, encoding: "utf8" });
 export const GPU_POLL_MS = 2000;
 // nvidia-smi answers in ~50 ms; a driver in trouble can hang it: the read gives up (and says so) instead.
 export const GPU_READ_TIMEOUT_MS = 5000;

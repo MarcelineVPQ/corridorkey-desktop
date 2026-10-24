@@ -7,6 +7,7 @@
 // <data> is $XDG_DATA_HOME/corridorkey-desktop (~/.local/share/corridorkey-desktop): the in-app install
 // (BACKLOG row 2) puts its downloads there. Newest first. A setting of null means "Automatic": the first
 // one found.
+import { isAppImageMount } from "./relaunch";
 import { MODELS_DIR, ortLibrary, PLATFORM, RUNTIME_DIR } from "./platform";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -41,7 +42,7 @@ function dirs(p: string, d: FindDeps): string[] {
 }
 
 /** "1.31.0" from libonnxruntime.so.1.31.0, compared numerically. */
-function versionKey(v: string): number[] {
+function numericVersionKey(v: string): number[] {
   // loop: NOT-WORTH — a few version parts
   return v.split(".").map((n) => Number.parseInt(n, 10) || 0);
 }
@@ -98,7 +99,7 @@ export function findEngineFiles(places: { bundledBinary: string | null; devBinar
     // macOS: Core ML (Apple's GPU and Neural Engine) is built into the library
     const gpu = o.cudaProvider === null || d.exists(join(capi, o.cudaProvider));
     if (!lib || !version) continue;
-    ort.push({ path: join(capi, lib), label: `ONNX Runtime ${version}${gpu ? " (graphics card)" : " (CPU only)"}`, key: versionKey(version) });
+    ort.push({ path: join(capi, lib), label: `ONNX Runtime ${version}${gpu ? " (graphics card)" : " (CPU only)"}`, key: numericVersionKey(version) });
   }
   // loop: NOT-WORTH — sorts one or two runtimes
   ort.sort((a, b) => newerFirst(a.key, b.key));
@@ -109,7 +110,7 @@ export function findEngineFiles(places: { bundledBinary: string | null; devBinar
 
 /** A path inside the running AppImage's mount (resources/…): it changes every launch, so it is never saved. */
 export function isInsideApp(path: unknown, resourcesPath: string | null): boolean {
-  return typeof path === "string" && ((!!resourcesPath && (path.startsWith(resourcesPath + "/") || path.startsWith(resourcesPath + "\\"))) || /\/\.mount_[^/]+\//.test(path));
+  return typeof path === "string" && ((!!resourcesPath && (path.startsWith(resourcesPath + "/") || path.startsWith(resourcesPath + "\\"))) || isAppImageMount(path));
 }
 
 /** The model set's version from its manifest.json ("2.0.0-onnx.3"), or null. */

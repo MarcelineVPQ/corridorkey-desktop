@@ -2,20 +2,15 @@
 // (ffprobe), a small still (ffmpeg), and the companion hints next to it. The
 // naming rules are run_interactive.py's, so a folder prepared for the
 // upstream launcher works here unchanged.
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
-import { promisify } from "node:util";
+import { run } from "./run";
 import type { ClipInfo } from "../../src/shared/types";
-
-const execFileP = promisify(execFile);
-// windowsHide: on Windows a console program started from the app would flash a terminal window
-const run = (cmd: string, args: string[], opts: { timeout?: number; maxBuffer?: number }) => execFileP(cmd, args, { ...opts, windowsHide: true, encoding: "utf8" });
 
 export const VIDEO_EXT = new Set([".mp4", ".mov", ".mkv", ".avi", ".mxf", ".webm", ".m4v"]);
 export const FRAME_EXT = new Set([".exr", ".png", ".jpg", ".jpeg"]);
-const HINT_IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".exr"]);
+export const HINT_IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".exr"]);
 const THUMB_WIDTH = 320; // shown at 160 CSS px: 2x for HiDPI, no larger (rule 3)
 const STILL_WIDTH = 640; // result stills, shown at up to 320 CSS px
 // ffprobe -count_packets reads the whole file (seconds for a large clip on a local disk); a stalled mount or
