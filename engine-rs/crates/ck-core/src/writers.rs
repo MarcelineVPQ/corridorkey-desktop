@@ -89,6 +89,12 @@ compile_error!("the ffmpeg writers and temp files assume a little-endian host");
 /// frame at 1280x1080; x264's lookahead at UHD takes seconds, not minutes).
 pub(crate) const FINISH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
+/// The last lines of ffmpeg's stderr a writer keeps for its error message.
+const TAIL_LINES: usize = 6;
+
+/// How long a failed writer waits for ffmpeg to exit (and say why) before it is killed.
+const FAIL_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
 pub(crate) struct VideoWriter {
     path: PathBuf,
     channels: usize,
@@ -98,6 +104,55 @@ pub(crate) struct VideoWriter {
     child: Option<Child>,
     err: Shared,
     frames: usize,
+    /// reads ffmpeg's stderr: each line goes on to the engine's stderr (as before) and the last TAIL_LINES are kept
+    log: Option<JoinHandle<()>>,
+    tail: Arc<Mutex<std::collections::VecDeque<String>>>,
+    /// the failure with what ffmpeg said, once composed (asked again, the same error)
+    said: Option<Error>,
+}
+
+/// Read a child's stderr to its end: every line on to ours, the last TAIL_LINES kept in `tail`.
+fn keep_tail(name: &str, err: std::process::ChildStderr, tail: Arc<Mutex<std::collections::VecDeque<String>>>) -> Result<JoinHandle<()>, Error> {
+    // loop: SERIAL-REQUIRED — one reader per ffmpeg writer; ends when ffmpeg exits (its stderr closes)
+    crate::ahead::spawn_named(name, move || {
+        use std::io::BufRead;
+        let mut r = std::io::BufReader::new(err);
+        let mut buf = Vec::new();
+        // loop: SERIAL-REQUIRED — ffmpeg's error lines in order [bounded: ends at the pipe's end, when ffmpeg exits or is killed]
+        loop {
+            buf.clear();
+            match r.read_until(b'\n', &mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+            let line = String::from_utf8_lossy(&buf).trim_end().to_string();
+            if line.is_empty() {
+                continue;
+            }
+            eprintln!("{line}");
+            let mut t = tail.lock().unwrap();
+            if t.len() == TAIL_LINES {
+                t.pop_front();
+            }
+            t.push_back(line);
+        }
+    })
+}
+
+/// A writer's failure with what ffmpeg said: `Output` in words when ffmpeg couldn't write the file (a full disk, a
+/// folder it may not write to), else the failure with ffmpeg's last lines added.
+pub(crate) fn with_ffmpeg_tail(base: Error, path: &Path, tail: &[String]) -> Error {
+    if tail.is_empty() {
+        return base;
+    }
+    let said = tail.join(" | ");
+    // loop: NOT-WORTH — ≤ TAIL_LINES lines of one failed writer
+    match tail.iter().find_map(|l| crate::write_failure_text(l)) {
+        Some(why) if base.code == crate::ErrorCode::Engine => {
+            Error::new(crate::ErrorCode::Output, format!("Can't write {}: {why} (ffmpeg: {said})", path.display()))
+        }
+        _ => Error { message: format!("{}; ffmpeg said: {said}", base.message), ..base },
+    }
 }
 
 impl VideoWriter {
@@ -106,9 +161,14 @@ impl VideoWriter {
             .args(ffmpeg_args(path, fps, w, h, cfg, channels, color_trc))
             .stdin(Stdio::piped())
             .stdout(Stdio::null()) // stdout is the engine's protocol channel
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| Error::assets(format!("ffmpeg binary not found or not runnable: {e}")))?;
+        let tail = Arc::new(Mutex::new(std::collections::VecDeque::new()));
+        let log = match child.stderr.take() {
+            Some(s) => Some(keep_tail("ffmpeg-log", s, tail.clone())?),
+            None => None,
+        };
         let mut stdin = child.stdin.take().unwrap();
         let (tx, rx): (SyncSender<Vec<u16>>, Receiver<Vec<u16>>) = sync_channel(2);
         let err: Shared = Arc::new(Mutex::new(None));
@@ -133,7 +193,32 @@ impl VideoWriter {
             child: Some(child),
             err,
             frames: 0,
+            log,
+            tail,
+            said: None,
         })
+    }
+
+    /// `base` with what ffmpeg said: ffmpeg is given FAIL_WAIT to exit (then killed) so its stderr is complete, and
+    /// the composed error is kept, so `release` reports the same.
+    fn ffmpeg_failed(&mut self, base: Error) -> Error {
+        if let Some(e) = self.said.clone() {
+            return e;
+        }
+        if let Some(mut c) = self.child.take() {
+            // loop: SERIAL-REQUIRED — a failed ffmpeg exiting, FAIL_WAIT 5 s, then killed
+            let _ = crate::proc::wait_timeout(&mut c, FAIL_WAIT);
+        }
+        if let Some(l) = self.log.take() {
+            // loop: SERIAL-REQUIRED — joins the stderr reader [bounded: ffmpeg has exited or was killed, so its stderr is closed]
+            let _ = crate::ahead::joined(l);
+        }
+        // loop: NOT-WORTH — ≤ TAIL_LINES lines, once per failed writer
+        let tail: Vec<String> = self.tail.lock().unwrap().iter().cloned().collect();
+        let e = with_ffmpeg_tail(base, &self.path, &tail);
+        *self.err.lock().unwrap() = Some(e.clone());
+        self.said = Some(e.clone());
+        e
     }
 }
 
@@ -142,14 +227,17 @@ impl Writer for VideoWriter {
         &self.path
     }
     fn write_many(&mut self, batch: Batch, n: usize) -> Result<(), Error> {
-        if let Some(e) = self.err.lock().unwrap().clone() {
-            return Err(e);
+        let failed = self.err.lock().unwrap().clone();
+        if let Some(e) = failed {
+            return Err(self.ffmpeg_failed(e));
         }
         let Batch::U16(v) = batch else { return Err(Error::engine("video writer expects uint16 frames".into())) };
         if v.len() != n * self.frame_len {
             return Err(Error::engine(format!("expected {n} frames of {} channels", self.channels)));
         }
-        self.tx.as_ref().unwrap().send(v).map_err(|_| Error::engine(format!("ffmpeg writer stopped: {}", self.path.display())))?;
+        if self.tx.as_ref().unwrap().send(v).is_err() {
+            return Err(self.ffmpeg_failed(Error::engine(format!("ffmpeg writer stopped: {}", self.path.display()))));
+        }
         self.frames += n;
         Ok(())
     }
@@ -183,16 +271,24 @@ impl Writer for VideoWriter {
             // loop: SERIAL-REQUIRED — ffmpeg finishing the file, within FINISH_TIMEOUT 300 s (this pass: it had no deadline)
             Some(mut c) => match crate::proc::wait_timeout(&mut c, end.saturating_duration_since(std::time::Instant::now())) {
                 Ok(Some(s)) if !timed_out => s.code().unwrap_or(-1),
-                Ok(_) => return Err(Error::engine(format!("ffmpeg writer did not finish within {} s: {}", FINISH_TIMEOUT.as_secs(), self.path.display()))),
+                Ok(_) => {
+                    let e = Error::engine(format!("ffmpeg writer did not finish within {} s: {}", FINISH_TIMEOUT.as_secs(), self.path.display()));
+                    return Err(self.ffmpeg_failed(e));
+                }
                 Err(_) => -1,
             },
             None => 0,
         };
-        if let Some(e) = self.err.lock().unwrap().clone() {
-            return Err(e);
+        let failed = self.err.lock().unwrap().clone();
+        if let Some(e) = failed {
+            return Err(self.ffmpeg_failed(e));
         }
         if rc != 0 {
-            return Err(Error::engine(format!("ffmpeg writer failed with exit code {rc}: {}", self.path.display())));
+            return Err(self.ffmpeg_failed(Error::engine(format!("ffmpeg writer failed with exit code {rc}: {}", self.path.display()))));
+        }
+        if let Some(l) = self.log.take() {
+            // loop: SERIAL-REQUIRED — joins the stderr reader [bounded: ffmpeg has exited, so its stderr is closed]
+            let _ = crate::ahead::joined(l);
         }
         Ok(())
     }
@@ -337,6 +433,52 @@ mod tests {
         assert!(
             c.contains("-pix_fmt bgra64le") && c.contains("-c:v prores_ks -profile:v 4 -pix_fmt yuva444p10le -threads 2") && c.contains("-color_trc linear")
         );
+    }
+
+    #[test]
+    fn the_error_carries_what_ffmpeg_said() {
+        let p = Path::new("/o/a_alpha.mp4");
+        let base = Error::engine("ffmpeg writer failed with exit code 1: /o/a_alpha.mp4".into());
+        let e = with_ffmpeg_tail(base.clone(), p, &["[out#0/mp4] Error opening output /o/a_alpha.mp4: No space left on device".into()]);
+        assert_eq!(e.code, crate::ErrorCode::Output);
+        assert!(e.message.starts_with("Can't write /o/a_alpha.mp4: the disk is full (ffmpeg: "), "{}", e.message);
+        let e = with_ffmpeg_tail(base.clone(), p, &["Unknown encoder 'libx264'".into(), "Error selecting an encoder".into()]);
+        assert_eq!(e.code, crate::ErrorCode::Engine);
+        assert!(e.message.ends_with("; ffmpeg said: Unknown encoder 'libx264' | Error selecting an encoder"), "{}", e.message);
+        assert_eq!(with_ffmpeg_tail(base.clone(), p, &[]), base);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_folder_ffmpeg_cant_write_is_an_output_error_with_its_words() {
+        if Command::new("ffmpeg").arg("-version").output().is_err() {
+            eprintln!("no ffmpeg: skipped");
+            return;
+        }
+        // an output path inside a file (not a folder): ffmpeg can't open it and says so on stderr
+        let dir = std::env::temp_dir().join(format!("ck-wfail-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("file"), b"").unwrap();
+        let p = dir.join("file").join("a.mp4");
+        let mut wr = VideoWriter::new(&p, 24.0, 16, 8, &WriterConfig::default(), 3, "iec61966-2-1").unwrap();
+        let mut err = None;
+        // loop: NOT-WORTH — up to 50 tiny frames, until ffmpeg's pipe closes
+        for _ in 0..50 {
+            if let Err(e) = wr.write_many(Batch::U16(vec![30000; 16 * 8 * 3]), 1) {
+                err = Some(e);
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let e = match err {
+            Some(e) => e,
+            None => wr.release().unwrap_err(),
+        };
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(e.message.contains("ffmpeg said: ") || e.message.contains("(ffmpeg: "), "{}", e.message);
+        assert!(e.message.to_lowercase().contains("not a directory"), "{}", e.message);
+        // asked again, the same error (the tail is added once)
+        assert_eq!(wr.release().unwrap_err(), e);
     }
 
     #[test]

@@ -130,11 +130,18 @@ pub(crate) fn write_failure(e: &std::io::Error) -> Option<&'static str> {
     }
     // ENOSPC / EDQUOT / EROFS (Linux, macOS) and ERROR_DISK_FULL / ERROR_HANDLE_DISK_FULL (Windows) when the kind is
     // not mapped
-    let text = e.to_string().to_lowercase();
+    write_failure_text(&e.to_string())
+}
+
+/// `write_failure` from a message's text (an io::Error's, or a line ffmpeg wrote to stderr).
+pub(crate) fn write_failure_text(text: &str) -> Option<&'static str> {
+    let text = text.to_lowercase();
     if text.contains("no space left") || text.contains("disk full") || text.contains("not enough space") || text.contains("quota") {
         Some("the disk is full")
     } else if text.contains("read-only file system") {
         Some("the drive is read-only")
+    } else if text.contains("permission denied") || text.contains("access is denied") {
+        Some("not allowed to write there")
     } else {
         None
     }

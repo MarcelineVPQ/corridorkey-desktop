@@ -90,6 +90,47 @@ fn string(o: &serde_json::Map<String, Value>, k: &str) -> Option<String> {
     }
 }
 
+/// libx264's presets (`ffmpeg -h encoder=libx264`, x264 --preset).
+pub(crate) const X264_PRESETS: [&str; 10] = ["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow", "placebo"];
+/// The pixel formats ffmpeg's libx264 encoder takes (`ffmpeg -h encoder=libx264`, "Supported pixel formats"), and
+/// their bit depth (x264's CRF scale goes to 51 at 8 bits, 63 at 10).
+pub(crate) const X264_PIX_FMTS: [(&str, u32); 15] = [
+    ("yuv420p", 8),
+    ("yuvj420p", 8),
+    ("yuv422p", 8),
+    ("yuvj422p", 8),
+    ("yuv444p", 8),
+    ("yuvj444p", 8),
+    ("nv12", 8),
+    ("nv16", 8),
+    ("nv21", 8),
+    ("gray", 8),
+    ("yuv420p10le", 10),
+    ("yuv422p10le", 10),
+    ("yuv444p10le", 10),
+    ("nv20le", 10),
+    ("gray10le", 10),
+];
+
+/// The video writer's settings against what libx264 takes: a bad-request before any model loads (it was an
+/// ffmpeg failure after the whole RVM pass).
+fn check_writer(w: &WriterConfig) -> Result<(), Error> {
+    if !X264_PRESETS.contains(&w.preset.as_str()) {
+        return Err(Error::bad_request(format!("preset {:?} isn't one of libx264's: {}", w.preset, X264_PRESETS.join(", "))));
+    }
+    // loop: NOT-WORTH — fifteen pixel formats, once per job
+    let Some(&(_, depth)) = X264_PIX_FMTS.iter().find(|(f, _)| *f == w.pix_fmt) else {
+        // loop: NOT-WORTH — fifteen names for the message
+        let names: Vec<&str> = X264_PIX_FMTS.iter().map(|(f, _)| *f).collect();
+        return Err(Error::bad_request(format!("pix_fmt {:?} isn't one libx264 takes: {}", w.pix_fmt, names.join(", "))));
+    };
+    let max = if depth > 8 { 63 } else { 51 };
+    if !(0..=max).contains(&w.crf) {
+        return Err(Error::bad_request(format!("crf must be between 0 and {max} for {}, got {}", w.pix_fmt, w.crf)));
+    }
+    Ok(())
+}
+
 /// Parse a run request (it already has id, input, output_dir and temp_dir: the engine checked them).
 pub fn parse(req: &Value) -> Result<JobConfig, Error> {
     let s = |k: &str| req.get(k).and_then(|v| v.as_str().map(|x| x.to_string()).or_else(|| (!v.is_null()).then(|| v.to_string())));
@@ -148,6 +189,10 @@ pub fn parse(req: &Value) -> Result<JobConfig, Error> {
         pix_fmt: string(o, "pix_fmt").unwrap_or_else(|| "yuv444p10le".into()),
         ..WriterConfig::default()
     };
+    // (EXR jobs don't use the video writer's settings)
+    if output_format == "video" {
+        check_writer(&writer)?;
+    }
     Ok(JobConfig {
         id,
         input,
@@ -246,6 +291,19 @@ mod tests {
         }
         // not a number at all stays an input error
         assert_eq!(parse(&req(json!({"despill_strength": "lots"}))).unwrap_err().code.as_str(), "input");
+    }
+
+    #[test]
+    fn writer_settings_are_checked_before_anything_runs() {
+        let c = parse(&req(json!({"preset": "slow", "pix_fmt": "yuv420p", "crf": 51}))).unwrap();
+        assert_eq!((c.writer.preset.as_str(), c.writer.pix_fmt.as_str(), c.writer.crf), ("slow", "yuv420p", 51));
+        assert_eq!(parse(&req(json!({"crf": 63}))).unwrap().writer.crf, 63); // 10-bit default: x264's longer scale
+                                                                             // loop: NOT-WORTH — a test's few options
+        for o in [json!({"preset": "warp"}), json!({"pix_fmt": "rgb24"}), json!({"pix_fmt": "yuv420p", "crf": 52}), json!({"crf": 64}), json!({"crf": -1})] {
+            assert_eq!(parse(&req(o.clone())).unwrap_err().code.as_str(), "bad-request", "{o}");
+        }
+        // an EXR job doesn't use them
+        assert!(parse(&req(json!({"output_format": "exr", "preset": "warp"}))).is_ok());
     }
 
     #[test]

@@ -135,6 +135,7 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
   message says which). Before, these were `engine`.
 - Rust engine: a request line that isn't UTF-8 text, a `cancel` without an `id`, a
   `run` option outside its documented range (`hint_quality`, `carry_hint_quality`,
-  `despill_strength`: 0–1) or a number that isn't finite (`"nan"`, `"inf"`) is a
+  `despill_strength`: 0–1; for video output a `preset` or `pix_fmt` libx264 doesn't take, a
+  `crf` outside 0–51, or 0–63 for 10-bit formats) or a number that isn't finite (`"nan"`, `"inf"`) is a
   `bad-request` (for a `run`, with its id, before anything loads); the engine keeps
   reading. An option that isn't a number at all stays an `input` error.
