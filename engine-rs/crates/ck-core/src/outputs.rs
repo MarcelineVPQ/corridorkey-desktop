@@ -57,7 +57,7 @@ impl<'a> RenderWorker<'a> {
                 let rendered = match &logits {
                     Data::F16(v) => render(&ro, v, geo.shape, geo.crop, geo.hw, &checker),
                     Data::F32(v) => render(&ro, v, geo.shape, geo.crop, geo.hw, &checker),
-                    Data::Bf16(_) => {
+                    Data::Bf16(_) | Data::F16Ref(_) | Data::F32Ref(_) => {
                         res = Err(Error::engine("stage 2 logits as bfloat16".into()));
                         break;
                     }

@@ -10,7 +10,7 @@ use crate::gpu::{nvidia, GpuInfo};
 use crate::Error;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
-use ort::value::Tensor;
+use ort::value::{Tensor, TensorRef};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -382,6 +382,10 @@ pub(crate) enum Data<'a> {
     F16(Vec<half::f16>),
     /// bfloat16 frames, concatenated in order (the decoded frames' model view: stage 1 and 2's rgb)
     Bf16(Vec<&'a [half::bf16]>),
+    /// borrowed float16 / float32 data, fed to a graph of the same type without a copy (the all-zero hint of a
+    /// window without hints is one buffer for the whole job)
+    F16Ref(&'a [half::f16]),
+    F32Ref(&'a [f32]),
 }
 
 impl From<Vec<f32>> for Data<'_> {
@@ -406,6 +410,8 @@ impl Data<'_> {
             Data::F16(v) => v.len(),
             // loop: NOT-WORTH — ≤ 80 slices
             Data::Bf16(parts) => parts.iter().map(|p| p.len()).sum(),
+            Data::F16Ref(v) => v.len(),
+            Data::F32Ref(v) => v.len(),
         }
     }
 
@@ -417,6 +423,9 @@ impl Data<'_> {
             // loop: HOT-PATH-OK — float16 -> float32 where a graph takes float32 (the CPU / fp32 path), one parallel pass
             Data::F16(v) => v.par_iter().with_min_len(PAR_MIN).map(|x| x.to_f32()).collect(),
             Data::Bf16(parts) => concat_parts(&parts, |x| x.to_f32()),
+            Data::F32Ref(v) => v.to_vec(),
+            // loop: HOT-PATH-OK — a borrowed float16 input to a float32 graph, one parallel pass
+            Data::F16Ref(v) => v.par_iter().with_min_len(PAR_MIN).map(|x| x.to_f32()).collect(),
         }
     }
 
@@ -428,6 +437,9 @@ impl Data<'_> {
             // loop: HOT-PATH-OK — float32 -> float16 for the fp16 graphs' float32-made inputs (hints, foundation inputs on CPU), one parallel pass
             Data::F32(v) => v.par_iter().with_min_len(PAR_MIN).map(|&x| half::f16::from_f32(x)).collect(),
             Data::Bf16(parts) => concat_parts(&parts, |x| half::f16::from_f32(x.to_f32())),
+            Data::F16Ref(v) => v.to_vec(),
+            // loop: HOT-PATH-OK — a borrowed float32 input to a float16 graph, one parallel pass
+            Data::F32Ref(v) => v.par_iter().with_min_len(PAR_MIN).map(|&x| half::f16::from_f32(x)).collect(),
         }
     }
 
@@ -439,6 +451,9 @@ impl Data<'_> {
             Data::F16(v) => v[range].iter().map(|x| x.to_f32()).collect(),
             // loop: NOT-WORTH — never used on a hot path (bf16 data is only an input)
             Data::Bf16(parts) => parts.iter().flat_map(|p| p.iter()).skip(range.start).take(range.len()).map(|x| x.to_f32()).collect(),
+            Data::F32Ref(v) => v[range].to_vec(),
+            // loop: NOT-WORTH — borrowed inputs only (never an output)
+            Data::F16Ref(v) => v[range].iter().map(|x| x.to_f32()).collect(),
         }
     }
 }
@@ -502,10 +517,12 @@ impl Net {
         let mut feed: Vec<(std::borrow::Cow<'_, str>, ort::session::SessionInputValue<'_>)> = Vec::with_capacity(inputs.len());
         // loop: NOT-WORTH — at most six inputs
         for (name, shape, data) in inputs {
-            let v: ort::session::SessionInputValue<'_> = if self.wants_f16(name) {
-                Tensor::from_array((shape, data.into_f16())).map_err(|e| Error::ort(self.piece, e))?.into()
-            } else {
-                Tensor::from_array((shape, data.into_f32())).map_err(|e| Error::ort(self.piece, e))?.into()
+            let v: ort::session::SessionInputValue<'_> = match (self.wants_f16(name), data) {
+                // borrowed data already in the graph's type: a view, no copy
+                (true, Data::F16Ref(s)) => TensorRef::from_array_view((shape, s)).map_err(|e| Error::ort(self.piece, e))?.into(),
+                (false, Data::F32Ref(s)) => TensorRef::from_array_view((shape, s)).map_err(|e| Error::ort(self.piece, e))?.into(),
+                (true, data) => Tensor::from_array((shape, data.into_f16())).map_err(|e| Error::ort(self.piece, e))?.into(),
+                (false, data) => Tensor::from_array((shape, data.into_f32())).map_err(|e| Error::ort(self.piece, e))?.into(),
             };
             feed.push((std::borrow::Cow::Borrowed(name), v));
         }

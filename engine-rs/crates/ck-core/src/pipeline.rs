@@ -180,7 +180,7 @@ impl FeatFile {
         let (half, bytes): (bool, &[u8]) = match v {
             Data::F16(x) => (true, bytemuck::cast_slice(x)),
             Data::F32(x) => (false, bytemuck::cast_slice(x)),
-            Data::Bf16(_) => return Err(Error::engine("foundation features as bfloat16".into())),
+            Data::Bf16(_) | Data::F16Ref(_) | Data::F32Ref(_) => return Err(Error::engine("foundation features as bfloat16 or borrowed".into())),
         };
         if *self.half.get_or_insert(half) != half {
             return Err(Error::engine("foundation features changed type".into()));
@@ -1156,6 +1156,11 @@ impl Pipeline {
             self.unload();
             self.ensure(key, &["stage1"], trt, sink, load_stage)?;
         }
+        // the hint is made in the type stage 1 takes; windows without any matte share one all-zero buffer, made the
+        // first time one is needed
+        let hint_f16 = self.net("stage1")?.wants_f16("hint");
+        let (zeros16, zeros32) = (std::cell::OnceCell::<Vec<half::f16>>::new(), std::cell::OnceCell::<Vec<f32>>::new());
+        let zero_len = chunk.min(t_all) * plane;
         sink.send(json!({"type": "progress", "stage": "keying"}));
         // measured host seconds around stage 1: inputs (decode wait, features, hints) and after (carry, blend, hand-off)
         let (mut s1_in_s, mut s1_out_s) = (0.0f64, 0.0f64);
@@ -1166,37 +1171,46 @@ impl Pipeline {
             let tc = t1 - t0;
             let WindowInputs { frames, hint_video, found, rvm } =
                 windows.next_item()?.ok_or_else(|| Error::engine("the window input thread ended early".into()))?;
-            let mut hint = vec![0f32; tc * plane];
+            // each frame's matte, if it has one (later sources win: the hint video, then the carry, then the
+            // first-frame hint), and its quality
+            let mut src: Vec<Option<&[f32]>> = vec![None; tc];
             let mut hq = vec![0f32; tc];
-            let mut present = vec![false; tc];
-            if let Some(hv) = hint_video {
-                // loop: HOT-PATH-OK — the window's frames
+            if let Some(hv) = &hint_video {
+                // loop: NOT-WORTH — the window's frames (≤ 80): slice references
                 for (j, m) in hv.iter().enumerate() {
-                    hint[j * plane..(j + 1) * plane].copy_from_slice(&m[..]);
+                    src[j] = Some(&m[..]);
                 }
                 // loop: NOT-WORTH — the window's hint qualities (≤ 80)
                 hq.iter_mut().for_each(|q| *q = hq_full);
-                // loop: NOT-WORTH — the window's flags (≤ 80)
-                present.iter_mut().for_each(|p| *p = true);
             }
-            // loop: HOT-PATH-OK — the window's frames
+            // loop: NOT-WORTH — the window's frames (≤ 80): slice references
             for (j, t) in (t0..t1).enumerate() {
                 if let Some(c) = carry.get(&t) {
-                    hint[j * plane..(j + 1) * plane].copy_from_slice(c);
+                    src[j] = Some(&c[..]);
                     hq[j] = hq_carry;
-                    present[j] = true;
                 }
             }
             if let (Some(ih), 0) = (&initial_hint, t0) {
-                hint[..plane].copy_from_slice(ih);
+                src[0] = Some(&ih[..]);
                 hq[0] = hq_full;
-                present[0] = true;
             }
+            // the hint in stage 1's own type, made once (it was a float32 window converted to float16 in the run): a
+            // window without any matte feeds the job's one all-zero buffer, borrowed
             // loop: NOT-WORTH — the window's flags (≤ 80)
-            if !present.iter().any(|p| *p) {
+            let hint = if src.iter().all(|s| s.is_none()) {
                 // loop: NOT-WORTH — the window's hint qualities (≤ 80)
                 hq.iter_mut().for_each(|q| *q = -1.0);
-            }
+                if hint_f16 {
+                    Data::F16Ref(&zeros16.get_or_init(|| vec![half::f16::ZERO; zero_len])[..tc * plane])
+                } else {
+                    Data::F32Ref(&zeros32.get_or_init(|| vec![0f32; zero_len])[..tc * plane])
+                }
+            } else if hint_f16 {
+                Data::F16(hint_window(&src, plane, half::f16::from_f32))
+            } else {
+                Data::F32(hint_window(&src, plane, |v| v))
+            };
+            drop(src);
             if !low_vram {
                 // loop: HOT-PATH-OK — the window's frames
                 for (j, t) in (t0..t1).enumerate() {
@@ -1218,7 +1232,7 @@ impl Pipeline {
             let outs = self.net("stage1")?.run(vec![
                 // loop: HOT-PATH-OK — ≤ 80 slice references; converted once inside the run (this pass: bf16 -> f32 -> f16 was two passes and an 850 MB float32 copy per 48-frame window)
                 ("rgb", vec![1, tc, 3, sh, sw], Data::Bf16(models.iter().map(|m| &m[..]).collect())),
-                ("hint", vec![1, tc, 1, sh, sw], hint.into()),
+                ("hint", vec![1, tc, 1, sh, sw], hint),
                 ("hint_quality", vec![1, tc], hq.into()),
                 ("moge", vec![1, tc, MOGE_CH, h64, w64], moge),
                 ("cradio", vec![1, tc, CRADIO_CH, h64, w64], cradio),
@@ -1260,7 +1274,7 @@ impl Pipeline {
                 match &baton {
                     Data::F16(v) => blend.add(t, &v[r], wts[j]),
                     Data::F32(v) => blend.add(t, &v[r], wts[j]),
-                    Data::Bf16(_) => return Err(Error::engine("stage1: bfloat16 baton".into())),
+                    Data::Bf16(_) | Data::F16Ref(_) | Data::F32Ref(_) => return Err(Error::engine("stage1: baton not float16 / float32".into())),
                 }
             }
             drop(baton);
@@ -1442,6 +1456,22 @@ enum Found {
     Inputs((Vec<f32>, Vec<f32>)),
 }
 
+/// A window's hint tensor in the graph's type: each frame's matte (`src[j]`, bfloat16-rounded values) through `conv`
+/// (float16: `half::f16::from_f32`, the same rounding the float32 window's conversion in the run did), zero where a
+/// frame has none.
+fn hint_window<T: Copy + Default + Send + Sync>(src: &[Option<&[f32]>], plane: usize, conv: impl Fn(f32) -> T + Sync + Send) -> Vec<T> {
+    use rayon::prelude::*;
+    let mut out = vec![T::default(); src.len() * plane];
+    // loop: HOT-PATH-OK — the window's frames (≤ 80); each matte converted once, in parallel
+    for (dst, s) in out.chunks_mut(plane).zip(src) {
+        if let Some(s) = s {
+            // loop: HOT-PATH-OK — one frame's matte into the tensor, parallel
+            dst.par_iter_mut().with_min_len(1 << 14).zip(s.par_iter()).for_each(|(d, &v)| *d = conv(v));
+        }
+    }
+    out
+}
+
 /// C-RADIO's and MoGe's inputs for frames: display RGB area-resized to 1/4 and 7/32.
 fn foundation_inputs(frames: &[Prepped], sh: usize, sw: usize) -> (Vec<f32>, Vec<f32>) {
     let n = frames.len();
@@ -1513,6 +1543,26 @@ pub(crate) fn piece_name(piece: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_hint_made_in_the_graphs_type_is_the_same_tensor() {
+        // three frames of 5 values: a matte, none, a matte; the old way made a float32 window and converted it
+        let plane = 5;
+        let a: Vec<f32> = vec![0.0, 0.25, 0.5039, 1.0, 0.123];
+        let b: Vec<f32> = vec![1.0, 0.0, 0.33, 0.66, 0.999];
+        let src = vec![Some(&a[..]), None, Some(&b[..])];
+        let mut old = vec![0f32; 3 * plane];
+        old[..plane].copy_from_slice(&a);
+        old[2 * plane..].copy_from_slice(&b);
+        let new16 = hint_window(&src, plane, half::f16::from_f32);
+        let old16 = Data::F32(old.clone()).into_f16();
+        // loop: NOT-WORTH — fifteen values
+        assert_eq!(new16.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), old16.iter().map(|x| x.to_bits()).collect::<Vec<_>>());
+        assert_eq!(hint_window(&src, plane, |v| v), old);
+        // a window without mattes: the shared zeros are the same as a fresh zero window
+        let zeros = vec![half::f16::ZERO; 4 * plane];
+        assert_eq!(Data::F16Ref(&zeros[..3 * plane]).into_f16(), Data::F32(vec![0f32; 3 * plane]).into_f16());
+    }
 
     #[test]
     fn tensorrt_cache_root_per_system() {
