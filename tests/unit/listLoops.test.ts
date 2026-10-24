@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { problems, scan } from "../../tools/list_loops.mjs";
+import { problems, scan, type Row } from "../../tools/list_loops.mjs";
 
 describe("loop pass lister", () => {
   it("lists Rust loops, chains, waits and threads, not the test module", () => {
@@ -36,6 +36,46 @@ describe("loop pass lister", () => {
     expect(problems(bounded)).toEqual([]);
     const timed = scan("let a = rx.recv_timeout(d);", "engine-rs/crates/ck-core/src/x.rs");
     expect(timed[0].flags).not.toContain("no-timeout");
+  });
+
+  it("exempts plain Rust loops and chains, not waits, pixel loops or while", () => {
+    const rs = "engine-rs/crates/ck-core/src/x.rs";
+    const exempt = scan(["fn f(v: &[u8]) -> bool {", "    let a = v.iter().any(|&b| b == 0);", "    for b in v {", "        let _ = b;", "    }", "    a", "}"].join("\n"), rs);
+    expect(exempt.map((r) => [r.line, r.required, r.verdict])).toEqual([
+      [2, false, ""],
+      [3, false, ""],
+    ]);
+    expect(problems(exempt)).toEqual([]);
+    const required = scan(
+      [
+        "fn g(rx: Receiver<u8>, img: &mut [f32], w: usize, h: usize) {",
+        "    let _ = rx.recv();",
+        "    std::thread::sleep(d);",
+        "    for y in 0..h {",
+        "        for x in 0..w {",
+        "            img[y * w + x] = 0.0;",
+        "        }",
+        "    }",
+        "    while busy() {",
+        "        poke();",
+        "    }",
+        "    loop {",
+        "        break;",
+        "    }",
+        "    let s: Vec<String> = v.iter().map(|x| x.to_string()).collect();",
+        "}",
+      ].join("\n"),
+      rs,
+    );
+    const at = (n: number) => required.find((r) => r.line === n)!;
+    expect(at(5).flags).toContain("pixel");
+    expect(at(4).required).toBe(false); // the outer row loop alone is a plain `for`
+    expect(problems(required).map((p) => Number(p.split(":")[1]))).toEqual([2, 3, 5, 9, 12, 15]);
+    // the exemption applied to every row would let all of these through; the line above pins that it isn't
+    const everythingExempt = (rows: Row[]) => problems(rows.map((r) => ({ ...r, required: false })));
+    expect(everythingExempt(required)).toEqual([]);
+    // every other language: each row still needs a verdict
+    expect(problems(scan("for (const a of xs) {}", "src/x.ts"))).toHaveLength(1);
   });
 
   it("finds TS timers, callbacks, nesting, JSX verdicts and wrapped chains", () => {

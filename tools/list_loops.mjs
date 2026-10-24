@@ -23,8 +23,14 @@
 //   main-blocking  blocks the Electron main process
 // A row flagged no-timeout, retry or spin must say what bounds it: `[bounded: ...]` in its reason.
 //
+// Rust (engine-rs/crates, .rs) needs a verdict only where one carries information (senior review 2026-10,
+// finding 16): a wait, thread, timer (sleep) or blocking call; a plain `while` / `loop` statement (it can spin or
+// wait); and a `for` loop or iterator chain flagged no-timeout, retry, spin, pixel, nested or alloc. A plain `for`
+// or iterator chain with none of those flags (an `.iter().any()` over a few items) is exempt: it is still listed,
+// as "exempt" when it has no verdict, and never fails the gate. Every other language: every row needs a verdict.
+//
 //   node tools/list_loops.mjs           TSV: file line kind verdict flags head
-//   node tools/list_loops.mjs --check   the gate: exit 1 on a row without a valid verdict (or bound)
+//   node tools/list_loops.mjs --check   the gate: exit 1 on a required row without a valid verdict (or bound)
 //   node tools/list_loops.mjs --md      the pass doc's summary and per-file tables (markdown)
 //
 // A verdict is a comment on the row's line or on the comment lines right above it:
@@ -167,6 +173,18 @@ function spanOf(lines, i, lang, kind) {
   return [i, lines.length - 1];
 }
 
+/** Flags that make a Rust `for` loop or iterator chain need a verdict. */
+const RS_REQUIRED_FLAGS = ["no-timeout", "retry", "spin", "pixel", "nested", "alloc"];
+
+/** Whether a row needs a verdict (see the header: Rust's plain `for` loops and chains are exempt). */
+export function requiresVerdict(r, lang) {
+  if (lang !== "rs") return true;
+  if (/wait|thread|timer|sync/.test(r.kind)) return true;
+  if (/^\s*('\w+:\s*)?(while\b|loop \{)/.test(r.head)) return true;
+  // loop: NOT-WORTH — a row's flags (≤ 6)
+  return r.flags.some((f) => RS_REQUIRED_FLAGS.includes(f));
+}
+
 /**
  * The verdict of row line `i`: on the line itself, or on the comment lines right above it. A row inside a
  * statement a formatter wrapped (a `.map(` continuation, the call after `return (`) takes the comment above the
@@ -174,19 +192,19 @@ function spanOf(lines, i, lang, kind) {
  */
 function verdictOf(lines, i, lang) {
   const own = VERDICT.exec(lines[i]);
-  if (own) return own;
+  if (own) return Object.assign(own, { at: i });
   const p = P[lang];
   let head = i;
   // loop: NOT-WORTH — at most six wrapped lines up to the statement's first line [bounded: i - head < 6]
   while (head > 0 && i - head < 6 && !p.comment.test(lines[head - 1]) && (/^\s*\./.test(lines[head]) || /([([=,]|=>)\s*$/.test(codeOf(lines[head - 1], lang)))) {
     head--;
   }
-  if (head !== i && VERDICT.exec(lines[head])) return VERDICT.exec(lines[head]);
+  if (head !== i && VERDICT.exec(lines[head])) return Object.assign(VERDICT.exec(lines[head]), { at: head });
   // loop: NOT-WORTH — at most six comment lines above a row
   for (let k = head - 1; k >= 0 && k >= head - 6; k--) {
     if (!P[lang].comment.test(lines[k])) break;
     const m = VERDICT.exec(lines[k]);
-    if (m) return m;
+    if (m) return Object.assign(m, { at: k });
   }
   return null;
 }
@@ -228,7 +246,7 @@ export function scan(text, file) {
       .join("\n");
     const call = lines.slice(i, Math.min(lines.length, i + 7)).join("\n");
     const m = verdictOf(lines, i, lang);
-    rows.push({ file, line: i + 1, kind, start, end, body, call, verdict: m ? m[2] : "", reason: m ? m[3] : "", head: line.trim().slice(0, 110) });
+    rows.push({ file, line: i + 1, kind, start, end, body, call, verdict: m ? m[2] : "", reason: m ? m[3] : "", verdictLine: m ? m.at + 1 : 0, head: line.trim().slice(0, 110) });
   });
   // flags
   // loop: NOT-WORTH — one file's rows, once per run
@@ -248,6 +266,7 @@ export function scan(text, file) {
     }
     if (file.startsWith("electron/main/") && (r.kind.includes("sync") || (/loop|iter/.test(r.kind) && /\w+Sync\(/.test(r.body)))) f.push("main-blocking");
     r.flags = f;
+    r.required = requiresVerdict(r, lang);
   });
   // loop: NOT-WORTH — one file's rows, once per run
   return rows.map(({ start, end, body, call, ...r }) => r);
@@ -283,20 +302,22 @@ export function listAll(root = ".") {
   return listFiles(root).flatMap((f) => scan(readFileSync(join(root, f), "utf8"), f));
 }
 
-/** Gate problems: rows without a verdict, or flagged ones that don't say what bounds them. */
+/** Gate problems: required rows without a verdict, or flagged ones that don't say what bounds them. */
 export function problems(rows) {
   const out = [];
   // loop: NOT-WORTH — once per gate run over the rows (its "retry" is the flag's name) [bounded: the rows]
   for (const r of rows) {
-    if (!r.verdict) out.push(`${r.file}:${r.line}: ${r.kind} without a verdict (// loop: VERDICT — reason): ${r.head}`);
+    if (!r.verdict && r.required) out.push(`${r.file}:${r.line}: ${r.kind} without a verdict (// loop: VERDICT — reason): ${r.head}`);
     // loop: NOT-WORTH — three flags per row
-    else if (r.flags.some((f) => ["no-timeout", "retry", "spin"].includes(f)) && !/\[bounded: [^\]]+\]/.test(r.reason))
+    else if (r.verdict && r.flags.some((f) => ["no-timeout", "retry", "spin"].includes(f)) && !/\[bounded: [^\]]+\]/.test(r.reason))
       out.push(`${r.file}:${r.line}: ${r.flags.join(",")} needs [bounded: what ends it] in its reason: ${r.head}`);
   }
   return out;
 }
 
 const esc = (s) => s.replace(/\|/g, "\\|");
+/** The verdict column: the verdict, "exempt" for an exempt row without one, else none. */
+const verdictText = (r, none) => r.verdict || (r.required ? none : "exempt");
 
 export function markdown(rows) {
   // loop: NOT-WORTH — six verdicts
@@ -317,6 +338,9 @@ export function markdown(rows) {
   out.push(`| Verdict | ${areas.join(" | ")} | All |`, `|---|${areas.map(() => "---|").join("")}---|`);
   // loop: NOT-WORTH — six verdicts × a few areas, once per doc build
   for (const v of VERDICTS) out.push(`| ${v} | ${areas.map((a) => rows.filter((r) => area(r.file) === a && r.verdict === v).length).join(" | ")} | ${byVerdict[v]} |`);
+  const exempt = (r) => !r.verdict && !r.required;
+  // loop: NOT-WORTH — a few areas × the rows, once per doc build
+  out.push(`| exempt (Rust, no verdict needed) | ${areas.map((a) => rows.filter((r) => area(r.file) === a && exempt(r)).length).join(" | ")} | ${rows.filter(exempt).length} |`);
   // loop: NOT-WORTH — a few areas × the rows, once per doc build
   out.push(`| **Total** | ${areas.map((a) => rows.filter((r) => area(r.file) === a).length).join(" | ")} | **${rows.length}** |`, "");
   // loop: NOT-WORTH — a few kinds
@@ -332,7 +356,7 @@ export function markdown(rows) {
     // loop: NOT-WORTH — the rows per file, once per doc build
     rows
       .filter((r) => r.file === f)
-      .forEach((r) => out.push(`| ${r.line} | ${r.kind} | ${r.verdict || "**none**"} | ${r.flags.join(", ")} | ${esc(r.reason)} | \`${esc(r.head.replace(/`/g, "'"))}\` |`));
+      .forEach((r) => out.push(`| ${r.line} | ${r.kind} | ${verdictText(r, "**none**")} | ${r.flags.join(", ")} | ${esc(r.reason)} | \`${esc(r.head.replace(/`/g, "'"))}\` |`));
     out.push("");
   }
   return out.join("\n");
@@ -348,8 +372,12 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.
       bad.forEach((b) => console.log(b));
       process.exit(1);
     }
-    console.log(`Loop gate: ${rows.length} rows (loops, chains, timers, waits, threads, main-process calls), all with a verdict.`);
+    // loop: NOT-WORTH — the rows, once per run
+    const required = rows.filter((r) => r.required).length;
+    console.log(
+      `Loop gate: ${rows.length} rows (loops, chains, timers, waits, threads, main-process calls): ${required} need a verdict and have one, ${rows.length - required} exempt (plain Rust loops and chains).`,
+    );
   } else if (process.argv.includes("--md")) console.log(markdown(rows));
   // loop: NOT-WORTH — the rows, once per run
-  else rows.forEach((r) => console.log([r.file, r.line, r.kind, r.verdict || "-", r.flags.join(",") || "-", r.head].join("\t")));
+  else rows.forEach((r) => console.log([r.file, r.line, r.kind, verdictText(r, "-"), r.flags.join(",") || "-", r.head].join("\t")));
 }
