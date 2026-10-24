@@ -40,6 +40,9 @@ impl Backend for Ort {
     fn run(&mut self, job: &JobConfig, sink: &mut dyn Sink) -> Result<JobResult, Error> {
         self.pipeline.run(job, sink)
     }
+    fn reset(&mut self) {
+        self.pipeline.reset();
+    }
 }
 
 fn arg_value(args: &[String], name: &str) -> Option<String> {

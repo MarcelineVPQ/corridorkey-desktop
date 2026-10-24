@@ -444,6 +444,16 @@ impl Pipeline {
         }
     }
 
+    /// After a job panicked (the engine caught it): drop the loads started ahead and every loaded network, and the
+    /// TensorRT job state, so the next job loads what it needs from scratch instead of reusing what the panic left
+    /// half-made.
+    pub fn reset(&mut self) {
+        self.drop_pending();
+        self.unload();
+        self.trt_fallbacks.clear();
+        self.trt_seconds.clear();
+    }
+
     /// Drop loads started ahead (a job ends or restarts).
     fn drop_pending(&mut self) {
         // loop: NOT-WORTH — at most two loads [bounded: each load ends (ORT session creation)]

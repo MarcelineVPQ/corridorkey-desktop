@@ -9,6 +9,11 @@ use serde_json::{json, Value};
 #[derive(Default)]
 struct Fake {
     ran: Vec<String>,
+    /// state a job leaves behind (sessions, loads); a panicking job leaves it half-made
+    half_made: bool,
+    /// what each job found when it started
+    found_half_made: Vec<bool>,
+    resets: usize,
 }
 
 impl Backend for Fake {
@@ -17,9 +22,13 @@ impl Backend for Fake {
     }
     fn run(&mut self, job: &JobConfig, sink: &mut dyn Sink) -> Result<JobResult, Error> {
         self.ran.push(job.id.clone());
+        self.found_half_made.push(self.half_made);
         match job.input.as_str() {
             "/missing.mp4" => Err(Error::input("input not found: /missing.mp4".into())),
-            "/panic.mp4" => panic!("boom"),
+            "/panic.mp4" => {
+                self.half_made = true;
+                panic!("boom")
+            }
             _ => {
                 sink.send(json!({"type": "progress", "stage": "probe"}));
                 sink.send(json!({"type": "clip", "width": 320, "height": 200, "fps": 24.0, "frames": 2}));
@@ -29,6 +38,20 @@ impl Backend for Fake {
             }
         }
     }
+    fn reset(&mut self) {
+        self.resets += 1;
+        self.half_made = false;
+    }
+}
+
+#[test]
+fn after_a_panic_the_backend_is_reset_before_the_next_job() {
+    let (r, fake) = talk(&[run("j1", "/a.mp4"), run("j2", "/panic.mp4"), run("j3", "/missing.mp4"), run("j4", "/a.mp4")], &[]);
+    assert_eq!(fake.ran, vec!["j1", "j2", "j3", "j4"]);
+    // reset once, after the panic only (not after a normal failure); no job found the panic's leftovers
+    assert_eq!(fake.resets, 1);
+    assert_eq!(fake.found_half_made, vec![false, false, false, false]);
+    assert_eq!(r.last().unwrap()["type"], "result");
 }
 
 fn talk(lines: &[Value], raw: &[&str]) -> (Vec<Value>, Fake) {

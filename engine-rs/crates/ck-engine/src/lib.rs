@@ -16,6 +16,9 @@ pub const PROTOCOL: i64 = 1;
 pub trait Backend {
     fn pong(&mut self) -> Value;
     fn run(&mut self, job: &JobConfig, sink: &mut dyn Sink) -> Result<JobResult, Error>;
+    /// Back to a clean state after a job panicked: whatever it held half-made (sessions, loads started ahead) is
+    /// dropped, so the next job starts as the first one did.
+    fn reset(&mut self) {}
 }
 
 /// Writes replies as JSON lines, adding the job id when there is one.
@@ -205,6 +208,10 @@ fn run_job<B: Backend, W: Write>(backend: &mut B, req: &Value, jid: &str, r: &mu
             Ok(res) => res,
             Err(p) => {
                 let m = ck_core::panic_message(&*p);
+                // what the job left half-made is dropped before the next job (a reset that panics too is only logged)
+                if let Err(p2) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| backend.reset())) {
+                    eprintln!("job {jid}: resetting after the panic failed too: {}", ck_core::panic_message(&*p2));
+                }
                 Err(Error::engine(format!("internal error: {m}")))
             }
         },
