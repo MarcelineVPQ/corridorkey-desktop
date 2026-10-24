@@ -59,8 +59,16 @@ fn str_field(req: &Value, k: &str) -> Option<String> {
 /// "A cancel for a job still waiting removes it"). Read only between jobs, a cancel sent after the job's own
 /// `run` line came too late: measured with the fake backend, `run j1, run j2, cancel j2` ran all three.
 struct Inbox {
-    state: std::sync::Mutex<(std::collections::VecDeque<String>, bool)>,
+    state: std::sync::Mutex<InboxState>,
     more: std::sync::Condvar,
+}
+
+#[derive(Default)]
+struct InboxState {
+    /// request lines read and not yet taken, in order
+    lines: std::collections::VecDeque<String>,
+    /// the input has ended (or failed): no more lines will come
+    ended: bool,
 }
 
 impl Inbox {
@@ -69,10 +77,10 @@ impl Inbox {
         let mut g = self.state.lock().unwrap();
         // loop: SERIAL-REQUIRED — waits for the next request line [bounded: the reader thread ends at the input's end and says so]
         loop {
-            if let Some(l) = g.0.pop_front() {
+            if let Some(l) = g.lines.pop_front() {
                 return Some(l);
             }
-            if g.1 {
+            if g.ended {
                 return None;
             }
             g = self.more.wait(g).unwrap();
@@ -83,7 +91,7 @@ impl Inbox {
     fn cancel_queued(&self, id: &str) -> bool {
         let g = self.state.lock().unwrap();
         // loop: NOT-WORTH — the few requests queued behind a job, once per job start
-        g.0.iter().any(|l| {
+        g.lines.iter().any(|l| {
             serde_json::from_str::<Value>(l)
                 .is_ok_and(|v| v.get("cmd").and_then(|c| c.as_str()) == Some("cancel") && str_field(&v, "id").as_deref() == Some(id))
         })
@@ -92,17 +100,17 @@ impl Inbox {
 
 /// Serve requests until `quit` or the end of input. One job at a time, in order.
 pub fn serve<B: Backend, R: BufRead + Send + 'static, W: Write>(backend: &mut B, input: R, out: W) {
-    let inbox = std::sync::Arc::new(Inbox { state: std::sync::Mutex::new((Default::default(), false)), more: std::sync::Condvar::new() });
+    let inbox = std::sync::Arc::new(Inbox { state: std::sync::Mutex::new(InboxState::default()), more: std::sync::Condvar::new() });
     let reader = inbox.clone();
     // loop: SERIAL-REQUIRED — the request reader: lines in order into the inbox; ends at the input's end (the app closes the pipe or exits)
     std::thread::spawn(move || {
         // loop: SERIAL-REQUIRED — one line at a time, in order [bounded: ends at the input's end or a read error]
         for line in input.lines() {
             let Ok(l) = line else { break };
-            reader.state.lock().unwrap().0.push_back(l);
+            reader.state.lock().unwrap().lines.push_back(l);
             reader.more.notify_one();
         }
-        reader.state.lock().unwrap().1 = true;
+        reader.state.lock().unwrap().ended = true;
         reader.more.notify_one();
     });
     let mut r = Replies::new(out);

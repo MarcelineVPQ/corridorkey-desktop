@@ -366,21 +366,21 @@ impl FrameReader {
 /// decoding overlaps the networks.
 pub struct Prefetch {
     rx: std::sync::mpsc::Receiver<Result<Prepped, Error>>,
-    seconds: std::sync::Arc<std::sync::Mutex<f64>>,
+    seconds: crate::ahead::Seconds,
     _thread: std::thread::JoinHandle<()>,
 }
 
 impl Prefetch {
     pub fn new(mut reader: FrameReader, depth: usize) -> Prefetch {
         let (tx, rx) = std::sync::mpsc::sync_channel(depth);
-        let seconds = std::sync::Arc::new(std::sync::Mutex::new(0.0));
+        let seconds = crate::ahead::Seconds::default();
         let s2 = seconds.clone();
         // loop: SERIAL-REQUIRED — the prefetch thread: decodes in order; ends at the clip's end, an error, or a dropped receiver
         let thread = std::thread::spawn(move || {
             // loop: SERIAL-REQUIRED — frames decode in order; ends at the clip's end, an error, or a dropped receiver
             loop {
                 let item = reader.next_frame();
-                *s2.lock().unwrap() = reader.seconds;
+                s2.set(reader.seconds);
                 let stop = !matches!(item, Ok(Some(_)));
                 let msg = match item {
                     Ok(Some(p)) => Ok(p),
@@ -407,7 +407,7 @@ impl Prefetch {
 
     /// Seconds the decoding thread spent (decode + preprocessing).
     pub fn seconds(&self) -> f64 {
-        *self.seconds.lock().unwrap()
+        self.seconds.get()
     }
 }
 

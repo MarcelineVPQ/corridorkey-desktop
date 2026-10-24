@@ -959,11 +959,11 @@ impl Pipeline {
             let mut state: Data<'static> = Data::F32(vec![0f32; ntok * RVM_CH]);
             // the small frames are made ahead on their own thread (they don't depend on the state)
             let mut reader = Prefetch::new(FrameReader::open(meta)?.display_only(), 8);
-            let dec = std::sync::Arc::new(std::sync::Mutex::new(0.0));
+            let dec = crate::ahead::Seconds::default();
             let dec2 = dec.clone();
             let mut small_frames = Ahead::spawn(4, move || {
                 let Some(f) = reader.next_frame()? else {
-                    *dec2.lock().unwrap() = reader.seconds();
+                    dec2.set(reader.seconds());
                     return Ok(None);
                 };
                 let mut disp = Vec::with_capacity(f.display.len());
@@ -988,7 +988,7 @@ impl Pipeline {
             if t != t_all {
                 return Err(Error::input(format!("{}: decoded only {t}/{t_all} requested frames", job.input)));
             }
-            decode_s += *dec.lock().unwrap();
+            decode_s += dec.get();
             sink.log(&format!("    RVM inputs prepared on their own thread in {:.1} s", small_frames.seconds()));
         }
         phases.push(("rvm", phase_t.elapsed().as_secs_f64()));
@@ -1008,7 +1008,7 @@ impl Pipeline {
             let mut mf = FeatFile::create(&moge_path, MOGE_CH * h64 * w64)?;
             // the resized inputs are made ahead on their own thread
             let mut reader = Prefetch::new(FrameReader::open(meta)?.display_only(), 8);
-            let dec = std::sync::Arc::new(std::sync::Mutex::new(0.0));
+            let dec = crate::ahead::Seconds::default();
             let dec2 = dec.clone();
             let mut done_frames = 0;
             let mut chunks = Ahead::spawn(2, move || {
@@ -1019,7 +1019,7 @@ impl Pipeline {
                     done_frames += 1;
                 }
                 if frames.is_empty() {
-                    *dec2.lock().unwrap() = reader.seconds();
+                    dec2.set(reader.seconds());
                     return Ok(None);
                 }
                 Ok(Some((frames.len(), foundation_inputs(&frames, sh, sw))))
@@ -1032,14 +1032,14 @@ impl Pipeline {
                 mf.put(t0, &m)?;
                 t0 += n;
             }
-            decode_s += *dec.lock().unwrap();
+            decode_s += dec.get();
             sink.log(&format!("    foundation inputs prepared on their own thread in {:.1} s", chunks.seconds()));
             found_files = Some((cf, mf));
             phases.push(("foundations", phase_t.elapsed().as_secs_f64()));
             phase_t = Instant::now();
         }
 
-        let window_decode_s = std::sync::Arc::new(std::sync::Mutex::new(0.0));
+        let window_decode_s = crate::ahead::Seconds::default();
         // 3. stage 1 on Hann windows (+ 4. stage 2 streamed, normal mode)
         let starts = window_starts(t_all, chunk, stride);
         let overlap = chunk.saturating_sub(stride);
@@ -1078,7 +1078,7 @@ impl Pipeline {
             let mut i = 0;
             Ahead::spawn(0, move || {
                 let Some(&t0) = starts.get(i) else {
-                    *dec.lock().unwrap() = reader.reader.seconds();
+                    dec.set(reader.reader.seconds());
                     return Ok(None);
                 };
                 i += 1;
@@ -1229,7 +1229,7 @@ impl Pipeline {
         self.baton_frames(ready, &mut baton_file, &mut stage2_frames, meta, &mut out, report, sink)?;
 
         drop(windows);
-        decode_s += *window_decode_s.lock().unwrap();
+        decode_s += window_decode_s.get();
         phases.push((if low_vram { "stage1" } else { "windows+stage2" }, phase_t.elapsed().as_secs_f64()));
         phase_t = Instant::now();
         // low-VRAM phase 2: stage 2 over the stored states
@@ -1280,8 +1280,8 @@ impl Pipeline {
             decode_s += dec_s;
             phases.push(("stage2", phase_t.elapsed().as_secs_f64()));
         }
-        let worker_s = *out.seconds.lock().unwrap();
-        out.finish()?;
+        // render + hand-off seconds on the render thread (all frames: finish waits for the queued ones)
+        let worker_s = out.finish()?;
         // every frame is with the writers now (before they finish encoding): say so right away
         report.report(writers, sink, true);
         // measured time per part

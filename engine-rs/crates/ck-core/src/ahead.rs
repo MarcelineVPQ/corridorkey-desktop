@@ -2,20 +2,38 @@
 //! prepared while the graphics card runs the current one. Items come out in order; the producer stops at its
 //! end (`Ok(None)`), at its first error (passed on), or when the consumer is dropped.
 use crate::Error;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+/// Seconds measured on one thread and read on another: an f64's bits in an atomic (no lock for a timing number).
+#[derive(Clone, Default)]
+pub struct Seconds(Arc<AtomicU64>);
+
+impl Seconds {
+    pub fn get(&self) -> f64 {
+        f64::from_bits(self.0.load(Ordering::Relaxed))
+    }
+    pub fn set(&self, v: f64) {
+        self.0.store(v.to_bits(), Ordering::Relaxed);
+    }
+    /// Add `v` (only the thread that measures writes, so a load and a store are enough).
+    pub fn add(&self, v: f64) {
+        self.set(self.get() + v);
+    }
+}
 
 pub struct Ahead<T> {
     rx: Receiver<Result<T, Error>>,
     /// seconds the producer spent making items
-    seconds: Arc<Mutex<f64>>,
+    seconds: Seconds,
 }
 
 impl<T: Send + 'static> Ahead<T> {
     /// Run `next` on a thread, keeping up to `depth` items ready.
     pub fn spawn(depth: usize, mut next: impl FnMut() -> Result<Option<T>, Error> + Send + 'static) -> Ahead<T> {
         let (tx, rx) = sync_channel(depth);
-        let seconds = Arc::new(Mutex::new(0.0));
+        let seconds = Seconds::default();
         let s2 = seconds.clone();
         // loop: SERIAL-REQUIRED — one producer thread per sequence; it ends at the sequence's end, an error, or a dropped consumer
         std::thread::spawn(move || {
@@ -23,7 +41,7 @@ impl<T: Send + 'static> Ahead<T> {
             loop {
                 let t = std::time::Instant::now();
                 let item = next();
-                *s2.lock().unwrap() += t.elapsed().as_secs_f64();
+                s2.add(t.elapsed().as_secs_f64());
                 let msg = match item {
                     Ok(Some(v)) => Ok(v),
                     Ok(None) => break,
@@ -49,7 +67,7 @@ impl<T: Send + 'static> Ahead<T> {
     }
 
     pub fn seconds(&self) -> f64 {
-        *self.seconds.lock().unwrap()
+        self.seconds.get()
     }
 }
 
