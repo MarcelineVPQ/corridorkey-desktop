@@ -111,6 +111,8 @@ def main():
             problems.append(f"{c}: the windows differ (Mac {window(m)}, CUDA {window(r)}): the mattes are not comparable")
         if precision(m) != precision(r):
             problems.append(f"{c}: the precisions differ (Mac {precision(m)}, CUDA {precision(r)})")
+        if provider(r) != "cuda":
+            problems.append(f"{c}: the reference ran on {provider(r)}, not CUDA")
         if k is None:
             problems.append(f"{c}: no matte comparison")
             continue
@@ -126,8 +128,8 @@ def main():
     within = not failed and not problems and len(passed) == len(clips)
     if mac_providers != ["coreml"]:
         verdict = (f"VERDICT: NOT A GATE RUN: the Mac ran {', '.join(mac_providers) or 'nothing'}, the gate needs Core ML. "
-                   f"Mattes vs CUDA: {'within' if within else 'NOT within'} the fp16 bar"
-                   f" ({len(passed)}/{len(clips)} clips pass{'; ' + str(len(problems)) + ' problem(s)' if problems else ''}).")
+                   f"Mattes vs the reference: {len(passed)}/{len(clips)} clips within the fp16 bar"
+                   f"{'; ' + str(len(problems)) + ' problem(s) below' if problems else ''}.")
     elif within and speed_measured:
         verdict = f"VERDICT: PASS: Core ML mattes within fp16 rounding of CUDA on all {len(clips)} clips, speed measured."
     else:
