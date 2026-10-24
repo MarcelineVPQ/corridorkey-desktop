@@ -6,7 +6,7 @@ On 21 October 2026 Corridor Crew released [CorridorKey 2.0](https://github.com/n
 ([the launch video](https://www.youtube.com/watch?v=svrdRAoIlxM)). I watched the whole video and purchased CK2.0
 straight away from [corridorkey.com](https://corridorkey.com) (their app and plugins for Resolve, Nuke, After Effects,
 Premiere and Blender), and only after paying did I see that Linux isn't supported yet. In the same video, Niko says
-it's "still pretty heavy on the GPU right now": about one frame a second at full native 4K, on an RTX 5090.
+it's "still pretty heavy on the GPU right now": about one frame a second at full native 4K, on an RTX 5090. I'd just found a fun new project to tackle.
 
 I'm an audio/video engineer. Timing, throughput, color and what a signal costs are my day job, and so is software.
 This was the perfect crossroads between the two. I've moved PyTorch projects to Rust and ONNX Runtime before, so I
@@ -116,9 +116,18 @@ use the low-memory temporal window here (80/40 or 48/24 at HD, 8/4 at 4K), chose
 
 ### Repeatability and how we got here
 
+Each engine build on the way is labelled as a dev step:
+
+| Step | Date | What changed |
+| --- | --- | --- |
+| **0.0.1-dev** | 2026-10-21 | the first Rust engine: a straight port of the original's graphs (models `onnx.1`) |
+| **0.0.2-dev** | 2026-10-21 | the speed work: the slow parts of the graphs rewritten exactly, memory pools kept warm (models `onnx.2`) |
+| **0.0.3-dev** | 2026-10-24 | as shipped in 1.0 (models `onnx.3`) |
+| **0.0.4-dev** | 2026-10-24 | 4K EXR frames decoded four at once, freed memory returned after every job (results below) |
+
 The same HD bench, run on different days as the engine improved (totals, seconds; Original = PyTorch):
 
-| Clip | 2026-10-21 Original | 2026-10-21 first Rust engine (`onnx.1`) | 2026-10-21 after the speed work (`onnx.2`), two runs | 2026-10-24 Original | 2026-10-24 CorridorKey Desktop (`onnx.3`, as shipped) |
+| Clip | 2026-10-21 Original | **0.0.1-dev** 2026-10-21, first Rust engine (`onnx.1`) | **0.0.2-dev** 2026-10-21, after the speed work (`onnx.2`), two runs | 2026-10-24 Original | **0.0.3-dev** 2026-10-24, CorridorKey Desktop (`onnx.3`, as shipped in 1.0) |
 | --- | --- | --- | --- | --- | --- |
 | godiva_close | 68.4 | 54.9 | 39.7 / 42.7 | 61.1 | **39.6** |
 | locked_backdrop | 40.3 | 36.9 | 20.6 / 21.9 | 31.3 | **19.5** |
@@ -127,12 +136,32 @@ The same HD bench, run on different days as the engine improved (totals, seconds
 | walking_sitting | 94.2 | 116.2 | 63.2 / 63.1 | 91.5 | **56.1** |
 | with_motion_blur | 19.0 | 22.7 | 12.4 / 12.3 | 20.8 | **11.4** |
 
-- A straight port (`onnx.1`) was *slower* than the original on four of six clips. The speed came from measuring
+- The straight port (0.0.1-dev) was *slower* than the original on four of six clips. The speed came from measuring
   where the time went and rewriting those parts of the graphs exactly (same output): window padding, the depatchify
   step, grouped 7×7 convolutions, and keeping memory pools warm between calls (docs/ENGINE_RUST.md, "Speed").
 - Two runs of the same build agree within 1 % on four clips, 6 % on locked_backdrop and 8 % on godiva_close. The
   original varied more between days (godiva 68.4 → 61.1 s), so every comparison here is a back-to-back pair on the
   same day.
+
+### 0.0.4-dev: feeding the card faster at 4K
+
+A utilization log (the card sampled every 100 ms) showed the card busy 88 % of an HD job but only 78 % of a 4K one:
+in the 4K job's first two phases (RVM and the foundation models) it waited on EXR frames, decoded one at a time at
+~80 ms each. 0.0.4-dev decodes four frames at once (one pass over the clip: 9.4 → 4.9 s) and reads a clip's size from
+the EXR header instead of decoding a frame. The same 4K shot (04_5h, 120 frames), back to back:
+
+| | 0.0.3-dev | 0.0.4-dev |
+| --- | --- | --- |
+| Frame decode + preparation (all passes, own thread) | 51.8 s | 27.8 s |
+| RVM phase | 11.2 s | 6.0 s |
+| Foundation phase | 10.2 s | 7.0 s |
+| Keying (stage 1 + stage 2) | 132.1 s | 133.4 s |
+| **Total** | **170.1 s** | **162.7 s** (−4 %) |
+| Engine RAM, peak | 12.8 GB | 13.6 GB |
+
+Both 4K outputs (alpha and foreground) are bit-identical to 0.0.3-dev's (same MD5 of every decoded frame). The keying
+itself is unchanged: from here only faster kernels (TensorRT, next) make 4K faster. HD video clips don't use
+this path (ffmpeg decodes them) and are unchanged: walking_sitting 54.5 → 55.2 s, within run-to-run spread.
 
 ### TensorRT (measured, not in 1.0)
 

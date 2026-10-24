@@ -190,11 +190,18 @@ pub fn read_still(p: &Path) -> Result<Still, Error> {
 /// (h, w) of a still without keeping its pixels.
 pub fn image_size(p: &Path) -> Result<(usize, usize), Error> {
     if is_exr(p) {
-        let s = match read_still(p)? {
-            Still::F32 { h, w, .. } => (h, w),
-            _ => unreachable!(),
-        };
-        return Ok(s);
+        // the header only (decoding a 4K frame to learn its size took ~50 ms): the first layer with R, G and B,
+        // the one read_still reads
+        let meta = exr::meta::MetaData::read_from_file(p, false).map_err(|e| Error::input(format!("{}: {e}", p.display())))?;
+        // loop: NOT-WORTH — a few layers, once per clip
+        let has = |hd: &exr::meta::header::Header, c: &str| hd.channels.list.iter().any(|ch| ch.name.eq_case_insensitive(c));
+        // loop: NOT-WORTH — a few layers, once per clip
+        let hd = meta
+            .headers
+            .iter()
+            .find(|hd| has(hd, "R") && has(hd, "G") && has(hd, "B"))
+            .ok_or_else(|| Error::input(format!("{}: no RGB layer", p.display())))?;
+        return Ok((hd.layer_size.height(), hd.layer_size.width()));
     }
     let (w, h) = ::image::image_dimensions(p).map_err(|e| Error::input(format!("{}: {e}", p.display())))?;
     Ok((h as usize, w as usize))
@@ -282,7 +289,14 @@ pub struct FrameReader {
     next: usize,
     denom: f32,
     need_model: bool,
+    /// frame folders: frames decoded together, handed out in order
+    ready: std::collections::VecDeque<Result<Prepped, Error>>,
 }
+
+/// Frames of a folder decoded at once. Measured 2026-10-24, a 4K EXR frame on one thread: 46 ms decode +
+/// 9 ms to planar + prep; the RVM and foundation passes waited on it with the card mostly idle. Each frame in
+/// flight costs ~0.2 GB at 4K.
+const FOLDER_BATCH: usize = 4;
 
 impl FrameReader {
     pub fn open(meta: &ClipMeta) -> Result<FrameReader, Error> {
@@ -290,7 +304,7 @@ impl FrameReader {
             crate::clip::Source::Video(p) => Some(VideoDecoder::open(p, meta.w, meta.h, meta.num_frames)?),
             crate::clip::Source::Frames(_) => None,
         };
-        Ok(FrameReader { seconds: 0.0, meta: meta.clone(), video, next: 0, denom: crate::color::asinh_denom(), need_model: true })
+        Ok(FrameReader { seconds: 0.0, meta: meta.clone(), video, next: 0, denom: crate::color::asinh_denom(), need_model: true, ready: Default::default() })
     }
 
     /// Only the display view (the RVM / foundation passes).
@@ -301,36 +315,50 @@ impl FrameReader {
 
     /// The next frame (None after num_frames).
     pub fn next_frame(&mut self) -> Result<Option<Prepped>, Error> {
+        if let Some(p) = self.ready.pop_front() {
+            return p.map(Some);
+        }
         if self.next >= self.meta.num_frames {
             return Ok(None);
         }
         let t0 = std::time::Instant::now();
-        let img = match (&mut self.video, &self.meta.source) {
+        let out = match (&mut self.video, &self.meta.source) {
             (Some(v), _) => {
                 let rgb = v.next_rgb()?;
-                rgb8_to_planar(rgb, self.meta.h, self.meta.w)
+                let img = rgb8_to_planar(rgb, self.meta.h, self.meta.w);
+                self.next += 1;
+                Ok(Some(prep_frame_views(img, self.meta.exr_linear, &self.meta, self.denom, self.need_model)))
             }
             (None, crate::clip::Source::Frames(paths)) => {
-                let p = &paths[self.next];
-                let img = read_image_rgb(p)?;
-                if (img.h, img.w) != (self.meta.h, self.meta.w) {
-                    return Err(Error::input(format!(
-                        "{}: frame size {}x{} differs from the first frame's {}x{}",
-                        p.display(),
-                        img.w,
-                        img.h,
-                        self.meta.w,
-                        self.meta.h
-                    )));
-                }
-                img
+                use rayon::prelude::*;
+                let end = (self.next + FOLDER_BATCH).min(self.meta.num_frames);
+                let (meta, denom, need_model) = (&self.meta, self.denom, self.need_model);
+                // loop: PARALLELIZE — FOLDER_BATCH frames decode at once on the pool; collected in order
+                let done: Vec<Result<Prepped, Error>> = paths[self.next..end]
+                    .par_iter()
+                    .map(|p| {
+                        let img = read_image_rgb(p)?;
+                        if (img.h, img.w) != (meta.h, meta.w) {
+                            return Err(Error::input(format!(
+                                "{}: frame size {}x{} differs from the first frame's {}x{}",
+                                p.display(),
+                                img.w,
+                                img.h,
+                                meta.w,
+                                meta.h
+                            )));
+                        }
+                        Ok(prep_frame_views(img, meta.exr_linear, meta, denom, need_model))
+                    })
+                    .collect();
+                self.next = end;
+                self.ready = done.into();
+                self.ready.pop_front().unwrap().map(Some)
             }
             _ => unreachable!(),
         };
-        self.next += 1;
-        let p = prep_frame_views(img, self.meta.exr_linear, &self.meta, self.denom, self.need_model);
         self.seconds += t0.elapsed().as_secs_f64();
-        Ok(Some(p))
+        out
     }
 }
 

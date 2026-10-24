@@ -303,13 +303,23 @@ impl Nvml {
 /// The card CUDA uses as device 0, or None (no driver library, no card, CUDA_VISIBLE_DEVICES hides every card, or
 /// several cards in an order this can't tell).
 pub fn nvidia() -> Option<GpuInfo> {
-    Nvml::open()?.info()
+    nvml()?.info()
+}
+
+// SAFETY: NVML is thread-safe (NVIDIA's NVML API reference, "Thread safety"); the device handle is only read
+unsafe impl Send for Nvml {}
+unsafe impl Sync for Nvml {}
+
+/// NVML, opened once per engine process (each open loaded the library and called nvmlInit again, per job).
+fn nvml() -> Option<&'static Nvml> {
+    static ONCE: std::sync::OnceLock<Option<Nvml>> = std::sync::OnceLock::new();
+    ONCE.get_or_init(Nvml::open).as_ref()
 }
 
 /// The memory budget the runtime's apply_auto_vram uses: free memory plus what this process already holds
 /// (its loaded models count for it). (budget bytes, free bytes, own bytes).
 pub fn budget() -> Option<(u64, u64, u64)> {
-    let n = Nvml::open()?;
+    let n = nvml()?;
     let info = n.info()?;
     let own = n.used_by(std::process::id()).unwrap_or(0);
     Some((info.free + own, info.free, own))

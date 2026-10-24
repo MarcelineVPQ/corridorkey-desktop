@@ -481,6 +481,14 @@ impl Pipeline {
     /// Run one job. Replies go to `sink` (progress, clip, memory, provider, frames, log); the result or the
     /// failure is returned for the engine to send.
     pub fn run(&mut self, job: &JobConfig, sink: &mut dyn Sink) -> Result<JobResult, Error> {
+        let r = self.run_job(job, sink);
+        // the job's frames, windows and writers are freed by now: give that host memory back too, not only
+        // the sessions' (unload), so the next job in the queue starts from the same footprint
+        trim_host_memory();
+        r
+    }
+
+    fn run_job(&mut self, job: &JobConfig, sink: &mut dyn Sink) -> Result<JobResult, Error> {
         let job_t = Instant::now();
         let Some(provider) = self.rt.provider() else {
             return Err(Error::no_gpu("CorridorKey needs an NVIDIA graphics card with CUDA.".into()));
