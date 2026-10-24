@@ -15,7 +15,8 @@ and wrapped it in a desktop app that installs itself.
 
 On my RTX 5080 it keys 4K at about two frames a second: 2.4-2.7× faster than the original on the same machine
 (1.5-1.8× at HD), with the same mattes, less graphics memory and RAM, and less than half the install. Every number
-is below, with the clips and the commands to check them yourself. TensorRT is next, for more speed still. Rust and ONNX Runtime
+is below, with the clips and the commands to check them yourself. On Linux, an optional TensorRT mode takes HD to
+about 2× the original's speed. Rust and ONNX Runtime
 also mean one engine for every platform: NVIDIA on Linux and Windows, and Apple Silicon through Core ML.
 
 It's free, it stays free, and it's Corridor's model. Huge thanks to Niko, Zachary Harris and the Corridor crew.
@@ -39,6 +40,13 @@ Status: 1.0 is almost ready, for Linux, Windows and macOS (Apple Silicon).
 - Nothing else to set up: the engine comes with the app, and on first start the setup downloads the GPU runtime and
   the CorridorKey models (a 4.9 GB download on Linux and Windows, about 3.3 GB on macOS, once). If `ffmpeg` is
   missing, it offers to install it (apt or pacman on Linux, `winget` on Windows, Homebrew on macOS).
+- Optional, Linux: **TensorRT** (Engine settings, TensorRT; off by default) for about 2× the original's speed at HD
+  with the same mattes (Speed, 0.0.6-dev). Switching it on offers its own download: NVIDIA's TensorRT 10.16
+  libraries (3.7 GB, from pypi.nvidia.com) and the TensorRT models (3.1 GB, from this repository's releases; C-RADIO's
+  weights are copied from the models you already have), 6.9 GB in all, 7.5 GB on disk. The first job at each
+  resolution optimizes for it once (about 2.5 minutes for the five networks on an RTX 5080); 4K still runs on CUDA.
+  Best on 16 GB cards: where a network can't be built (stage 1 at 80-frame windows), that network runs on CUDA and
+  the job's log says so. Windows needs its own TensorRT builder (a later version); macOS has no TensorRT.
 
 **Windows, first start:** the installer isn't code-signed yet, so Windows SmartScreen shows "Windows protected
 your PC" the first time. Click **More info**, then **Run anyway**. It's asked once; signing comes later.
@@ -232,14 +240,15 @@ same band as CUDA against the original PyTorch.
 | walking_sitting | 1.88e-4 | 1.5 % | 57.0 dB |
 | with_motion_blur | 2.19e-4 | 1.7 % | 57.9 dB |
 
-TensorRT reaches the app as an option in a later step (with its optional download); the one-time build per
-resolution is about 2.5 minutes for the five networks.
+The one-time build per resolution is about 2.5 minutes for the five networks. In 1.0 this is the app's TensorRT
+switch (Linux, off by default; Requirements): the AppImage carries the engine builder, and the switch offers the
+TensorRT download.
 
-### TensorRT (measured, not in 1.0)
+### TensorRT, first measurement (2026-10-21)
 
-TensorRT is built into the engine as an opt-in and was measured on 2026-10-21 (`onnx.2` models, the same HD bench).
-It is the next release's headline; it needs a one-time optimization per resolution (about 3.5 minutes) and is not
-available at 4K yet (its 4K build needs more than 12 GB of graphics memory).
+TensorRT's first measurement in the engine, on 2026-10-21 (`onnx.2` models, the same HD bench), before it took
+CUDA's window (0.0.6-dev above is what the app's switch runs). It needed a one-time optimization per resolution
+(about 3.5 minutes) and was not available at 4K (its 4K build needs more than 12 GB of graphics memory).
 
 | Clip | TensorRT total | CUDA total (same day) | Original (same day) | TensorRT vs original |
 | --- | --- | --- | --- | --- |
@@ -403,7 +412,8 @@ CorridorKey writes only these folders (plus the results you ask for, next to you
 | Settings (a few KB) | `~/.config/corridorkey-desktop` | `%APPDATA%\corridorkey-desktop` | `~/Library/Application Support/corridorkey-desktop` (with the data) |
 
 - **App settings → Storage** shows each folder's real size and removes the runtime, the models or the cache (it asks
-  first; the setup downloads them again when needed).
+  first; the setup downloads them again when needed). On Linux, TensorRT is its own item: its libraries and models
+  (inside the data folder, about 7.5 GB) and the engines built for your card (`~/.cache/corridorkey-desktop/tensorrt`).
 - The cache cleans itself: stills older than 30 days go, and it never grows past 500 MB. Job temp files are removed
   when a job ends, and anything left by a crash at the next start.
 - **Windows:** uninstalling from Apps & features asks whether to remove the downloaded runtime, models, cache and

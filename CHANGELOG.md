@@ -34,3 +34,10 @@ screen keyer, on its own Rust + ONNX Runtime engine, for Linux, Windows and macO
 - Add clips (video files) and Add folder (frame sequences, folders of clips) are two buttons: one
   dialog can't pick both on Windows or Linux.
 - The window title says which CorridorKey and which engine: CorridorKey 2.0 — Rust + ONNX.
+- TensorRT, optional (Linux): Engine settings, TensorRT, "Use TensorRT (faster on NVIDIA)", off by default. About
+  2× the original's speed at HD with the same mattes (README, Speed, 0.0.6-dev); the first job at each resolution
+  optimizes for it once (a few minutes), 4K still runs on CUDA. Switching it on offers its own download (NVIDIA's
+  TensorRT libraries from pypi.nvidia.com and the TensorRT models from this repository's releases, 6.9 GB, with
+  progress, stop and resume, every file SHA-256 checked); jobs ask for TensorRT only once it is installed, and the
+  job's log says what really ran (and which network stayed on CUDA, and why). Its own item in Storage. Windows
+  needs its own engine builder (later); macOS has no TensorRT.
