@@ -1,0 +1,164 @@
+name: macOS
+
+# We have no Mac: this is where the app is built and run on one (the DS5 configurator's mac-smoke pattern).
+# GitHub's macOS runner is an Apple Silicon Mac with a logged-in desktop, but a virtual one without the GPU or
+# the Neural Engine: it proves the build, the install and the app, not keying speed. Linux and Windows are built
+# on Marcy's PC (tools/release.sh); CI is only for macOS (and Windows checks), so this runs on demand
+# (gh workflow run macos.yml, or Actions -> macOS -> Run workflow), never on every push.
+#   1. the app's checks and the engine's checks on macOS
+#   2. the engine for aarch64-apple-darwin and the arm64 disk image, unsigned until Marcy's Developer ID
+#   3. installed as a user does (a quarantined download, moved to /Applications); what Gatekeeper says is recorded
+#   4. started through LaunchServices (as Finder / the Dock do) and driven over DevTools (tools/drive.mjs) through
+#      every page, one screenshot each
+# Screenshots, logs and Gatekeeper's answers are the run's "macos-smoke" artifact; the job summary has the list.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  APP_NAME: CorridorKey
+
+jobs:
+  build:
+    name: macOS build and smoke test
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      # npm 9/10's own peer resolution crashes on this tree; .npmrc sets legacy-peer-deps.
+      - run: npx -y npm@10.9.2 ci
+      - run: npm run check
+      - run: npm run check:engine
+
+      - name: Build the engine and the disk image (unsigned)
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm run dist:mac
+
+      - name: Install it as a user would, and ask Gatekeeper
+        timeout-minutes: 8
+        run: |
+          # Not -e: codesign / spctl answer "no" with a non-zero exit, which is what this step records.
+          set +e -uo pipefail
+          # A time limit for anything that can wait on a dialog (macOS has no timeout(1)).
+          limit() { perl -e '$t = shift; alarm $t; exec @ARGV or die "exec: $!"' "$@"; }
+          # Gatekeeper's "Not Opened" dialogs: press Done, as a user would.
+          dismiss() {
+            for _ in 1 2 3 4 5; do
+              limit 15 osascript -e 'tell application "System Events" to tell process "CoreServicesUIAgent" to click button "Done" of window 1' > /dev/null 2>&1 || break
+              sleep 1
+            done
+          }
+          OUT="$RUNNER_TEMP/macos-smoke"
+          mkdir -p "$OUT/screenshots"
+          echo "OUT=$OUT" >> "$GITHUB_ENV"
+          G="$OUT/gatekeeper.txt"
+          dmg="$(ls release/*.dmg)"
+          app="/Applications/$APP_NAME.app"
+          {
+            echo "== sw_vers"; sw_vers
+            echo "== the download: $(basename "$dmg"), $(du -h "$dmg" | cut -f1)"
+          } > "$G"
+          # A browser download carries the quarantine flag; copying the app out of the opened image passes it on.
+          cp "$dmg" ~/Downloads/ || exit 1
+          dl=~/Downloads/"$(basename "$dmg")"
+          xattr -w com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;$(uuidgen)" "$dl" || exit 1
+          mnt="$(mktemp -d)"
+          hdiutil attach "$dl" -nobrowse -readonly -mountpoint "$mnt" > /dev/null || exit 1
+          ditto "$mnt/$APP_NAME.app" "$app" || exit 1
+          xattr -w com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;$(uuidgen)" "$app"
+          eng="$app/Contents/Resources/engine/corridorkey-engine"
+          {
+            echo "== the engine inside the app"
+            file "$eng"
+            echo "== xattr -l (after copying to Applications)"
+            xattr -l "$app"
+            echo "== codesign -dv --verbose=4"
+            codesign -dv --verbose=4 "$app" 2>&1
+            echo "== spctl --assess --type execute (quarantined, as downloaded)"
+            spctl --assess --type execute -vvv "$app" 2>&1; echo "exit $?"
+          } >> "$G" 2>&1
+          hdiutil detach "$mnt" > /dev/null
+          file "$eng" | grep -q arm64 || { echo "::error::the engine is missing or not an arm64 binary"; cat "$G"; exit 1; }
+          # Double-click it, as a user would on first start (Gatekeeper's check).
+          limit 30 open "$app" 2>&1 | tee -a "$G"
+          sleep 15
+          limit 20 screencapture -x "$OUT/screenshots/00-gatekeeper-first-open.png" || echo "screencapture failed" >> "$G"
+          {
+            echo "== first open of the quarantined app: did it start?"
+            pgrep -fl "$app/Contents/MacOS/" || echo "no app process: Gatekeeper blocked it"
+            echo "== the dialog's text (System Events)"
+            limit 20 osascript -e 'tell application "System Events" to get value of static texts of windows of process "CoreServicesUIAgent"' 2>&1 || echo "(no answer: exit $?)"
+          } >> "$G" 2>&1
+          pkill -f "$app/Contents/MacOS/" || true
+          dismiss
+          sleep 3
+          # What README tells Mac users until the app is signed (and what "Open Anyway" amounts to): take the flag off.
+          xattr -dr com.apple.quarantine "$app" || exit 1
+          {
+            echo "== spctl --assess after xattr -dr com.apple.quarantine"
+            spctl --assess --type execute -vvv "$app" 2>&1; echo "exit $?"
+          } >> "$G" 2>&1
+          cat "$G"
+
+      - name: Start it from /Applications and screenshot every page
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          app="/Applications/$APP_NAME.app"
+          # As a user starts it (LaunchServices: Finder, Dock, Spotlight).
+          if ! open -a "$app" --stdout "$OUT/main-stdout.log" --stderr "$OUT/main-stderr.log" --args --remote-debugging-port=9334; then
+            echo "::error::LaunchServices refused to open the installed app; starting the binary directly so the rest still runs"
+            echo "LaunchServices refused the install (open -a failed)" > "$OUT/launch-refused.txt"
+            nohup "$app/Contents/MacOS/$APP_NAME" --remote-debugging-port=9334 > "$OUT/main-stdout.log" 2> "$OUT/main-stderr.log" &
+          fi
+          go() { echo "document.querySelector('[data-rail=$1]')?.click(); '$1'"; }
+          node tools/drive.mjs --port 9334 --out "$OUT/screenshots" \
+            --wait 5000 --shot 01-first-start-setup \
+            --eval "$(go queue)" --wait 1500 --shot 02-queue \
+            --eval "$(go engine)" --wait 1500 --shot 03-engine \
+            --eval "$(go settings)" --wait 1500 --shot 04-app-settings \
+            --eval "$(go about)" --wait 1500 --shot 05-about \
+            --close
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## macOS build and smoke test"
+            echo
+            echo "Screenshots (the macos-smoke artifact):"
+            ls "$OUT/screenshots" 2>/dev/null | sed 's/^/- /'
+            echo
+            echo "<details><summary>What Gatekeeper says (unsigned build)</summary>"
+            echo
+            echo '```'
+            cat "$OUT/gatekeeper.txt" 2>/dev/null
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload screenshots, logs and Gatekeeper's answers
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-smoke
+          path: ${{ runner.temp }}/macos-smoke/
+          retention-days: 30
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: corridorkey-desktop-macos-arm64
+          path: release/*.dmg
+          retention-days: 14
