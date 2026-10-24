@@ -88,6 +88,8 @@ export function rustEngineEnv(
     if (exists(join(site, "tensorrt_libs"))) dirs.push(join(site, "tensorrt_libs"));
     out.CK_ENGINE_ORT = ort;
   }
+  // the engine ends with this app on every system (engine-rs proc.rs end_with_parent; Windows waits on this pid)
+  out.CK_ENGINE_PARENT_PID = String(process.pid);
   // loop: NOT-WORTH — a user's extra library folders, once per engine spawn
   if (env.CK_ENGINE_LD_LIBRARY_PATH) dirs.push(...env.CK_ENGINE_LD_LIBRARY_PATH.split(win ? ";" : ":").filter(Boolean));
   // Windows finds DLLs on PATH (the folders go first); Linux on LD_LIBRARY_PATH; macOS on DYLD_LIBRARY_PATH

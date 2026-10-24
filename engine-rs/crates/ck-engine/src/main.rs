@@ -51,33 +51,9 @@ fn arg_value(args: &[String], name: &str) -> Option<String> {
     })
 }
 
-/// Linux: end with the app. The engine runs a job to its end without reading stdin, in its own process group
-/// (the app kills that group to cancel), so when the app itself died it kept the graphics card busy for a
-/// whole job nobody would see (measured: an idle engine outlived its parent; tests/lifetime.rs). The kernel
-/// now kills it when its parent goes; its ffmpeg children end with their pipes, and the app removes stale job
-/// folders when it starts.
-#[cfg(target_os = "linux")]
-fn die_with_parent() {
-    extern "C" {
-        fn prctl(option: std::os::raw::c_int, arg2: std::os::raw::c_ulong, ...) -> std::os::raw::c_int;
-        fn getppid() -> std::os::raw::c_int;
-    }
-    const PR_SET_PDEATHSIG: std::os::raw::c_int = 1;
-    const SIGKILL: std::os::raw::c_ulong = 9;
-    // SAFETY: prctl(2) PR_SET_PDEATHSIG with a signal number; getppid(2) has no arguments
-    unsafe {
-        let parent = getppid();
-        prctl(PR_SET_PDEATHSIG, SIGKILL);
-        // the parent went before the request took effect: nobody is listening
-        if parent == 1 || getppid() != parent {
-            std::process::exit(1);
-        }
-    }
-}
-
 fn main() {
-    #[cfg(target_os = "linux")]
-    die_with_parent();
+    // end with the app on every system (ck_core::proc::end_with_parent)
+    ck_core::proc::end_with_parent(ck_core::proc::parent_pid_from(std::env::var("CK_ENGINE_PARENT_PID").ok().as_deref()));
     let args: Vec<String> = std::env::args().collect();
     // loop: NOT-WORTH — the command line, once per process
     if args.iter().any(|a| a == "--help" || a == "-h") {

@@ -77,9 +77,159 @@ pub fn die_with_parent(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
+/// The engine ends with the app that started it, on every system (the hardcoded-values pass 2026-10-24: this was
+/// Linux-only, so on Windows and macOS an app crash left the engine keying, and holding the graphics card, for a
+/// whole job nobody would see; measured on Linux before the fix: tests/lifetime.rs).
+///  - Linux: the kernel kills it when its parent goes (PR_SET_PDEATHSIG); its children die with it the same way
+///    (`die_with_parent`) or end with their pipes.
+///  - Windows: it joins a job object that kills every process in it when the last handle closes (its ffmpeg and
+///    TensorRT-builder children join it by inheritance), and a thread waits on the app's process handle
+///    (`parent_pid`: the app passes its pid in CK_ENGINE_PARENT_PID) and exits when it ends.
+///  - macOS: a thread checks every second whether the engine was handed to launchd (its parent is gone).
+pub fn end_with_parent(parent_pid: Option<u32>) {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = parent_pid;
+        extern "C" {
+            fn prctl(option: std::os::raw::c_int, arg2: std::os::raw::c_ulong, ...) -> std::os::raw::c_int;
+            fn getppid() -> std::os::raw::c_int;
+        }
+        const PR_SET_PDEATHSIG: std::os::raw::c_int = 1;
+        const SIGKILL: std::os::raw::c_ulong = 9;
+        // SAFETY: prctl(2) PR_SET_PDEATHSIG with a signal number; getppid(2) has no arguments
+        unsafe {
+            let parent = getppid();
+            prctl(PR_SET_PDEATHSIG, SIGKILL);
+            // the parent went before the request took effect: nobody is listening
+            if parent == 1 || getppid() != parent {
+                std::process::exit(1);
+            }
+        }
+    }
+    #[cfg(windows)]
+    win::end_with_parent(parent_pid);
+    #[cfg(all(unix, not(target_os = "linux")))]
+    {
+        let _ = parent_pid;
+        extern "C" {
+            fn getppid() -> std::os::raw::c_int;
+        }
+        // SAFETY: getppid(2) has no arguments
+        let parent = unsafe { getppid() };
+        // loop: SERIAL-REQUIRED — the parent watch: one check a second for the engine's whole life [bounded: exits when the parent is gone]
+        std::thread::spawn(move || loop {
+            // SAFETY: as above
+            if unsafe { getppid() } != parent {
+                std::process::exit(1);
+            }
+            // loop: SERIAL-REQUIRED — the watch's one-second sleep (not a spin)
+            std::thread::sleep(Duration::from_secs(1));
+        });
+    }
+}
+
+/// The app's pid as it passes it (CK_ENGINE_PARENT_PID); None when absent or not a pid (a bench run, a shell).
+pub fn parent_pid_from(v: Option<&str>) -> Option<u32> {
+    v.and_then(|s| s.trim().parse::<u32>().ok()).filter(|&p| p > 0)
+}
+
+#[cfg(windows)]
+mod win {
+    use std::ffi::c_void;
+    type Handle = *mut c_void;
+    // kernel32's own calls (no extra DLL: the engine needs only what every Windows has)
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateJobObjectW(attrs: *mut c_void, name: *const u16) -> Handle;
+        fn SetInformationJobObject(job: Handle, class: i32, info: *const c_void, len: u32) -> i32;
+        fn AssignProcessToJobObject(job: Handle, process: Handle) -> i32;
+        fn GetCurrentProcess() -> Handle;
+        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> Handle;
+        fn WaitForSingleObject(h: Handle, ms: u32) -> u32;
+        fn GetLastError() -> u32;
+    }
+    const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS: i32 = 9;
+    const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000;
+    const SYNCHRONIZE: u32 = 0x0010_0000;
+    const INFINITE: u32 = 0xFFFF_FFFF;
+    const ERROR_INVALID_PARAMETER: u32 = 87;
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct BasicLimits {
+        per_process_user_time: i64,
+        per_job_user_time: i64,
+        limit_flags: u32,
+        min_working_set: usize,
+        max_working_set: usize,
+        active_process_limit: u32,
+        affinity: usize,
+        priority_class: u32,
+        scheduling_class: u32,
+    }
+    #[repr(C)]
+    #[derive(Default)]
+    struct ExtendedLimits {
+        basic: BasicLimits,
+        io: [u64; 6],
+        process_memory_limit: usize,
+        job_memory_limit: usize,
+        peak_process_memory: usize,
+        peak_job_memory: usize,
+    }
+    // JOBOBJECT_EXTENDED_LIMIT_INFORMATION is 144 bytes on 64-bit Windows
+    #[cfg(target_pointer_width = "64")]
+    const _: () = assert!(std::mem::size_of::<ExtendedLimits>() == 144);
+
+    pub fn end_with_parent(parent_pid: Option<u32>) {
+        // SAFETY: documented kernel32 calls with a zeroed, correctly sized JOBOBJECT_EXTENDED_LIMIT_INFORMATION;
+        // the job handle is kept open for the engine's whole life on purpose (closing it is what kills the job)
+        unsafe {
+            let job = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
+            if !job.is_null() {
+                let mut info = ExtendedLimits::default();
+                info.basic.limit_flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                let ok = SetInformationJobObject(
+                    job,
+                    JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS,
+                    &info as *const _ as *const c_void,
+                    std::mem::size_of::<ExtendedLimits>() as u32,
+                );
+                if ok != 0 {
+                    AssignProcessToJobObject(job, GetCurrentProcess());
+                }
+            }
+            let Some(pid) = parent_pid else { return };
+            let parent = OpenProcess(SYNCHRONIZE, 0, pid);
+            if parent.is_null() {
+                // no such process: the app is already gone
+                if GetLastError() == ERROR_INVALID_PARAMETER {
+                    std::process::exit(1);
+                }
+                return;
+            }
+            let parent = parent as usize;
+            // loop: SERIAL-REQUIRED — waits on the app's process handle for the engine's whole life [bounded: returns when the app ends]
+            std::thread::spawn(move || {
+                WaitForSingleObject(parent as Handle, INFINITE);
+                std::process::exit(1);
+            });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_apps_pid_is_read_as_the_app_passes_it() {
+        assert_eq!(parent_pid_from(Some("4242")), Some(4242));
+        assert_eq!(parent_pid_from(Some(" 17 ")), Some(17));
+        assert_eq!(parent_pid_from(Some("0")), None);
+        assert_eq!(parent_pid_from(Some("app")), None);
+        assert_eq!(parent_pid_from(None), None);
+    }
 
     #[test]
     fn output_and_deadline() {
