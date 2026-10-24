@@ -5,13 +5,13 @@ import type { FfmpegState, InstallState } from "../../shared/types";
 import { installMissing } from "../../shared/tasks";
 import { Row } from "../panel/Section";
 import { gbBytes } from "../format";
+import { ProgressBar } from "../ProgressBar";
 
 export const installPct = (inst: InstallState) => (inst.total ? Math.floor((inst.done / inst.total) * 100) : 0);
 
 /** The GPU runtime and the models: what downloads, the button, real progress, Stop, the error. */
 export function InstallBox({ inst }: { inst: InstallState }) {
   const needInstall = installMissing(inst);
-  const pct = installPct(inst);
   if (!needInstall)
     return (
       <div className="check-line ok">
@@ -39,9 +39,7 @@ export function InstallBox({ inst }: { inst: InstallState }) {
           <div className="hint-text">
             {inst.step} · {gbBytes(inst.done)} of {gbBytes(inst.total)}
           </div>
-          <div className="bar" role="progressbar" aria-valuemin={0} aria-valuemax={inst.total} aria-valuenow={inst.done}>
-            <span style={{ width: `${pct}%` }} />
-          </div>
+          <ProgressBar value={inst.done} max={inst.total} />
           <button type="button" className="btn small" onClick={() => void window.ck.stopInstall()}>
             Stop
           </button>

@@ -1,6 +1,7 @@
 // Queue: the clips (left), the selected clip's readouts (main view), its
 // settings in the panel. Start/Stop and Add clips sit in the page's own bar.
 import { memo } from "react";
+import { ProgressBar } from "../ProgressBar";
 import { FolderPlus, Play, Plus, Square, Trash2 } from "lucide-react";
 import type { AppState, Job } from "../../shared/types";
 import { missingInput } from "../../shared/tasks";
@@ -119,7 +120,6 @@ const JobRow = memo(JobRowView, (a, b) => a.selected === b.selected && rowKey(a.
 const rowKey = (j: Job) => JSON.stringify({ ...j, log: undefined, logLines: undefined, stills: undefined });
 
 function JobRowView({ job, selected, onSelect }: { job: Job; selected: boolean; onSelect: () => void }) {
-  const pct = job.framesTotal ? (job.framesDone / job.framesTotal) * 100 : 0;
   const need = missingInput(job);
   return (
     <div
@@ -140,11 +140,7 @@ function JobRowView({ job, selected, onSelect }: { job: Job; selected: boolean; 
         </div>
         <div className="job-meta">{job.clip.probeError ?? clipFacts(job.clip)}</div>
         <div className={`job-status ${job.status}`}>{need ? `Waiting: ${need}` : statusText(job)}</div>
-        {job.status === "running" && (
-          <div className="bar">
-            <span style={{ width: `${pct}%` }} />
-          </div>
-        )}
+        {job.status === "running" && <ProgressBar value={job.framesDone} max={job.framesTotal ?? 0} />}
       </div>
       {job.status !== "running" && (
         <button
@@ -180,7 +176,7 @@ function Detail({ job }: { job: Job }) {
         </div>
       </div>
       {job.clip.probeError && (
-        <section className="notice error" style={{ margin: "0 0 14px" }}>
+        <section className="notice error">
           <h3>Can't read this clip</h3>
           <div>{job.clip.probeError}</div>
         </section>

@@ -95,7 +95,7 @@ export function EnginePage(props: {
       </div>
       <div className="page-content">
         {state.engine.status === "failed" && (
-          <section className="notice error" style={{ margin: "0 0 14px" }}>
+          <section className="notice error">
             <h3>The engine didn't start</h3>
             <div>{state.engine.error}</div>
           </section>

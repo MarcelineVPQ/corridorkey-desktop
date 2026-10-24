@@ -414,8 +414,8 @@
    The surface turns translucent and the SVG filter (useLiquidGlass) frosts and
    bends what's behind it; the rim highlight follows the pointer (useSpecular).
    Reduce transparency (OS) turns it back into the solid surface. */
-.app-rail.glass,
-.split-panel.glass {
+/* the open rail and the split panel use the stronger frost below */
+.app-rail.glass {
   background: color-mix(in srgb, var(--bg-1) 55%, transparent);
   backdrop-filter: var(--glass-clear, blur(6px)) saturate(1.4);
 }

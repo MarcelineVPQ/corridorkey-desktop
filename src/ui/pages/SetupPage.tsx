@@ -58,7 +58,7 @@ export function SetupPage(props: { state: AppState; openQueue: () => void; openG
           )}
         </Step>
         {allDone ? (
-          <section className="notice" style={{ margin: "0 0 14px" }}>
+          <section className="notice">
             <h3>All set</h3>
             <div className="hint-text">Pick a clip in the queue to choose its hint and outputs, then press Start queue.</div>
             <button type="button" className="btn small primary" style={{ marginTop: 8 }} onClick={props.openQueue}>

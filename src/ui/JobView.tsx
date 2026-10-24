@@ -2,6 +2,7 @@
 // window it used, its results, its error and the engine log, as MainBlocks
 // (readouts are always shown, never folded).
 import { useEffect, useState } from "react";
+import { ProgressBar } from "./ProgressBar";
 import { FolderOpen, RotateCcw } from "lucide-react";
 import { LOG_SHOWN, type Job } from "../shared/types";
 import { duration, remaining, STAGE_ORDER, STAGE_TEXT } from "./format";
@@ -18,7 +19,6 @@ export function JobView({ job }: { job: Job }) {
     return () => clearInterval(t);
   }, [job.status]);
 
-  const pct = job.framesTotal ? Math.min(100, (job.framesDone / job.framesTotal) * 100) : 0;
   const left = remaining(job);
   const elapsed = job.startedAt ? ((job.finishedAt ?? Date.now()) - job.startedAt) / 1000 : null;
   const nowIdx = job.stage ? STAGE_ORDER.indexOf(job.stage) : -1;
@@ -39,9 +39,7 @@ export function JobView({ job }: { job: Job }) {
               );
             })}
           </div>
-          <div className="bar big" role="progressbar" aria-valuemin={0} aria-valuemax={job.framesTotal ?? 0} aria-valuenow={job.framesDone}>
-            <span style={{ width: `${pct}%` }} />
-          </div>
+          <ProgressBar value={job.framesDone} max={job.framesTotal ?? 0} big />
           <div className="stats">
             <Stat k="Frames written" v={job.framesTotal ? `${job.framesDone} / ${job.framesTotal}` : String(job.framesDone)} />
             <Stat k="Speed (measured)" v={job.framesPerSecond ? `${job.framesPerSecond.toFixed(2)} fps` : "measuring…"} />
@@ -92,7 +90,7 @@ export function JobView({ job }: { job: Job }) {
       )}
 
       {(job.status === "failed" || job.status === "cancelled") && (
-        <section className={`notice ${job.status === "failed" ? "error" : "warn"}`} style={{ margin: "0 0 14px" }}>
+        <section className={`notice ${job.status === "failed" ? "error" : "warn"}`}>
           <h3>{job.status === "failed" ? errorTitle(job.error?.code) : "Cancelled"}</h3>
           <div>{job.status === "failed" ? job.error?.message : "Stopped."}</div>
           {job.partial && <p className="hint-text">{job.partial}</p>}
