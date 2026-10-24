@@ -1,11 +1,36 @@
 # CorridorKey Desktop
 
+## Why this exists
+
+On 21 October 2026 Corridor Crew released [CorridorKey 2.0](https://github.com/nikopueringer/CorridorKey2.0)
+([the launch video](https://www.youtube.com/watch?v=svrdRAoIlxM)). I watched the whole video and purchased CK2.0
+straight away from [corridorkey.com](https://corridorkey.com) (their app and plugins for Resolve, Nuke, After Effects,
+Premiere and Blender), and only after paying did I see that Linux isn't supported yet. In the same video, Niko says
+it's "still pretty heavy on the GPU right now": about one frame a second at full native 4K, on an RTX 5090.
+
+I'm an audio/video engineer. Timing, throughput, color and what a signal costs are my day job, and so is software.
+This was the perfect crossroads between the two. I've moved PyTorch projects to Rust and ONNX Runtime before, so I
+knew there were gains to be found. I took Corridor's model, gave it a new engine (Rust on ONNX Runtime, no Python),
+and wrapped it in a desktop app that installs itself.
+
+On my RTX 5080 it keys 4K at about two frames a second: 2.4-2.7× faster than the original on the same machine
+(1.5-1.8× at HD), with the same mattes, less graphics memory and RAM, and less than half the install. Every number
+is below, with the clips and the commands to check them yourself. TensorRT is next, for more speed still. Rust and ONNX Runtime
+also mean one engine for every platform: NVIDIA on Linux and Windows today, and Apple Silicon through Core ML next.
+
+It's free, it stays free, and it's Corridor's model. Huge thanks to Niko, Zachary Harris and the Corridor crew.
+Windows testers wanted: see Requirements.
+
+Marcy ([MarcelineVPQ](https://github.com/MarcelineVPQ))
+
+## What it is
+
 A free desktop app for [CorridorKey 2.0](https://github.com/nikopueringer/CorridorKey2.0),
 Corridor Digital's AI green-screen keyer (model by Zachary Harris). Drop clips in, pick a hint
 mode and outputs, and watch real progress: frames written, the temporal window the runtime
 chose from your free graphics memory, and stills of the results.
 
-Status: in development, Linux first.
+Status: 1.0 is almost ready (Linux and Windows); macOS is planned next.
 
 ## Requirements
 
@@ -18,6 +43,10 @@ Status: in development, Linux first.
 (the downloads, ffmpeg through winget) and works through its pages. That machine has no NVIDIA graphics card, so
 **keying on an NVIDIA card under Windows has not been tested yet**: we don't have a real Windows PC with one. Every
 speed and quality number in this README was measured on Linux. If you try it on Windows, please tell us how it goes.
+
+**macOS is planned next.** A great many VFX artists work on Macs. The plan: Apple Silicon, with the engine on ONNX
+Runtime's Core ML backend (Apple's GPU and Neural Engine) and a signed `.dmg`, built and tested on real Apple
+Silicon machines (GitHub's macOS runners).
 
 ## Install size
 
@@ -138,6 +167,20 @@ Every result above is reproducible with the tools in this repository. The full r
 Test copies always run isolated: their own home folder, a headless compositor, a private D-Bus and a memory cap.
 They never touch the desktop, its keyring or its settings.
 
+## The original's open pull requests
+
+We follow [CorridorKey 2.0's pull requests](https://github.com/nikopueringer/CorridorKey2.0/pulls) and check each one
+against this app's own engine. As of 2026-10-24:
+
+| PR | What it fixes in the original | In CorridorKey Desktop |
+| --- | --- | --- |
+| [#4](https://github.com/nikopueringer/CorridorKey2.0/pull/4) | Frame folders read in text order (`f_1, f_10, f_2`), and `.PNG`/`.EXR` in capitals not found on Linux | **Had the same bug; fixed.** Natural order (`f_2` before `f_10`) and any extension case, in the engine and the app, with tests |
+| [#11](https://github.com/nikopueringer/CorridorKey2.0/pull/11) | The automatic memory window runs out of graphics memory on a first run (RTX 5090, 2048×1152) | **Handled differently.** The engine caps ONNX Runtime's memory to the budget and, if an automatic window still runs out before any frame is written, halves it and restarts (up to ~7 times). No retry was needed in any run here; not tested on a 32 GB card |
+| [#9](https://github.com/nikopueringer/CorridorKey2.0/pull/9) | Halves the original's graphics memory (bf16 weights, no gradients), same output | **Not needed:** the engine already runs fp16 weights. If it is merged, the original's memory numbers in the Speed tables will drop; we will re-measure |
+| [#8](https://github.com/nikopueringer/CorridorKey2.0/pull/8) | A desktop GUI (Qt) on top of the original's Python pipeline | A different approach: this app installs itself and runs its own engine, no Python |
+| [#10](https://github.com/nikopueringer/CorridorKey2.0/pull/10), [#6](https://github.com/nikopueringer/CorridorKey2.0/pull/6), [#7](https://github.com/nikopueringer/CorridorKey2.0/pull/7) | Apple Silicon (MPS), AMD (ROCm) support | Not in 1.0: NVIDIA only. **macOS (Apple Silicon) is planned next**, on ONNX Runtime's Core ML backend; AMD would need ONNX Runtime's ROCm or MIGraphX build |
+| [#3](https://github.com/nikopueringer/CorridorKey2.0/pull/3) | Python version requirements | Not applicable (no Python) |
+
 ## Why it's built this way
 
 - **Rust + ONNX Runtime instead of Python + PyTorch:** the tables above. One small program (3.6 MB) with no Python,
@@ -188,3 +231,5 @@ CorridorKey is © Corridor Digital, under the CorridorKey licence (see LICENSE).
 free and stays free. Organisations with more than US $20M annual revenue need CorridorKey
 plugin seats ([corridorkey.com](https://corridorkey.com)). Foundation models: C-RADIO (NVIDIA),
 MoGe (Microsoft), RVM (Google DeepMind); see the CorridorKey repository's notices.
+
+Built by Marcy ([MarcelineVPQ](https://github.com/MarcelineVPQ)) at 42 Pixel Studios.
