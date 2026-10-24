@@ -5,8 +5,12 @@ mod fakes;
 mod jobs;
 
 use super::*;
+use crate::hann::{taper_weights, window_starts};
+use crate::runtime::Data;
 use fakes::*;
+use keying::hint_window;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::sync::Mutex;
 
 /// A scratch folder, removed with everything in it when dropped.
@@ -100,7 +104,9 @@ impl Harness {
         let (mut writers, seen) = self.writers();
         let mut report = FrameReport { total: meta.num_frames, last_sent: None, last_done: None };
         let mut sink = RecSink::default();
-        let res = self.pipe.keying(&self.job, &meta, &self.frames, key, trt, "load", chunk, stride, low_vram, "clip", &mut writers, &mut report, &mut sink);
+        let ctx = JobCtx::new(&self.job, &meta, &self.frames, trt, "clip");
+        let plan = JobPlan { chunk, stride, low_vram, key: key.clone() };
+        let res = self.pipe.keying(&ctx, &plan, &mut writers, &mut report, &mut sink);
         // loop: NOT-WORTH — ≤ four writers
         let written = seen.iter().map(|(n, s)| (n.clone(), *s.lock().unwrap())).collect();
         Outcome { res, sink, written }
