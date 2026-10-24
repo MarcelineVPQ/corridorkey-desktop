@@ -109,6 +109,14 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
 
 - `progress.p` is the stage's own fraction when the stage reports one (stage-1
   windows), otherwise absent. The app never invents a fraction.
+- `result.outputs` lists one path per output: a file (`<clip>_alpha.mp4`, `<clip>_cutout.mov`) or, for EXR, a
+  folder `<clip>_<output>_exr/` (the checker's output name is `checker_comp_despill050`, by its despill). Rust engine
+  (backlog row 30): its frames are `<clip>_<output>.<number>.exr`. A frame folder's frames keep their own numbers
+  (the trailing digits of each input name) and padding (at least 4); a video, or a folder where a frame has no
+  number or the numbers don't strictly increase, counts from 1001 (padding 4, wider if needed; a `log` line says
+  why). `_settings.txt` adds `EXR Frame Numbers: source (65-184)` or `1001-1120`. The alpha EXR holds the matte as
+  channel `A` alone, the cutout is RGBA premultiplied (RGB × alpha), fg and checker RGB. The PyTorch engine
+  writes the original's layout: `<output>_000000.exr` from 0, the matte as `Y`, a straight cutout.
 - `frames` counts finished frames handed to every selected output's writer
   (the slowest one). The writers encode on their own threads with a queue of
   at most 2 batches, so it trails the file on disk by at most 2 frames at the

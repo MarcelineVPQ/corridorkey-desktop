@@ -26,7 +26,9 @@ A matte named like the clip (`shot01FrameHint.png`, `shot01_AlphaHint.mp4`) is f
 
 ## Outputs
 
-**Video** writes 10-bit previews (alpha, foreground, checker) and a ProRes 4444 cutout. **EXR sequence** writes scene-linear, unclamped HDR frames for compositing. Despill applies to the checker and cutout.
+**Video** writes 10-bit previews (alpha, foreground, checker) and a ProRes 4444 cutout. **EXR sequence** writes scene-linear, unclamped HDR frames for compositing, named the studio way
+(`shot_alpha.1001.exr`; a numbered frame folder keeps its own frame numbers), with the matte in the alpha channel
+and the cutout premultiplied, as Nuke expects. Despill applies to the checker and cutout.
 
 ## Appearance
 

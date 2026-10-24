@@ -45,3 +45,8 @@ screen keyer, on its own Rust + ONNX Runtime engine, for Linux, Windows and macO
   full depth, so film plates reach the model without rounding to 8 bits. Measured on a 4K plate: the matte is
   identical to keying the same plate as 16-bit frames; the old 8-bit read put one hair-edge pixel in twelve off by
   up to 15/255 (README, Quality). About 2 % more time; 8-bit sources are unchanged.
+- EXR outputs to the studio convention (Rust engine): frames named `<clip>_<output>.<number>.exr` with the source's
+  own frame numbers and padding (a frame folder's `04_5d_00065.exr` gives `04_5d_alpha.00065.exr`; video counts
+  from 1001), the alpha EXR's matte in channel `A` (Nuke and OpenImageIO read it as alpha), and the cutout
+  premultiplied (RGB × alpha). On purpose this differs from the original CorridorKey's EXR writer
+  (`alpha_000000.exr` from 0, the matte as `Y`, a straight cutout); the matte values themselves are unchanged.

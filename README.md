@@ -305,6 +305,21 @@ The 16-bit path gives exactly the matte of the 16-bit image sequence. The 8-bit 
 hardest: about one hair-edge pixel in twelve was off, by up to 15 levels of 255. The deep decode costs about 2 % more
 time.
 
+### EXR outputs a compositor can read as they are (1.0)
+
+EXR outputs follow the studio convention, unlike the original's EXR writer: frames are named
+`<clip>_<output>.<number>.exr` with the source's own frame numbers (a frame folder `04_5d_00065.exr` …
+`04_5d_00184.exr` gives `04_5d_alpha.00065.exr` …; a video counts from 1001, the VFX convention), the matte-only EXR
+stores the matte as the alpha channel `A` (the original writes it as `Y`, which Nuke reads as grey colour), and the
+cutout is premultiplied (RGB × alpha, as EXR and Nuke expect; the original's is straight). `_settings.txt` records
+the numbering. The video cutout (ProRes 4444) stays straight, as that format carries it.
+
+Checked on 2026-10-24 (CPU, a 10-frame 04_5d sequence and a 12-frame 12-bit ProRes clip, against the engine before
+the change): OpenImageIO reports the matte file's single channel as its alpha channel; the matte values are
+bit-identical to the old `Y` channel; the float cutout's colour equals the old straight colour × alpha exactly (half
+float: within one or two half-float steps, the second rounding). OpenCV (4.11) and ffmpeg can't open an alpha-only
+EXR; `tools/side_by_side.py` reads it with the `OpenEXR` Python package (`pip install OpenEXR`).
+
 ### Test it yourself
 
 The clips are free to download (their owners don't allow re-hosting, so they aren't in this repository):
