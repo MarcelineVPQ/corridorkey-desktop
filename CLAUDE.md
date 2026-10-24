@@ -20,7 +20,10 @@ Built to **Marcy's 17 basic rules for programming applications** (memory
   `tools/list_loops.mjs --check`; the pass: docs/LOOP_PASS_2026-10.md, docs/EFFICIENCY_PASS_2026-10.md.
 - **Isolated test copies (rule 12):** `tools/isolated.sh` (own HOME, private D-Bus, headless KWin,
   basic password store, 4 GB cap) + `tools/drive.mjs` (CDP steps + screenshots). Never the user's screen.
-- **Memory caps:** every test/build/run under `systemd-run --user --scope -p MemoryMax=…`.
+- **Memory caps:** every test/build/run under `systemd-run --user --scope -p MemoryMax=…`. On Marcy's PC all of it
+  also runs inside one shared budget, the user slice `claude-work.slice` (24 GB total, throttled above 20 GB):
+  `--slice=claude-work.slice` on direct runs, `CK_SLICE=claude-work.slice` for the repo's scripts (their own
+  systemd-run joins it), and one memory-heavy job at a time (`flock ~/.cache/claude-scratch/heavy.lock`).
 - **Backlog (rule 8):** `docs/BACKLOG.md`; ideas wait for Marcy's "now".
 - **Licence:** CorridorKey licence (LICENSE, a CC BY-NC-SA 4.0 variant). The app stays free,
   keeps the CorridorKey name, credits Corridor Digital. No paywall, ever.

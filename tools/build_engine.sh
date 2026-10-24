@@ -30,7 +30,7 @@ if [ "${1:-}" = --windows ]; then
   ENG="$(cd "$(dirname "$0")/.." && pwd)/engine-rs"
   mkdir -p "$ENG/target/dist"
   cd "$ENG"
-  systemd-run --user --scope --quiet --collect -p MemoryMax=12G -p MemorySwapMax=0 -- \
+  systemd-run --user --scope --quiet --collect ${CK_SLICE:+--slice=$CK_SLICE} -p MemoryMax=12G -p MemorySwapMax=0 -- \
     cargo build --release --locked -p ck-engine --no-default-features --features ort-dynamic,cuda,tensorrt --target x86_64-pc-windows-gnu
   cp "$ENG/target/x86_64-pc-windows-gnu/release/corridorkey-engine.exe" "$ENG/target/dist/corridorkey-engine.exe.new"
   mv -f "$ENG/target/dist/corridorkey-engine.exe.new" "$ENG/target/dist/corridorkey-engine.exe"
@@ -48,7 +48,7 @@ ZIG_VENV="${ZIG_VENV:-$HOME/.local/share/corridorkey-release/zig/venv}"
 export PATH="$ZIG_VENV/bin:$PATH"
 mkdir -p "$ENG/target/dist"
 cd "$ENG"
-systemd-run --user --scope --quiet --collect -p MemoryMax=12G -p MemorySwapMax=0 -- \
+systemd-run --user --scope --quiet --collect ${CK_SLICE:+--slice=$CK_SLICE} -p MemoryMax=12G -p MemorySwapMax=0 -- \
   env PATH="$PATH" cargo zigbuild --release --locked -p ck-engine --no-default-features --features ort-dynamic,cuda,tensorrt \
   --target "x86_64-unknown-linux-gnu.$GLIBC"
 # copy beside it, then rename: a running engine keeps its old file ("Text file busy" otherwise)

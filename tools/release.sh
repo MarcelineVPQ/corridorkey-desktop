@@ -20,7 +20,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 KEY="$HOME/.config/corridorkey-release/feed-signing.pem"
-CAP=(systemd-run --user --scope --quiet --collect -p MemoryMax=8G -p MemorySwapMax=0 --)
+CAP=(systemd-run --user --scope --quiet --collect ${CK_SLICE:+--slice=$CK_SLICE} -p MemoryMax=8G -p MemorySwapMax=0 --)
 
 v="$(node -p 'require("./package.json").version')"
 if [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then dev=false
