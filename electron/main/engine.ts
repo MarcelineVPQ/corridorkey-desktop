@@ -37,6 +37,8 @@ export interface RustLaunch {
   // libonnxruntime.so for the GPU build (null: the engine's own, or CK_ENGINE_ORT)
   ort: string | null;
   env: NodeJS.ProcessEnv;
+  // the TensorRT engine cache (the app's cache folder + "tensorrt"); a CK_ENGINE_TRT_CACHE in `env` wins
+  trtCache?: string;
 }
 
 export type EngineLaunch = PythonLaunch | RustLaunch;
@@ -109,7 +111,10 @@ export function launchCommand(launch: EngineLaunch): { cmd: string; args: string
   if (launch.kind === "rust") {
     const args = ["--models", launch.models];
     if (launch.ort) args.push("--ort", launch.ort);
-    return { cmd: launch.binary, args, env: rustEngineEnv(launch.env, launch.ort) };
+    const env = rustEngineEnv(launch.env, launch.ort);
+    // TensorRT engines go to the app's own cache folder on every system (engine-rs pipeline.rs trt_root)
+    if (launch.trtCache && !launch.env.CK_ENGINE_TRT_CACHE) env.CK_ENGINE_TRT_CACHE = launch.trtCache;
+    return { cmd: launch.binary, args, env };
   }
   return { cmd: launch.python, args: ["-u", launch.script, "--package-root", launch.packageRoot], env: engineEnv(launch.env) };
 }

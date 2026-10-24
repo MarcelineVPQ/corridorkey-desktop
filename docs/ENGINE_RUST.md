@@ -94,7 +94,7 @@ The engine runs `ffmpeg` / `ffprobe` from the system: they are not bundled.
   networks; default: only when stage 1 and 2 share the card), `CK_ENGINE_CUDNN_SEARCH` (heuristic |
   exhaustive | default), `CK_ENGINE_CUDNN_MAX_WORKSPACE`, `CK_ENGINE_GRAPH_OPT` (all | layout | extended),
   `CK_ENGINE_PROFILE=<dir>` (ORT per-node profile; on CUDA it times kernel launches, not GPU work),
-  `CK_ENGINE_THREADS`; TensorRT: `CK_ENGINE_TRT_CACHE` (engine folder), `CK_ENGINE_TRT_BUILD` (ck-trt-build,
+  `CK_ENGINE_THREADS`; TensorRT: `CK_ENGINE_TRT_CACHE` (engine folder; the app passes its cache folder + `tensorrt`, else the system cache folder: `~/.cache`, `%LOCALAPPDATA%\corridorkey-desktop\cache`, `~/Library/Caches`), `CK_ENGINE_TRT_BUILD` (ck-trt-build,
   else next to the engine binary), `CK_ENGINE_TRT_BUILD_TIMEOUT_S` (one engine build's deadline, default 1800 s).
 - No open-ended waits: ffprobe 120 s, `ffmpeg -version` 30 s, each TensorRT build `CK_ENGINE_TRT_BUILD_TIMEOUT_S`, a
   writer finishing its file 300 s (then ffmpeg is killed and the job fails saying so) (`proc.rs`,

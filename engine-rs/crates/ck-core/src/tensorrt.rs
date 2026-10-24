@@ -87,7 +87,7 @@ pub fn profile(piece: &str, b: &Bucket) -> Option<(String, String, String)> {
     Some((at(b.h.0, b.w.0, t.0), at(b.h.1, b.w.1, t.1), at(b.h.1, b.w.1, t.1)))
 }
 
-/// The engine builder: CK_ENGINE_TRT_BUILD, else `ck-trt-build` next to this program.
+/// The engine builder: CK_ENGINE_TRT_BUILD, else `ck-trt-build` (`ck-trt-build.exe` on Windows) next to this program.
 pub fn builder_path() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("CK_ENGINE_TRT_BUILD") {
         if !p.is_empty() {
@@ -95,8 +95,13 @@ pub fn builder_path() -> Option<PathBuf> {
         }
     }
     let exe = std::env::current_exe().ok()?;
-    let p = exe.parent()?.join("ck-trt-build");
+    let p = exe.parent()?.join(builder_name());
     p.exists().then_some(p)
+}
+
+/// The builder's file name on this system.
+pub fn builder_name() -> String {
+    format!("ck-trt-build{}", std::env::consts::EXE_SUFFIX)
 }
 
 /// The longest one engine build may take: CK_ENGINE_TRT_BUILD_TIMEOUT_S, default 1800 s (measured builds on the
@@ -310,5 +315,12 @@ mod tests {
         std::fs::write(&onnx, b"abc").unwrap();
         assert!(source_stamp(&onnx).starts_with("3:") && source_stamp(&onnx).ends_with(",-"));
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_builder_has_the_systems_program_name() {
+        let n = builder_name();
+        assert!(n.starts_with("ck-trt-build"));
+        assert_eq!(n.ends_with(".exe"), cfg!(windows));
     }
 }

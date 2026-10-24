@@ -1426,19 +1426,29 @@ pub fn trim_host_memory() {
     }
 }
 
-/// The TensorRT engine cache root: CK_ENGINE_TRT_CACHE, else $XDG_CACHE_HOME (or ~/.cache)/corridorkey-desktop/tensorrt.
+/// The TensorRT engine cache root: CK_ENGINE_TRT_CACHE (the app passes its cache folder's `tensorrt`), else the
+/// system's cache folder (the app's own, electron/main/platform.ts appDirs): Linux $XDG_CACHE_HOME (or
+/// ~/.cache)/corridorkey-desktop/tensorrt, Windows %LOCALAPPDATA%\corridorkey-desktop\cache\tensorrt, macOS
+/// ~/Library/Caches/corridorkey-desktop/tensorrt.
 pub fn trt_root() -> PathBuf {
-    if let Ok(p) = std::env::var("CK_ENGINE_TRT_CACHE") {
-        if !p.is_empty() {
-            return PathBuf::from(p);
-        }
+    trt_root_for(std::env::consts::OS, |k| std::env::var(k).ok())
+}
+
+/// `trt_root` for system `os` ("linux", "windows", "macos") and an environment lookup.
+pub fn trt_root_for(os: &str, env: impl Fn(&str) -> Option<String>) -> PathBuf {
+    let var = |k: &str| env(k).filter(|s| !s.is_empty()).map(PathBuf::from);
+    if let Some(p) = var("CK_ENGINE_TRT_CACHE") {
+        return p;
     }
-    let base = std::env::var("XDG_CACHE_HOME")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into())).join(".cache"));
-    base.join("corridorkey-desktop").join("tensorrt")
+    let app = "corridorkey-desktop";
+    match os {
+        "windows" => {
+            let local = var("LOCALAPPDATA").or_else(|| var("USERPROFILE").map(|h| h.join("AppData").join("Local"))).unwrap_or_else(|| PathBuf::from("."));
+            local.join(app).join("cache").join("tensorrt")
+        }
+        "macos" => var("HOME").unwrap_or_else(|| PathBuf::from(".")).join("Library").join("Caches").join(app).join("tensorrt"),
+        _ => var("XDG_CACHE_HOME").unwrap_or_else(|| var("HOME").unwrap_or_else(|| PathBuf::from(".")).join(".cache")).join(app).join("tensorrt"),
+    }
 }
 
 /// A network's name for people (progress details and logs).
@@ -1450,5 +1460,30 @@ pub fn piece_name(piece: &str) -> &'static str {
         "stage1" => "stage 1",
         "stage2" => "stage 2",
         _ => "network",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tensorrt_cache_root_per_system() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            // loop: NOT-WORTH — a test's two or three variables
+            move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string())
+        };
+        // loop: NOT-WORTH — a path's few parts
+        let j = |parts: &[&str]| parts.iter().collect::<PathBuf>();
+        // the app's folder wins everywhere
+        assert_eq!(trt_root_for("windows", env(&[("CK_ENGINE_TRT_CACHE", "/app/cache/tensorrt"), ("LOCALAPPDATA", "C:/L")])), j(&["/app/cache/tensorrt"]));
+        assert_eq!(trt_root_for("linux", env(&[("XDG_CACHE_HOME", "/x"), ("HOME", "/h")])), j(&["/x", "corridorkey-desktop", "tensorrt"]));
+        assert_eq!(trt_root_for("linux", env(&[("XDG_CACHE_HOME", ""), ("HOME", "/h")])), j(&["/h", ".cache", "corridorkey-desktop", "tensorrt"]));
+        assert_eq!(trt_root_for("windows", env(&[("LOCALAPPDATA", "C:/L"), ("HOME", "/h")])), j(&["C:/L", "corridorkey-desktop", "cache", "tensorrt"]));
+        assert_eq!(trt_root_for("windows", env(&[("USERPROFILE", "C:/U")])), j(&["C:/U", "AppData", "Local", "corridorkey-desktop", "cache", "tensorrt"]));
+        assert_eq!(
+            trt_root_for("macos", env(&[("HOME", "/Users/m"), ("XDG_CACHE_HOME", "/x")])),
+            j(&["/Users/m", "Library", "Caches", "corridorkey-desktop", "tensorrt"])
+        );
     }
 }

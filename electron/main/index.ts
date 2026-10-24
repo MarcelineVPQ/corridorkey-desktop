@@ -150,7 +150,7 @@ const queue = new Queue({
     // the Rust engine when it is set up; the PyTorch engine (CorridorKey checkout) until it replaces it
     if (chooseEngine(rustEngine, checkout) === "rust") {
       const paths = enginePaths();
-      return new EngineProcess({ kind: "rust", binary: paths.binary!, models: paths.models!, ort: paths.ort, env: process.env }, onReply, onExit);
+      return new EngineProcess({ kind: "rust", binary: paths.binary!, models: paths.models!, ort: paths.ort, env: process.env, trtCache: join(cacheDir, "tensorrt") }, onReply, onExit);
     }
     const root = settings.corridorKeyRoot!;
     return new EngineProcess({ python: join(root, "venv", "bin", "python"), script: engineScript(), packageRoot: root, env: process.env }, onReply, onExit);

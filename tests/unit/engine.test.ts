@@ -71,6 +71,13 @@ describe("engine launch", () => {
     expect(g.args).toEqual(["--models", "/m", "--ort", "/o/libonnxruntime.so"]);
   });
 
+  it("points the Rust engine's TensorRT cache at the app's cache folder, unless the environment says otherwise", () => {
+    const c = launchCommand({ kind: "rust", binary: "/e/corridorkey-engine", models: "/m", ort: null, env: {}, trtCache: "/c/corridorkey-desktop/tensorrt" });
+    expect(c.env.CK_ENGINE_TRT_CACHE).toBe("/c/corridorkey-desktop/tensorrt");
+    const o = launchCommand({ kind: "rust", binary: "/e/corridorkey-engine", models: "/m", ort: null, env: { CK_ENGINE_TRT_CACHE: "/mine" }, trtCache: "/c/t" });
+    expect(o.env.CK_ENGINE_TRT_CACHE).toBe("/mine");
+  });
+
   it("finds the CUDA, cuDNN and TensorRT libraries of a pip-wheel layout next to ONNX Runtime", () => {
     const site = "/v/lib/python3.12/site-packages";
     const have = new Set([`${site}/nvidia`, `${site}/nvidia/cu13/lib`, `${site}/nvidia/cudnn/lib`, `${site}/tensorrt_libs`]);

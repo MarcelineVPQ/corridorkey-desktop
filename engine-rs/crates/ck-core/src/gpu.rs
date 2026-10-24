@@ -337,11 +337,17 @@ pub fn budget() -> Option<(u64, u64, u64)> {
     Some((info.free + own, info.free, own))
 }
 
+/// TensorRT's library by its per-system names (TensorRT 10: libnvinfer.so.10 on Linux, nvinfer_10.dll on Windows).
+#[cfg(windows)]
+const NVINFER_LIBS: [&str; 2] = ["nvinfer_10.dll", "nvinfer.dll"];
+#[cfg(not(windows))]
+const NVINFER_LIBS: [&str; 2] = ["libnvinfer.so.10", "libnvinfer.so"];
+
 /// TensorRT's version from libnvinfer (getInferLibVersion: major*10000 + minor*100 + patch for 10.x),
 /// as "10.16.0"; None when the library is not there.
 pub fn tensorrt_version() -> Option<String> {
     // loop: NOT-WORTH — two library names
-    for name in ["libnvinfer.so.10", "libnvinfer.so"] {
+    for name in NVINFER_LIBS {
         // SAFETY: getInferLibVersion takes nothing and returns an int32
         unsafe {
             if let Ok(lib) = Library::new(name) {
@@ -359,11 +365,119 @@ pub fn trt_version_string(v: i32) -> String {
     format!("{}.{}.{}", v / 10000, (v / 100) % 100, v % 100)
 }
 
-/// Host memory the kernel says is available (MemAvailable, bytes): the CPU provider's budget.
+/// Host memory the system says is available (bytes): the CPU provider's budget. Linux: /proc/meminfo's
+/// MemAvailable; Windows: GlobalMemoryStatusEx's ullAvailPhys; macOS: free + inactive pages (host_statistics64,
+/// psutil's reading of "available"). None only where the system doesn't say.
 pub fn host_available() -> Option<u64> {
-    let s = std::fs::read_to_string("/proc/meminfo").ok()?;
+    #[cfg(target_os = "linux")]
+    {
+        let s = std::fs::read_to_string("/proc/meminfo").ok()?;
+        meminfo_available(&s)
+    }
+    #[cfg(windows)]
+    {
+        win_mem::avail_phys()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        mac_mem::available()
+    }
+    #[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
+    {
+        None
+    }
+}
+
+/// MemAvailable of a /proc/meminfo text, in bytes.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn meminfo_available(s: &str) -> Option<u64> {
     // loop: NOT-WORTH — /proc/meminfo's ~55 lines, once per CPU job
     s.lines().find_map(|l| l.strip_prefix("MemAvailable:")).and_then(|r| r.trim().trim_end_matches("kB").trim().parse::<u64>().ok()).map(|kb| kb * 1024)
+}
+
+/// macOS "available" as psutil reads it: (free - speculative) + inactive pages.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn mac_available(free: u64, speculative: u64, inactive: u64, page: u64) -> u64 {
+    (free.saturating_sub(speculative) + inactive) * page
+}
+
+#[cfg(windows)]
+mod win_mem {
+    /// MEMORYSTATUSEX (sysinfoapi.h)
+    #[repr(C)]
+    #[derive(Default)]
+    #[allow(dead_code)]
+    struct MemoryStatus {
+        length: u32,
+        memory_load: u32,
+        total_phys: u64,
+        avail_phys: u64,
+        total_page_file: u64,
+        avail_page_file: u64,
+        total_virtual: u64,
+        avail_virtual: u64,
+        avail_extended_virtual: u64,
+    }
+    const _: () = assert!(std::mem::size_of::<MemoryStatus>() == 64);
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GlobalMemoryStatusEx(buf: *mut MemoryStatus) -> i32;
+    }
+    /// ullAvailPhys: physical memory that can be used without paging out (bytes).
+    pub fn avail_phys() -> Option<u64> {
+        let mut m = MemoryStatus { length: std::mem::size_of::<MemoryStatus>() as u32, ..Default::default() };
+        // SAFETY: GlobalMemoryStatusEx fills a MEMORYSTATUSEX whose dwLength is set, as documented
+        (unsafe { GlobalMemoryStatusEx(&mut m) } != 0).then_some(m.avail_phys)
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod mac_mem {
+    use std::ffi::{c_char, c_int, c_uint, c_void};
+    /// vm_statistics64 (mach/vm_statistics.h), filled by the kernel; only three counters are read
+    #[repr(C, align(8))]
+    #[allow(dead_code)]
+    struct VmStats64 {
+        free_count: c_uint,
+        active_count: c_uint,
+        inactive_count: c_uint,
+        wire_count: c_uint,
+        counters: [u64; 9],
+        purgeable_count: c_uint,
+        speculative_count: c_uint,
+        more_counters: [u64; 4],
+        pages: [c_uint; 4],
+        uncompressed: u64,
+    }
+    const _: () = assert!(std::mem::size_of::<VmStats64>() == 152);
+    const HOST_VM_INFO64: c_int = 4;
+    extern "C" {
+        fn mach_host_self() -> c_uint;
+        fn host_statistics64(host: c_uint, flavor: c_int, info: *mut c_int, count: *mut c_uint) -> c_int;
+        fn sysctlbyname(name: *const c_char, old: *mut c_void, oldlen: *mut usize, new: *mut c_void, newlen: usize) -> c_int;
+    }
+    /// An integer sysctl value (hw.pagesize, hw.memsize).
+    fn sysctl_u64(name: &std::ffi::CStr) -> Option<u64> {
+        let mut v: u64 = 0;
+        let mut len = std::mem::size_of::<u64>();
+        // SAFETY: sysctlbyname(3) writes at most `len` bytes into `v` (a smaller integer lands in its low bytes:
+        // little-endian Apple Silicon)
+        let rc = unsafe { sysctlbyname(name.as_ptr(), &mut v as *mut u64 as *mut c_void, &mut len, std::ptr::null_mut(), 0) };
+        (rc == 0 && len > 0).then_some(v)
+    }
+    pub fn available() -> Option<u64> {
+        let page = sysctl_u64(c"hw.pagesize")?;
+        // SAFETY: an all-integer struct; host_statistics64 writes at most `count` 32-bit words into it
+        unsafe {
+            let mut st: VmStats64 = std::mem::zeroed();
+            let mut count = (std::mem::size_of::<VmStats64>() / 4) as c_uint;
+            if host_statistics64(mach_host_self(), HOST_VM_INFO64, &mut st as *mut VmStats64 as *mut c_int, &mut count) != 0 {
+                // hw.memsize (the total) is not what is available: no answer rather than a wrong one
+                return None;
+            }
+            Some(super::mac_available(st.free_count as u64, st.speculative_count as u64, st.inactive_count as u64, page))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -423,7 +537,17 @@ mod tests {
     }
 
     #[test]
+    #[cfg(any(target_os = "linux", windows, target_os = "macos"))]
     fn host_memory_readable() {
-        assert!(super::host_available().unwrap() > 0);
+        assert!(super::host_available().is_some_and(|b| b > 0));
+    }
+
+    #[test]
+    fn host_memory_formulas() {
+        let mi = "MemTotal:       61000000 kB\nMemFree:         2000000 kB\nMemAvailable:   33554432 kB\n";
+        assert_eq!(super::meminfo_available(mi), Some(33554432 * 1024));
+        assert_eq!(super::meminfo_available("MemTotal: 1 kB\n"), None);
+        assert_eq!(super::mac_available(1000, 100, 500, 16384), 1400 * 16384);
+        assert_eq!(super::mac_available(10, 100, 5, 4096), 5 * 4096);
     }
 }
