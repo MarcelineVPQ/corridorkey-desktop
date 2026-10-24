@@ -3,6 +3,7 @@
 //! files (the RVM features, the low-VRAM states and foundation features) go to a scratch folder per test.
 mod fakes;
 mod jobs;
+mod retry;
 
 use super::*;
 use crate::hann::{taper_weights, window_starts};
