@@ -1,7 +1,7 @@
 # corridorkey-desktop
 
-A free Linux desktop app for CorridorKey 2.0 (Corridor Digital's AI keyer).
-Built to **Marcy's 15 basic rules for programming applications** (memory
+A free desktop app for CorridorKey 2.0 (Corridor Digital's AI keyer): Linux, Windows and macOS (Apple Silicon).
+Built to **Marcy's 17 basic rules for programming applications** (memory
 `marcys-15-basic-rules`); they are the standard here, with these specifics:
 
 - **Engine/app contract (rule 10):** the app never imports the model. Two engines speak

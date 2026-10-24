@@ -125,6 +125,7 @@ Each engine build on the way is labelled as a dev step:
 | **0.0.3-dev** | 2026-10-24 | as shipped in 1.0 (models `onnx.3`) |
 | **0.0.4-dev** | 2026-10-24 | 4K EXR frames decoded four at once, freed memory returned after every job (results below) |
 | **0.0.5-dev** | 2026-10-24 | TensorRT re-measured on today's engine (opt-in, not in the app yet; results below) |
+| **0.0.6-dev** | 2026-10-24 | TensorRT takes CUDA's window, so its mattes match (results below) |
 
 The same HD bench, run on different days as the engine improved (totals, seconds; Original = PyTorch):
 
@@ -193,6 +194,40 @@ frames, against CUDA's 48 or 80), and the window changes the matte more than pre
 | with_motion_blur | 3.39e-4 | 2.9 % | 53.4 dB |
 
 The next step lets TensorRT run the same long windows as CUDA, so its mattes match before it reaches the app.
+
+### 0.0.6-dev: TensorRT with the same mattes as CUDA
+
+0.0.5-dev showed the catch: TensorRT's memory limits gave it 16–24-frame windows where CUDA uses 48 or 80, and the
+window changes the matte. 0.0.6-dev gives TensorRT exactly CUDA's window and staging (one network on the card at a
+time), and builds its engines for that window. Stage 1 for 48-frame windows needs a 6.1 GB working-memory block
+while it builds (peak 13.9 GB on the card), so it builds on 16 GB cards; where a network can't be built (stage 1 at
+80 frames), that one network runs on CUDA at the same window and the app remembers not to try again.
+
+The six HD clips, totals in seconds, all on 2026-10-24 (the original and CUDA from the runs above):
+
+| Clip (window) | Original | CUDA (0.0.4-dev) | **TensorRT (0.0.6-dev)** | vs the original |
+| --- | --- | --- | --- | --- |
+| godiva_close (80/40) | 61.1 | 37.3 | **34.6** (stage 1 on CUDA) | 1.77× faster |
+| locked_backdrop (48/24) | 31.3 | 19.1 | **15.2** | 2.06× |
+| metal_glasses (48/24) | 42.3 | 25.8 | **21.2** | 2.00× |
+| smoke (48/24) | 74.7 | 46.5 | **36.4** | 2.05× |
+| walking_sitting (48/24) | 91.5 | 58.4 | **43.9** | 2.08× |
+| with_motion_blur (80/40) | 20.8 | 11.8 | **11.2** (stage 1 on CUDA) | 1.86× |
+
+Mattes, TensorRT against CUDA at the same window (`tools/matte_compare.py`): every clip within fp16 rounding, the
+same band as CUDA against the original PyTorch.
+
+| Clip | alpha MAE | % of pixels off by more than 1/255 | alpha PSNR |
+| --- | --- | --- | --- |
+| godiva_close | 9.63e-4 | 7.4 % | 51.3 dB |
+| locked_backdrop | 4.01e-4 | 3.5 % | 55.1 dB |
+| metal_glasses | 5.69e-4 | 4.7 % | 52.5 dB |
+| smoke | 5.18e-4 | 4.1 % | 55.1 dB |
+| walking_sitting | 1.88e-4 | 1.5 % | 57.0 dB |
+| with_motion_blur | 2.19e-4 | 1.7 % | 57.9 dB |
+
+TensorRT reaches the app as an option in a later step (with its optional download); the one-time build per
+resolution is about 2.5 minutes for the five networks.
 
 ### TensorRT (measured, not in 1.0)
 
