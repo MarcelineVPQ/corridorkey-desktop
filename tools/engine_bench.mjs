@@ -3,7 +3,8 @@
 // process per clip) and records what the engine itself reports plus what the system measures:
 //   engine, version, provider/precision; load-to-first-frame (spawn → first `frames` reply with done > 0);
 //   steady frames/s from the engine's own `frames` replies after the first window; total wall time;
-//   peak VRAM (nvidia-smi every 250 ms, the engine's process tree); peak RSS (/proc, the same tree);
+//   peak VRAM (nvidia-smi every 250 ms, the engine's process tree); peak RSS (the same tree: /proc on Linux,
+//   one `ps` table elsewhere, i.e. macOS);
 //   the memory window used (`memory` reply). Writes <out>/bench.json, <out>/bench.md and every reply to
 //   <out>/<clip>.replies.jsonl (the engine's own logs, e.g. the Rust engine's timing line); outputs go to
 //   <out>/out/<clip>/ for tools/matte_compare.py --roots.
@@ -89,6 +90,37 @@ export function tree(root) {
     }
   }
   return all;
+}
+
+/** macOS (no /proc): the tree under `root` and its summed RSS in MB, from one `ps -A -o pid=,ppid=,rss=` table. */
+export function psTreeRssMb(table, root) {
+  const kids = new Map();
+  const rss = new Map();
+  // loop: HOT-PATH-OK — the system's process list (a few hundred lines), every 250 ms while a bench clip runs
+  for (const line of table.split("\n")) {
+    // loop: NOT-WORTH — three numbers of one line
+    const [pid, ppid, kb] = line.trim().split(/\s+/).map(Number);
+    if (!pid) continue;
+    rss.set(pid, kb || 0);
+    if (!kids.has(ppid)) kids.set(ppid, []);
+    kids.get(ppid).push(pid);
+  }
+  const all = [root];
+  // loop: HOT-PATH-OK — the engine's few processes
+  for (let i = 0; i < all.length; i++) all.push(...(kids.get(all[i]) ?? []));
+  // loop: HOT-PATH-OK — the engine's few processes
+  return all.reduce((s, p) => s + (rss.get(p) ?? 0), 0) / 1024;
+}
+
+/** Peak-RSS sample of the engine's process tree in MB: /proc on Linux, `ps` elsewhere (0 when unreadable). */
+function treeRssMb(root) {
+  if (process.platform === "linux") return rssMb(tree(root));
+  try {
+    // loop: HOT-PATH-OK — one ps call every 250 ms while a bench clip runs [bounded: 5 s timeout]
+    return psTreeRssMb(execFileSync("ps", ["-A", "-o", "pid=,ppid=,rss="], { encoding: "utf8", timeout: 5000 }), root);
+  } catch {
+    return 0;
+  }
 }
 
 const rssMb = (pids) =>
@@ -181,9 +213,8 @@ async function runClip(a, clip) {
       r.error = `stalled: no engine reply for ${a.stallS} s`;
       child.kill("SIGKILL");
     }
-    const p = tree(child.pid);
-    if (!a.cpu) r.peakVramMb = Math.max(r.peakVramMb, vramMb(p));
-    r.peakRssMb = Math.max(r.peakRssMb, Math.round(rssMb(p)));
+    if (!a.cpu) r.peakVramMb = Math.max(r.peakVramMb, vramMb(tree(child.pid)));
+    r.peakRssMb = Math.max(r.peakRssMb, Math.round(treeRssMb(child.pid)));
   }, SAMPLE_MS);
   const done = new Promise((res) => {
     const replies = join(a.out, `${name}.replies.jsonl`);
