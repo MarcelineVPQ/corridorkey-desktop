@@ -8,9 +8,13 @@ REF / TEST: an engine output folder (<clip>_alpha.mp4 / <clip>_alpha_exr, <clip>
 the ONNX spike's .npz (alpha (T,h,w), fg (T,3,h,w) in sRGB). --roots compares every clip folder present in
 both roots (the engine bench's out/<clip>/).
 
-Videos are decoded by ffmpeg to 16-bit RGB (alpha = its first channel). EXR sequences are decoded by ffmpeg
-as float; EXR fg is scene-linear and is compared after the video path's display encoding
-(clip(srgb(max(x, 0)), 0, 1)), so EXR and video outputs land on the same scale. Needs numpy and ffmpeg only.
+Videos are decoded by ffmpeg to 16-bit RGB (alpha = its first channel). EXR sequences are read as float by
+OpenCV, file by file, never through ffmpeg (2026-10-24: ffmpeg's EXR path bent the linear values and produced a
+false finding; tools/side_by_side.py reads them the same way). EXR fg is scene-linear and is compared after the
+video path's display encoding (clip(srgb(max(x, 0)), 0, 1)), so EXR and video outputs land on the same scale.
+Before a clip is reported, REF's first frame is decoded twice and compared with itself: anything but exactly zero
+stops the run (a broken decode can't pass as a result). Needs numpy and ffmpeg; OpenCV for EXR (with
+OPENCV_IO_ENABLE_OPENEXR, set here).
 
 Per clip: alpha MAE, max |diff|, SAD per frame, % of pixels off by more than 1/255 and 4/255, alpha PSNR;
 fg PSNR over all pixels and over the subject (reference alpha > 0.5); the worst frame by alpha MAE.
@@ -42,9 +46,9 @@ def probe_size(path):
     return int(h), int(w)
 
 
-def ffmpeg_frames(args, h, w, channels, dtype, limit):
-    """Raw frames from an ffmpeg command line (input args), as (h, w, channels) arrays."""
-    pix = {(1, np.float32): "grayf32le", (3, np.float32): "gbrpf32le", (3, np.uint16): "rgb48le"}[(channels, dtype)]
+def ffmpeg_frames(args, h, w, limit):
+    """16-bit RGB frames of a video from an ffmpeg command line (input args), as (h, w, 3) uint16 arrays."""
+    pix, channels, dtype = "rgb48le", 3, np.uint16
     cmd = ["ffmpeg", "-v", "error", "-nostdin", *args, "-map", "0:v:0", "-fps_mode", "passthrough"]
     if limit:
         cmd += ["-frames:v", str(limit)]
@@ -57,12 +61,7 @@ def ffmpeg_frames(args, h, w, channels, dtype, limit):
             buf = p.stdout.read(n)
             if len(buf) < n:
                 break
-            a = np.frombuffer(buf, dtype=dtype)
-            if pix == "gbrpf32le":  # planar G, B, R
-                g, b, r = a.reshape(3, h, w)
-                yield np.stack([r, g, b], axis=-1)
-            else:
-                yield a.reshape(h, w, channels)
+            yield np.frombuffer(buf, dtype=dtype).reshape(h, w, channels)
     finally:
         p.kill()
         # loop: SERIAL-REQUIRED — reaps ffmpeg after its frames were read [bounded: its pipe was read to the end]
@@ -72,38 +71,45 @@ def ffmpeg_frames(args, h, w, channels, dtype, limit):
 def video_alpha(path, limit):
     h, w = probe_size(path)
     # loop: SERIAL-REQUIRED — frames stream in order from one ffmpeg (a few frames in memory)
-    for f in ffmpeg_frames(["-i", path], h, w, 3, np.uint16, limit):
+    for f in ffmpeg_frames(["-i", path], h, w, limit):
         yield f[:, :, 0].astype(np.float32) / 65535.0
 
 
 def video_fg(path, limit):
     h, w = probe_size(path)
     # loop: SERIAL-REQUIRED — frames stream in order from one ffmpeg
-    for f in ffmpeg_frames(["-i", path], h, w, 3, np.uint16, limit):
+    for f in ffmpeg_frames(["-i", path], h, w, limit):
         yield f.astype(np.float32).transpose(2, 0, 1) / 65535.0
 
 
-def exr_seq(folder, channels, limit):
-    files = sorted(glob.glob(os.path.join(folder, "*.exr")))
+def exr_seq(folder, limit):
+    """The folder's EXR frames in name order, as float arrays (h, w) or (h, w, 3) RGB, read by OpenCV."""
+    os.environ.setdefault("OPENCV_IO_ENABLE_OPENEXR", "1")
+    import cv2  # only EXR needs OpenCV
+
+    files = sorted(glob.glob(os.path.join(glob.escape(folder), "*.exr")))
     if not files:
         raise SystemExit(f"no EXR frames in {folder}")
-    h, w = probe_size(files[0])
-    args = ["-pattern_type", "glob", "-i", os.path.join(glob.escape(folder), "*.exr")]
-    # loop: SERIAL-REQUIRED — frames stream in order from one ffmpeg
-    for f in ffmpeg_frames(args, h, w, channels, np.float32, limit):
-        yield f
+    # loop: SERIAL-REQUIRED — one EXR file at a time, in order (a frame in memory) [bounded: the folder's files]
+    for f in files[: limit or None]:
+        img = cv2.imread(f, cv2.IMREAD_UNCHANGED)
+        if img is None:
+            raise SystemExit(f"{f}: OpenCV couldn't read it")
+        if img.dtype != np.float32:
+            raise SystemExit(f"{f}: read as {img.dtype}, not float (an EXR must decode to float)")
+        yield img[..., ::-1] if img.ndim == 3 else img  # OpenCV reads BGR
 
 
 def exr_alpha(folder, limit):
     # loop: SERIAL-REQUIRED — EXR frames in order
-    for f in exr_seq(folder, 1, limit):
-        yield np.clip(f[:, :, 0], 0.0, 1.0)
+    for f in exr_seq(folder, limit):
+        yield np.clip(f if f.ndim == 2 else f[:, :, 0], 0.0, 1.0)
 
 
 def exr_fg(folder, limit):
     # loop: SERIAL-REQUIRED — EXR frames in order
-    for f in exr_seq(folder, 3, limit):
-        yield linear_to_srgb(f).transpose(2, 0, 1)
+    for f in exr_seq(folder, limit):
+        yield linear_to_srgb(f[:, :, :3]).transpose(2, 0, 1)
 
 
 class Source:
@@ -147,6 +153,18 @@ class Source:
 
 def psnr(mse):
     return float("inf") if mse == 0 else 10.0 * math.log10(1.0 / mse)
+
+
+def self_check(src):
+    """REF against itself, first frame of alpha and fg, each decoded twice: must be exactly zero."""
+    # loop: NOT-WORTH — alpha and fg
+    for kind in ("alpha", "fg"):
+        a, b = getattr(src, kind)(), getattr(src, kind)()
+        if a is None:
+            continue
+        x, y = next(iter(a), None), next(iter(b), None)
+        if x is None or y is None or x.shape != y.shape or np.abs(x.astype(np.float64) - y.astype(np.float64)).max() != 0:
+            raise SystemExit(f"self-check failed: {kind} of {src.path} differs from itself")
 
 
 def compare(ref, test):
@@ -243,7 +261,9 @@ def main():
     rows = []
     # loop: SERIAL-REQUIRED — one clip at a time keeps memory to a few frames
     for name, r, t in pairs:
+        self_check(Source(r, a.frames))
         m = compare(Source(r, a.frames), Source(t, a.frames))
+        m["self_check"] = "passed"
         m.update({"clip": name, "ref": r, "test": t})
         rows.append((name, m))
         print("COMPARE " + json.dumps(m), flush=True)
