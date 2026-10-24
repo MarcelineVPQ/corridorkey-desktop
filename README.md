@@ -10,8 +10,8 @@ Status: in development, Linux first.
 ## Requirements
 
 - An NVIDIA graphics card (RTX 30-series or newer) and `ffmpeg`.
-- A CorridorKey2.0 checkout set up as its README describes (Python venv, weights). The app
-  asks for that folder on first start.
+- Nothing else to set up: the engine comes with the app, and on first start the Engine page downloads
+  the GPU runtime and the CorridorKey models (4.5 GB, once). If `ffmpeg` is missing, it offers to install it.
 
 ## Install size
 

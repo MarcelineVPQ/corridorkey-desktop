@@ -54,7 +54,8 @@ built from the CorridorKey2.0 clone). Precision: fp16 on the GPU, fp32 on the CP
 Use the **`2.0.0-onnx.3`** set: `2.0.0-onnx.2` (stage 1 and stage 2 with three exact graph rewrites: window
 pads, depatchify ConvTranspose, grouped 7×7 convs; `engine-rs/export/speed_patches.py`) with C-RADIO
 re-exported so it takes portrait frames (`docs/ONNX_EXPORT.md` "Portrait").
-Same inputs and outputs as `2.0.0-onnx.1`. The engine runs all three; the speed numbers below are onnx.2, and
+Same inputs and outputs as `2.0.0-onnx.1`. The engine runs all three. The current speed numbers (onnx.3, the
+engine and runtime the app ships) are in the README, "Speed"; the table below is the onnx.2 run of 2026-10-21, and
 onnx.3 gives identical landscape output at the same speed ("Portrait" below). The engine reads the set's version
 from `manifest.json` and refuses portrait clips up front (an `input` error) only for onnx.1 / onnx.2.
 
@@ -101,9 +102,12 @@ The engine runs `ffmpeg` / `ffprobe` from the system: they are not bundled.
 
 ## The app
 
-The queue runs the Rust engine when its program and models folder are set up (Engine page, or
-`CK_ENGINE_BIN` / `CK_ENGINE_MODELS` / `CK_ENGINE_ORT`), else the PyTorch engine from the CorridorKey
-checkout (`electron/main/settings.ts` `chooseEngine`). The Engine page says which engine is in use.
+The engine ships inside the AppImage (`resources/engine/`); its GPU runtime and models are downloaded on first start
+into `~/.local/share/corridorkey-desktop` (`electron/main/install.ts`, Engine page, Runtime and models). The Engine
+page lists every copy it finds (`electron/main/engineFind.ts`; Automatic = the newest, Browse… for anything else);
+`CK_ENGINE_BIN` / `CK_ENGINE_MODELS` / `CK_ENGINE_ORT` override the lists. The queue runs the Rust engine when its
+program and models are there, else the PyTorch engine from a CorridorKey2.0 checkout if one is chosen (the benchmark
+reference; `electron/main/settings.ts` `chooseEngine`). The Engine page says which engine is in use.
 
 ## Graphics memory
 
@@ -164,6 +168,9 @@ window 4/2 low-VRAM, both encoded by x264 CRF 12), against the Rust engine's CUD
 MAE 3.41e-4, max 6.25e-2, 3.08 % > 1/255; PyTorch bf16 5.00e-4, 2.23e-1, 3.57 %.
 
 ## Against the PyTorch engine (`tools/engine_bench.mjs`, 12 GB budget, alpha+fg, auto, no hint)
+
+The current run (2026-10-24: onnx.3, the bundled engine built for glibc 2.28, the runtime the app downloads) is the
+README's "Speed" table: 1.54-1.82× faster than PyTorch on every clip. The record below is the onnx.2 run it replaced.
 
 RTX 5080, the six clips in `~/Videos/corridorkey-tests`, one engine process per clip, the same options for
 both engines. Rust: CUDA fp16, the `2.0.0-onnx.2` models, two full runs on 2026-10-21 (both shown where they
