@@ -109,13 +109,17 @@ impl Profile {
 
 /// runtime.select_vram_profile's search: the largest window that fits `budget_gb` (a larger low-VRAM window beats a
 /// smaller normal one, the normal mode first at the same window); a single-frame low-VRAM window when nothing fits.
-pub fn select_vram_profile(shape_hw: (usize, usize), num_frames: usize, budget_gb: f64) -> Profile {
+/// `low_only` (a TensorRT job): low-VRAM mode only. The table's normal-mode peaks are measured on CUDA only, and
+/// with them a 16 GB card's free memory would put HD 48/24 and 4K 8/4 in the normal mode, where TensorRT's peaks
+/// are unmeasured; TensorRT keeps the low mode it had before the measured table (row 41) until they are measured.
+/// The window is the same as CUDA's (a low-mode peak is never above the normal one at the same window).
+pub fn select_vram_profile(shape_hw: (usize, usize), num_frames: usize, budget_gb: f64, low_only: bool) -> Profile {
     let mp = (shape_hw.0 * shape_hw.1) as f64 / 1e6;
     let mut estimate = 0.0;
     for chunk in AUTO_WINDOWS {
         // loop: NOT-WORTH — two modes
         for low in [false, true] {
-            if !low && !AUTO_NORMAL.contains(&chunk) {
+            if !low && (low_only || !AUTO_NORMAL.contains(&chunk)) {
                 continue;
             }
             let p = Profile { chunk, stride: (chunk / 2).max(1), low_vram: low, estimate_gb: estimate_peak_vram_gb(mp, chunk.min(num_frames), low) };
@@ -405,16 +409,34 @@ mod tests {
         ];
         // loop: NOT-WORTH — seven cases
         for (shape, frames, want) in cases {
-            let p = select_vram_profile(shape, frames, 12.0);
+            let p = select_vram_profile(shape, frames, 12.0, false);
             assert_eq!((p.chunk, p.stride, p.low_vram), want, "{shape:?} {frames} frames");
         }
     }
 
     #[test]
+    fn tensorrt_keeps_low_memory_mode() {
+        // where the measured table puts CUDA in the normal mode (a 16 GB card's ~14.5 GiB free: HD 48/24, 4K 8/4;
+        // godiva_close at 12 GiB), a TensorRT job takes the same window in low-VRAM mode (its normal-mode peaks
+        // are unmeasured, row 41)
+        let cases = [((1152, 1280), 250, 14.5, 48), ((2176, 4096), 120, 14.5, 8), ((768, 1024), 349, 12.0, 80)];
+        // loop: NOT-WORTH — three cases
+        for (shape, frames, budget, chunk) in cases {
+            let cuda = select_vram_profile(shape, frames, budget, false);
+            let trt = select_vram_profile(shape, frames, budget, true);
+            assert_eq!((cuda.chunk, cuda.stride, cuda.low_vram), (chunk, chunk / 2, false), "CUDA {shape:?} {frames} frames");
+            assert_eq!((trt.chunk, trt.stride, trt.low_vram), (chunk, chunk / 2, true), "TensorRT {shape:?} {frames} frames");
+            assert!(trt.fits(budget));
+        }
+        // nothing fits: the single-frame low window either way
+        assert_eq!(select_vram_profile((1152, 1920), 240, 1.0, true), select_vram_profile((1152, 1920), 240, 1.0, false));
+    }
+
+    #[test]
     fn selection_prefers_long_windows() {
-        let p = select_vram_profile((1152, 1920), 240, 15.0);
+        let p = select_vram_profile((1152, 1920), 240, 15.0, false);
         assert!(p.fits(15.0));
-        let tiny = select_vram_profile((1152, 1920), 240, 1.0);
+        let tiny = select_vram_profile((1152, 1920), 240, 1.0, false);
         assert_eq!((tiny.chunk, tiny.stride, tiny.low_vram), (1, 1, true));
     }
 
@@ -434,7 +456,7 @@ mod tests {
         assert_eq!(w[0]["fits"], json!(needs <= 15.0));
         assert_eq!(w[2]["fits"], json!(false), "80 frames at HD don't fit 15 GiB");
         // the window the automatic choice picks for 15 GiB fits by the same rule, with the same estimate
-        let auto = select_vram_profile(shape, 240, 15.0);
+        let auto = select_vram_profile(shape, 240, 15.0, false);
         let a = window_estimates(shape, 240, &[(auto.chunk, auto.stride, auto.low_vram)], Some((15.0 * GIB) as u64));
         assert_eq!(a[0]["fits"], json!(true));
         assert!((a[0]["peak_bytes"].as_u64().unwrap() as f64 / GIB - auto.estimate_gb).abs() < 1e-6);

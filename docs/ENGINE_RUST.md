@@ -219,6 +219,9 @@ their windows; godiva_close (960×720) keeps 80/40 but now in the normal mode (t
 12.9 GiB, measured 8.0). At a 16 GB card's ~14.5 GiB free, the 1280×1080 clips go from 48/24 low to 48/24 normal
 and the 4K plates from 8/4 low to 8/4 normal (measured 10.5 and 11.0 GiB): the same windows, and low-VRAM staging
 gives identical output, but TensorRT builds its engines per mode (a new one-time build, its peaks unmeasured).
+A TensorRT job's automatic window therefore keeps low-VRAM mode (the same window, `select_vram_profile`'s
+`low_only`; test `tensorrt_keeps_low_memory_mode`): the normal-mode peaks are measured on CUDA only, so TensorRT stays
+in the mode it had before this table; the rule is lifted once TensorRT's normal-mode peaks are measured (row 54).
 
 | Size (padded MP) | Mode | Window | Runs | Measured peak (highest) | Old estimate (PyTorch table) | New estimate | New − measured |
 |---|---|---|---|---|---|---|---|

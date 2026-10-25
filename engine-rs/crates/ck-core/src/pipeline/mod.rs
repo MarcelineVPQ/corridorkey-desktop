@@ -624,8 +624,8 @@ impl Pipeline<OrtLoader> {
         crate::clip::model_shape_supported(meta.shape_h, meta.shape_w, meta.w, meta.h, self.models.takes_portrait())?;
         let t_all = meta.num_frames;
         let (sh, sw) = (meta.shape_h, meta.shape_w);
-        // TensorRT jobs take the same window (and low-VRAM staging) as the CUDA path, so the mattes match
-        // (tensorrt.rs bucket_for); their engines are built for it
+        // TensorRT jobs take the same window as the CUDA path (the automatic one in low-VRAM mode, below), so the
+        // mattes match (low-VRAM staging gives identical output; tensorrt.rs bucket_for); their engines are built for it
         if !job.manual && provider == Provider::CoreMl {
             // Core ML, phase 1: the window comes from the set (the smallest stage-1 window it was built for at this
             // size), low-memory mode; there is no graphics memory reading on a Mac to size it from
@@ -648,7 +648,10 @@ impl Pipeline<OrtLoader> {
                 Some(cap) if provider != Provider::Cpu => seen.min(cap),
                 _ => seen,
             };
-            let p = select_vram_profile((sh, sw), t_all, budget);
+            // a TensorRT job keeps low-VRAM mode: the table's normal-mode peaks are CUDA's, TensorRT's are
+            // unmeasured (row 41; lifted once they are). A later fallback to CUDA runs the low mode, as before.
+            let tensorrt = job.tensorrt && provider == Provider::Cuda && self.loader.rt.tensorrt_ep;
+            let p = select_vram_profile((sh, sw), t_all, budget, tensorrt);
             chunk = p.chunk;
             stride = p.stride;
             low_vram = p.low_vram;
