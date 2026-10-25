@@ -427,8 +427,15 @@ the runtime's own inputs; Corridor's files untouched, a wrapper patches autocast
 Fed the same pixels, our matte is closer to the truth than CorridorKey 2.0's own shipping run on every measure
 (hair-edge error about 9× smaller). Our engine against CorridorKey 2.0 as it ships: alpha MAE 3.7e-4, hair edges
 9.1 % > 1/255, fg 57.2 dB, about the original's own distance from the truth: on the same input, what separates us
-from the original is its bf16 rounding. Not measured in this run: how much of the hair difference seen before came
-from the 16-bit read (that run would be the next step, "expanding the bit depth").
+from the original is its bf16 rounding.
+
+How much the 16-bit read changed (2026-10-25, one more run, the same clip and settings, only `input_bit_depth`
+"16"): our 16-bit matte against our 8-bit one, hair edges MAE 4.0e-3, 40.5 % > 1/255 (alpha MAE 2.8e-4, fg 49.4 dB);
+against CorridorKey 2.0 as it ships, hair edges 39.7 % > 1/255, against 9.1 % at 8 bits. So most of the hair
+difference Marcy saw came from our 16-bit read, about 4× more than the original's bf16 rounding. Whether 16-bit
+hair is better or worse is not measured: the truth above was fed 8-bit frames, so 16-bit differs from it by input,
+not necessarily by error. That needs a second truth fed the same 16-bit frames (the next step, "expanding the bit
+depth").
 
 **2. The scorecard measured the wrong reference (2026-10-24).** Comparing with the original's output can't tell
 which of two roundings is closer to the right answer. From now on quality is measured against the fp32 truth. The
