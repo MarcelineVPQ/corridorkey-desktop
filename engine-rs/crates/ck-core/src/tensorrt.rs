@@ -16,9 +16,13 @@ use std::path::{Path, PathBuf};
 /// close to the clips in it (TensorRT sizes its working memory, and so the longest window, for the largest shape).
 /// 720p pads to 768x1280, 1080p to 1152x1920, UHD to 2176x3840.
 pub(crate) const DIM_RANGES: [(usize, usize); 8] = [(128, 512), (640, 896), (1024, 1280), (1408, 1664), (1792, 2176), (2304, 2816), (2944, 3456), (3584, 4096)];
-/// The largest padded side TensorRT is used for. UHD (2176 x 3840 and up) runs on CUDA until its builds are
-/// measured (BACKLOG row 12, step 3).
-pub(crate) const MAX_SIDE: usize = 2176;
+/// The largest padded side TensorRT is used for: 4096 (DCI 4K, 4096x2160, pads to 2176x4096).
+pub(crate) const MAX_SIDE: usize = 4096;
+/// The largest engine shape (a range's largest H x W) TensorRT is used for: 2176 x 4096, the largest measured
+/// (BACKLOG row 12, step 3, 2026-10-24, RTX 5080 16 GB: all five networks build for the 4K range at the 8/4
+/// low-VRAM window, stage 1 in 139 s with a 7.2 GB workspace, peak 13.1 GB on the card). A range past it (open gate
+/// 4096x3072 pads into h2944-3456) runs on CUDA until measured.
+pub(crate) const MAX_AREA: usize = 2176 * 4096;
 /// Frames per call of the foundation models in low-VRAM mode (pipeline.rs, the foundations prepass).
 pub(crate) const FOUNDATION_CHUNK: usize = 4;
 
@@ -38,13 +42,16 @@ fn range_of(v: usize, ranges: &[(usize, usize)]) -> Option<(usize, usize)> {
 
 /// The engine set for padded (H, W) and the job's window (the CUDA path's choice; measured 2026-10-24: at the
 /// same window TensorRT's mattes match CUDA's within fp16 rounding, at a shorter one they don't). None: outside
-/// every range or larger than MAX_SIDE (CUDA runs it).
+/// every range, larger than MAX_SIDE, or in a range larger than MAX_AREA (CUDA runs it).
 pub(crate) fn bucket_for(shape_h: usize, shape_w: usize, window: usize, low_vram: bool) -> Option<Bucket> {
     if shape_h > MAX_SIDE || shape_w > MAX_SIDE || window == 0 {
         return None;
     }
     let h = range_of(shape_h, &DIM_RANGES)?;
     let w = range_of(shape_w, &DIM_RANGES)?;
+    if h.1 * w.1 > MAX_AREA {
+        return None;
+    }
     let f = if low_vram { FOUNDATION_CHUNK.min(window) } else { window };
     Some(Bucket { h, w, t: (1, window), f: (1, f) })
 }
@@ -380,10 +387,46 @@ mod tests {
         assert_eq!(bucket_for(1152, 1280, 2, true).unwrap().f, (1, 2));
         // portrait: a different bucket (aspect ratio counts)
         assert_eq!(bucket_for(1920, 1152, 24, true).unwrap().key(), "h1792-2176_w1024-1280_t1-24_f1-4");
-        // UHD stays on CUDA (step 3), and so does anything past the ranges
-        assert_eq!(bucket_for(2176, 3840, 8, true), None);
+        // 4K (step 3): DCI 4K and UHD share the 2176 x 4096 range, portrait too; the 8/4 low-VRAM window
+        assert_eq!(bucket_for(2176, 4096, 8, true).unwrap().key(), "h1792-2176_w3584-4096_t1-8_f1-4");
+        assert_eq!(bucket_for(2176, 3840, 8, true).unwrap().key(), "h1792-2176_w3584-4096_t1-8_f1-4");
+        assert_eq!(bucket_for(4096, 2176, 8, true).unwrap().key(), "h3584-4096_w1792-2176_t1-8_f1-4");
+        // past the largest measured shape (open gate 4096x3072 -> 3072 x 4096) and past the ranges: CUDA
+        assert_eq!(bucket_for(3072, 4096, 8, true), None);
+        assert_eq!(bucket_for(4224, 4096, 8, true), None);
         assert_eq!(bucket_for(4352, 7680, 4, true), None);
         assert_eq!(bucket_for(1152, 1280, 0, true), None);
+    }
+
+    #[test]
+    fn shapes_up_to_2176_keep_their_step_2_buckets() {
+        // the step-2 rule (MAX_SIDE 2176, no area limit), unchanged for every padded shape it took
+        let step2 = |h: usize, w: usize, t: usize, low: bool| -> Option<Bucket> {
+            if h > 2176 || w > 2176 || t == 0 {
+                return None;
+            }
+            let f = if low { FOUNDATION_CHUNK.min(t) } else { t };
+            Some(Bucket { h: range_of(h, &DIM_RANGES)?, w: range_of(w, &DIM_RANGES)?, t: (1, t), f: (1, f) })
+        };
+        // loop: NOT-WORTH — a test over 17 x 17 shapes x a few windows
+        for h in (128..=2176).step_by(128) {
+            for w in (128..=2176).step_by(128) {
+                for (t, low) in [(1, true), (8, true), (48, true), (80, true), (16, false), (24, false)] {
+                    assert_eq!(bucket_for(h, w, t, low), step2(h, w, t, low), "{h}x{w} t{t} low {low}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_4k_profiles() {
+        let b = bucket_for(2176, 4096, 8, true).unwrap();
+        let (min, _, max) = profile("stage1", &b).unwrap();
+        assert!(min.starts_with("rgb:1x1x3x1792x3584,"), "{min}");
+        assert!(max.starts_with("rgb:1x8x3x2176x4096,") && max.contains("cradio:1x8x1152x34x64"), "{max}");
+        assert_eq!(profile("cradio", &b).unwrap().2, "rgb:4x3x544x1024");
+        assert_eq!(profile("rvm", &b).unwrap().2, "frame:1x3x544x1024,state:1x2177x384");
+        assert_eq!(profile("stage2", &b).unwrap().2, "rgb:1x1x3x2176x4096,baton:1x1x512x136x256");
     }
 
     #[test]

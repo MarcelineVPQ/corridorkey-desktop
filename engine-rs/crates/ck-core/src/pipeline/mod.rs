@@ -736,7 +736,13 @@ impl Pipeline<OrtLoader> {
             return Ok((base.clone(), None));
         }
         let Some(bucket) = crate::tensorrt::bucket_for(sh, sw, window, low_vram) else {
-            fallback(format!("{sw}x{sh} is outside the TensorRT ranges (larger than {} px a side runs on CUDA)", crate::tensorrt::MAX_SIDE), &mut msg);
+            fallback(
+                format!(
+                    "{sw}x{sh} is outside the TensorRT ranges (more than {} px a side, or a larger frame than 4096x2176, runs on CUDA)",
+                    crate::tensorrt::MAX_SIDE
+                ),
+                &mut msg,
+            );
             sink.send(msg);
             return Ok((base.clone(), None));
         };
