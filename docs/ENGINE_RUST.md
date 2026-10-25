@@ -343,10 +343,10 @@ docs/ONNX_EXPORT.md).
 w1024-1280), and since step 3 (2026-10-24) also 2304-2816, 2944-3456 and 3584-4096 for a side, as long as the
 range's largest frame is at most 2176 × 4096 (`MAX_AREA`, the largest measured: DCI 4K and UHD → h1792-2176
 w3584-4096; open gate 4096×3072 and anything over 4096 a side run on CUDA). At 4K on a 16 GB card the job's window
-is 8/4 low-VRAM and all five networks build (stage 1 in 139 s with a 7.2 GB workspace, peak 13.1 GB on the card);
-stage 1 for 16-frame windows at 4K finds no tactic within 8 GiB (it built with a 12000 MB workspace, peak 13.0 GB
-on the card, not with 9400 MB), so where a bigger card picks 16/8 at 4K, stage 1 runs on CUDA; on the 16 GB card
-that 16/8 engine also ran out of graphics memory while keying (13.2 GB peak), as CUDA does. At 8/4 the four Tears
+is 8/4 low-VRAM and all five networks build (stage 1 in 139 s with a 7.2 GiB workspace, peak 12.8 GiB on the card);
+stage 1 for 16-frame windows at 4K finds no tactic within 8 GiB (it built with a 12000 MiB workspace, peak 12.7 GiB
+on the card, not with 9400 MiB), so where a bigger card picks 16/8 at 4K, stage 1 runs on CUDA; on the 16 GB card
+that 16/8 engine also ran out of graphics memory while keying (13.2 GiB peak), as CUDA does. At 8/4 the four Tears
 of Steel 4K plates key in 111-113 s on TensorRT against 147-152 s on CUDA (steady 2.64-2.67 against 1.90-1.93 fps),
 alpha MAE 3-4e-5 against CUDA (EXR, read as float). A TensorRT job takes **exactly the CUDA path's
 window and low-VRAM staging** (`select_vram_profile`), so both give the same matte, and its engines are built

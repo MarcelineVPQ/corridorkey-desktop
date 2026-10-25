@@ -36,7 +36,9 @@ screen keyer, on its own Rust + ONNX Runtime engine, for Linux, Windows and macO
 - The window title says which CorridorKey and which engine: CorridorKey 2.0 — Rust + ONNX.
 - TensorRT, optional (Linux): Engine settings, TensorRT, "Use TensorRT (faster on NVIDIA)", off by default. About
   2× the original's speed at HD with the same mattes (README, Speed, 0.0.6-dev); the first job at each resolution
-  optimizes for it once (a few minutes), 4K still runs on CUDA. Switching it on offers its own download (NVIDIA's
+  optimizes for it once (about 4.5 minutes on an RTX 5080, about 5 at 4K; about half that once TensorRT's timing
+  cache is warm). 4K (DCI 4K and UHD, up to 2176×4096) runs on TensorRT too, at the 8/4 window on 16 GB cards, about
+  25 % faster than CUDA with the same mattes (README, Speed, 0.0.7-dev); open gate and larger stay on CUDA. Switching it on offers its own download (NVIDIA's
   TensorRT libraries from pypi.nvidia.com and the TensorRT models from this repository's releases, 6.9 GB, with
   progress, stop and resume, every file SHA-256 checked); jobs ask for TensorRT only once it is installed, and the
   job's log says what really ran (and which network stayed on CUDA, and why). Its own item in Storage. Windows

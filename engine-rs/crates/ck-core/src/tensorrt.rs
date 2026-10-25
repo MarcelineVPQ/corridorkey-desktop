@@ -20,7 +20,7 @@ pub(crate) const DIM_RANGES: [(usize, usize); 8] = [(128, 512), (640, 896), (102
 pub(crate) const MAX_SIDE: usize = 4096;
 /// The largest engine shape (a range's largest H x W) TensorRT is used for: 2176 x 4096, the largest measured
 /// (BACKLOG row 12, step 3, 2026-10-24, RTX 5080 16 GB: all five networks build for the 4K range at the 8/4
-/// low-VRAM window, stage 1 in 139 s with a 7.2 GB workspace, peak 13.1 GB on the card). A range past it (open gate
+/// low-VRAM window, stage 1 in 139 s with a 7.2 GiB workspace, peak 12.8 GiB on the card). A range past it (open gate
 /// 4096x3072 pads into h2944-3456) runs on CUDA until measured.
 pub(crate) const MAX_AREA: usize = 2176 * 4096;
 /// Frames per call of the foundation models in low-VRAM mode (pipeline.rs, the foundations prepass).

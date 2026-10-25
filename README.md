@@ -47,8 +47,9 @@ Status: 1.0 is almost ready, for Linux, Windows and macOS (Apple Silicon).
   with the same mattes (Speed, 0.0.6-dev). Switching it on offers its own download: NVIDIA's TensorRT 10.16
   libraries (3.7 GB, from pypi.nvidia.com) and the TensorRT models (3.1 GB, from this repository's releases; C-RADIO's
   weights are copied from the models you already have), 6.9 GB in all, 7.5 GB on disk. The first job at each
-  resolution optimizes for it once (about 2.5 minutes for the five networks on an RTX 5080); 4K still runs on CUDA.
-  Best on 16 GB cards: where a network can't be built (stage 1 at 80-frame windows), that network runs on CUDA and
+  resolution optimizes for it once (about 4.5 minutes for the five networks on an RTX 5080, about 5 at 4K; about
+  half that once TensorRT's timing cache is warm). 4K (DCI 4K and UHD, up to 2176×4096) runs on TensorRT too, at
+  the 8/4 window on 16 GB cards; open gate and larger frames stay on CUDA (Speed, 0.0.7-dev). Best on 16 GB cards: where a network can't be built (stage 1 at 80-frame windows), that network runs on CUDA and
   the job's log says so. Windows needs its own TensorRT builder (a later version); macOS has no TensorRT.
 
 **Windows, first start:** the installer isn't code-signed yet, so Windows SmartScreen shows "Windows protected
@@ -144,6 +145,7 @@ Each engine build on the way is labelled as a dev step:
 | **0.0.4-dev** | 2026-10-24 | 4K EXR frames decoded four at once, freed memory returned after every job (results below) |
 | **0.0.5-dev** | 2026-10-24 | TensorRT re-measured on today's engine (opt-in, not in the app yet; results below) |
 | **0.0.6-dev** | 2026-10-24 | TensorRT takes CUDA's window, so its mattes match (results below) |
+| **0.0.7-dev** | 2026-10-24 | TensorRT at 4K: DCI 4K and UHD get their own engine range (results below) |
 
 The same HD bench, run on different days as the engine improved (totals, seconds; Original = PyTorch):
 
@@ -247,6 +249,67 @@ same band as CUDA against the original PyTorch.
 The one-time build per resolution is about 2.5 minutes for the five networks. In 1.0 this is the app's TensorRT
 switch (Linux, off by default; Requirements): the AppImage carries the engine builder, and the switch offers the
 TensorRT download.
+
+**Correction (measured later on 2026-10-24, 0.0.7-dev):** the 2.5 minutes above (140.9 s for the 1280×1080 range)
+were measured with TensorRT's timing cache already warm from the earlier ranges' builds in the same cache folder.
+A first build with an empty cache, the five networks at 1280×1080 (window 48/24), takes **270.7 s (4 min 31 s)**
+with the shipped (Zig-built) builder and 270.7 s with the earlier g++ build of it, so the builder makes no
+difference; stage 1 alone is 138 s. The same builds with the timing cache warm: 135.0 s. The app's own first
+optimize measured 4 min 22 s. So: about 4.5 minutes the first time per resolution on an RTX 5080, about half that
+when the timing cache is warm.
+
+### 0.0.7-dev: TensorRT at 4K
+
+Until 0.0.6-dev a frame with a side over 2176 px ran on CUDA under TensorRT. 0.0.7-dev gives 4K its own engine
+range (DCI 4K and UHD pad into 2176×4096; open gate 4096×3072 and anything larger stay on CUDA) and keeps CUDA's
+window, as at HD: 8/4 in low-memory mode at 4K on a 16 GB card. Measured on 2026-10-24, RTX 5080 (16 GB), TensorRT
+10.16.1.
+
+The one-time builds at 4K (the shipped builder, workspace 7.2 GiB, cold; card memory is the whole card, in GiB as in the
+tables above; the desktop holds 1.6 of it):
+
+| Network | Window | Built | Time | Card peak | RAM peak |
+| --- | --- | --- | --- | --- | --- |
+| C-RADIO | 8/4 | yes | 36.8 s | 3.2 GB | 4.3 GB |
+| MoGe | 8/4 | yes | 33.1 s | 2.4 GB | 2.5 GB |
+| RVM | 8/4 | yes | 35.6 s | 2.5 GB | 2.4 GB |
+| stage 1 | 8/4 | yes | 139.2 s | 12.8 GB | 4.7 GB |
+| stage 2 | 8/4 | yes | 57.8 s | 5.6 GB | 3.3 GB |
+| stage 1 | 16/8 | **no** with a 4.0, 7.2 or 9.2 GiB workspace (no tactic); yes with 11.7 GiB (211.8 s, 12.7 GB) | | | |
+
+Inside the engine the first 4K job built all five in 284.5 s (about 5 minutes) and nothing fell back to CUDA.
+16/8 doesn't fit a 16 GB card: the engine caps the builder's workspace at 8 GiB, and even the engine built by hand
+with 11.7 GiB ran out of graphics memory in stage 1 while keying (13.2 GB peak), as CUDA does at 16/8. So 8/4 is the
+4K window on 16 GB for both.
+
+The four Tears of Steel 4K plates (120 EXR frames each), TensorRT against CUDA, same day, same engine binary, same
+8/4 window, EXR output:
+
+| Shot | CUDA: total · first frames · steady | TensorRT: total · first frames · steady | Change | Graphics memory, CUDA / TensorRT | RAM, CUDA / TensorRT |
+| --- | --- | --- | --- | --- | --- |
+| 04_5h | 151.5 s · 88.9 s · 1.90 fps | **113.0 s** · 68.1 s · 2.66 fps | −25 % | 9.22 / 9.81 GB | 6.30 / 5.50 GB |
+| 04_5d | 147.5 s · 85.6 s · 1.93 fps | **112.6 s** · 67.4 s · 2.64 fps | −24 % | 9.13 / 9.81 GB | 6.35 / 5.67 GB |
+| 08_3a | 147.3 s · 85.4 s · 1.93 fps | **112.4 s** · 67.7 s · 2.67 fps | −24 % | 9.29 / 9.81 GB | 6.37 / 5.67 GB |
+| 04_2c | 148.1 s · 86.2 s · 1.93 fps | **111.5 s** · 66.4 s · 2.64 fps | −25 % | 9.15 / 9.81 GB | 6.48 / 5.66 GB |
+
+04_5h's first TensorRT job, with the one-time build: 398.9 s; its matte is bit-identical to the later job's. These
+runs used a measurement build of the engine; the shipped change, re-run on 04_5d with the same engines, took
+111.9 s (measurement build: 112.6 s and 109.9 s), and its alpha and foreground are identical to the measurement build's, value for value.
+
+Mattes, TensorRT against CUDA, read exactly: the EXR frames as floats with OpenCV (not through ffmpeg). The edge
+band is where CUDA's alpha is between 0.02 and 0.98 (hair and soft edges). The HD table above compares video files,
+so its numbers aren't directly comparable with these.
+
+| Shot | alpha MAE | alpha max | % off by more than 1/255 | more than 4/255 | alpha PSNR | edge band: MAE · % > 1/255 | fg PSNR |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 04_5h | 2.95e-5 | 0.016 | 0.005 % | 0.00000009 % | 76.1 dB | 4.4e-4 · 0.11 % | 63.1 dB |
+| 04_5d | 3.08e-5 | 0.086 | 0.094 % | 0.002 % | 70.6 dB | 7.5e-4 · 3.1 % | 65.2 dB |
+| 08_3a | 4.14e-5 | 0.054 | 0.116 % | 0.016 % | 66.6 dB | 1.2e-3 · 4.2 % | 54.1 dB |
+| 04_2c | 3.75e-5 | 0.013 | 0.010 % | 0 | 75.4 dB | 3.7e-4 · 0.14 % | 80.6 dB |
+
+Today's CUDA 4K totals (147-152 s) are below the 4K table's 170-174 s (0.0.3-dev): 0.0.4-dev's faster EXR decoding
+took 04_5h from 170.1 to 162.7 s; these runs also write EXR instead of video, and the rest of the gap wasn't measured
+on its own. The 4K table above stays as measured.
 
 ### TensorRT, first measurement (2026-10-21)
 

@@ -93,8 +93,9 @@ export function TrtBox({ trt, inst, platform }: { trt: TrtState; inst: InstallSt
         </label>
       </Row>
       <p className="hint-text">
-        About 2× the original&apos;s speed at HD, with the same mattes (README, Speed, 0.0.6-dev). The first job at each resolution optimizes for it once, a few minutes; later jobs reuse that. Best on
-        graphics cards with 16 GB. Frames larger than 2176 pixels a side (4K) still run on CUDA. An extra {gbBytes(trt.fullBytes)} download: NVIDIA&apos;s TensorRT libraries and the TensorRT models.
+        About 2× the original&apos;s speed at HD, with the same mattes (README, Speed, 0.0.6-dev). The first job at each resolution optimizes for it once, about 4.5 minutes on an RTX 5080 (about 5 at
+        4K); later jobs reuse that. Best on graphics cards with 16 GB. 4K (DCI 4K and UHD) runs on TensorRT too; open gate and larger frames run on CUDA. An extra {gbBytes(trt.fullBytes)} download:
+        NVIDIA&apos;s TensorRT libraries and the TensorRT models.
       </p>
       {trt.on &&
         (baseMissing ? (
