@@ -5,6 +5,8 @@
 //   steady frames/s from the engine's own `frames` replies after the first window; total wall time;
 //   peak VRAM (nvidia-smi every 250 ms, the engine's process tree); peak RSS (the same tree: /proc on Linux,
 //   one `ps` table elsewhere, i.e. macOS);
+//   CPU time of the engine's process tree (Linux: utime+stime of every live process plus the c-times of the children
+//   they reaped, from /proc/<pid>/stat, sampled every 250 ms and once more at each `result`; elsewhere n/a);
 //   the memory window used (`memory` reply). Writes <out>/bench.json, <out>/bench.md and every reply to
 //   <out>/<clip>.replies.jsonl (the engine's own logs, e.g. the Rust engine's timing line); outputs go to
 //   <out>/out/<clip>/ for tools/matte_compare.py --roots.
@@ -16,7 +18,12 @@
 // opts: --vram-budget GB (the run option vram_budget_gb, same for both engines), --tensorrt,
 //       --stall-s S (default 600: an engine silent that long is killed and the clip recorded as stalled;
 //       the longest silence measured is one TensorRT engine build, 93 s),
-//       --option key=json (any extra run option), --env K=V (engine environment), --cpu (no GPU guard; CPU only).
+//       --option key=json (any extra run option), --env K=V (engine environment), --cpu (no GPU guard; CPU only),
+//       --warm (after the clip's job, the same clip again as a second job in the same engine process, models already
+//       loaded: what the second clip of a queue costs; its numbers go to the row's `warm`, outputs to <out>/out-warm/).
+// Columns: "total" is engine start → the cold job's result (model load included; the exit follows at once); "first
+// frames" is engine start → the first finished frames (load + the first window), never the total. Warm times count
+// from the second job's `run` line.
 // Defaults for both engines: outputs alpha+fg, automatic memory window, no hint.
 // GPU guard: refuses to start, and stops between clips, while Sonata runs or another process holds > 1 GiB.
 import { spawn, execFileSync } from "node:child_process";
@@ -45,6 +52,7 @@ export function parseArgs(argv) {
     else if (k === "--tensorrt") a.tensorrt = true;
     else if (k === "--stall-s") a.stallS = Number(next());
     else if (k === "--cpu") a.cpu = true;
+    else if (k === "--warm") a.warm = true;
     else if (k === "--option") {
       const [key, ...v] = next().split("=");
       a.option[key] = JSON.parse(v.join("="));
@@ -123,6 +131,41 @@ function treeRssMb(root) {
   }
 }
 
+let clkTck = null;
+/** Clock ticks per second for /proc/<pid>/stat (getconf CLK_TCK; 100 on Linux when it can't be read). */
+function ticksPerS() {
+  if (clkTck === null) {
+    try {
+      // loop: NOT-WORTH — one getconf call per bench [bounded: 5 s timeout]
+      clkTck = Number(execFileSync("getconf", ["CLK_TCK"], { encoding: "utf8", timeout: 5000 }).trim()) || 100;
+    } catch {
+      clkTck = 100;
+    }
+  }
+  return clkTck;
+}
+
+/**
+ * CPU seconds of a process tree: for every live process utime + stime + cutime + cstime (/proc/<pid>/stat fields
+ * 14-17). A child its parent has reaped (an ffmpeg writer) is counted once, in that parent's c-times; a live child
+ * is counted by its own entry and is not yet in anyone's c-times. Unreadable processes count 0.
+ */
+export function treeCpuS(pids, readStat = (p) => readFileSync(`/proc/${p}/stat`, "utf8"), tck = ticksPerS()) {
+  let ticks = 0;
+  // loop: HOT-PATH-OK — the engine's few processes, every 250 ms while a bench clip runs
+  for (const p of pids) {
+    try {
+      const s = readStat(p);
+      // fields after the command name "(...)": [0] is field 3 (state), so utime..cstime (14-17) are [11]..[14]
+      const f = s.slice(s.lastIndexOf(")") + 2).split(" ");
+      ticks += Number(f[11]) + Number(f[12]) + Number(f[13]) + Number(f[14]);
+    } catch {
+      // error: NOT-WORTH — the process ended between listing and reading
+    }
+  }
+  return ticks / tck;
+}
+
 const rssMb = (pids) =>
   // loop: HOT-PATH-OK — the engine's few processes, every 250 ms while a bench clip runs
   pids.reduce((s, p) => {
@@ -189,19 +232,39 @@ export function steadyFps(frames, firstWindowAt) {
   return t1 > t0 ? (d1 - d0) / (t1 - t0) : null;
 }
 
+/** One job's bookkeeping inside an engine process (the cold job, and with --warm a second one). */
+function newJob(id, sentAt) {
+  return { id, sentAt, frames: [], firstFrameAt: undefined, firstWindowAt: undefined, totalS: undefined, cpuAtEnd: null, error: null };
+}
+
 async function runClip(a, clip) {
   const name = basename(clip, extname(clip));
   const [cmd, args] = engineCommand(a);
   const t0 = performance.now();
   const sec = () => (performance.now() - t0) / 1000;
   const child = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, PYTHONUNBUFFERED: "1", ...a.env } });
-  const r = { clip: name, input: resolve(clip), engine: a.kind, peakVramMb: 0, peakRssMb: 0, memory: null, provider: null, error: null };
-  const frames = [];
+  const r = { clip: name, input: resolve(clip), engine: a.kind, peakVramMb: 0, peakRssMb: 0, cpuS: null, memory: null, provider: null, error: null };
+  const linux = process.platform === "linux";
+  const jobs = [];
+  let cpuSeen = 0;
+  const sampleCpu = () => {
+    if (linux) cpuSeen = Math.max(cpuSeen, treeCpuS(tree(child.pid)));
+    return linux ? cpuSeen : null;
+  };
   const stderr = [];
   createInterface({ input: child.stderr }).on("line", (l) => {
     stderr.push(l);
     if (stderr.length > 30) stderr.shift();
   });
+  const send = (id) => {
+    const warm = jobs.length === 1;
+    jobs.push(newJob(id, sec()));
+    const out = join(a.out, warm ? "out-warm" : "out", name);
+    const tmp = join(a.out, "tmp", warm ? `${name}-warm` : name);
+    child.stdin.write(JSON.stringify({ cmd: "run", id, input: resolve(clip), output_dir: out, temp_dir: tmp, options: runOptions(a) }) + "\n");
+  };
+  // loop: NOT-WORTH — one or two jobs per engine process
+  const jobOf = (id) => jobs.find((j) => j.id === id) ?? jobs[jobs.length - 1];
   // lifetime: OK — cleared when the engine exits
   // loop: HOT-PATH-OK — /proc reads + one nvidia-smi call every 250 ms while a bench clip runs
   let lastReply = 0;
@@ -215,6 +278,7 @@ async function runClip(a, clip) {
     }
     if (!a.cpu) r.peakVramMb = Math.max(r.peakVramMb, vramMb(tree(child.pid)));
     r.peakRssMb = Math.max(r.peakRssMb, Math.round(treeRssMb(child.pid)));
+    sampleCpu();
   }, SAMPLE_MS);
   const done = new Promise((res) => {
     const replies = join(a.out, `${name}.replies.jsonl`);
@@ -237,20 +301,26 @@ async function runClip(a, clip) {
           precision: m.precision ?? (m.torch ? "bf16-autocast" : null),
           runtime: m.ort ? `onnxruntime ${m.ort}` : m.torch ? `torch ${m.torch}` : null,
         });
-        child.stdin.write(JSON.stringify({ cmd: "run", id: name, input: resolve(clip), output_dir: join(a.out, "out", name), temp_dir: join(a.out, "tmp", name), options: runOptions(a) }) + "\n");
+        send(name);
       } else if (m.type === "provider") r.provider = { ...(r.provider ?? {}), ...m };
       else if (m.type === "clip") Object.assign(r, { width: m.width, height: m.height, totalFrames: m.frames });
-      else if (m.type === "memory") r.memory = m;
-      else if (m.type === "progress" && m.stage === "keying" && typeof m.p === "number" && r.firstWindowAt === undefined) r.firstWindowAt = now;
-      else if (m.type === "frames") {
-        if (r.firstFrameAt === undefined && m.done > 0) r.firstFrameAt = now;
-        frames.push([now, m.done]);
+      else if (m.type === "memory") r.memory = r.memory ?? m;
+      else if (m.type === "progress" && m.stage === "keying" && typeof m.p === "number") {
+        const j = jobOf(m.id);
+        if (j.firstWindowAt === undefined) j.firstWindowAt = now;
+      } else if (m.type === "frames") {
+        const j = jobOf(m.id);
+        if (j.firstFrameAt === undefined && m.done > 0) j.firstFrameAt = now;
+        j.frames.push([now, m.done]);
       } else if (m.type === "result") {
-        r.totalS = now;
-        r.engineSeconds = m.seconds;
-        child.stdin.write('{"cmd":"quit"}\n');
+        const j = jobOf(m.id);
+        j.totalS = now;
+        j.engineSeconds = m.seconds;
+        j.cpuAtEnd = sampleCpu();
+        if (a.warm && jobs.length === 1) send(`${name}~warm`);
+        else child.stdin.write('{"cmd":"quit"}\n');
       } else if (m.type === "error") {
-        r.error = `${m.code}: ${m.message}`;
+        jobOf(m.id).error = `${m.code}: ${m.message}`;
         child.stdin.write('{"cmd":"quit"}\n');
       }
     });
@@ -262,8 +332,25 @@ async function runClip(a, clip) {
   child.stdin.write('{"cmd":"ping"}\n');
   await done;
   clearInterval(sampler);
-  r.steadyFps = steadyFps(frames, r.firstWindowAt);
-  r.framesDone = frames.length ? frames[frames.length - 1][1] : 0;
+  const cold = jobs[0] ?? newJob(name, 0);
+  Object.assign(r, { firstFrameAt: cold.firstFrameAt, firstWindowAt: cold.firstWindowAt, totalS: cold.totalS, engineSeconds: cold.engineSeconds });
+  r.steadyFps = steadyFps(cold.frames, cold.firstWindowAt);
+  r.framesDone = cold.frames.length ? cold.frames[cold.frames.length - 1][1] : 0;
+  r.cpuS = cold.cpuAtEnd;
+  r.error = r.error ?? cold.error;
+  const w = jobs[1];
+  if (a.warm) {
+    r.warm = w
+      ? {
+          totalS: w.totalS === undefined ? null : w.totalS - w.sentAt,
+          firstFrameS: w.firstFrameAt === undefined ? null : w.firstFrameAt - w.sentAt,
+          steadyFps: steadyFps(w.frames, w.firstWindowAt),
+          framesDone: w.frames.length ? w.frames[w.frames.length - 1][1] : 0,
+          cpuS: w.cpuAtEnd !== null && cold.cpuAtEnd !== null ? w.cpuAtEnd - cold.cpuAtEnd : null,
+          error: w.error ?? (w.totalS === undefined ? (r.error ?? `engine exited (${r.exit})`) : null),
+        }
+      : { error: r.error ?? "not run (the cold job failed)" };
+  }
   if (r.error || r.exit !== 0) r.stderrTail = stderr;
   return r;
 }
@@ -272,8 +359,8 @@ const fmt = (v, d = 1, unit = "") => (v === null || v === undefined || Number.is
 
 export function markdown(rows) {
   const head =
-    "| clip | engine | provider / precision | size | frames | window | load→first frame | steady fps | total | peak VRAM | peak RSS | result |\n" +
-    "|---|---|---|---|---|---|---|---|---|---|---|---|\n";
+    "| clip | engine | provider / precision | size | frames | window | first frames (start → first frames) | steady fps | total (start → result) | warm: total · first frames · steady | CPU time | peak VRAM | peak RSS | result |\n" +
+    "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n";
   return (
     head +
     rows
@@ -282,7 +369,8 @@ export function markdown(rows) {
         const m = r.memory;
         const win = m ? `${m.hann_chunk}/${m.hann_stride}${m.low_vram ? " low" : ""}${m.auto ? " auto" : ""}` : "n/a";
         const prov = `${r.provider?.provider ?? r.pongProvider ?? "?"} / ${r.provider?.precision ?? r.precision ?? "?"}`;
-        return `| ${r.clip} | ${r.engineName ?? r.engine} ${r.version ?? ""} | ${prov} | ${r.width ?? "?"}×${r.height ?? "?"} | ${r.framesDone}/${r.totalFrames ?? "?"} | ${win} | ${fmt(r.firstFrameAt, 1, " s")} | ${fmt(r.steadyFps, 2)} | ${fmt(r.totalS, 1, " s")} | ${fmt(r.peakVramMb / 1024, 2, " GB")} | ${fmt(r.peakRssMb / 1024, 2, " GB")} | ${r.error ?? "ok"} |`;
+        const warm = !r.warm ? "n/a" : r.warm.error ? r.warm.error : `${fmt(r.warm.totalS, 1, " s")} · ${fmt(r.warm.firstFrameS, 1, " s")} · ${fmt(r.warm.steadyFps, 2)}`;
+        return `| ${r.clip} | ${r.engineName ?? r.engine} ${r.version ?? ""} | ${prov} | ${r.width ?? "?"}×${r.height ?? "?"} | ${r.framesDone}/${r.totalFrames ?? "?"} | ${win} | ${fmt(r.firstFrameAt, 1, " s")} | ${fmt(r.steadyFps, 2)} | ${fmt(r.totalS, 1, " s")} | ${warm} | ${fmt(r.cpuS, 1, " s")} | ${fmt(r.peakVramMb / 1024, 2, " GB")} | ${fmt(r.peakRssMb / 1024, 2, " GB")} | ${r.error ?? "ok"} |`;
       })
       .join("\n") +
     "\n"

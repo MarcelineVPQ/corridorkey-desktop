@@ -4,7 +4,7 @@ EXR), frame by frame, with the exact numbers next to the pictures (Marcy 2026-10
 produce results she can view, not only numbers).
 
   python3 tools/side_by_side.py REF TEST --out DIR [--labels "Original" "Ours"] [--frames 72 ...]
-      [--crop NAME:X,Y,W,H ...] [--video] [--open]
+      [--crop NAME:X,Y,W,H ...] [--video] [--open] [--blind]
 
 REF / TEST: an engine output folder (<clip>_alpha.mp4|.mov or <clip>_alpha_exr/, <clip>_fg.mp4|.mov or <clip>_fg_exr/).
 Per frame: full-frame foreground and matte side by side (REF left), a difference image amplified 20x, and each
@@ -16,6 +16,8 @@ linear values and produced a false finding): EXR is read as float by OpenCV; vid
 RGB (alpha = first channel), as tools/matte_compare.py does. EXR foregrounds are scene-linear and are compared after
 the video path's display encoding (clip(srgb(max(x, 0)), 0, 1)). Before anything is written, REF is compared with
 itself: anything but zero stops the run (a broken decode can't pass as a result).
+--blind (for a blind A/B, tools/vs_original.sh --blind): numbers.md leaves out the two folders' paths, so only the
+labels (e.g. "A" / "B") name the sides; the caller keeps the key.
 Needs numpy, OpenCV (with OPENCV_IO_ENABLE_OPENEXR, set here) and ffmpeg; alpha-only EXRs (channel A) also the
 OpenEXR package (pip install OpenEXR), as OpenCV can't read them.
 """
@@ -151,6 +153,7 @@ def main():
     ap.add_argument("--crop", action="append", default=[], help="NAME:X,Y,W,H in output pixels")
     ap.add_argument("--video", action="store_true", help="also a side-by-side video of the foreground")
     ap.add_argument("--open", action="store_true", help="open the result folder in the file manager")
+    ap.add_argument("--blind", action="store_true", help="numbers.md without the folders' paths (a blind A/B)")
     a = ap.parse_args()
     ref, test = Out(a.ref), Out(a.test)
     os.makedirs(a.out, exist_ok=True)
@@ -171,7 +174,8 @@ def main():
         if x is not None and np.abs(x - getattr(ref, kind)(f0)).max() != 0:
             raise SystemExit(f"self-check failed: {kind} of REF differs from itself")
 
-    lines = [f"# {la} vs {lb}", "", f"- reference: `{a.ref}`", f"- test: `{a.test}`", "- decode: EXR as float (OpenCV), video 16-bit (ffmpeg); self-check passed", ""]
+    where = ["- sources: hidden (blind test)"] if a.blind else [f"- reference: `{a.ref}`", f"- test: `{a.test}`"]
+    lines = [f"# {la} vs {lb}", "", *where, "- decode: EXR as float (OpenCV), video 16-bit (ffmpeg); self-check passed", ""]
     # loop: NOT-WORTH — the frames asked for (a few), each a few image writes
     for n in a.frames:
         lines.append(f"## Frame {n}")
