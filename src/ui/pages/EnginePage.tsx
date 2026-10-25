@@ -1,6 +1,7 @@
-// Engine: what runs the model. Main view: which engine the queue uses, the
+// Engine: what runs the model. Its settings and its status side by side in the
+// page (SettingsLayout). Status: which engine the queue uses, the
 // engine as it last answered, each engine's files, the graphics card (read
-// only while a job runs). Panel: the first-run install (GPU runtime and models),
+// only while a job runs). Settings: the first-run install (GPU runtime and models),
 // ffmpeg (checked, and installed on request), the lists of engine files found
 // (Automatic = the newest, Browse… for anything else), and the CorridorKey
 // checkout the PyTorch engine (the benchmark reference) runs from.
@@ -9,23 +10,14 @@ import type { AppState, EngineFileKind } from "../../shared/types";
 import { installMissing } from "../../shared/tasks";
 import { downloadingStatus, ENGINE_FAILED, NO_VRAM_HELD } from "../../shared/texts";
 import { Accordion, Row, Section } from "../panel/Section";
-import { MainBlock, SplitView } from "../panel/SplitView";
+import { MainBlock, SettingsLayout } from "../panel/SplitView";
 import { Stat } from "../JobView";
 import { gib } from "../format";
 import { FfmpegBox, InstallBox, installPct, TrtBox } from "../setup/SetupParts";
 import { PathText } from "../PathText";
 import { More } from "../More";
 
-export function EnginePage(props: {
-  state: AppState;
-  panelShown: boolean;
-  narrow: boolean;
-  glass: boolean;
-  focus: string | null;
-  sectionTasks: Record<string, string>;
-  hidePanel: () => void;
-  openSetup: () => void;
-}) {
+export function EnginePage(props: { state: AppState; focus: string | null; sectionTasks: Record<string, string>; openSetup: () => void }) {
   const { state } = props;
   const p = state.engine.pong;
   const root = state.settings.corridorKeyRoot;
@@ -105,86 +97,82 @@ export function EnginePage(props: {
     );
   };
 
-  const main = (
-    <div className="page-body">
-      <div className="page-bar">
-        <h1>Engine</h1>
-      </div>
-      <div className="page-content">
-        {state.engine.status === "failed" && (
-          <section className="notice error">
-            <h3>{ENGINE_FAILED}</h3>
-            <div>{state.engine.error}</div>
-          </section>
+  const notice = state.engine.status === "failed" && (
+    <section className="notice error">
+      <h3>{ENGINE_FAILED}</h3>
+      <div>{state.engine.error}</div>
+    </section>
+  );
+
+  const readouts = (
+    <>
+      <MainBlock title="Engine in use">
+        <p className="hint-text">
+          {kind === "rust"
+            ? "The CorridorKey engine on ONNX Runtime."
+            : kind === "python"
+              ? "The PyTorch engine from your CorridorKey2.0 folder. Set up the ONNX Runtime engine to use it instead."
+              : needInstall
+                ? "Not installed yet: the setup downloads the GPU runtime and the models."
+                : "None set up yet: no engine program or models found. Choose them in the panel."}
+        </p>
+        <button type="button" className="btn small" onClick={props.openSetup}>
+          <ListChecks size={14} /> Open the setup
+        </button>
+      </MainBlock>
+      <MainBlock title="Engine">
+        {p ? (
+          <div className="stats">
+            <Stat k="State" v={{ stopped: `Idle · ${NO_VRAM_HELD}`, starting: "Starting", ready: "Running the queue", failed: "Failed" }[state.engine.status]} />
+            <Stat k="Engine" v={`${p.engine} ${p.version} · protocol ${p.protocol}`} />
+            {p.torch ? <Stat k="Python / PyTorch" v={`${p.python ?? "?"} · ${p.torch}`} /> : <Stat k="Runtime" v={`ONNX Runtime ${p.ort ?? "?"} · ${p.provider ?? "?"} · ${p.precision ?? "?"}`} />}
+            <Stat k="Graphics card" v={p.gpu ? `${p.gpu}${p.vramTotalMb ? ` · ${gib(p.vramTotalMb)}` : ""}` : "none found"} />
+            {trt.supported && !p.torch && <Stat k="TensorRT" v={trt.on ? (trt.ready ? "On: jobs ask for it" : "On, not installed: jobs run on CUDA") : "Off"} />}
+          </div>
+        ) : (
+          <p className="hint-text">Not started yet this session. It starts with the queue and quits when the queue is done, so it holds no graphics memory while idle.</p>
         )}
-        <MainBlock title="Engine in use">
-          <p className="hint-text">
-            {kind === "rust"
-              ? "The CorridorKey engine on ONNX Runtime."
-              : kind === "python"
-                ? "The PyTorch engine from your CorridorKey2.0 folder. Set up the ONNX Runtime engine to use it instead."
-                : needInstall
-                  ? "Not installed yet: the setup downloads the GPU runtime and the models."
-                  : "None set up yet: no engine program or models found. Choose them in the panel."}
-          </p>
-          <button type="button" className="btn small" onClick={props.openSetup}>
-            <ListChecks size={14} /> Open the setup
-          </button>
-        </MainBlock>
-        <MainBlock title="Engine">
-          {p ? (
+      </MainBlock>
+      <MainBlock title="ONNX Runtime engine files">
+        {/* before the first install nothing is wrong yet: the setup installs them (no red "missing" lines) */}
+        {needInstall && !rust.ok ? <p className="hint-text">The setup's first step installs them.</p> : checks(rust, "Engine program and the five networks found")}
+        {p && !p.torch && (
+          <ul className="check-list">
+            {/* loop: NOT-WORTH — five networks per render */}
+            {Object.entries(p.assets).map(([k, ok]) => (
+              <li key={k} className={`check-line ${ok ? "ok" : "error"}`}>
+                {ok ? <Check size={15} aria-hidden /> : <X size={15} aria-hidden />} {k} {ok ? `found by the engine (${p.precision ?? ""})` : "missing"}
+              </li>
+            ))}
+          </ul>
+        )}
+      </MainBlock>
+      <MainBlock title="Graphics card">
+        {state.gpu && state.queueRunning ? (
+          <>
             <div className="stats">
-              <Stat k="State" v={{ stopped: `Idle · ${NO_VRAM_HELD}`, starting: "Starting", ready: "Running the queue", failed: "Failed" }[state.engine.status]} />
-              <Stat k="Engine" v={`${p.engine} ${p.version} · protocol ${p.protocol}`} />
-              {p.torch ? <Stat k="Python / PyTorch" v={`${p.python ?? "?"} · ${p.torch}`} /> : <Stat k="Runtime" v={`ONNX Runtime ${p.ort ?? "?"} · ${p.provider ?? "?"} · ${p.precision ?? "?"}`} />}
-              <Stat k="Graphics card" v={p.gpu ? `${p.gpu}${p.vramTotalMb ? ` · ${gib(p.vramTotalMb)}` : ""}` : "none found"} />
-              {trt.supported && !p.torch && <Stat k="TensorRT" v={trt.on ? (trt.ready ? "On: jobs ask for it" : "On, not installed: jobs run on CUDA") : "Off"} />}
+              <Stat k="Card" v={state.gpu.name} />
+              <Stat k="Memory used" v={`${gib(state.gpu.usedMb)} / ${gib(state.gpu.totalMb)}`} />
+              <Stat k="Busy" v={`${state.gpu.utilization}%`} />
             </div>
-          ) : (
-            <p className="hint-text">Not started yet this session. It starts with the queue and quits when the queue is done, so it holds no graphics memory while idle.</p>
-          )}
-        </MainBlock>
-        <MainBlock title="ONNX Runtime engine files">
-          {/* before the first install nothing is wrong yet: the setup installs them (no red "missing" lines) */}
-          {needInstall && !rust.ok ? <p className="hint-text">The setup's first step installs them.</p> : checks(rust, "Engine program and the five networks found")}
-          {p && !p.torch && (
-            <ul className="check-list">
-              {/* loop: NOT-WORTH — five networks per render */}
-              {Object.entries(p.assets).map(([k, ok]) => (
-                <li key={k} className={`check-line ${ok ? "ok" : "error"}`}>
-                  {ok ? <Check size={15} aria-hidden /> : <X size={15} aria-hidden />} {k} {ok ? `found by the engine (${p.precision ?? ""})` : "missing"}
+            <ul className="gpu-procs">
+              {/* loop: HOT-PATH-OK — a few compute processes per render (GPU readout every 2 s while a job runs) */}
+              {state.gpu.processes.map((g) => (
+                <li key={g.pid}>
+                  {g.ours ? "CorridorKey engine" : g.name} — {gib(g.usedMb)}
                 </li>
               ))}
             </ul>
-          )}
-        </MainBlock>
-        <MainBlock title="Graphics card">
-          {state.gpu && state.queueRunning ? (
-            <>
-              <div className="stats">
-                <Stat k="Card" v={state.gpu.name} />
-                <Stat k="Memory used" v={`${gib(state.gpu.usedMb)} / ${gib(state.gpu.totalMb)}`} />
-                <Stat k="Busy" v={`${state.gpu.utilization}%`} />
-              </div>
-              <ul className="gpu-procs">
-                {/* loop: HOT-PATH-OK — a few compute processes per render (GPU readout every 2 s while a job runs) */}
-                {state.gpu.processes.map((g) => (
-                  <li key={g.pid}>
-                    {g.ours ? "CorridorKey engine" : g.name} — {gib(g.usedMb)}
-                  </li>
-                ))}
-              </ul>
-            </>
-          ) : (
-            <p className="hint-text">Read while a job runs and this window is shown (nothing is read while idle).</p>
-          )}
-          {state.gpuError && <p className="hint-text">Graphics card readout: {state.gpuError}</p>}
-        </MainBlock>
-      </div>
-    </div>
+          </>
+        ) : (
+          <p className="hint-text">Read while a job runs and this window is shown (nothing is read while idle).</p>
+        )}
+        {state.gpuError && <p className="hint-text">Graphics card readout: {state.gpuError}</p>}
+      </MainBlock>
+    </>
   );
 
-  const panel = (
+  const settings = (
     <Accordion page="engine" focus={props.focus}>
       <Section
         id="install"
@@ -252,5 +240,5 @@ export function EnginePage(props: {
     </Accordion>
   );
 
-  return <SplitView main={main} panel={panel} panelTitle="Engine settings" shown={props.panelShown} narrow={props.narrow} glass={props.glass} onEscape={props.hidePanel} />;
+  return <SettingsLayout title="Engine" notice={notice} settingsTitle="Engine settings" settings={settings} readoutsTitle="Status" readouts={readouts} />;
 }

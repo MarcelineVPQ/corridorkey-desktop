@@ -279,10 +279,14 @@ select {
   text-align: center;
   padding: 24px;
 }
+/* a clip's card: its name across the top (beside the remove button), its thumbnail and facts below */
 .job-row {
   display: grid;
   grid-template-columns: 96px minmax(0, 1fr) auto;
-  gap: 10px;
+  grid-template-areas:
+    "name name remove"
+    "thumb info info";
+  gap: 6px 10px;
   align-items: center;
   padding: 8px;
   border-radius: 10px;
@@ -291,6 +295,20 @@ select {
   cursor: pointer;
   text-align: left;
   width: 100%;
+}
+.job-row > .job-name {
+  grid-area: name;
+}
+.job-row > .thumb-wrap {
+  grid-area: thumb;
+}
+.job-row > .job-info {
+  grid-area: info;
+  min-width: 0;
+}
+.job-row > .icon-btn {
+  grid-area: remove;
+  align-self: start;
 }
 .job-row.selected {
   border-color: var(--accent);
@@ -304,15 +322,51 @@ select {
   background: var(--bg-3);
   display: block;
 }
+/* the clip's name uses the card's width and wraps to a second line before it's cut (with …) */
 .job-name {
   font-weight: 600;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 .job-meta {
   color: var(--text-3);
   font-size: 13px;
+}
+/* a clip's facts (QueuePage Facts): each part whole; each part's "·" before it, and the first part of a line has
+   its "·" in the margin the outer box clips, so no line starts with a separator */
+.facts {
+  overflow: hidden;
+}
+.facts-in {
+  display: flex;
+  flex-wrap: wrap;
+  margin-left: -1.1em;
+}
+.facts-in > span {
+  white-space: nowrap;
+}
+.facts-in > span::before {
+  content: "·";
+  display: inline-block;
+  width: 1.1em;
+  text-align: center;
+}
+/* a path on its own line, or after its label ("Results:"): the path shortens to the room left, never drops below */
+.path-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.path-line .path-label {
+  flex: none;
+}
+.results-line {
+  margin-top: 8px;
 }
 .job-status {
   font-size: 13px;
@@ -533,7 +587,7 @@ select {
 /* ---- running / results ---- */
 .stats {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
   gap: 10px;
   margin-top: 12px;
 }
@@ -551,26 +605,54 @@ select {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-.stages {
+/* a reason behind a tile row, one line each under the tiles (JobView Notes) */
+.stat-notes {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.stat-notes li {
+  padding: 1px 0;
+}
+.stat-notes .k {
+  color: var(--text-3);
+}
+/* the running job's one progress row: the step it's on, the frames bar, the step's detail (window n/N) */
+.progress-row {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+}
+.progress-row .bar {
+  margin-top: 0;
+}
+.progress-step {
   display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin: 10px 0;
+  align-items: baseline;
+  gap: 8px;
+  white-space: nowrap;
+}
+.progress-of {
+  font-size: 13px;
+  color: var(--text-3);
+}
+.progress-detail {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .stage {
   font-size: 13px;
   padding: 3px 9px;
   border-radius: 999px;
-  background: var(--bg-2);
-  color: var(--text-3);
 }
 .stage.now {
   background: var(--accent-soft);
   color: var(--accent-ink);
   font-weight: 600;
-}
-.stage.past {
-  color: var(--text-2);
 }
 .stills {
   display: flex;

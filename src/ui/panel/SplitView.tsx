@@ -3,7 +3,7 @@
 // the page you're on (no show button on the page, no hide button in the panel);
 // opening a page shows it. Narrow windows: the panel opens as a drawer over the
 // page, the page behind is dimmed, and the same rail item, Escape or a click on the dimmed page closes it.
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useId, type ReactNode } from "react";
 import { useGlass } from "../glass/useGlass";
 import { REGULAR_GLASS } from "../glass/variants";
 
@@ -33,6 +33,42 @@ export function SplitView(props: { main: ReactNode; panel: ReactNode; panelTitle
           <div className="panel-body">{panel}</div>
         </aside>
       )}
+    </div>
+  );
+}
+
+/**
+ * A page whose settings live in its main area (Engine, App settings; UI pass B: the right-hand panel is the Queue's
+ * per-clip settings only). Two groups, each under its heading: the settings (the page's Accordion) and the readouts
+ * (MainBlocks). Side by side when the page has room (settings first, the wider one), one column below that; the
+ * order on screen is the keyboard's order.
+ */
+export function SettingsLayout(props: { title: string; notice?: ReactNode; settingsTitle: string; settingsSub?: string; settings: ReactNode; readoutsTitle: string; readouts: ReactNode }) {
+  const settingsId = useId();
+  const readoutsId = useId();
+  return (
+    <div className="page-body">
+      <div className="page-bar">
+        <h1>{props.title}</h1>
+      </div>
+      <div className="page-content settings-page">
+        {props.notice}
+        <div className="settings-cols">
+          <section className="settings-group" aria-labelledby={settingsId}>
+            <header className="group-head">
+              <h2 id={settingsId}>{props.settingsTitle}</h2>
+              {props.settingsSub && <div className="group-sub">{props.settingsSub}</div>}
+            </header>
+            {props.settings}
+          </section>
+          <section className="settings-group" aria-labelledby={readoutsId}>
+            <header className="group-head">
+              <h2 id={readoutsId}>{props.readoutsTitle}</h2>
+            </header>
+            {props.readouts}
+          </section>
+        </div>
+      </div>
     </div>
   );
 }

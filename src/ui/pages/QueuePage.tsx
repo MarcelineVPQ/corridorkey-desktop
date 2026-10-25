@@ -3,14 +3,14 @@
 import { memo } from "react";
 import { ProgressBar } from "../ProgressBar";
 import { FolderPlus, Play, Plus, Square, Trash2 } from "lucide-react";
-import { OTHER_GPU_USER_MB, type AppState, type Job, type TrtPrebuild } from "../../shared/types";
+import { OTHER_GPU_USER_MB, type AppState, type Job } from "../../shared/types";
 import { missingInput, startBlocked } from "../../shared/tasks";
 import { AS_USED, CANT_READ_CLIP } from "../../shared/texts";
 import { JobSettings } from "../JobSettings";
 import { JobView } from "../JobView";
 import { SplitView } from "../panel/SplitView";
 import { PathText } from "../PathText";
-import { clipFacts, gib, statusText } from "../format";
+import { clipFactParts, gib, statusText } from "../format";
 
 export function QueuePage(props: {
   state: AppState;
@@ -69,7 +69,7 @@ export function QueuePage(props: {
             state.jobs.map((j) => <JobRow key={j.id} job={j} selected={j.id === selected} onSelect={() => onSelect(j.id)} />)
           )}
         </nav>
-        <section className="detail">{job ? <Detail job={job} prebuild={state.tensorrt.prebuild} /> : <div className="detail-empty">Add a clip to start.</div>}</section>
+        <section className="detail">{job ? <Detail job={job} state={state} /> : <div className="detail-empty">Add a clip to start.</div>}</section>
       </div>
     </div>
   );
@@ -124,15 +124,16 @@ function JobRowView({ job, selected, onSelect }: { job: Job; selected: boolean; 
       onClick={onSelect}
       onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onSelect()}
     >
+      {/* the name across the card's width (two lines before it's cut), the clip's facts beside its thumbnail */}
+      <div className="job-name" title={job.clip.path}>
+        <BreakableName name={job.clip.name} />
+      </div>
       <span className="thumb-wrap">
         {job.clip.thumb ? <img className="thumb" src={job.clip.thumb} alt="" width={96} loading="lazy" decoding="async" /> : <div className="thumb" />}
         {need && <i className="task" aria-hidden />}
       </span>
-      <div style={{ minWidth: 0 }}>
-        <div className="job-name" title={job.clip.path}>
-          {job.clip.name}
-        </div>
-        <div className="job-meta">{job.clip.probeError ?? clipFacts(job.clip)}</div>
+      <div className="job-info">
+        {job.clip.probeError ? <div className="job-meta">{job.clip.probeError}</div> : <Facts parts={clipFactParts(job.clip)} />}
         <div className={`job-status ${job.status}`}>{need ? `Waiting: ${need}` : statusText(job)}</div>
         {job.status === "running" && <ProgressBar value={job.framesDone} max={job.framesTotal ?? 0} />}
       </div>
@@ -154,19 +155,55 @@ function JobRowView({ job, selected, onSelect }: { job: Job; selected: boolean; 
   );
 }
 
-function Detail({ job, prebuild }: { job: Job; prebuild: TrtPrebuild }) {
+/** A clip's name that wraps after its _ - . first (greenscreen_ / take2), and mid-word only when a part is too long. */
+function BreakableName({ name }: { name: string }) {
+  // loop: HOT-PATH-OK — a few parts of one name, per row render (rows are memoised)
+  const parts = name.split(/(?<=[_\-.])/);
+  return (
+    <>
+      {/* loop: HOT-PATH-OK — as above */}
+      {parts.map((p, i) => (
+        <span key={i}>
+          {p}
+          {i < parts.length - 1 && <wbr />}
+        </span>
+      ))}
+    </>
+  );
+}
+
+/**
+ * A clip's facts on as many lines as they need: each part kept whole, and a line never starts with the separator
+ * (each part's "·" sits before it; the first part of every line has its "·" outside the clipped box).
+ */
+function Facts({ parts }: { parts: string[] }) {
+  return (
+    <div className="job-meta facts">
+      <span className="facts-in">
+        {/* loop: HOT-PATH-OK — ≤ four facts per row per render */}
+        {parts.map((p) => (
+          <span key={p}>{p}</span>
+        ))}
+      </span>
+    </div>
+  );
+}
+
+function Detail({ job, state }: { job: Job; state: AppState }) {
   return (
     <>
       <div className="detail-head">
         {job.clip.thumb ? <img className="thumb" src={job.clip.thumb} alt="" width={240} /> : <div className="thumb" />}
         <div style={{ minWidth: 0 }}>
           <h2>{job.clip.name}</h2>
-          <div className="job-meta">{clipFacts(job.clip)}</div>
-          <div>
+          <Facts parts={clipFactParts(job.clip)} />
+          <div className="path-line">
             <PathText path={job.clip.path} />
           </div>
-          <div className="hint-text" style={{ marginTop: 8 }}>
-            Results: <PathText path={job.outputDir} />
+          {/* the label and its path on one line: the path shortens to the room after the label, never drops below it */}
+          <div className="path-line results-line hint-text">
+            <span className="path-label">Results:</span>
+            <PathText path={job.outputDir} />
           </div>
           {(job.clip.companionFirstFrame || job.clip.companionHintVideo) && job.status === "waiting" && <div className="hint-text">Found a hint next to the clip and selected it.</div>}
         </div>
@@ -177,7 +214,7 @@ function Detail({ job, prebuild }: { job: Job; prebuild: TrtPrebuild }) {
           <div>{job.clip.probeError}</div>
         </section>
       )}
-      <JobView job={job} prebuild={prebuild} />
+      <JobView job={job} prebuild={state.tensorrt.prebuild} plan={{ tensorrt: state.tensorrt, engineKind: state.engineKind, platform: state.system.platform, queueRunning: state.queueRunning }} />
     </>
   );
 }
