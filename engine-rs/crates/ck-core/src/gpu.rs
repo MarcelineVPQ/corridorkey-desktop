@@ -353,6 +353,14 @@ pub(crate) fn budget() -> Option<(u64, u64, u64)> {
     Some((info.free + own, info.free, own))
 }
 
+/// The card's memory for the `estimate` command, from the same NVML reading as `budget`: (total, free, budget) bytes.
+pub fn card_memory() -> Option<(u64, u64, u64)> {
+    let n = nvml()?;
+    let info = n.info()?;
+    let own = n.used_by(std::process::id()).unwrap_or(0);
+    Some((info.total, info.free, info.free + own))
+}
+
 /// TensorRT's library by its per-system names (TensorRT 10: libnvinfer.so.10 on Linux, nvinfer_10.dll on Windows).
 #[cfg(windows)]
 const NVINFER_LIBS: [&str; 2] = ["nvinfer_10.dll", "nvinfer.dll"];
@@ -383,7 +391,7 @@ pub(crate) fn trt_version_string(v: i32) -> String {
 /// Host memory the system says is available (bytes): the CPU provider's budget. Linux: /proc/meminfo's
 /// MemAvailable; Windows: GlobalMemoryStatusEx's ullAvailPhys; macOS: free + inactive pages (host_statistics64,
 /// psutil's reading of "available"). None only where the system doesn't say.
-pub(crate) fn host_available() -> Option<u64> {
+pub fn host_available() -> Option<u64> {
     #[cfg(target_os = "linux")]
     {
         let s = std::fs::read_to_string("/proc/meminfo").ok()?;

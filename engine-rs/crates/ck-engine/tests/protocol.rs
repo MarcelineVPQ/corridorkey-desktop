@@ -159,6 +159,50 @@ fn colorspaces_lists_a_configs_spaces_and_a_bad_config_is_a_bad_request() {
     assert_eq!(fake.ran, vec!["j1"]);
 }
 
+/// A 1x1 PNG (the image crate reads only its header for the size).
+const PNG_1X1: [u8; 70] = [
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120,
+    218, 99, 100, 96, 248, 95, 15, 0, 2, 135, 1, 128, 235, 71, 186, 146, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+];
+
+#[test]
+fn estimate_answers_per_window_with_its_id_and_bad_ones_are_bad_requests() {
+    let dir = std::env::temp_dir().join(format!("ck-proto-estimate-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    // loop: NOT-WORTH — two test frames
+    for i in 1..=2 {
+        std::fs::write(dir.join(format!("f_{i:04}.png")), PNG_1X1).unwrap();
+    }
+    let clip = dir.to_str().unwrap();
+    let (r, fake) = talk(
+        &[
+            json!({"cmd": "estimate", "id": "e1", "input": clip, "windows": [[24, 12, false], [8, 4, true]]}),
+            json!({"cmd": "estimate", "id": "e2", "input": "/no/such/clip.mov", "windows": [[8, 4, false]]}),
+            json!({"cmd": "estimate", "id": "e3", "input": clip, "windows": [[4, 8, false]]}),
+            json!({"cmd": "estimate", "id": "e4", "windows": [[8, 4, false]]}),
+            json!({"cmd": "estimate", "id": "e5", "input": clip, "windows": [[8, 4, false]], "vram_budget_gb": "lots"}),
+            json!({"cmd": "ping"}),
+        ],
+        &[],
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(fake.ran.is_empty(), "an estimate runs no job");
+    assert_eq!((r[0]["type"].as_str(), r[0]["id"].as_str()), (Some("estimate"), Some("e1")));
+    assert_eq!((r[0]["shape_w"].as_u64(), r[0]["shape_h"].as_u64(), r[0]["frames"].as_u64()), (Some(128), Some(128), Some(2)));
+    let w = r[0]["windows"].as_array().unwrap();
+    assert_eq!(w.len(), 2);
+    // the window is capped at the clip's 2 frames; the fake has no memory reading: estimates without a verdict
+    assert_eq!((w[0]["hann_chunk"].as_u64(), w[0]["frames"].as_u64(), w[0]["fits"].clone()), (Some(24), Some(2), Value::Null));
+    assert!(w[0]["peak_bytes"].as_u64().unwrap() > w[1]["peak_bytes"].as_u64().unwrap(), "normal mode needs more than low-memory");
+    assert_eq!(r[0]["free_bytes"], Value::Null);
+    assert_eq!((r[1]["type"].as_str(), r[1]["id"].as_str(), r[1]["code"].as_str()), (Some("error"), Some("e2"), Some("input")));
+    // loop: NOT-WORTH — three replies
+    for (i, id) in [(2, "e3"), (3, "e4"), (4, "e5")] {
+        assert_eq!((r[i]["id"].as_str(), r[i]["code"].as_str()), (Some(id), Some("bad-request")), "{}", r[i]);
+    }
+    assert_eq!(r[5]["type"], "pong", "the engine keeps running");
+}
+
 #[test]
 fn ping_pong() {
     let (r, _) = talk(&[json!({"cmd": "ping"})], &[]);

@@ -352,6 +352,19 @@ pub(crate) fn probe_frame_dir(dir: &Path, num_frames: i64, fps: f64, exr_linear:
     Ok(ClipMeta::with_shape(Source::Frames(paths), fps, h, w, n, exr_linear))
 }
 
+/// A clip's size and frame count as a job's probe reads them (the `estimate` command): ffprobe for a video, the first
+/// frame's header for a frame folder (its rate and colour don't change the size). Nothing is decoded.
+pub fn probe_size(input: &Path, num_frames: i64) -> Result<ClipMeta, Error> {
+    if !input.exists() {
+        return Err(Error::input(format!("input not found: {}", input.display())));
+    }
+    if input.is_dir() {
+        probe_frame_dir(input, num_frames, 24.0, false)
+    } else {
+        probe_video(input, num_frames)
+    }
+}
+
 /// The first frame number of a video's (or an unnumbered folder's) EXR sequence: the VFX convention.
 pub(crate) const FIRST_FRAME: u64 = 1001;
 

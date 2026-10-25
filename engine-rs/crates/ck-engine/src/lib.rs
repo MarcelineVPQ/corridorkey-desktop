@@ -19,6 +19,39 @@ pub trait Backend {
     /// Back to a clean state after a job panicked: whatever it held half-made (sessions, loads started ahead) is
     /// dropped, so the next job starts as the first one did.
     fn reset(&mut self) {}
+    /// The memory an `estimate` is weighed against, as the automatic window reads it; None: no reading (no card,
+    /// Core ML, or a backend without one): the reply then has the estimates and no verdict.
+    fn card_memory(&mut self) -> Option<ck_core::vram::CardMemory> {
+        None
+    }
+    /// The engine's CK_ENGINE_VRAM_BUDGET_GB (a request's `vram_budget_gb` wins), as for a run.
+    fn vram_budget_gb(&self) -> Option<f64> {
+        None
+    }
+}
+
+/// The `estimate` command (backlog row 41): the peak graphics memory per window for a clip, before any job.
+fn estimate_reply<B: Backend>(backend: &mut B, req: &Value) -> Value {
+    let Some(input) = str_field(req, "input") else {
+        return json!({"type": "error", "code": "bad-request", "message": "estimate needs input"});
+    };
+    let windows = match ck_core::vram::parse_windows(req.get("windows")) {
+        Ok(w) => w,
+        Err(e) => return json!({"type": "error", "code": e.code.as_str(), "message": e.message}),
+    };
+    let num_frames = req.get("num_frames").and_then(|v| v.as_i64()).unwrap_or(-1);
+    let cap = match req.get("vram_budget_gb") {
+        None | Some(Value::Null) => backend.vram_budget_gb(),
+        Some(v) => match v.as_f64().filter(|g| g.is_finite() && *g > 0.0) {
+            Some(g) => Some(g),
+            None => return json!({"type": "error", "code": "bad-request", "message": format!("vram_budget_gb: a positive number, got {v}")}),
+        },
+    };
+    let mem = backend.card_memory();
+    match ck_core::vram::estimate(&input, num_frames, &windows, mem, cap) {
+        Ok(v) => v,
+        Err(e) => json!({"type": "error", "code": e.code.as_str(), "message": e.message}),
+    }
 }
 
 /// Writes replies as JSON lines, adding the job id when there is one.
@@ -178,6 +211,14 @@ pub fn serve<B: Backend, R: BufRead + Send + 'static, W: Write>(backend: &mut B,
                     Ok(v) => v,
                     Err(e) => json!({"type": "error", "code": e.code.as_str(), "message": e.message}),
                 };
+                if !id.is_null() {
+                    reply["id"] = id;
+                }
+                r.send(reply);
+            }
+            // the peak graphics memory per window for a clip (backlog row 41): probe only, no model; between jobs
+            "estimate" => {
+                let mut reply = estimate_reply(backend, &req);
                 if !id.is_null() {
                     reply["id"] = id;
                 }

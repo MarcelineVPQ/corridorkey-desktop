@@ -59,6 +59,25 @@ impl Backend for Ort {
     fn reset(&mut self) {
         self.pipeline.reset();
     }
+    // the reading the automatic window takes (pipeline/mod.rs): NVML on a card, the host's free memory on the CPU
+    fn card_memory(&mut self) -> Option<ck_core::vram::CardMemory> {
+        use ck_core::runtime::Provider;
+        use ck_core::vram::CardMemory;
+        match self.pipeline.rt().provider()? {
+            Provider::CoreMl => None,
+            Provider::Cpu => {
+                let free = ck_core::gpu::host_available()?;
+                Some(CardMemory { total: None, free, budget: free, source: "host", provider: Provider::Cpu.name() })
+            }
+            p => {
+                let (total, free, budget) = ck_core::gpu::card_memory()?;
+                Some(CardMemory { total: Some(total), free, budget, source: "gpu", provider: p.name() })
+            }
+        }
+    }
+    fn vram_budget_gb(&self) -> Option<f64> {
+        self.pipeline.rt().cfg.vram_budget_gb
+    }
 }
 
 fn main() {
