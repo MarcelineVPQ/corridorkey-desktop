@@ -2,16 +2,15 @@
 // right edge, icons only by default, expanding over the page on hover or
 // keyboard focus and closing right after a page is picked with the pointer;
 // pinned open it takes its full width. Ctrl+B pins/unpins. The bottom shows
-// the engine's state (a dot with a symbol, never color alone: ✓ ready, hourglass starting, ⚠ failed, power off =
-// idle, not running; its words beside it when the rail is open, as a tooltip and to screen readers when it isn't),
-// the graphics card while a job runs,
+// the engine's state (a dot plus a symbol, never color alone: ✓ ready, … starting, ! failed, – idle; its words
+// beside it when the rail is open, as a tooltip and to screen readers when it isn't), the graphics card while a job runs,
 // the pin, and in the bottom corner the lock: locked, the rail stays
 // collapsed (hover and focus no longer expand it). Pin and lock exclude each
 // other; both remembered. A task waiting on a page puts a dot on its item; a
 // press leads to it (tasks.ts). The behavior is railModel.ts.
 // Idle cost: none (CSS states; no timers, no polling; one keydown listener).
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { Activity, Check, Cpu, Hourglass, Info, ListVideo, Lock, LockOpen, PanelRightClose, PanelRightOpen, Power, Settings, TriangleAlert } from "lucide-react";
+import { Activity, Cpu, Info, ListVideo, Lock, LockOpen, PanelRightClose, PanelRightOpen, Settings } from "lucide-react";
 import type { AppState } from "../../shared/types";
 import type { PageId } from "../../shared/tasks";
 import { NO_VRAM_HELD } from "../../shared/texts";
@@ -78,16 +77,15 @@ export function AppRail(props: { state: AppState; page: PageId; pageDots: Partia
     e.status === "ready"
       ? {
           cls: "ok",
-          sym: Check,
+          sym: "✓",
           text: "Engine ready",
           sub: e.pong?.torch ? `${e.pong.engine} · torch ${e.pong.torch.split("+")[0]}` : `${e.pong?.engine ?? ""} · ${e.pong?.provider ?? ""} ${e.pong?.precision ?? ""}`.trim(),
         }
       : e.status === "starting"
-        ? { cls: "warn", sym: Hourglass, text: "Engine starting", sub: state.engineKind === "python" ? "loading Python and CUDA" : "starting ONNX Runtime" }
+        ? { cls: "warn", sym: "…", text: "Engine starting", sub: state.engineKind === "python" ? "loading Python and CUDA" : "starting ONNX Runtime" }
         : e.status === "failed"
-          ? { cls: "error", sym: TriangleAlert, text: "Engine failed", sub: "see Engine" }
-          : { cls: "idle", sym: Power, text: "Engine idle", sub: NO_VRAM_HELD };
-  const Sym = engineLine.sym;
+          ? { cls: "error", sym: "!", text: "Engine failed", sub: "see Engine" }
+          : { cls: "idle", sym: "–", text: "Engine idle", sub: NO_VRAM_HELD };
   const g = state.gpu;
 
   return (
@@ -139,7 +137,7 @@ export function AppRail(props: { state: AppState; page: PageId; pageDots: Partia
           <div className={`rail-status ${engineLine.cls}`} role="status" aria-label={`${engineLine.text} · ${engineLine.sub}`} title={`${engineLine.text}\n${engineLine.sub}`}>
             <span className="rail-ic">
               <span className="rail-dot" aria-hidden>
-                <Sym size={12} strokeWidth={2.5} />
+                {engineLine.sym}
               </span>
             </span>
             <span className="rail-label rail-status-text">

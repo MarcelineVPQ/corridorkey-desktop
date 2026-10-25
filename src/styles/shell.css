@@ -150,11 +150,13 @@
 .rail-dot {
   display: grid;
   place-items: center;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background: var(--bg-3);
   color: var(--text-1);
+  font-size: 10px;
+  font-weight: 700;
 }
 .rail-status.ok .rail-dot {
   background: var(--status-ok);
@@ -299,7 +301,7 @@
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 10px 44px 10px 12px;
+  padding: 10px 28px 10px 12px;
   border: 0;
   border-radius: 10px;
   background: transparent;
@@ -340,29 +342,21 @@
 .sec.open .sec-chev {
   transform: rotate(180deg);
 }
-/* "Keep open": a pin beside the chevron; pressed, the section stays open while others fold */
 .sec-pin {
   position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  right: 8px;
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
+  top: 7px;
+  right: 7px;
+  width: 10px;
+  height: 10px;
   padding: 0;
-  border: 0;
-  border-radius: 6px;
+  border: 1.5px solid var(--border-2);
+  border-radius: 50%;
   background: transparent;
-  color: var(--text-3);
   cursor: pointer;
 }
-.sec-pin:hover {
-  background: var(--bg-2);
-  color: var(--text-1);
-}
 .sec-pin.on {
-  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 .sec-body {
   padding: 4px 12px 12px;

@@ -3,13 +3,13 @@
 // disclosure: its header (a button, aria-expanded) shows an icon, the title,
 // a live status line (how it's set now; the full text as its tooltip) and,
 // for a waiting task, a dot on the icon with the task as the status. The pin
-// beside the chevron ("Keep open") keeps it open while others fold. One section is
+// dot in the header's corner keeps it open while others fold. One section is
 // open at a time (plus the pinned ones), remembered per page. The body is a
 // function, rendered only while open: a closed section costs nothing.
 // Readouts don't go here: they are MainBlocks in the page's main view.
 // Keyboard: Enter/Space opens or folds; ↑ ↓ Home End move between headers.
 import { createContext, useContext, useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from "react";
-import { ChevronDown, Pin, type LucideIcon } from "lucide-react";
+import { ChevronDown, type LucideIcon } from "lucide-react";
 import { usePref } from "../prefs";
 
 interface AccordionState {
@@ -84,9 +84,7 @@ export function Section(props: { id: string; icon: LucideIcon; title: string; st
           aria-label={isPinned ? `Unpin ${title}` : `Keep ${title} open`}
           title={isPinned ? "Kept open: click to let it fold with the others" : "Keep this section open while others fold"}
           onClick={() => acc.togglePin(id)}
-        >
-          <Pin size={15} aria-hidden fill={isPinned ? "currentColor" : "none"} />
-        </button>
+        />
       </div>
       {isOpen && (
         <div id={bodyId} className="sec-body">
