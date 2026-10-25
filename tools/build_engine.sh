@@ -14,13 +14,18 @@
 # The build stops if the result needs a newer glibc than 2.28. GPU features as the app uses them: ONNX Runtime
 # loaded at run time (the in-app install downloads it), CUDA, TensorRT. Memory-capped (its own 12 G scope:
 # when release.sh runs it, this cap and release.sh's sit side by side, they don't nest).
+#
+# OpenColorIO (`ocio`, backlog row 29) is built from source and linked in on every target (CMake, a few minutes the
+# first time; engine-rs/vendor/README.md): with Zig's C++ (libc++, linked in) on Linux, MinGW's g++ (libstdc++ linked
+# in) for Windows. The Linux build also stops if the engine exports C++ runtime symbols (ONNX Runtime and TensorRT,
+# loaded at run time, keep the system's libstdc++), as tools/build_trt_builder.sh checks for ck-trt-build.
 set -euo pipefail
 if [ "${1:-}" = --mac ]; then
   # macOS has no systemd-run: the runner's own limits apply
   ENG="$(cd "$(dirname "$0")/.." && pwd)/engine-rs"
   mkdir -p "$ENG/target/dist"
   cd "$ENG"
-  cargo build --release --locked -p ck-engine --no-default-features --features ort-dynamic --target aarch64-apple-darwin
+  cargo build --release --locked -p ck-engine --no-default-features --features ort-dynamic,ocio --target aarch64-apple-darwin
   cp "$ENG/target/aarch64-apple-darwin/release/corridorkey-engine" "$ENG/target/dist/corridorkey-engine.new"
   mv -f "$ENG/target/dist/corridorkey-engine.new" "$ENG/target/dist/corridorkey-engine"
   echo "built $ENG/target/dist/corridorkey-engine (macOS arm64)"
@@ -31,11 +36,12 @@ if [ "${1:-}" = --windows ]; then
   mkdir -p "$ENG/target/dist"
   cd "$ENG"
   systemd-run --user --scope --quiet --collect ${CK_SLICE:+--slice=$CK_SLICE} -p MemoryMax=12G -p MemorySwapMax=0 -- \
-    cargo build --release --locked -p ck-engine --no-default-features --features ort-dynamic,cuda,tensorrt --target x86_64-pc-windows-gnu
+    cargo build --release --locked -p ck-engine --no-default-features --features ort-dynamic,cuda,tensorrt,ocio --target x86_64-pc-windows-gnu
   cp "$ENG/target/x86_64-pc-windows-gnu/release/corridorkey-engine.exe" "$ENG/target/dist/corridorkey-engine.exe.new"
   mv -f "$ENG/target/dist/corridorkey-engine.exe.new" "$ENG/target/dist/corridorkey-engine.exe"
-  # only Windows' own DLLs: a MinGW runtime DLL here would be missing on users' PCs
-  extra=$(x86_64-w64-mingw32-objdump -p "$ENG/target/dist/corridorkey-engine.exe" | awk '/DLL Name/ {print tolower($3)}' | grep -vE '^(kernel32|ntdll|msvcrt|bcryptprimitives|advapi32|ws2_32|userenv|api-ms-win-.*)\.dll$' || true)
+  # only Windows' own DLLs: a MinGW runtime DLL here would be missing on users' PCs (user32 and gdi32: OpenColorIO's
+  # monitor-profile lookup, SystemMonitor_windows.cpp; both are part of every Windows)
+  extra=$(x86_64-w64-mingw32-objdump -p "$ENG/target/dist/corridorkey-engine.exe" | awk '/DLL Name/ {print tolower($3)}' | grep -vE '^(kernel32|ntdll|msvcrt|bcryptprimitives|advapi32|ws2_32|userenv|user32|gdi32|api-ms-win-.*)\.dll$' || true)
   [ -z "$extra" ] || { echo "build_engine: the Windows engine needs DLLs Windows doesn't have: $extra" >&2; exit 1; }
   echo "built $ENG/target/dist/corridorkey-engine.exe"
   exit 0
@@ -49,7 +55,7 @@ export PATH="$ZIG_VENV/bin:$PATH"
 mkdir -p "$ENG/target/dist"
 cd "$ENG"
 systemd-run --user --scope --quiet --collect ${CK_SLICE:+--slice=$CK_SLICE} -p MemoryMax=12G -p MemorySwapMax=0 -- \
-  env PATH="$PATH" cargo zigbuild --release --locked -p ck-engine --no-default-features --features ort-dynamic,cuda,tensorrt \
+  env PATH="$PATH" cargo zigbuild --release --locked -p ck-engine --no-default-features --features ort-dynamic,cuda,tensorrt,ocio \
   --target "x86_64-unknown-linux-gnu.$GLIBC"
 # copy beside it, then rename: a running engine keeps its old file ("Text file busy" otherwise)
 cp "$ENG/target/x86_64-unknown-linux-gnu/release/corridorkey-engine" "$ENG/target/dist/corridorkey-engine.new"
@@ -58,6 +64,13 @@ need=$(objdump -T "$ENG/target/dist/corridorkey-engine" | grep -oE "GLIBC_[0-9.]
 if [ "$(printf '%s\n' "$need" "GLIBC_$GLIBC" | sort -V | tail -1)" != "GLIBC_$GLIBC" ]; then
   rm -f "$ENG/target/dist/corridorkey-engine"
   echo "build_engine: the engine needs $need, newer than glibc $GLIBC; not shipped" >&2
+  exit 1
+fi
+# no C++ library of its own exported (OCIO's libc++ is linked in): ONNX Runtime's and TensorRT's libraries, loaded at
+# run time, must keep using the system's libstdc++
+if nm -D --defined-only "$ENG/target/dist/corridorkey-engine" | grep -qE ' (T|W|V) (_Zn|_Zd|_ZNSt|_ZNKSt|_ZTVN|__cxa_)'; then
+  rm -f "$ENG/target/dist/corridorkey-engine"
+  echo "build_engine: the engine exports C++ runtime symbols; not shipped" >&2
   exit 1
 fi
 echo "built $ENG/target/dist/corridorkey-engine (needs $need)"
