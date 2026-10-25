@@ -32,3 +32,7 @@ rayon.workspace = true
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 exr = "1.73"
 ocio-rs.workspace = true
+
+# the Core ML execution provider's API (--device coreml; macOS only: the macOS ONNX Runtime build has the provider)
+[target.'cfg(target_os = "macos")'.dependencies]
+ort = { workspace = true, features = ["coreml"] }

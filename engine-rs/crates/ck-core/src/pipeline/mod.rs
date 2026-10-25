@@ -81,6 +81,21 @@ pub(crate) struct ModelKey {
     pub(crate) trt_cache: Option<PathBuf>,
     /// the job's graphics memory budget (bytes): each session's arena limit
     pub(crate) vram_cap: Option<u64>,
+    /// Core ML: the fixed-shape files this job's size and window take (`coreml_key`)
+    pub(crate) coreml: Option<CoremlFiles>,
+}
+
+/// The Core ML set's files for one job: one per network, built for the job's padded size and frames per call.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct CoremlFiles {
+    pub(crate) files: BTreeMap<&'static str, PathBuf>,
+    /// frames per C-RADIO / MoGe call the files take: a shorter call (the low-memory prepass's last chunk) is
+    /// padded with copies of its last frame, and only its own frames' features are kept (each frame is its own
+    /// batch item: the copies don't change them)
+    pub(crate) foundation_batch: usize,
+    /// the runtime's Core ML compute units and cache root (for the `provider` reply)
+    pub(crate) units: &'static str,
+    pub(crate) cache: PathBuf,
 }
 
 /// A network loading ahead on its own thread: (network, the key it is for, the load: the network and its seconds).
@@ -261,10 +276,13 @@ impl<L: Loader> Pipeline<L> {
                 self.set_shrink();
                 continue;
             }
-            let file = self
-                .models
-                .file(piece, key.precision)
-                .ok_or_else(|| Error::assets(format!("missing ONNX model {piece} ({}) in {}", key.precision.name(), self.models.dir.display())))?;
+            let file = match &key.coreml {
+                Some(c) => c.files.get(piece).cloned().ok_or_else(|| Error::assets(format!("no Core ML model for {piece} in this job's set")))?,
+                None => self
+                    .models
+                    .file(piece, key.precision)
+                    .ok_or_else(|| Error::assets(format!("missing ONNX model {piece} ({}) in {}", key.precision.name(), self.models.dir.display())))?,
+            };
             let t = Instant::now();
             let settings = trt.map(|f| f(piece));
             let cap = self.arena_limit(key, piece);
@@ -318,7 +336,66 @@ impl<L: Loader> Pipeline<L> {
                 }
             }
         }
+        if key.provider == Provider::CoreMl {
+            self.send_coreml_provider(key, sink);
+        }
         Ok(())
+    }
+
+    /// Core ML jobs: the `provider` reply once sessions exist. A Core ML session is made with ONNX Runtime's CPU
+    /// fallback switched off, so each loaded network runs every node on Core ML (ORT doesn't say how many partitions
+    /// it made: the study measured one per network; reported as unknown here).
+    fn send_coreml_provider(&self, key: &ModelKey, sink: &mut dyn Sink) {
+        // loop: NOT-WORTH — ≤ five networks, once per load phase
+        let pieces: BTreeMap<&str, &str> = self.nets.iter().map(|(k, n)| (*k, n.provider().name())).collect();
+        let cm = key.coreml.as_ref();
+        let files: BTreeMap<&str, String> = cm
+            .map(|c| {
+                c.files
+                    // loop: NOT-WORTH — ≤ five files
+                    .iter()
+                    .filter(|(p, _)| pieces.contains_key(*p))
+                    .map(|(p, f)| (*p, f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        sink.send(json!({
+            "type": "provider", "provider": "coreml", "precision": key.precision.name(), "pieces": pieces,
+            "coreml": {"files": files, "nodes": "all", "partitions": null, "compute_units": cm.map(|c| c.units),
+                       "model_format": "MLProgram", "cpu_fallback": false, "cache": cm.map(|c| c.cache.to_string_lossy().into_owned())}
+        }));
+    }
+
+    /// Core ML jobs: the set's files for padded size `shape`, `tc` frames per stage-1 window and the foundations'
+    /// batch (4 in low-memory mode, the prepass's chunk; else the window). Err (bad-request): the set doesn't have
+    /// that size or window, or the job asks for fp32 (the Core ML set is fp16).
+    fn coreml_key(
+        &self,
+        base: &ModelKey,
+        shape: (usize, usize),
+        tc: usize,
+        low_vram: bool,
+        cfg: &crate::config::EngineConfig,
+        sink: &mut dyn Sink,
+    ) -> Result<ModelKey, Error> {
+        if base.precision != Precision::Fp16 {
+            return Err(Error::input("--device coreml: the Core ML model set is fp16 (CK_ENGINE_PRECISION=fp32 can't run on it)".into()));
+        }
+        let fb = if low_vram { keying::FOUNDATION_CHUNK } else { tc };
+        let mut files = BTreeMap::new();
+        // loop: NOT-WORTH — five networks, once per job
+        for (piece, t) in [("rvm", 1), ("cradio", fb), ("moge", fb), ("stage1", tc), ("stage2", 1)] {
+            let f = self.models.coreml_file(piece, shape, t).map_err(Error::input)?;
+            files.insert(piece, f);
+        }
+        sink.log(&format!(
+            "  Core ML: the set's files for {}x{} (padded), stage 1 at {tc} frames per window, C-RADIO / MoGe at {fb} per call, compute units {}",
+            shape.1,
+            shape.0,
+            cfg.coreml_units.name()
+        ));
+        let cm = CoremlFiles { files, foundation_batch: fb, units: cfg.coreml_units.name(), cache: cfg.coreml_cache.clone() };
+        Ok(ModelKey { coreml: Some(cm), ..base.clone() })
     }
 
     /// Low-VRAM mode: start loading `pieces` (the next phase's networks) on their own thread while the current
@@ -466,7 +543,7 @@ impl Pipeline<OrtLoader> {
     fn run_job(&mut self, job: &JobConfig, sink: &mut dyn Sink) -> Result<JobResult, Error> {
         let job_t = Instant::now();
         let Some(provider) = self.loader.rt.provider() else {
-            return Err(Error::no_gpu("CorridorKey needs an NVIDIA graphics card with CUDA.".into()));
+            return Err(Error::no_gpu(self.loader.rt.unavailable_reason()));
         };
         let precision = self.loader.rt.precision(provider);
         let missing = self.models.missing(precision);
@@ -486,15 +563,16 @@ impl Pipeline<OrtLoader> {
         // colour management (backlog row 29), before any network loads: a bad config or space is a bad-request now
         let color = color_setup(job, is_dir, sink)?;
         let vram_cap = match provider {
-            Provider::Cpu => None,
+            Provider::Cpu | Provider::CoreMl => None,
             _ => job.vram_budget_gb.map(|g| (g * 1073741824.0) as u64),
         };
-        let base_key = ModelKey { provider, precision, trt_cache: None, vram_cap };
+        let base_key = ModelKey { provider, precision, trt_cache: None, vram_cap, coreml: None };
         // a manual normal-mode job loads the CUDA / CPU networks before the probe, as the runtime's load_model
         // (TensorRT's depend on the clip). An automatic window loads them once the window is chosen: measured, the
         // early load cost ~3 s per job when the window then came out low-VRAM (every network loaded again per
         // phase). The automatic budget is free + own memory, the same either way.
-        if job.manual && !job.low_vram && !job.tensorrt {
+        // (Core ML: its files depend on the clip's size, so they load after the probe)
+        if job.manual && !job.low_vram && !job.tensorrt && provider != Provider::CoreMl {
             self.ensure(&base_key, &crate::runtime::PIECES, None, sink, "load")?;
         }
         sink.send(json!({"type": "progress", "stage": "probe"}));
@@ -548,7 +626,18 @@ impl Pipeline<OrtLoader> {
         let (sh, sw) = (meta.shape_h, meta.shape_w);
         // TensorRT jobs take the same window (and low-VRAM staging) as the CUDA path, so the mattes match
         // (tensorrt.rs bucket_for); their engines are built for it
-        if !job.manual {
+        if !job.manual && provider == Provider::CoreMl {
+            // Core ML, phase 1: the window comes from the set (the smallest stage-1 window it was built for at this
+            // size), low-memory mode; there is no graphics memory reading on a Mac to size it from
+            let Some(&c) = self.models.coreml_batches("stage1", (sh, sw)).first() else {
+                return Err(Error::input(self.models.coreml_file("stage1", (sh, sw), 1).err().unwrap_or_default()));
+            };
+            (chunk, stride, low_vram) = (c, (c / 2).max(1), true);
+            sink.log(&format!(
+                "  Core ML window: hann_chunk={chunk}, hann_stride={stride}, low_vram=True (the smallest window the Core ML set has at {sw}x{sh})"
+            ));
+            sink.send(json!({"type": "memory", "hann_chunk": chunk, "hann_stride": stride, "low_vram": low_vram, "auto": true, "estimate_basis": "coreml-set", "provider": provider.name()}));
+        } else if !job.manual {
             // the budget the runtime's apply_auto_vram sees: free memory plus what this process holds
             let (seen, source) = match provider {
                 Provider::Cpu => (crate::gpu::host_available().unwrap_or(0) as f64 / 1073741824.0, "host"),
@@ -585,7 +674,14 @@ impl Pipeline<OrtLoader> {
             }));
         }
         // which provider really runs this job
-        let (key, trt_info) = self.job_key(job, &base_key, (sh, sw), chunk, low_vram, sink)?;
+        let (key, trt_info) = if provider == Provider::CoreMl {
+            if job.tensorrt {
+                sink.log("  TensorRT was asked for: not on Core ML (ignored)");
+            }
+            (self.coreml_key(&base_key, (sh, sw), chunk.min(t_all), low_vram, &self.loader.rt.cfg, sink)?, None)
+        } else {
+            self.job_key(job, &base_key, (sh, sw), chunk, low_vram, sink)?
+        };
         if key.provider == Provider::TensorRt {
             if trt_info.as_ref().is_some_and(|i| !i.1) {
                 sink.log("  TensorRT: optimizing for this resolution range (a one-time build; later clips in this range reuse it)");
@@ -778,7 +874,10 @@ impl Pipeline<OrtLoader> {
         msg["range"] = json!(bucket.key());
         msg["cache"] = json!(if built { "reused" } else { "build" });
         sink.send(msg);
-        Ok((ModelKey { provider: Provider::TensorRt, precision: trt_prec, trt_cache: Some(bdir.clone()), vram_cap: base.vram_cap }, Some((bdir, built))))
+        Ok((
+            ModelKey { provider: Provider::TensorRt, precision: trt_prec, trt_cache: Some(bdir.clone()), vram_cap: base.vram_cap, coreml: None },
+            Some((bdir, built)),
+        ))
     }
 
     /// TensorRT jobs: build every engine this range is missing (one network at a time, ck-trt-build in a child

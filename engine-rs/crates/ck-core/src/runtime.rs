@@ -22,6 +22,8 @@ pub enum Provider {
     Cuda,
     TensorRt,
     Cpu,
+    /// ONNX Runtime's Core ML provider (macOS): every node of a fixed-shape Core ML set file, or no session
+    CoreMl,
 }
 
 impl Provider {
@@ -30,6 +32,7 @@ impl Provider {
             Provider::Cuda => "cuda",
             Provider::TensorRt => "tensorrt",
             Provider::Cpu => "cpu",
+            Provider::CoreMl => "coreml",
         }
     }
 }
@@ -64,6 +67,19 @@ pub struct ModelSet {
     manifest: BTreeMap<String, BTreeMap<String, String>>,
     /// manifest.json's "version" (CorridorKey2.0 make_manifest.py), when the folder has one
     pub(crate) version: Option<String>,
+    /// coreml.json, when the folder has one: the Core ML set (fixed-shape files, engine-rs/export/coreml)
+    pub(crate) coreml: Option<CoremlManifest>,
+}
+
+/// coreml.json: {"format": 1, "source_set": "2.0.0-onnx.3", "fp16": {"1152x1280": {"stage1-t4": "file.onnx", ...}}}.
+/// Core ML compiles a model for fixed shapes, so there is one file per network, padded size (H x W) and batch
+/// (`-t<T>`: frames per call). The files keep their weights in the set's own `.onnx.data` files.
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+pub(crate) struct CoremlManifest {
+    #[serde(default)]
+    pub(crate) source_set: Option<String>,
+    #[serde(default)]
+    pub(crate) fp16: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 /// Model sets whose C-RADIO only takes landscape or square frames (measured: an ONNX Runtime broadcast error
@@ -90,7 +106,61 @@ impl ModelSet {
             .ok()
             .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
             .and_then(|v| v.get("version")?.as_str().map(str::to_string));
-        Ok(ModelSet { dir: dir.to_path_buf(), manifest, version })
+        let cpath = dir.join("coreml.json");
+        let coreml = if cpath.exists() {
+            let s = std::fs::read_to_string(&cpath).map_err(|e| Error::assets(format!("{}: {e}", cpath.display())))?;
+            Some(serde_json::from_str(&s).map_err(|e| Error::assets(format!("{}: {e}", cpath.display())))?)
+        } else {
+            None
+        };
+        Ok(ModelSet { dir: dir.to_path_buf(), manifest, version, coreml })
+    }
+
+    /// The Core ML set's file for `piece` at padded size `sh` x `sw` and batch `t`. Err: why there is none (no
+    /// coreml.json, no file for that size, the batches it has for that size, or the file is missing).
+    pub(crate) fn coreml_file(&self, piece: &str, (sh, sw): (usize, usize), t: usize) -> Result<PathBuf, String> {
+        let Some(cm) = &self.coreml else {
+            return Err(format!("{} has no Core ML model set (coreml.json)", self.dir.display()));
+        };
+        if let (Some(from), Some(v)) = (&cm.source_set, &self.version) {
+            if from != v {
+                return Err(format!("the Core ML set (coreml.json) was built from model set {from}, this folder is {v}: its weights don't match"));
+            }
+        }
+        let Some(files) = cm.fp16.get(&format!("{sh}x{sw}")) else {
+            let have: Vec<&str> = cm.fp16.keys().map(|k| k.as_str()).collect();
+            return Err(format!(
+                "the Core ML set has no models for {sw}x{sh} frames (padded); it has {}",
+                if have.is_empty() { "none".to_string() } else { have.join(", ") }
+            ));
+        };
+        let Some(name) = files.get(&format!("{piece}-t{t}")) else {
+            // loop: NOT-WORTH — the set's few batches, for the message
+            let have: Vec<String> = self.coreml_batches(piece, (sh, sw)).iter().map(|t| t.to_string()).collect();
+            return Err(format!(
+                "the Core ML set has no {piece} for {t} frame(s) per call at {sw}x{sh} (it has {}): pick a window it was built for",
+                if have.is_empty() { "none".to_string() } else { format!("{} frame(s)", have.join(", ")) }
+            ));
+        };
+        let f = self.dir.join(name);
+        if f.exists() {
+            Ok(f)
+        } else {
+            Err(format!("Core ML model missing: {}", f.display()))
+        }
+    }
+
+    /// The batches (frames per call) the Core ML set has for `piece` at `sh` x `sw`, smallest first.
+    pub(crate) fn coreml_batches(&self, piece: &str, (sh, sw): (usize, usize)) -> Vec<usize> {
+        let pre = format!("{piece}-t");
+        let mut v: Vec<usize> = self
+            .coreml
+            .as_ref()
+            .and_then(|c| c.fp16.get(&format!("{sh}x{sw}")))
+            .map(|f| f.keys().filter_map(|k| k.strip_prefix(&pre)?.parse().ok()).collect())
+            .unwrap_or_default();
+        v.sort_unstable();
+        v
     }
 
     /// Whether this set's C-RADIO takes frames taller than wide (false only for the sets measured to fail).
@@ -172,6 +242,8 @@ pub struct Runtime {
     pub gpu: Option<GpuInfo>,
     pub(crate) cuda_ep: bool,
     pub tensorrt_ep: bool,
+    /// the loaded ONNX Runtime has the Core ML provider (macOS builds only; never true elsewhere)
+    pub coreml_ep: bool,
     pub ort_version: String,
     /// the engine's settings, read once at startup (config.rs); everything below the protocol loop reads them here
     pub cfg: EngineConfig,
@@ -218,15 +290,24 @@ impl Runtime {
         };
         #[cfg(not(feature = "tensorrt"))]
         let tensorrt_ep = false;
-        let gpu = if cfg.device == Device::Cpu { None } else { nvidia() };
-        Ok(Runtime { env, gpu, cuda_ep, tensorrt_ep, ort_version: version, cfg: cfg.clone() })
+        #[cfg(target_os = "macos")]
+        let coreml_ep = {
+            use ort::ep::ExecutionProvider;
+            ort::ep::CoreML::is_available().unwrap_or(false)
+        };
+        #[cfg(not(target_os = "macos"))]
+        let coreml_ep = false;
+        let gpu = if matches!(cfg.device, Device::Cpu | Device::CoreMl) { None } else { nvidia() };
+        Ok(Runtime { env, gpu, cuda_ep, tensorrt_ep, coreml_ep, ort_version: version, cfg: cfg.clone() })
     }
 
     /// The normal provider: CUDA with a card and the CUDA EP (or when asked), the CPU only when asked.
-    /// None: no usable GPU (the protocol's `no-gpu`).
+    /// Core ML only when asked for (--device coreml) and the loaded ONNX Runtime has it.
+    /// None: no usable GPU (the protocol's `no-gpu`), or no Core ML provider (`unavailable_reason`).
     pub fn provider(&self) -> Option<Provider> {
         match self.cfg.device {
             Device::Cpu => Some(Provider::Cpu),
+            Device::CoreMl => self.coreml_ep.then_some(Provider::CoreMl),
             _ if self.gpu.is_some() && self.cuda_ep => Some(Provider::Cuda),
             _ => None,
         }
@@ -238,6 +319,17 @@ impl Runtime {
             Some(p) => p,
             None if prov == Provider::Cpu => Precision::Fp32,
             None => Precision::Fp16,
+        }
+    }
+
+    /// Why `provider()` is None, in words for the job's error.
+    pub fn unavailable_reason(&self) -> String {
+        match self.cfg.device {
+            Device::CoreMl => format!(
+                "--device coreml: this ONNX Runtime ({}) has no Core ML execution provider (the macOS onnxruntime build has it); nothing runs on the CPU instead",
+                self.ort_version
+            ),
+            _ => "CorridorKey needs an NVIDIA graphics card with CUDA.".into(),
         }
     }
 
@@ -290,6 +382,33 @@ impl Runtime {
                     return Err("this engine was built without the TensorRT execution provider".into());
                 }
             }
+            Provider::CoreMl => {
+                // every node on Core ML or no session: CPU fallback is switched off, so a node Core ML can't take is
+                // an error naming the reason, never a silent CPU run
+                #[cfg(target_os = "macos")]
+                {
+                    use ort::ep::coreml::{ComputeUnits, ModelFormat};
+                    let cache = coreml_cache_dir(&self.cfg.coreml_cache, &self.ort_version, self.cfg.coreml_units.name(), file);
+                    std::fs::create_dir_all(&cache).map_err(|e| format!("the Core ML cache folder {}: {e}", cache.display()))?;
+                    let units = match self.cfg.coreml_units {
+                        crate::config::CoremlUnits::All => ComputeUnits::All,
+                        crate::config::CoremlUnits::CpuGpu => ComputeUnits::CPUAndGPU,
+                        crate::config::CoremlUnits::CpuAne => ComputeUnits::CPUAndNeuralEngine,
+                        crate::config::CoremlUnits::Cpu => ComputeUnits::CPUOnly,
+                    };
+                    let ep = ort::ep::CoreML::default()
+                        .with_model_format(ModelFormat::MLProgram)
+                        .with_compute_units(units)
+                        .with_static_input_shapes(true)
+                        .with_model_cache_dir(cache.display());
+                    b = b.with_config_entry("session.disable_cpu_ep_fallback", "1").map_err(|e| e.to_string())?;
+                    b = b.with_execution_providers([ep.build().error_on_failure()]).map_err(|e| e.to_string())?;
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    return Err("Core ML runs only on macOS".into());
+                }
+            }
         }
         b.commit_from_file(file).map_err(|e| e.to_string())
     }
@@ -319,6 +438,18 @@ fn cuda_ep(cfg: &EngineConfig, vram_cap: Option<u64>) -> ort::ep::CUDA {
         .with_arena_extend_strategy(ort::ep::ArenaExtendStrategy::SameAsRequested)
         // TF32 off: an fp32 model on CUDA computes in fp32
         .with_tf32(false)
+}
+
+/// The compiled-model cache folder of one Core ML set file: `<root>/<ORT version>/<units>/<file stem>-<bytes>-<mtime>`.
+/// The stem names the network, padded size and batch; size and modification time change when the file is rebuilt
+/// (ORT's own cache key follows the graph's structure, not its weights).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn coreml_cache_dir(root: &Path, ort_version: &str, units: &str, file: &Path) -> PathBuf {
+    let meta = std::fs::metadata(file).ok();
+    let bytes = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+    let mtime = meta.and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
+    let stem = file.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    root.join(ort_version).join(units).join(format!("{stem}-{bytes}-{mtime}"))
 }
 
 /// Where a TensorRT network's engine lives: the shape range's folder for this network (engine + EPContext stub).
@@ -476,7 +607,7 @@ impl Net {
             session.inputs().iter().filter(|i| i.dtype().tensor_type() == Some(ort::value::TensorElementType::Float16)).map(|i| i.name().to_string()).collect();
         // on the GPU a run can give its arena's working memory back (the five sessions have one arena each, so
         // without this their peaks would add up); the pipeline decides per phase, see `shrinks`
-        let shrink_options = if prov != Provider::Cpu {
+        let shrink_options = if matches!(prov, Provider::Cuda | Provider::TensorRt) {
             let mut o = ort::session::RunOptions::new().map_err(|e| Error::ort(piece, e))?;
             o.set("memory.enable_memory_arena_shrinkage", "gpu:0").map_err(|e| Error::ort(piece, e))?;
             Some(o)
@@ -562,6 +693,32 @@ mod tests {
     #[test]
     fn version_from_build_info() {
         assert_eq!(ort_version("ORT Build Info: git-branch=rel-1.31.0, git-commit-id=402979a, build type=Release"), "1.31.0");
+    }
+
+    #[test]
+    fn coreml_set_files_by_size_and_batch() {
+        let dir = std::env::temp_dir().join(format!("ck-coreml-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let m = ModelSet::open(&dir).unwrap();
+        assert!(m.coreml_file("stage1", (1152, 1280), 4).unwrap_err().contains("no Core ML model set"));
+        std::fs::write(dir.join("s1-t4.onnx"), b"").unwrap();
+        std::fs::write(
+            dir.join("coreml.json"),
+            r#"{"format": 1, "source_set": "2.0.0-onnx.3", "fp16": {"1152x1280": {"stage1-t4": "s1-t4.onnx", "stage1-t8": "gone.onnx", "rvm-t1": "x.onnx"}}}"#,
+        )
+        .unwrap();
+        let m = ModelSet::open(&dir).unwrap();
+        assert_eq!(m.coreml_file("stage1", (1152, 1280), 4), Ok(dir.join("s1-t4.onnx")));
+        assert_eq!(m.coreml_batches("stage1", (1152, 1280)), vec![4, 8]);
+        assert!(m.coreml_file("stage1", (1152, 1280), 8).unwrap_err().contains("missing"));
+        let e = m.coreml_file("stage1", (1152, 1280), 6).unwrap_err();
+        assert!(e.contains("6 frame(s)") && e.contains("4, 8 frame(s)"), "{e}");
+        assert!(m.coreml_file("stage1", (2176, 4096), 4).unwrap_err().contains("it has 1152x1280"));
+        // built from another model set: its weights don't match
+        std::fs::write(dir.join("manifest.json"), r#"{"version": "2.0.0-onnx.4"}"#).unwrap();
+        let m = ModelSet::open(&dir).unwrap();
+        assert!(m.coreml_file("stage1", (1152, 1280), 4).unwrap_err().contains("built from model set 2.0.0-onnx.3"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

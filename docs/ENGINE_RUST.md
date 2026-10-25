@@ -88,6 +88,20 @@ The engine runs `ffmpeg` / `ffprobe` from the system: they are not bundled.
   `tensorrt_libs` next to the ORT library it is given (`electron/main/engine.ts`, `rustEngineEnv`).
 - `--device cpu` runs ONNX Runtime's CPU provider (tests). Without a usable GPU, jobs fail with `no-gpu`,
   as with the PyTorch engine.
+- `--device coreml` (macOS only; elsewhere the engine stops with an error) runs ONNX Runtime's Core ML provider
+  (BACKLOG row 24, phase 1): ML Program format, fp16, compute units `CK_ENGINE_COREML_UNITS` (all | cpu-gpu |
+  cpu-ane | cpu; default all), compiled models cached under `CK_ENGINE_COREML_CACHE` (default `coreml` next to the
+  TensorRT cache root, e.g. `~/Library/Caches/corridorkey-desktop/coreml`; one folder per ORT version, units and
+  file). Core ML compiles for fixed shapes, so it runs the **Core ML set**: `coreml.json` in the models folder lists
+  one file per network, padded size and frames per call (`engine-rs/export/coreml/build_coreml_models.sh`; the
+  files keep their weights in the shipped `.onnx.data`). A job whose size or window the set lacks is refused
+  (bad-request naming what the set has); without a window the job takes the set's smallest, low-memory. The low-memory
+  prepass's last C-RADIO / MoGe chunk is padded to the fixed batch with copies of its last frame (batch items are
+  independent; only its own frames are kept). Sessions are made with ORT's CPU fallback off
+  (`session.disable_cpu_ep_fallback`): every node runs on Core ML or the session fails with ORT's reason; nothing
+  falls back to the CPU silently. The pong says `coreml_available` (and `unavailable` when it isn't); the job's
+  `provider` reply says `coreml` only once its sessions exist (`coreml.nodes` "all", `partitions` null: ORT
+  doesn't report the count).
 - Session settings (measured, "Speed" below): graph optimisation `ORT_ENABLE_ALL` (the `ort` crate's `Level3`
   is only `ORT_ENABLE_LAYOUT`); cuDNN convolution search heuristic; attention on ORT's own flash kernels
   (the engine sets `ORT_ENABLE_CUDNN_FLASH_ATTENTION=0` unless the environment sets it); arena shrinkage only

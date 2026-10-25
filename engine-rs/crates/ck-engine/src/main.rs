@@ -1,11 +1,12 @@
 //! corridorkey-engine: CorridorKey on ONNX Runtime, speaking docs/ENGINE_PROTOCOL.md over stdio.
 //!
-//!   corridorkey-engine --models DIR [--ort libonnxruntime.so] [--device auto|cuda|cpu]
+//!   corridorkey-engine --models DIR [--ort libonnxruntime.so] [--device auto|cuda|cpu|coreml]
 //!
 //! --models (CK_ENGINE_MODELS): the folder with the five ONNX networks (docs/ENGINE_RUST.md).
 //! --ort (CK_ENGINE_ORT, ORT_DYLIB_PATH): ONNX Runtime's library, for the GPU build that loads it at run time.
 //! --device (CK_ENGINE_DEVICE): auto = the graphics card (no card: jobs fail with `no-gpu`, as the
-//!   PyTorch engine); cpu = ONNX Runtime's CPU provider (tests; slow).
+//!   PyTorch engine); cpu = ONNX Runtime's CPU provider (tests; slow); coreml = ONNX Runtime's Core ML provider
+//!   (macOS only; the models folder's Core ML set, coreml.json; docs/ENGINE_RUST.md).
 //! Every other setting is a CK_ENGINE_* variable (docs/ENGINE_RUST.md "Knobs"), read once (ck_core::config).
 use ck_core::config::EngineConfig;
 use ck_core::job::JobConfig;
@@ -26,7 +27,15 @@ impl Backend for Ort {
         let precision = prov.map(|p| rt.precision(p));
         json!({
             "type": "pong", "version": ENGINE_VERSION, "protocol": PROTOCOL, "engine": "onnxruntime",
-            "device": if prov.is_some_and(|p| p != ck_core::runtime::Provider::Cpu) { "cuda" } else { "cpu" },
+            "device": match prov {
+                Some(ck_core::runtime::Provider::CoreMl) => "coreml",
+                Some(p) if p != ck_core::runtime::Provider::Cpu => "cuda",
+                _ => "cpu",
+            },
+            // (additive) the loaded ONNX Runtime has the Core ML provider; with --device coreml and without it,
+            // `provider` is null and `unavailable` says why (nothing runs on the CPU instead)
+            "coreml_available": rt.coreml_ep,
+            "unavailable": if prov.is_none() { Some(rt.unavailable_reason()) } else { None },
             "gpu": rt.gpu.as_ref().map(|g| g.name.clone()),
             "vram_total_mb": rt.gpu.as_ref().map(|g| g.total / 1048576),
             "provider": prov.map(|p| p.name()),

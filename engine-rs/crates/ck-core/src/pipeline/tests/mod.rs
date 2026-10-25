@@ -42,7 +42,7 @@ fn fake_models(dir: &Path) -> ModelSet {
 }
 
 fn key(provider: Provider) -> ModelKey {
-    ModelKey { provider, precision: Precision::Fp32, trt_cache: None, vram_cap: None }
+    ModelKey { provider, precision: Precision::Fp32, trt_cache: None, vram_cap: None, coreml: None }
 }
 
 /// The test clip's model shape: not square, so a swapped height and width shows.

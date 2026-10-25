@@ -15,6 +15,40 @@ pub enum Device {
     Cuda,
     /// ONNX Runtime's CPU provider (tests; slow)
     Cpu,
+    /// ONNX Runtime's Core ML provider (macOS only; the fixed-shape Core ML model set, coreml.json)
+    CoreMl,
+}
+
+impl Device {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Device::Auto => "auto",
+            Device::Cuda => "cuda",
+            Device::Cpu => "cpu",
+            Device::CoreMl => "coreml",
+        }
+    }
+}
+
+/// CK_ENGINE_COREML_UNITS: what Core ML may run the networks on (its MLComputeUnits).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CoremlUnits {
+    /// CPU, GPU and Neural Engine (Core ML picks per layer)
+    All,
+    CpuGpu,
+    CpuAne,
+    Cpu,
+}
+
+impl CoremlUnits {
+    pub fn name(&self) -> &'static str {
+        match self {
+            CoremlUnits::All => "all",
+            CoremlUnits::CpuGpu => "cpu-gpu",
+            CoremlUnits::CpuAne => "cpu-ane",
+            CoremlUnits::Cpu => "cpu",
+        }
+    }
 }
 
 /// CK_ENGINE_GRAPH_OPT: ONNX Runtime's graph optimisation level (a measurement knob).
@@ -69,6 +103,10 @@ pub struct EngineConfig {
     pub vram_budget_gb: Option<f64>,
     /// the TensorRT engine cache root (CK_ENGINE_TRT_CACHE, else the system's cache folder: pipeline::trt_root_for)
     pub trt_cache: PathBuf,
+    /// CK_ENGINE_COREML_UNITS (default all)
+    pub coreml_units: CoremlUnits,
+    /// Core ML's compiled-model cache root (CK_ENGINE_COREML_CACHE, else `coreml` next to the TensorRT cache root)
+    pub coreml_cache: PathBuf,
     /// CK_ENGINE_TRT_BUILD: the engine builder (None: ck-trt-build next to the engine)
     pub trt_build: Option<PathBuf>,
     /// CK_ENGINE_TRT_BUILD_TIMEOUT_S: one engine build's deadline (1800 s)
@@ -95,6 +133,8 @@ impl Default for EngineConfig {
             arena_shrink: ArenaShrink::Auto,
             vram_budget_gb: None,
             trt_cache: PathBuf::from("tensorrt"),
+            coreml_units: CoremlUnits::All,
+            coreml_cache: PathBuf::from("coreml"),
             trt_build: None,
             trt_build_timeout: Duration::from_secs(1800),
             parent_pid: None,
@@ -130,9 +170,27 @@ impl EngineConfig {
     pub fn parse(args: &[String], env: &dyn Fn(&str) -> Option<String>, os: &str) -> Result<EngineConfig, String> {
         let var = |k: &str| env(k).filter(|s| !s.trim().is_empty());
         let device = match arg_value(args, "--device").map(|v| ("--device", v)).or_else(|| var("CK_ENGINE_DEVICE").map(|v| ("CK_ENGINE_DEVICE", v))) {
-            Some((name, v)) => pick(name, &v, &[("auto", Device::Auto), ("cuda", Device::Cuda), ("cpu", Device::Cpu)])?,
+            Some((name, v)) => {
+                let d = pick(name, &v, &[("auto", Device::Auto), ("cuda", Device::Cuda), ("cpu", Device::Cpu), ("coreml", Device::CoreMl)])?;
+                if d == Device::CoreMl && os != "macos" {
+                    return Err(format!("{name}: coreml is ONNX Runtime's Core ML provider, macOS only (this system: {os})"));
+                }
+                d
+            }
             None => Device::Auto,
         };
+        let coreml_units = match var("CK_ENGINE_COREML_UNITS") {
+            Some(v) => pick(
+                "CK_ENGINE_COREML_UNITS",
+                &v,
+                &[("all", CoremlUnits::All), ("cpu-gpu", CoremlUnits::CpuGpu), ("cpu-ane", CoremlUnits::CpuAne), ("cpu", CoremlUnits::Cpu)],
+            )?,
+            None => CoremlUnits::All,
+        };
+        let trt_cache = crate::pipeline::trt_root_for(os, |k| var(k));
+        let coreml_cache = var("CK_ENGINE_COREML_CACHE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| trt_cache.parent().map(|p| p.join("coreml")).unwrap_or_else(|| PathBuf::from("coreml")));
         let precision = match var("CK_ENGINE_PRECISION") {
             Some(v) => Some(pick("CK_ENGINE_PRECISION", &v, &[("fp16", Precision::Fp16), ("fp32", Precision::Fp32)])?),
             None => None,
@@ -198,7 +256,9 @@ impl EngineConfig {
             profile: var("CK_ENGINE_PROFILE").map(PathBuf::from),
             arena_shrink,
             vram_budget_gb,
-            trt_cache: crate::pipeline::trt_root_for(os, |k| var(k)),
+            trt_cache,
+            coreml_units,
+            coreml_cache,
             trt_build: var("CK_ENGINE_TRT_BUILD").map(PathBuf::from),
             trt_build_timeout,
             parent_pid: crate::proc::parent_pid_from(var("CK_ENGINE_PARENT_PID").as_deref()),
@@ -212,7 +272,7 @@ impl EngineConfig {
         json!({
             "models": path(&self.models),
             "ort": path(&self.ort),
-            "device": match self.device { Device::Auto => "auto", Device::Cuda => "cuda", Device::Cpu => "cpu" },
+            "device": self.device.name(),
             "precision": self.precision.map(|p| p.name()),
             "threads": self.threads,
             "graph_opt": match self.graph_opt { GraphOpt::All => "all", GraphOpt::Layout => "layout", GraphOpt::Extended => "extended" },
@@ -232,6 +292,8 @@ impl EngineConfig {
             },
             "vram_budget_gb": self.vram_budget_gb,
             "trt_cache": self.trt_cache.to_string_lossy(),
+            "coreml_units": self.coreml_units.name(),
+            "coreml_cache": self.coreml_cache.to_string_lossy(),
             "trt_build": path(&self.trt_build),
             "trt_build_timeout_s": self.trt_build_timeout.as_secs(),
             "parent_pid": self.parent_pid,
@@ -272,7 +334,11 @@ mod tests {
     #[test]
     fn nothing_set_is_the_defaults() {
         let c = EngineConfig::parse(&args(&["corridorkey-engine"]), &env(&[("HOME", "/h")]), "linux").unwrap();
-        let d = EngineConfig { trt_cache: PathBuf::from("/h/.cache/corridorkey-desktop/tensorrt"), ..EngineConfig::default() };
+        let d = EngineConfig {
+            trt_cache: PathBuf::from("/h/.cache/corridorkey-desktop/tensorrt"),
+            coreml_cache: PathBuf::from("/h/.cache/corridorkey-desktop/coreml"),
+            ..EngineConfig::default()
+        };
         assert_eq!(c, d);
     }
 
@@ -330,12 +396,20 @@ mod tests {
             ("CK_ENGINE_VRAM_BUDGET_GB", "-2"),
             ("CK_ENGINE_VRAM_BUDGET_GB", "lots"),
             ("CK_ENGINE_TRT_BUILD_TIMEOUT_S", "1h"),
+            ("CK_ENGINE_COREML_UNITS", "gpu"),
         ] {
             let e = move |n: &str| (n == k).then(|| v.to_string());
             let err = EngineConfig::parse(&args(&["e"]), &e, "linux").unwrap_err();
             assert!(err.starts_with(k), "{k}={v}: {err}");
         }
         assert!(EngineConfig::parse(&args(&["e", "--device", "metal"]), &env(&[]), "linux").unwrap_err().starts_with("--device"));
+        // Core ML: macOS only, a clear error elsewhere; on macOS its units and cache
+        assert!(EngineConfig::parse(&args(&["e", "--device", "coreml"]), &env(&[]), "linux").unwrap_err().contains("macOS only"));
+        let c =
+            EngineConfig::parse(&args(&["e", "--device", "coreml"]), &env(&[("HOME", "/Users/m"), ("CK_ENGINE_COREML_UNITS", "cpu-gpu")]), "macos").unwrap();
+        assert_eq!((c.device, c.coreml_units), (Device::CoreMl, CoremlUnits::CpuGpu));
+        assert_eq!(c.coreml_cache, PathBuf::from("/Users/m/Library/Caches/corridorkey-desktop/coreml"));
+        assert_eq!(c.to_json()["device"].as_str(), Some("coreml"));
         // empty means unset
         assert_eq!(EngineConfig::parse(&args(&["e"]), &env(&[("CK_ENGINE_DEVICE", ""), ("CK_ENGINE_THREADS", " ")]), "linux").unwrap().device, Device::Auto);
         // the arena values

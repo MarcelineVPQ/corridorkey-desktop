@@ -287,7 +287,7 @@ impl<L: Loader> Pipeline<L> {
         // stage 1 loads while the foundations run
         self.preload(key, &["stage1"]);
         sink.send(json!({"type": "progress", "stage": "foundations"}));
-        let fchunk = 4;
+        let fchunk = FOUNDATION_CHUNK;
         sink.log(&format!("    frozen VFM prepass: T={t_all}, grid={w64}x{h64}, chunk={fchunk}"));
         let mut cf = FeatFile::create(&ctx.temps.cradio, CRADIO_CH * h64 * w64)?;
         let mut mf = FeatFile::create(&ctx.temps.moge, MOGE_CH * h64 * w64)?;
@@ -614,20 +614,31 @@ impl<L: Loader> Pipeline<L> {
         sink.log(&format!("  timing: {}; wall {:.1} s", parts.join(", "), times.started.elapsed().as_secs_f64()));
     }
 
-    /// C-RADIO and MoGe on `n` frames' resized inputs (`foundation_inputs`).
-    fn foundation_run(&mut self, n: usize, radio: Vec<f32>, moge: Vec<f32>, sh: usize, sw: usize) -> Result<(Data<'static>, Data<'static>), Error> {
+    /// C-RADIO and MoGe on `n` frames' resized inputs (`foundation_inputs`). Core ML's fixed-batch files: fewer
+    /// frames than the batch are padded with copies of the last one, and only the `n` frames' features are kept.
+    fn foundation_run(&mut self, n: usize, mut radio: Vec<f32>, mut moge: Vec<f32>, sh: usize, sw: usize) -> Result<(Data<'static>, Data<'static>), Error> {
         let (hr, wr) = (sh / 4, sw / 4);
         let (hm, wm) = (sh * 7 / 32, sw * 7 / 32);
+        let fixed = self.key.as_ref().and_then(|k| k.coreml.as_ref()).map(|c| c.foundation_batch);
+        let b = match fixed {
+            Some(f) if n < f => {
+                pad_frames(&mut radio, 3 * hr * wr, f - n);
+                pad_frames(&mut moge, 3 * hm * wm, f - n);
+                f
+            }
+            _ => n,
+        };
         let c =
             // loop: NOT-WORTH — one output per C-RADIO call
-            self.net("cradio")?.run(vec![("rgb", vec![n, 3, hr, wr], radio.into())])?.into_iter().next().ok_or_else(|| Error::engine("cradio: no output".into()))?;
+            self.net("cradio")?.run(vec![("rgb", vec![b, 3, hr, wr], radio.into())])?.into_iter().next().ok_or_else(|| Error::engine("cradio: no output".into()))?;
         // loop: NOT-WORTH — one output per MoGe call
         let m =
-            self.net("moge")?.run(vec![("rgb", vec![n, 3, hm, wm], moge.into())])?.into_iter().next().ok_or_else(|| Error::engine("moge: no output".into()))?;
-        if c.0 != vec![n, CRADIO_CH, sh / 64, sw / 64] || m.0 != vec![n, MOGE_CH, sh / 64, sw / 64] {
+            self.net("moge")?.run(vec![("rgb", vec![b, 3, hm, wm], moge.into())])?.into_iter().next().ok_or_else(|| Error::engine("moge: no output".into()))?;
+        if c.0 != vec![b, CRADIO_CH, sh / 64, sw / 64] || m.0 != vec![b, MOGE_CH, sh / 64, sw / 64] {
             return Err(Error::engine(format!("foundation shapes {:?} / {:?}", c.0, m.0)));
         }
-        Ok((c.1, m.1))
+        let per = (sh / 64) * (sw / 64);
+        Ok((keep_frames(c.1, n * CRADIO_CH * per)?, keep_frames(m.1, n * MOGE_CH * per)?))
     }
 
     /// Blended states that are final: to the low-VRAM file, or straight to stage 2.
@@ -713,4 +724,53 @@ fn foundation_inputs(frames: &[Prepped], sh: usize, sw: usize) -> (Vec<f32>, Vec
         moge.extend(resize_area(&p, hm, wm).data);
     }
     (radio, moge)
+}
+
+/// The low-memory foundations prepass's frames per C-RADIO / MoGe call.
+pub(crate) const FOUNDATION_CHUNK: usize = 4;
+
+/// Append `extra` copies of the last frame (`frame` values each) to `v` (a fixed-batch network's padding).
+fn pad_frames(v: &mut Vec<f32>, frame: usize, extra: usize) {
+    if frame == 0 || v.len() < frame {
+        return;
+    }
+    let last = v.len() - frame;
+    v.reserve(frame * extra);
+    // loop: NOT-WORTH — ≤ 3 padding frames, only on Core ML's last prepass chunk
+    for _ in 0..extra {
+        v.extend_from_within(last..last + frame);
+    }
+}
+
+/// The first `len` values of a network output (a padded batch's own frames).
+fn keep_frames(d: Data<'static>, len: usize) -> Result<Data<'static>, Error> {
+    match d {
+        Data::F32(mut v) if v.len() >= len => {
+            v.truncate(len);
+            Ok(Data::F32(v))
+        }
+        Data::F16(mut v) if v.len() >= len => {
+            v.truncate(len);
+            Ok(Data::F16(v))
+        }
+        other => Err(Error::engine(format!("a network output of {} values, {len} expected", other.len()))),
+    }
+}
+
+#[cfg(test)]
+mod coreml_batch_tests {
+    use super::*;
+
+    #[test]
+    fn padded_batch_keeps_only_its_own_frames() {
+        // two frames of 3 values, padded to a fixed batch of 4 with copies of the last frame
+        let mut v = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        pad_frames(&mut v, 3, 2);
+        assert_eq!(v, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 4.0, 5.0, 6.0, 4.0, 5.0, 6.0]);
+        match keep_frames(Data::F32(v), 6).unwrap() {
+            Data::F32(k) => assert_eq!(k, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+            _ => panic!("type changed"),
+        }
+        assert!(keep_frames(Data::F16(vec![half::f16::ZERO; 2]), 6).is_err());
+    }
 }
