@@ -25,6 +25,7 @@ export const IPC = {
   startQueue: "ck:start-queue",
   stopQueue: "ck:stop-queue",
   showInFolder: "ck:show-in-folder",
+  copyText: "ck:copy-text",
   setVisible: "ck:set-visible",
   setAppearance: "ck:set-appearance",
   pickOutputRoot: "ck:pick-output-root",

@@ -8,6 +8,7 @@ import { LOG_SHOWN, type Job, type TrtPrebuild } from "../shared/types";
 import { prebuildStep, TRT_NOT_BUILT } from "../shared/trt";
 import { duration, ranOnText, remaining, STAGE_ORDER, STAGE_TEXT, trtJobText } from "./format";
 import { MainBlock } from "./panel/SplitView";
+import { PathText } from "./PathText";
 
 export function JobView({ job, prebuild }: { job: Job; prebuild?: TrtPrebuild }) {
   // A 1 s tick for the elapsed clock, only while this job runs and the page is visible (rule 3).
@@ -108,7 +109,7 @@ export function JobView({ job, prebuild }: { job: Job; prebuild?: TrtPrebuild })
             {/* loop: HOT-PATH-OK — ≤ four outputs per render */}
             {job.outputs.map((f) => (
               <li key={f}>
-                <span className="path">{f}</span>
+                <PathText path={f} />
                 <button type="button" className="icon-btn" aria-label="Show in folder" title="Show in folder" onClick={() => window.ck.showInFolder(f)}>
                   <FolderOpen size={14} />
                 </button>

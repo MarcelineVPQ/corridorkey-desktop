@@ -7,8 +7,10 @@ import { installMissing } from "../../shared/tasks";
 import { INSTALL_FIRST } from "../../shared/texts";
 import { Row } from "../panel/Section";
 import { duration, gbBytes } from "../format";
-import { PIECE_NAMES, prebuildStep, rangeText, trtSizeKey, TRT_TRADEOFF_4K, TRT_TRADEOFF_HD } from "../../shared/trt";
+import { PIECE_NAMES, prebuildStep, rangeText, trtSizeKey, TRT_BUILD_NOT_MEASURED, TRT_NOT_MEASURED } from "../../shared/trt";
 import { ProgressBar } from "../ProgressBar";
+import { More } from "../More";
+import { PathText } from "../PathText";
 
 export const installPct = (inst: Pick<InstallState, "done" | "total">) => (inst.total ? Math.floor((inst.done / inst.total) * 100) : 0);
 
@@ -21,26 +23,27 @@ export function InstallBox({ inst }: { inst: InstallState }) {
         <Check size={15} aria-hidden /> The GPU runtime and the CorridorKey models are installed
       </div>
     );
+  // loop: NOT-WORTH — two parts per render
+  const what = [inst.needRuntime && `GPU runtime, ${gbBytes(inst.runtimeBytes)}`, inst.needModels && `CorridorKey models, ${gbBytes(inst.modelsBytes)}`].filter(Boolean).join(" · ");
   return (
     <>
-      <p className="hint-text">CorridorKey downloads what it runs on, once, into {inst.dir}:</p>
-      <ul className="check-list">
-        {inst.needRuntime && (
-          <li className="hint-text">
-            GPU runtime, {gbBytes(inst.runtimeBytes)} download: {inst.runtimeWhat}
-          </li>
-        )}
-        {inst.needModels && (
-          <li className="hint-text">
-            CorridorKey models, {gbBytes(inst.modelsBytes)} download: by Corridor Digital, under the CorridorKey licence (free to use, never sold), from this app's GitHub releases
-          </li>
-        )}
-      </ul>
+      <p className="hint-text">
+        {what}: downloaded once, into <PathText path={inst.dir} />
+      </p>
+      <More>
+        <ul className="check-list">
+          {inst.needRuntime && <li className="hint-text">GPU runtime: {inst.runtimeWhat}</li>}
+          {inst.needModels && <li className="hint-text">CorridorKey models: by Corridor Digital, under the CorridorKey licence (free to use, never sold), from this app&apos;s GitHub releases</li>}
+        </ul>
+        <p className="hint-text">{CHECKED_AND_RESUMED}</p>
+      </More>
       {inst.gpuProblem && <p className="hint-text">{inst.gpuProblem}</p>}
       <InstallControls p={inst} canStart={inst.gpuOk} start={() => void window.ck.startInstall()} />
     </>
   );
 }
+
+const CHECKED_AND_RESUMED = "Every file is checked against its SHA-256 before it is used. A stopped download continues where it left off.";
 
 /** One install's controls (the runtime and models, or TensorRT's parts): the button, real progress, Stop, the error. */
 function InstallControls({ p, canStart, start }: { p: Pick<InstallState, "status" | "step" | "done" | "total" | "error" | "bytes">; canStart: boolean; start: () => void }) {
@@ -66,7 +69,6 @@ function InstallControls({ p, canStart, start }: { p: Pick<InstallState, "status
           <X size={15} aria-hidden /> {p.error}
         </div>
       )}
-      <p className="hint-text">Every file is checked against its SHA-256 before it is used. A stopped download continues where it left off.</p>
     </>
   );
 }
@@ -81,24 +83,29 @@ export function TrtBox({ trt, inst, platform }: { trt: TrtState; inst: InstallSt
       <p className="hint-text">
         {platform === "darwin"
           ? "TensorRT is NVIDIA's, and Macs have no NVIDIA graphics: CorridorKey runs on Apple's GPU and Neural Engine through Core ML instead."
-          : "TensorRT (faster on NVIDIA cards) is Linux-only in this version: on Windows it needs its own engine builder, which comes in a later version. Jobs run on CUDA."}
+          : "TensorRT (NVIDIA's optimizer for its graphics cards) is Linux-only in this version: on Windows it needs its own engine builder, which comes in a later version. Jobs run on CUDA."}
       </p>
     );
   const baseMissing = installMissing(inst);
   const needParts = trt.needLibs || trt.needProvider || trt.needModels;
   return (
     <>
-      <Row label="Use TensorRT (faster on NVIDIA)" htmlFor="tensorrt-on">
+      <Row label="Use TensorRT (NVIDIA)" htmlFor="tensorrt-on">
         <label className="checks">
           <input id="tensorrt-on" type="checkbox" checked={trt.on} onChange={(e) => void window.ck.setTensorrt(e.target.checked)} />
           On
         </label>
       </Row>
       <p className="hint-text">
-        TensorRT optimizes the CorridorKey networks for this exact graphics card, once per resolution range, with the same mattes as CUDA (README, Speed, 0.0.6-dev and 0.0.7-dev). {TRT_TRADEOFF_4K}{" "}
-        {TRT_TRADEOFF_HD} Best on graphics cards with 16 GB. 4K (DCI 4K and UHD) runs on TensorRT too; open gate and larger frames run on CUDA. An extra {gbBytes(trt.fullBytes)} download:
-        NVIDIA&apos;s TensorRT libraries and the TensorRT models.
+        Optimizes the CorridorKey networks for this graphics card, once per resolution range. An extra {gbBytes(trt.fullBytes)} download. {TRT_NOT_MEASURED}
       </p>
+      <More>
+        <p className="hint-text">
+          The download is NVIDIA&apos;s TensorRT libraries and the TensorRT models. The app builds 4K and HD in the background; jobs never wait on a build. Best on graphics cards with 16 GB. 4K (DCI
+          4K and UHD) runs on TensorRT too; open gate and larger frames run on CUDA.
+        </p>
+        <p className="hint-text">{CHECKED_AND_RESUMED}</p>
+      </More>
       {trt.on &&
         (baseMissing ? (
           <p className="hint-text">{INSTALL_FIRST} (Runtime and models, above).</p>
@@ -147,10 +154,10 @@ function PrebuildBox({ trt }: { trt: TrtState }) {
   const canStart = p.status !== "running" && p.status !== "done";
   return (
     <>
-      <p className="hint-text">
-        Jobs never wait on a TensorRT build: the app builds 4K and HD in the background, about 5 minutes for 4K (measured), and pauses while you key. It builds again only after a graphics driver,
-        TensorRT or model update. Until a size is built, its clips run on CUDA.
-      </p>
+      <p className="hint-text">The app builds 4K and HD in the background and pauses while you key. Until a size is built, its clips run on CUDA.</p>
+      <More>
+        <p className="hint-text">Jobs never wait on a TensorRT build. It builds again only after a graphics driver, TensorRT or model update. {TRT_BUILD_NOT_MEASURED}</p>
+      </More>
       <ul className="check-list">
         {/* loop: HOT-PATH-OK — two ranges per render */}
         {p.ranges.map((r) => (

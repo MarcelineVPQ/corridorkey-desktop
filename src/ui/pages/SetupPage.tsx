@@ -11,7 +11,16 @@ import { FfmpegBox, InstallBox } from "../setup/SetupParts";
 
 function Step(props: { n: number; title: string; done: boolean; children: ReactNode }) {
   return (
-    <MainBlock title={`${props.n} · ${props.title}`}>
+    <MainBlock
+      title={
+        <>
+          <span className={`step-n ${props.done ? "done" : ""}`} aria-label={`Step ${props.n}${props.done ? ", done" : ""}`}>
+            {props.n}
+          </span>
+          {props.title}
+        </>
+      }
+    >
       {props.done && (
         <div className="check-line ok" style={{ marginBottom: 8 }}>
           <Check size={15} aria-hidden /> Done

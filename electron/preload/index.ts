@@ -36,6 +36,7 @@ const api: CorridorKeyApi = {
   startQueue: () => ipcRenderer.invoke(IPC.startQueue),
   stopQueue: () => ipcRenderer.invoke(IPC.stopQueue),
   showInFolder: (path) => ipcRenderer.invoke(IPC.showInFolder, path),
+  copyText: (text) => ipcRenderer.invoke(IPC.copyText, text),
   setVisible: (visible) => ipcRenderer.send(IPC.setVisible, visible),
   setAppearance: (a) => ipcRenderer.invoke(IPC.setAppearance, a),
   pickOutputRoot: () => ipcRenderer.invoke(IPC.pickOutputRoot),

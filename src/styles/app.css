@@ -110,7 +110,7 @@ select {
 }
 .doc code {
   font-family: var(--font-mono);
-  font-size: 0.92em;
+  font-size: 13px;
   background: var(--bg-2);
   padding: 1px 5px;
   border-radius: 4px;
@@ -125,7 +125,7 @@ select {
   background: var(--bg-2);
   border: 1px solid var(--border-1);
   color: var(--text-2);
-  font-size: 12px;
+  font-size: 13px;
   white-space: nowrap;
 }
 .chip.ok {
@@ -275,10 +275,10 @@ select {
 }
 .job-meta {
   color: var(--text-3);
-  font-size: 12px;
+  font-size: 13px;
 }
 .job-status {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-2);
 }
 .job-status.done {
@@ -344,7 +344,7 @@ select {
 }
 .path {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-3);
   word-break: break-all;
 }
@@ -357,10 +357,9 @@ select {
 }
 .section h3 {
   margin: 0 0 10px;
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-3);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-1);
 }
 .field {
   display: grid;
@@ -374,7 +373,7 @@ select {
   color: var(--text-2);
 }
 .hint-text {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-3);
   margin-top: 2px;
 }
@@ -389,14 +388,14 @@ select {
 .checks + .estimate,
 select + .estimate {
   margin-top: 4px;
-  font-size: 12px;
+  font-size: 13px;
 }
 /* the cache folder's sizes per clip and per TensorRT range (App settings, Storage) */
 .sizes {
   list-style: none;
   margin: 0;
   padding: 0;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-2);
 }
 .sizes li {
@@ -507,7 +506,7 @@ select {
   background: var(--bg-2);
 }
 .stat .k {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-3);
 }
 .stat .v {
@@ -522,7 +521,7 @@ select {
   margin: 10px 0;
 }
 .stage {
-  font-size: 12px;
+  font-size: 13px;
   padding: 3px 9px;
   border-radius: 999px;
   background: var(--bg-2);
@@ -530,7 +529,7 @@ select {
 }
 .stage.now {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
   font-weight: 600;
 }
 .stage.past {
@@ -552,7 +551,7 @@ select {
   background: var(--bg-3);
 }
 .stills figcaption {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-3);
   margin-top: 4px;
 }
@@ -569,7 +568,7 @@ select {
 }
 .log {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
   background: var(--bg-0);
   border: 1px solid var(--border-1);
   border-radius: 8px;
@@ -596,7 +595,7 @@ select {
   justify-content: center;
   font-size: 20px;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--accent-ink);
   pointer-events: none;
   z-index: 10;
 }
@@ -612,4 +611,61 @@ select {
 }
 .queue-empty .btn-row {
   justify-content: center;
+}
+
+/* a path (PathText.tsx): shortened on one line, the full path as its tooltip, and its Copy button */
+.path-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  vertical-align: middle;
+}
+.path-text .path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: normal;
+}
+.copy-btn {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border: 1px solid var(--border-1);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 13px;
+  cursor: pointer;
+}
+.copy-btn:hover {
+  background: var(--bg-3);
+  color: var(--text-1);
+}
+
+/* More (More.tsx): the rest of an explanation, one press away */
+.more-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+}
+.more-chev {
+  transition: transform 0.15s;
+}
+.more-btn[aria-expanded="true"] .more-chev {
+  transform: rotate(180deg);
+}
+.more-body > * {
+  margin: 4px 0 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bar > span,
+  .more-chev {
+    transition: none;
+  }
 }

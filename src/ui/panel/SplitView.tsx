@@ -38,7 +38,7 @@ export function SplitView(props: { main: ReactNode; panel: ReactNode; panelTitle
 }
 
 /** A readout block in a page's main view: always shown, never folded. */
-export function MainBlock({ title, children, actions }: { title: string; children: ReactNode; actions?: ReactNode }) {
+export function MainBlock({ title, children, actions }: { title: ReactNode; children: ReactNode; actions?: ReactNode }) {
   return (
     <section className="block">
       <header className="block-head">

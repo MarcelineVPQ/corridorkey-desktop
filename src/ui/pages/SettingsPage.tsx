@@ -12,6 +12,9 @@ import { Accordion, Row, Section, Segmented } from "../panel/Section";
 import { MainBlock, SplitView } from "../panel/SplitView";
 import { Stat } from "../JobView";
 import { gbBytes } from "../format";
+import { More } from "../More";
+import { PathText } from "../PathText";
+import { shortenPath } from "../paths";
 
 // where results go without an output folder (the readout, the Results status and its button)
 const NEXT_TO_CLIP = "Next to each clip";
@@ -63,7 +66,7 @@ export function SettingsPage(props: { state: AppState; panelShown: boolean; narr
             <Stat k="Version" v={versionText(state.version)} />
           </div>
           {desktopNote && <p className="hint-text">{desktopNote}</p>}
-          {state.settings.outputRoot && <div className="path">{state.settings.outputRoot}</div>}
+          {state.settings.outputRoot && <PathText path={state.settings.outputRoot} />}
         </MainBlock>
       </div>
     </div>
@@ -100,7 +103,12 @@ export function SettingsPage(props: { state: AppState; panelShown: boolean; narr
         )}
       </Section>
 
-      <Section id="results" icon={FolderOutput} title="Results" status={state.settings.outputRoot ? `Into ${state.settings.outputRoot}` : `${NEXT_TO_CLIP} (out_<clip>)`}>
+      <Section
+        id="results"
+        icon={FolderOutput}
+        title="Results"
+        status={state.settings.outputRoot ? `Into ${shortenPath(state.settings.outputRoot, state.system.home, 40)}` : `${NEXT_TO_CLIP} (out_<clip>)`}
+      >
         {() => (
           <Row label="Where results go" hint="For clips added from now on">
             <div className="file-pick">
@@ -139,7 +147,7 @@ export function SettingsPage(props: { state: AppState; panelShown: boolean; narr
             <>
               {/* loop: NOT-WORTH — three folders per render */}
               {storage.map((i) => (
-                <Row key={i.id} label={`${i.label} · ${i.bytes ? gbBytes(i.bytes) : "empty"}`} hint={i.path}>
+                <Row key={i.id} label={`${i.label} · ${i.bytes ? gbBytes(i.bytes) : "empty"}`} hint={<PathText path={i.path} />}>
                   <div className="file-pick">
                     <button type="button" className="btn small" disabled={!i.bytes} onClick={() => void window.ck.openStorageFolder(i.id)}>
                       <FolderOpen size={14} /> Open
@@ -151,11 +159,13 @@ export function SettingsPage(props: { state: AppState; panelShown: boolean; narr
                 </Row>
               ))}
               {state.cache && <CacheFolder cache={state.cache} missing={state.cacheMissing} busy={busy} />}
-              <p className="hint-text">
-                Per clip: its thumbnail and result stills, and its job&apos;s working files while it runs. Changing the cache folder asks whether to move the files or start fresh. Removing asks first.
-                The runtime and models come back through the setup when you need them{state.tensorrt.supported ? ", TensorRT through its switch (Engine settings)" : ""}; your settings and results are
-                never touched here.
-              </p>
+              <p className="hint-text">Removing asks first. Your settings and results are never touched here.</p>
+              <More>
+                <p className="hint-text">
+                  The cache folder holds, per clip, its thumbnail and result stills, and its job&apos;s working files while it runs. Changing the cache folder asks whether to move the files or start
+                  fresh. The runtime and models come back through the setup when you need them{state.tensorrt.supported ? ", TensorRT through its switch (Engine settings)" : ""}.
+                </p>
+              </More>
             </>
           )
         }
@@ -266,9 +276,11 @@ function CacheFolder({ cache, missing, busy }: { cache: CacheInfo; missing: stri
       {missing && (
         <>
           <p className="estimate no-fit" role="alert">
-            <strong>Drive not available.</strong> {missing} The cache is in the default folder for now; nothing was moved or deleted, and the chosen folder is used again when the app starts with its
-            drive connected.
+            <strong>Drive not available.</strong> {missing} The cache is in the default folder for now; nothing was moved or deleted.
           </p>
+          <More>
+            <p className="hint-text">The chosen folder is used again when the app starts with its drive connected.</p>
+          </More>
           <div className="file-pick">
             <button type="button" className="btn small" disabled={locked} title={busy ? NOT_WHILE_BUSY : cache.defaultDir} onClick={() => void window.ck.pickCacheFolder("default")}>
               <RotateCcw size={14} /> Use the default folder from now on
@@ -276,7 +288,7 @@ function CacheFolder({ cache, missing, busy }: { cache: CacheInfo; missing: stri
           </div>
         </>
       )}
-      <Row label={`Cache folder · ${cache.bytes ? mbOrGbBytes(cache.bytes) : "empty"}`} hint={cache.dir}>
+      <Row label={`Cache folder · ${cache.bytes ? mbOrGbBytes(cache.bytes) : "empty"}`} hint={<PathText path={cache.dir} />}>
         <div className="file-pick">
           <button type="button" className="btn small" disabled={locked} title={busy ? NOT_WHILE_BUSY : undefined} onClick={() => void window.ck.pickCacheFolder()}>
             <FolderInput size={14} /> Change…

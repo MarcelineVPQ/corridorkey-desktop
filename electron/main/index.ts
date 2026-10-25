@@ -1,6 +1,7 @@
 // CorridorKey desktop: main process. One window, one queue, one engine.
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, net, protocol, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, net, protocol, shell } from "electron";
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 import { existsSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -308,7 +309,7 @@ function state(): AppState {
     card,
     desktopPalette,
     update: updater.state,
-    system: { engineBin: engineBinName(), ortLib: ortLibrary().display, platform: PLATFORM },
+    system: { engineBin: engineBinName(), ortLib: ortLibrary().display, platform: PLATFORM, home: homedir() },
   };
 }
 
@@ -835,6 +836,12 @@ function registerIpc(): void {
   ipcMain.handle(IPC.showInFolder, (_e, pathIn: unknown) => {
     const p = pathArg(pathIn);
     if (p) shell.showItemInFolder(p);
+  });
+  // a path's Copy button (src/ui/PathText.tsx): plain text only, bounded
+  ipcMain.handle(IPC.copyText, (_e, textIn: unknown) => {
+    if (typeof textIn !== "string" || textIn.length === 0 || textIn.length > 4096) return false;
+    clipboard.writeText(textIn);
+    return true;
   });
   ipcMain.handle(IPC.setAppearance, (_e, aIn: unknown) => {
     const a = sanitizeAppearance(aIn);

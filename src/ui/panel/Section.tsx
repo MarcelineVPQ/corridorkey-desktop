@@ -3,13 +3,13 @@
 // disclosure: its header (a button, aria-expanded) shows an icon, the title,
 // a live status line (how it's set now; the full text as its tooltip) and,
 // for a waiting task, a dot on the icon with the task as the status. The pin
-// dot in the header's corner keeps it open while others fold. One section is
+// beside the chevron ("Keep open") keeps it open while others fold. One section is
 // open at a time (plus the pinned ones), remembered per page. The body is a
 // function, rendered only while open: a closed section costs nothing.
 // Readouts don't go here: they are MainBlocks in the page's main view.
 // Keyboard: Enter/Space opens or folds; ↑ ↓ Home End move between headers.
 import { createContext, useContext, useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from "react";
-import { ChevronDown, type LucideIcon } from "lucide-react";
+import { ChevronDown, Pin, type LucideIcon } from "lucide-react";
 import { usePref } from "../prefs";
 
 interface AccordionState {
@@ -57,9 +57,10 @@ export function Section(props: { id: string; icon: LucideIcon; title: string; st
   const bodyId = useId();
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
-    if (acc.focus === id) ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    if (acc.focus === id) ref.current?.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   }, [acc.focus, id]);
-  const line = task ?? (disabled ? `${status} · ${disabled}` : status);
+  // a locked section's reason (a clip that ran: "As used for this run") is said once, in the panel's subtitle
+  const line = task ?? status;
   return (
     <section ref={ref} className={`sec ${isOpen ? "open" : ""}`} data-section={id}>
       <div className="sec-head">
@@ -81,9 +82,11 @@ export function Section(props: { id: string; icon: LucideIcon; title: string; st
           className={`sec-pin ${isPinned ? "on" : ""}`}
           aria-pressed={isPinned}
           aria-label={isPinned ? `Unpin ${title}` : `Keep ${title} open`}
-          title={isPinned ? "Pinned open · click to let it fold" : "Keep this section open"}
+          title={isPinned ? "Kept open: click to let it fold with the others" : "Keep this section open while others fold"}
           onClick={() => acc.togglePin(id)}
-        />
+        >
+          <Pin size={15} aria-hidden fill={isPinned ? "currentColor" : "none"} />
+        </button>
       </div>
       {isOpen && (
         <div id={bodyId} className="sec-body">
@@ -94,8 +97,8 @@ export function Section(props: { id: string; icon: LucideIcon; title: string; st
   );
 }
 
-/** A setting's row: its name, an optional short hint (≤ 60 characters), the control. */
-export function Row({ label, hint, htmlFor, children }: { label: string; hint?: string; htmlFor?: string; children: ReactNode }) {
+/** A setting's row: its name, an optional short hint (≤ 60 characters, or a path), the control. */
+export function Row({ label, hint, htmlFor, children }: { label: string; hint?: ReactNode; htmlFor?: string; children: ReactNode }) {
   return (
     <div className="row">
       <div className="row-label">

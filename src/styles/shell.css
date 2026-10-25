@@ -84,7 +84,7 @@
 }
 .rail-status {
   cursor: default;
-  font-size: 12px;
+  font-size: 13px;
 }
 .rail-link:hover {
   background: var(--bg-2);
@@ -150,13 +150,11 @@
 .rail-dot {
   display: grid;
   place-items: center;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   background: var(--bg-3);
   color: var(--text-1);
-  font-size: 10px;
-  font-weight: 700;
 }
 .rail-status.ok .rail-dot {
   background: var(--status-ok);
@@ -184,14 +182,13 @@
 }
 .rail-status-sub {
   color: var(--text-3);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 13px;
 }
 .rail-version {
   align-self: flex-end;
   margin: auto 9px 4px 0;
   color: var(--accent-ink);
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
   writing-mode: vertical-rl;
@@ -268,7 +265,7 @@
 }
 .panel-sub {
   color: var(--text-3);
-  font-size: 12px;
+  font-size: 13px;
   margin-top: 2px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -302,7 +299,7 @@
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 10px 28px 10px 12px;
+  padding: 10px 44px 10px 12px;
   border: 0;
   border-radius: 10px;
   background: transparent;
@@ -329,10 +326,9 @@
 }
 .sec-status {
   color: var(--text-3);
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 13px;
+  /* the whole summary, wrapped (never cut off with …) */
+  overflow-wrap: anywhere;
 }
 .sec-status.waiting {
   color: var(--status-warn);
@@ -344,21 +340,29 @@
 .sec.open .sec-chev {
   transform: rotate(180deg);
 }
+/* "Keep open": a pin beside the chevron; pressed, the section stays open while others fold */
 .sec-pin {
   position: absolute;
-  top: 7px;
-  right: 7px;
-  width: 10px;
-  height: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
   padding: 0;
-  border: 1.5px solid var(--border-2);
-  border-radius: 50%;
+  border: 0;
+  border-radius: 6px;
   background: transparent;
+  color: var(--text-3);
   cursor: pointer;
 }
+.sec-pin:hover {
+  background: var(--bg-2);
+  color: var(--text-1);
+}
 .sec-pin.on {
-  background: var(--accent);
-  border-color: var(--accent);
+  color: var(--accent-ink);
 }
 .sec-body {
   padding: 4px 12px 12px;
@@ -369,7 +373,8 @@
   padding: 0;
   min-width: 0;
 }
-.sec-body fieldset:disabled {
+/* a clip that ran: its settings read as they were used (full contrast); only the controls dim */
+.sec-body fieldset:disabled :is(input, select, button) {
   opacity: 0.6;
 }
 .row {
@@ -389,7 +394,7 @@
 }
 .row-hint {
   color: var(--text-3);
-  font-size: 12px;
+  font-size: 13px;
 }
 .row-control {
   min-width: 0;
@@ -411,11 +416,30 @@
   margin-bottom: 10px;
 }
 .block-head h3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin: 0;
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-3);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+/* the setup's step number (a real sequence) */
+.step-n {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--bg-3);
+  color: var(--text-1);
+  font-size: 14px;
+  font-weight: 700;
+}
+.step-n.done {
+  background: var(--accent);
+  color: var(--accent-text);
 }
 
 /* ---- Glass (App settings → Appearance; Liquid Glass from the DS5 app) ----

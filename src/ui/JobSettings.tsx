@@ -6,9 +6,11 @@ import { useEffect, useState } from "react";
 import type { EngineKind, HintFileKind, Job, JobOptions, MemoryChoice, MemoryEstimate, MemoryEstimateResult, ModelScale, OutputName, TrtState, VideoCodec, WindowEstimate } from "../shared/types";
 import { LINEAR_RANGES, MANUAL_WINDOWS, OUTPUT_NAMES, VRAM_LIMIT_AUTO_HELP, scaledSize, videoCodecsFor, vramLimitChoices, withCutoutAlpha } from "../shared/types";
 import { gibBytes } from "../shared/units";
-import { AS_USED, lowerFirst } from "../shared/texts";
-import { builtWindows, tradeoffFor, trtSizeKey, TRT_TRADEOFF_4K } from "../shared/trt";
+import { AS_USED } from "../shared/texts";
+import { builtWindows, trtSizeKey, TRT_NOT_MEASURED } from "../shared/trt";
 import { Accordion, Row, Section, Segmented } from "./panel/Section";
+import { More } from "./More";
+import { PathText } from "./PathText";
 
 const OUTPUT_TEXT: Record<OutputName, { label: string; help: string }> = {
   alpha: { label: "Alpha", help: "the matte" },
@@ -68,7 +70,7 @@ export function JobSettings({
   // the PyTorch reference engine writes the original's H.264 CRF 12 whatever is chosen (it never gets video_codec)
   const codec: VideoCodec = engineKind === "python" ? "h264-crf12" : o.videoCodec;
   const pickable = engineKind !== "python" && codecs.length > 1;
-  const locked = job.status !== "waiting" ? lowerFirst(AS_USED) : null;
+  const locked = job.status !== "waiting" ? AS_USED : null;
   const pick = async (kind: HintFileKind) => {
     const path = await window.ck.pickFile(kind);
     if (path) set(kind === "hint-image" ? { hintFirstFrame: path, hintMode: "first-frame" } : { hintVideo: path, hintMode: "video" });
@@ -322,7 +324,9 @@ export function JobSettings({
           {() => (
             <>
               <p className="hint-text">{trtPlan.text}</p>
-              <p className="hint-text">The choice is in Engine settings, TensorRT. What really ran shows on the clip&apos;s page once it starts.</p>
+              <More>
+                <p className="hint-text">The choice is in Engine settings, TensorRT. What really ran shows on the clip&apos;s page once it starts. {TRT_NOT_MEASURED}</p>
+              </More>
             </>
           )}
         </Section>
@@ -333,16 +337,15 @@ export function JobSettings({
 
 /**
  * What a waiting clip will ask for and run on, before it runs: the setting, the parts, whether its size's TensorRT
- * range is built (the cache), and the measured trade-off (README). Null where TensorRT doesn't exist (Windows, macOS).
+ * range is built (the cache). Null where TensorRT doesn't exist (Windows, macOS).
  */
 export function trtPlanFor(job: Job, trt: TrtState, engineKind: EngineKind | null): { status: string; text: string } | null {
   if (!trt.supported) return null;
   const { width, height } = job.clip;
   const key = width && height && job.options.modelScale === 1 ? trtSizeKey(width, height) : null;
-  const tradeoff = key ? tradeoffFor(key) : TRT_TRADEOFF_4K;
   if (engineKind !== "rust") return { status: "Not with this engine · CUDA", text: "TensorRT runs on the ONNX Runtime engine only; this clip runs on the PyTorch engine." };
-  if (!trt.on) return { status: "Off · runs on CUDA", text: `TensorRT is off, so this clip runs on CUDA. ${tradeoff}` };
-  if (!trt.ready) return { status: "On, not installed · runs on CUDA", text: `TensorRT's parts aren't installed, so this clip runs on CUDA. ${tradeoff}` };
+  if (!trt.on) return { status: "Off · runs on CUDA", text: "TensorRT is off, so this clip runs on CUDA." };
+  if (!trt.ready) return { status: "On, not installed · runs on CUDA", text: "TensorRT's parts aren't installed, so this clip runs on CUDA." };
   if (job.options.modelScale !== 1)
     return {
       status: "On · depends on the internal resolution",
@@ -354,15 +357,15 @@ export function trtPlanFor(job: Job, trt: TrtState, engineKind: EngineKind | nul
   if (windows.length)
     return {
       status: "On · built for this size",
-      text: `Built for ${width}×${height} with windows up to ${windows.join(" or ")} frames: it runs on TensorRT when the job's automatic window is one of those (at 4K on a 16 GB card it is 8). ${tradeoff}`,
+      text: `Built for ${width}×${height} with windows up to ${windows.join(" or ")} frames: it runs on TensorRT when the job's automatic window is one of those (at 4K on a 16 GB card it is 8).`,
     };
   // loop: NOT-WORTH — two ranges
   const building = trt.prebuild.status === "running" && trt.prebuild.ranges.some((r) => trtSizeKey(r.width, r.height) === key && r.state !== "done");
   return {
     status: building ? "On · building in the background · CUDA until then" : "On · not built for this size · runs on CUDA",
     text: building
-      ? `TensorRT for this size is building in the background now (Engine settings, TensorRT); if this clip starts first, it runs on CUDA. ${tradeoff}`
-      : `TensorRT isn't built for ${width}×${height} yet, so this clip runs on CUDA: jobs never wait on a build. Engine settings, TensorRT builds 4K and HD in the background. ${tradeoff}`,
+      ? "TensorRT for this size is building in the background now (Engine settings, TensorRT); if this clip starts first, it runs on CUDA."
+      : `TensorRT isn't built for ${width}×${height} yet, so this clip runs on CUDA: jobs never wait on a build. Engine settings, TensorRT builds 4K and HD in the background.`,
   };
 }
 
@@ -556,10 +559,8 @@ function FilePick({ path, onPick, onClear }: { path: string | null; onPick: () =
       </button>
       {path && (
         <>
-          <span className="path" title={path}>
-            {path}
-          </span>
-          <button type="button" className="icon-btn" aria-label="Clear" onClick={onClear}>
+          <PathText path={path} />
+          <button type="button" className="icon-btn" aria-label="Clear" title="Clear" onClick={onClear}>
             <X size={14} />
           </button>
         </>

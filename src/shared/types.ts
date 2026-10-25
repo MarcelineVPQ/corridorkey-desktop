@@ -517,7 +517,8 @@ export interface AppState {
   desktopPalette: DesktopPalette | null;
   update: UpdateState;
   // this system's file names, for the Engine page's hints (electron/main/platform.ts)
-  system: { engineBin: string; ortLib: string; platform: string };
+  // and the home folder, shown as ~ in shortened paths (src/ui/paths.ts)
+  system: { engineBin: string; ortLib: string; platform: string; home: string };
 }
 
 // the hint file a dialog picks: the first-frame matte image, or the hint video (or frame folder)
@@ -560,6 +561,8 @@ export interface CorridorKeyApi {
   startQueue(): Promise<void>;
   stopQueue(): Promise<void>;
   showInFolder(path: string): Promise<void>;
+  // puts text (a path) on the system clipboard; false when it was refused
+  copyText(text: string): Promise<boolean>;
   setAppearance(appearance: Appearance): Promise<void>;
   pickOutputRoot(): Promise<void>;
   clearOutputRoot(): Promise<void>;

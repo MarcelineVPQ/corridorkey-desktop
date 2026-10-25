@@ -1,7 +1,7 @@
 // TensorRT facts the app shows: which engine range a clip's size falls in (the engine's own rule, mirrored here and
 // checked against engine-rs/crates/ck-core/src/tensorrt.rs and clip.rs by tests/unit/trt.test.ts), the networks a
-// range builds, and the build and speed numbers measured in the README (Speed, 0.0.6-dev and 0.0.7-dev). Nothing
-// here is estimated: a number either comes from those measurements or isn't shown.
+// range builds, and what is (and isn't yet) measured for the model set the app ships. Nothing here is estimated: a
+// number either comes from a measurement of that model set or isn't shown.
 
 // tensorrt.rs DIM_RANGES / MAX_SIDE / MAX_AREA, clip.rs SHAPE_QUANTUM
 export const TRT_DIM_RANGES: readonly (readonly [number, number])[] = [
@@ -25,20 +25,15 @@ export const PIECE_NAMES: Record<string, string> = { cradio: "C-RADIO", moge: "M
 // the engine's `fallback_reason` for a job whose range isn't built yet (pipeline/mod.rs TRT_NOT_BUILT)
 export const TRT_NOT_BUILT = "TensorRT for this resolution range isn't built yet";
 
-// README, Speed, 0.0.7-dev: the one-time builds at 4K, seconds per network (RTX 5080, cold timing cache)
+// README, Speed, 0.0.7-dev: the one-time builds at 4K, seconds per network (RTX 5080, cold timing cache), measured
+// on model set onnx.3. Used only to weight the background build's progress bar by network (buildFraction); never
+// shown as a time.
 export const MEASURED_4K_BUILD_S: Record<string, number> = { cradio: 36.8, moge: 33.1, rvm: 35.6, stage1: 139.2, stage2: 57.8 };
 
-// The trade-off in the README's measured numbers (RTX 5080, Speed, 0.0.6-dev and 0.0.7-dev), told before a choice:
-// 4K: the five networks built in 284.5 s inside the engine; four 4K plates (120 EXR frames) 147.3-151.5 s on CUDA,
-// 111.5-113.0 s on TensorRT (24-25 % less): 35-38 s saved per clip, so the build pays back after about 8 such clips.
-export const TRT_TRADEOFF_4K =
-  "At 4K the one-time build takes about 5 minutes; after it a 120-frame 4K clip keys in about 112 s instead of 148 s on CUDA (about 25 % faster, measured), so it pays back after about 8 such clips. For a single short clip CUDA is quicker overall.";
-// HD (1280x1080 range): a cold build 270.7 s; six HD clips 18-25 % faster than CUDA (19.1 → 15.2 s … 58.4 → 43.9 s)
-export const TRT_TRADEOFF_HD =
-  "At HD the one-time build takes about 4.5 minutes (measured at 1280×1080; about half that once TensorRT's timing cache is warm); after it HD clips key 18-25 % faster than on CUDA (58.4 → 43.9 s on the longest measured clip), so it pays back over many clips.";
-
-/** The trade-off for a size key: the 4K numbers for the 4K-class ranges (a side of 1792 px or more), else HD's. */
-export const tradeoffFor = (sizeKey: string) => (/^h(1792|2304|2944|3584)-|_w(2304|2944|3584)-/.test(sizeKey) ? TRT_TRADEOFF_4K : TRT_TRADEOFF_HD);
+// The app ships model set 2.0.0-onnx.4 (2026-10-25); TensorRT's speed and build time were measured only on onnx.3
+// (README, Speed, 0.0.6-dev and 0.0.7-dev), so the app says so instead of showing onnx.3's numbers (UI pass 2026-10-25).
+export const TRT_NOT_MEASURED = "Speed on this model set: not measured yet.";
+export const TRT_BUILD_NOT_MEASURED = "Build time on this model set: not measured yet.";
 
 // loop: NOT-WORTH — eight ranges, per lookup
 const rangeOf = (v: number) => TRT_DIM_RANGES.find(([lo, hi]) => v >= lo && v <= hi) ?? null;

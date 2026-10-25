@@ -13,6 +13,7 @@ import { EnginePage } from "./pages/EnginePage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { AboutPage } from "./pages/AboutPage";
 import { SetupPage } from "./pages/SetupPage";
+import { HomeContext } from "./PathText";
 
 export function App() {
   const [state, setState] = useState<AppState | null>(null);
@@ -107,13 +108,15 @@ export function App() {
       }}
       onDrop={onDrop}
     >
-      <main className="shell-page">
-        {page === "queue" && <QueuePage state={state} selected={selected} onSelect={setSelected} panelShown={panelShown("queue")} sectionTasks={d.sections} {...common} />}
-        {page === "engine" && <EnginePage state={state} panelShown={panelShown("engine")} sectionTasks={d.sections} openSetup={() => setPage("setup")} {...common} />}
-        {page === "settings" && <SettingsPage state={state} panelShown={panelShown("settings")} {...common} />}
-        {page === "about" && <AboutPage version={state.version} panelShown={panelShown("about")} {...common} />}
-        {page === "setup" && <SetupPage state={state} openQueue={() => setPage("queue")} openGuide={() => setPage("about")} />}
-      </main>
+      <HomeContext.Provider value={state.system.home}>
+        <main className="shell-page">
+          {page === "queue" && <QueuePage state={state} selected={selected} onSelect={setSelected} panelShown={panelShown("queue")} sectionTasks={d.sections} {...common} />}
+          {page === "engine" && <EnginePage state={state} panelShown={panelShown("engine")} sectionTasks={d.sections} openSetup={() => setPage("setup")} {...common} />}
+          {page === "settings" && <SettingsPage state={state} panelShown={panelShown("settings")} {...common} />}
+          {page === "about" && <AboutPage version={state.version} panelShown={panelShown("about")} {...common} />}
+          {page === "setup" && <SetupPage state={state} openQueue={() => setPage("queue")} openGuide={() => setPage("about")} />}
+        </main>
+      </HomeContext.Provider>
       <AppRail state={state} page={page} pageDots={d.pages} onPress={onPress} glass={glass} windowWidth={width} />
       {dragging && <div className="drop-overlay">Drop to add to the queue</div>}
     </div>

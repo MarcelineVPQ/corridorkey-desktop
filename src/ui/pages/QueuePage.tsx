@@ -9,6 +9,7 @@ import { AS_USED, CANT_READ_CLIP } from "../../shared/texts";
 import { JobSettings } from "../JobSettings";
 import { JobView } from "../JobView";
 import { SplitView } from "../panel/SplitView";
+import { PathText } from "../PathText";
 import { clipFacts, gib, statusText } from "../format";
 
 export function QueuePage(props: {
@@ -161,9 +162,11 @@ function Detail({ job, prebuild }: { job: Job; prebuild: TrtPrebuild }) {
         <div style={{ minWidth: 0 }}>
           <h2>{job.clip.name}</h2>
           <div className="job-meta">{clipFacts(job.clip)}</div>
-          <div className="path">{job.clip.path}</div>
+          <div>
+            <PathText path={job.clip.path} />
+          </div>
           <div className="hint-text" style={{ marginTop: 8 }}>
-            Results: <span className="path">{job.outputDir}</span>
+            Results: <PathText path={job.outputDir} />
           </div>
           {(job.clip.companionFirstFrame || job.clip.companionHintVideo) && job.status === "waiting" && <div className="hint-text">Found a hint next to the clip and selected it.</div>}
         </div>

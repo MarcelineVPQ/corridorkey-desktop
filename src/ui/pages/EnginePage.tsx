@@ -13,6 +13,8 @@ import { MainBlock, SplitView } from "../panel/SplitView";
 import { Stat } from "../JobView";
 import { gib } from "../format";
 import { FfmpegBox, InstallBox, installPct, TrtBox } from "../setup/SetupParts";
+import { PathText } from "../PathText";
+import { More } from "../More";
 
 export function EnginePage(props: {
   state: AppState;
@@ -97,11 +99,7 @@ export function EnginePage(props: {
             {custom && <option value={custom}>{custom}</option>}
             <option value={BROWSE}>Browse…</option>
           </select>
-          {inUse && (
-            <span className="path" title={inUse}>
-              {inUse}
-            </span>
-          )}
+          {inUse && <PathText path={inUse} />}
         </div>
       </Row>
     );
@@ -221,20 +219,16 @@ export function EnginePage(props: {
       <Section id="folder" icon={FolderCog} title="Benchmark reference (advanced)" status={root ? (state.checkout.ok ? "set up" : "incomplete") : "not used"} task={null}>
         {() => (
           <>
-            <p className="hint-text">
-              Not needed to use CorridorKey. It runs Corridor's original CorridorKey 2.0 (PyTorch) from a CorridorKey2.0 checkout, so speed and quality can be compared on the same machine (README,
-              Speed).
-            </p>
+            <p className="hint-text">Not needed to use CorridorKey: it runs Corridor&apos;s original (PyTorch), to compare speed and quality.</p>
+            <More>
+              <p className="hint-text">It runs Corridor&apos;s original CorridorKey 2.0 from a CorridorKey2.0 checkout, so speed and quality can be compared on the same machine (README, Speed).</p>
+            </More>
             <Row label="CorridorKey2.0 checkout" hint="The original's folder, with its venv and weights">
               <div className="file-pick">
                 <button type="button" className="btn small" onClick={() => window.ck.pickCheckout()}>
                   <FolderOpen size={14} /> Choose…
                 </button>
-                {root && (
-                  <span className="path" title={root}>
-                    {root}
-                  </span>
-                )}
+                {root && <PathText path={root} />}
               </div>
             </Row>
             {root &&
