@@ -56,6 +56,8 @@ export function engineOptions(o: JobOptions, kind: "video" | "frames", tensorrt 
     out.hann_stride = o.memory.hannStride;
     out.low_vram = o.memory.lowVram;
   }
+  // the graphics memory limit (backlog row 43); none = Auto
+  if (o.vramLimitGb !== null) out.vram_budget_gb = o.vramLimitGb;
   if (kind === "frames") {
     out.frame_dir_fps = o.frameDirFps;
     out.frame_dir_linear = o.frameDirLinear;
@@ -292,6 +294,8 @@ export class Queue {
           auto: Boolean(r.auto),
           budgetGb: typeof r.budget_gb === "number" ? r.budget_gb : null,
           estimateGb: typeof r.estimate_gb === "number" ? r.estimate_gb : null,
+          freeGb: typeof r.free_gb === "number" ? r.free_gb : null,
+          limitGb: typeof r.budget_cap_gb === "number" ? r.budget_cap_gb : null,
         };
         break;
       case "frames": {

@@ -113,6 +113,8 @@ export const settings = (over: Partial<Settings> = {}): Settings => ({
   modelsDir: null,
   ortLibrary: null,
   tensorrt: false,
+  vramLimitGb: null,
+  cacheRoot: null,
   ...over,
 });
 
@@ -149,6 +151,8 @@ export const appState = (over: Partial<AppState> = {}): AppState => ({
   install: installState(),
   tensorrt: trtState(),
   storage: null,
+  cache: null,
+  card: null,
   enginePaths: { binary: null, models: null, ort: null },
   desktopPalette: null,
   update: updateState(),

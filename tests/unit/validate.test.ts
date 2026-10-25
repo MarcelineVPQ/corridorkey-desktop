@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadSettings } from "../../electron/main/settings";
-import { idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir } from "../../electron/main/validate";
-import { DEFAULT_APPEARANCE, DEFAULT_OPTIONS } from "../../src/shared/types";
+import { idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir, vramLimit } from "../../electron/main/validate";
+import { DEFAULT_APPEARANCE, DEFAULT_OPTIONS, vramLimitChoices } from "../../src/shared/types";
 
 describe("IPC and settings validation", () => {
   it("keeps valid job options as they are", () => {
@@ -66,6 +66,34 @@ describe("IPC and settings validation", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("the graphics memory limit: whole GiB within the menus' range, else Auto (backlog rows 43, 44)", () => {
+    expect([vramLimit(12), vramLimit(2), vramLimit(256)]).toEqual([12, 2, 256]);
+    expect([vramLimit(1), vramLimit(257), vramLimit(7.5), vramLimit("12"), vramLimit(null), vramLimit(NaN)]).toEqual([null, null, null, null, null, null]);
+    expect(sanitizeOptions({ vramLimitGb: 8 }).vramLimitGb).toBe(8);
+    expect(sanitizeOptions({ vramLimitGb: -3 }).vramLimitGb).toBeNull();
+    const dir = mkdtempSync(join(tmpdir(), "ck-settings-"));
+    try {
+      const file = join(dir, "settings.json");
+      writeFileSync(file, JSON.stringify({ vramLimitGb: 10, cacheRoot: "/media/fast" }));
+      expect(loadSettings(file, {})).toMatchObject({ vramLimitGb: 10, cacheRoot: "/media/fast" });
+      // a relative cache location or a bad limit: the defaults (the system's cache folder, Auto)
+      writeFileSync(file, JSON.stringify({ vramLimitGb: "lots", cacheRoot: "fast" }));
+      expect(loadSettings(file, {})).toMatchObject({ vramLimitGb: null, cacheRoot: null });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("the limit menu runs up to the card's size once read, and keeps the current choice", () => {
+    expect(vramLimitChoices(16 * 1073741824, null)).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+    // a card that reports 15.9 GiB: up to 15
+    expect(vramLimitChoices(15.9 * 1073741824, null).at(-1)).toBe(15);
+    // a default set on a bigger card stays offered
+    expect(vramLimitChoices(8 * 1073741824, 24)).toEqual([2, 3, 4, 5, 6, 7, 8, 24]);
+    // the card's size not read yet: a fixed set
+    expect(vramLimitChoices(null, null)).toEqual([2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 32, 48]);
   });
 
   it("two clips with the same name never share an output folder", () => {

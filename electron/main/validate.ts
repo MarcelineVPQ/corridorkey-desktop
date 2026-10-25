@@ -4,7 +4,19 @@
 // with options it would refuse (an unknown output name, a stride past the window) and the settings file can
 // never stop the app from starting.
 import { isAbsolute } from "node:path";
-import { DEFAULT_APPEARANCE, DEFAULT_OPTIONS, OUTPUT_NAMES, videoCodecsFor, withCutoutAlpha, type Appearance, type JobOptions, type MemoryChoice, type OutputName } from "../../src/shared/types";
+import {
+  DEFAULT_APPEARANCE,
+  DEFAULT_OPTIONS,
+  OUTPUT_NAMES,
+  VRAM_LIMIT_MAX_GB,
+  VRAM_LIMIT_MIN_GB,
+  videoCodecsFor,
+  withCutoutAlpha,
+  type Appearance,
+  type JobOptions,
+  type MemoryChoice,
+  type OutputName,
+} from "../../src/shared/types";
 
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
 const oneOf = <T extends string>(v: unknown, allowed: readonly T[], fallback: T): T => (typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : fallback);
@@ -32,6 +44,11 @@ function memory(v: unknown): MemoryChoice {
   return { auto: false, hannChunk: chunk, hannStride: stride, lowVram: bool(m.lowVram, false) };
 }
 
+/** A graphics memory limit in whole GiB within the menus' range, else null (Auto). */
+export function vramLimit(v: unknown): number | null {
+  return typeof v === "number" && Number.isInteger(v) && v >= VRAM_LIMIT_MIN_GB && v <= VRAM_LIMIT_MAX_GB ? v : null;
+}
+
 /** Job options from the page or the settings file: each field valid, else its default. */
 export function sanitizeOptions(v: unknown, platform: string = process.platform): JobOptions {
   const o = obj(v);
@@ -53,6 +70,7 @@ export function sanitizeOptions(v: unknown, platform: string = process.platform)
     cutoutLinear: bool(o.cutoutLinear, DEFAULT_OPTIONS.cutoutLinear),
     frameDirFps: num(o.frameDirFps, 0.001, 1000, DEFAULT_OPTIONS.frameDirFps),
     frameDirLinear: bool(o.frameDirLinear, DEFAULT_OPTIONS.frameDirLinear),
+    vramLimitGb: vramLimit(o.vramLimitGb),
   });
 }
 

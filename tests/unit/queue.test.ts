@@ -100,7 +100,10 @@ describe("Queue", () => {
     h.tick(4000);
     h.reply({ type: "frames", id: "a", done: 10, total: 24 });
     expect(h.q.jobs[0].framesPerSecond).toBeCloseTo(2);
-    expect(h.q.jobs[0].memory).toMatchObject({ hannChunk: 24, budgetGb: 13.2, estimateGb: 7.5 });
+    expect(h.q.jobs[0].memory).toMatchObject({ hannChunk: 24, budgetGb: 13.2, estimateGb: 7.5, freeGb: null, limitGb: null });
+    // the Rust engine's reply under a limit: the free memory it saw and the limit, apart
+    h.reply({ type: "memory", id: "a", hann_chunk: 8, hann_stride: 4, low_vram: true, auto: true, budget_gb: 6, estimate_gb: 4.2, free_gb: 13.2, budget_cap_gb: 6 });
+    expect(h.q.jobs[0].memory).toMatchObject({ budgetGb: 6, freeGb: 13.2, limitGb: 6 });
     h.reply({ type: "frames", id: "other", done: 99, total: 99 });
     expect(h.q.jobs[0].framesDone).toBe(10);
   });
@@ -314,6 +317,13 @@ describe("engineOptions", () => {
     expect(auto).not.toHaveProperty("hint_first_frame");
     const manual = engineOptions({ ...DEFAULT_OPTIONS, hintMode: "first-frame", hintFirstFrame: "/h.png", memory: { auto: false, hannChunk: 8, hannStride: 4, lowVram: true } }, "frames");
     expect(manual).toMatchObject({ hann_chunk: 8, hann_stride: 4, low_vram: true, hint_first_frame: "/h.png", frame_dir_fps: 24 });
+  });
+
+  it("sends the graphics memory limit as vram_budget_gb, and none for Auto (backlog row 43)", () => {
+    expect(engineOptions(DEFAULT_OPTIONS, "video")).not.toHaveProperty("vram_budget_gb");
+    expect(engineOptions({ ...DEFAULT_OPTIONS, vramLimitGb: 10 }, "video")).toMatchObject({ vram_budget_gb: 10 });
+    // a manual window keeps its limit too (the engine caps its CUDA memory at it)
+    expect(engineOptions({ ...DEFAULT_OPTIONS, vramLimitGb: 6, memory: { auto: false, hannChunk: 8, hannStride: 4, lowVram: true } }, "video")).toMatchObject({ vram_budget_gb: 6, hann_chunk: 8 });
   });
 
   it("asks for TensorRT only when told to (never false-but-present: the PyTorch engine never sees the key)", () => {

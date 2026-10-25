@@ -4,7 +4,7 @@
 import { Clapperboard, Film, FolderOpen, MemoryStick, Wand2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { EngineKind, HintFileKind, Job, JobOptions, MemoryChoice, MemoryEstimate, MemoryEstimateResult, OutputName, VideoCodec, WindowEstimate } from "../shared/types";
-import { MANUAL_WINDOWS, OUTPUT_NAMES, videoCodecsFor, withCutoutAlpha } from "../shared/types";
+import { MANUAL_WINDOWS, OUTPUT_NAMES, VRAM_LIMIT_AUTO_HELP, videoCodecsFor, vramLimitChoices, withCutoutAlpha } from "../shared/types";
 import { gibBytes } from "../shared/units";
 import { AS_USED, lowerFirst } from "../shared/texts";
 import { Accordion, Row, Section, Segmented } from "./panel/Section";
@@ -69,7 +69,8 @@ export function JobSettings({
   const despillUsed = o.outputs.includes("checker") || o.outputs.includes("cutout");
   const hintFile = o.hintMode === "first-frame" ? o.hintFirstFrame : o.hintMode === "video" ? o.hintVideo : null;
   const hintStatus = o.hintMode === "none" ? "No hint · the model picks the subject" : `${HINT_TEXT[o.hintMode]} · trust ${o.hintQuality.toFixed(2)}${hintFile ? "" : " · no file yet"}`;
-  const memStatus = o.memory.auto ? "Automatic · from free graphics memory" : `Manual · ${o.memory.hannChunk}/${o.memory.hannStride}${o.memory.lowVram ? " · low-memory" : ""}`;
+  const memLimit = o.vramLimitGb !== null && platform !== "darwin" ? ` · limit ${o.vramLimitGb} GiB` : "";
+  const memStatus = (o.memory.auto ? "Automatic · from free graphics memory" : `Manual · ${o.memory.hannChunk}/${o.memory.hannStride}${o.memory.lowVram ? " · low-memory" : ""}`) + memLimit;
   // loop: HOT-PATH-OK — ≤ four outputs per render
   const outStatus = `${o.outputs.map((x) => OUTPUT_TEXT[x].label).join(", ")} · ${video ? CODEC_TEXT[codec].short : `EXR ${o.exrDtype}`}`;
 
@@ -211,22 +212,7 @@ export function JobSettings({
       )}
 
       <Section id="memory" icon={MemoryStick} title="Graphics memory" status={memStatus} disabled={locked}>
-        {() => (
-          <>
-            <Row label="Temporal window" hint={o.memory.auto ? "Largest that fits when the job starts" : undefined}>
-              <Segmented
-                label="Memory mode"
-                value={o.memory.auto ? "auto" : "manual"}
-                options={[
-                  ["auto", "Automatic"],
-                  ["manual", "Manual"],
-                ]}
-                onChange={(v) => set({ memory: v === "auto" ? { auto: true } : { auto: false, hannChunk: 24, hannStride: 12, lowVram: false } })}
-              />
-            </Row>
-            {!o.memory.auto && <ManualMemory job={job} memory={o.memory} queueRunning={queueRunning} onChange={(memory) => set({ memory })} />}
-          </>
-        )}
+        {() => <MemorySection job={job} options={o} queueRunning={queueRunning} platform={platform} set={set} />}
       </Section>
     </Accordion>
   );
@@ -235,11 +221,11 @@ export function JobSettings({
 type ManualChoice = Extract<MemoryChoice, { auto: false }>;
 
 /**
- * Manual window / stride and low-memory mode, each choice with the engine's graphics-memory estimate for this clip
- * (backlog row 41). Rendered only while the section is open in Manual mode, so the engine is asked only then; the
- * numbers are the engine's `estimate` reply (rule 1): nothing is estimated here.
+ * The Graphics memory section: the temporal window (Automatic / Manual) and the graphics memory limit (backlog row
+ * 43). Rendered only while the section is open, so the engine's `estimate` (row 41: a short-lived engine, no
+ * graphics memory held) is asked only then, for this clip under its limit; the numbers are the engine's (rule 1).
  */
-function ManualMemory({ job, memory, queueRunning, onChange }: { job: Job; memory: ManualChoice; queueRunning: boolean; onChange: (m: ManualChoice) => void }) {
+function MemorySection({ job, options: o, queueRunning, platform, set }: { job: Job; options: JobOptions; queueRunning: boolean; platform: string; set: (patch: Partial<JobOptions>) => void }) {
   const [est, setEst] = useState<MemoryEstimateResult | null>(null);
   // a clip that ran shows the window it really used (JobView); the estimate is for choosing one
   const waiting = job.status === "waiting";
@@ -247,12 +233,101 @@ function ManualMemory({ job, memory, queueRunning, onChange }: { job: Job; memor
     let live = true;
     setEst(null);
     if (!waiting) return;
-    // one ask per clip shown (and again when the queue starts or ends: the engine's reading changes)
+    // one ask per clip shown and limit (and again when the queue starts or ends: the engine's reading changes)
     void window.ck.estimateMemory(job.id).then((r) => live && setEst(r));
     return () => {
       live = false;
     };
-  }, [job.id, job.clip.path, queueRunning, waiting]);
+  }, [job.id, job.clip.path, queueRunning, waiting, o.vramLimitGb]);
+  const e = est?.ok ? est.estimate : null;
+  return (
+    <>
+      <Row label="Temporal window" hint={o.memory.auto ? `Largest that fits when the job starts${o.vramLimitGb !== null ? `, within ${o.vramLimitGb} GiB` : ""}` : undefined}>
+        <Segmented
+          label="Memory mode"
+          value={o.memory.auto ? "auto" : "manual"}
+          options={[
+            ["auto", "Automatic"],
+            ["manual", "Manual"],
+          ]}
+          onChange={(v) => set({ memory: v === "auto" ? { auto: true } : { auto: false, hannChunk: 24, hannStride: 12, lowVram: false } })}
+        />
+      </Row>
+      {/* Core ML takes its window from the model set: the limit isn't used on a Mac (no control that does nothing) */}
+      {platform !== "darwin" && (
+        <VramLimitRow
+          id="vlimit"
+          value={o.vramLimitGb}
+          totalBytes={e?.totalBytes ?? null}
+          cardText={waiting ? cardText(est, e) : null}
+          provider={e?.provider ?? null}
+          onChange={(vramLimitGb) => set({ vramLimitGb })}
+        />
+      )}
+      {!o.memory.auto && <ManualMemory est={est} waiting={waiting} memory={o.memory} onChange={(memory) => set({ memory })} />}
+    </>
+  );
+}
+
+/** The card's memory as the engine's estimate read it, for the limit row (null: nothing to say yet). */
+function cardText(est: MemoryEstimateResult | null, e: MemoryEstimate | null): string {
+  if (!est) return "Reading the card's memory…";
+  if (!e) return est.ok ? "" : est.reason;
+  if (e.totalBytes === null && e.freeBytes === null) return "This system gives no graphics memory reading.";
+  const parts = [e.totalBytes !== null ? `This card: ${gibBytes(e.totalBytes)}` : "This card", e.freeBytes !== null ? `${gibBytes(e.freeBytes)} free` : null];
+  // loop: NOT-WORTH — two parts per render
+  return `${parts.filter(Boolean).join(", ")}${est.ok && est.stale ? " (read before the queue started)" : ""}`;
+}
+
+/**
+ * Graphics memory limit: Auto / N GiB (backlog row 43), the engine's `vram_budget_gb`. Shared by a clip's settings
+ * and App settings' default. The menu runs up to the card's size once the engine has read it.
+ */
+export function VramLimitRow({
+  id,
+  value,
+  totalBytes,
+  cardText,
+  provider,
+  onChange,
+}: {
+  id: string;
+  value: number | null;
+  totalBytes: number | null;
+  cardText: string | null;
+  provider: string | null;
+  onChange: (gb: number | null) => void;
+}) {
+  const choices = vramLimitChoices(totalBytes, value);
+  const what =
+    provider === "cpu"
+      ? "Not used on the CPU (no graphics card in use)."
+      : value === null
+        ? "Auto: the memory free on the card when the job starts."
+        : `The automatic window fits within ${value} GiB, and the engine's CUDA memory is capped at it. A manual window isn't resized.`;
+  return (
+    <Row label="Memory limit" hint={cardText || undefined} htmlFor={id}>
+      <select id={id} title={VRAM_LIMIT_AUTO_HELP} value={value === null ? "auto" : String(value)} onChange={(ev) => onChange(ev.target.value === "auto" ? null : Number(ev.target.value))}>
+        <option value="auto">Auto</option>
+        {/* loop: HOT-PATH-OK — up to the card's GiB (a few dozen) per render */}
+        {choices.map((gb) => (
+          <option key={gb} value={String(gb)}>
+            {gb} GiB
+          </option>
+        ))}
+      </select>
+      <p className="estimate" title={VRAM_LIMIT_AUTO_HELP}>
+        {what}
+      </p>
+    </Row>
+  );
+}
+
+/**
+ * Manual window / stride and low-memory mode, each choice with the engine's graphics-memory estimate for this clip
+ * (backlog row 41), weighed against the clip's limit when it has one.
+ */
+function ManualMemory({ est, waiting, memory, onChange }: { est: MemoryEstimateResult | null; waiting: boolean; memory: ManualChoice; onChange: (m: ManualChoice) => void }) {
   const e = est?.ok ? est.estimate : null;
   // loop: HOT-PATH-OK — twelve windows, per lookup (a few per render)
   const of = (c: number, s: number, low: boolean) => e?.windows.find((w) => w.hannChunk === c && w.hannStride === s && w.lowVram === low) ?? null;
@@ -318,7 +393,8 @@ function estimateText(est: MemoryEstimateResult | null, w: WindowEstimate | null
   const stale = est.stale ? " (free memory read before the queue started)" : "";
   const peak = `About ${gibBytes(w.peakBytes)}`;
   if (e.freeBytes === null || w.fits === null) return `${peak}; this system gives no memory reading, so no verdict.`;
-  const capped = e.budgetBytes !== null && e.budgetBytes < e.freeBytes ? ` (the engine's budget: ${gibBytes(e.budgetBytes)})` : "";
+  // the budget under a limit (the clip's, or the engine's CK_ENGINE_VRAM_BUDGET_GB): what the verdict is weighed against
+  const capped = e.budgetBytes !== null && e.budgetBytes < e.freeBytes ? ` (${e.capGb !== null ? `the limit: ${gibBytes(e.budgetBytes)}` : `the engine's budget: ${gibBytes(e.budgetBytes)}`})` : "";
   const card = e.totalBytes !== null ? ` on this ${gibBytes(e.totalBytes)} card` : "";
   const of = `${peak} of ${gibBytes(e.freeBytes)} free${card}${capped}${stale}`;
   return w.fits ? `${of}: fits.` : `${of}: doesn't fit (with the engine's safety margin it needs ${gibBytes(w.needsBytes)}).`;

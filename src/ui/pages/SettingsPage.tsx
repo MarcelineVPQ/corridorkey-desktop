@@ -3,8 +3,10 @@
 // Updates, Storage (what the app keeps on disk, each folder removable). Every
 // control changes something you can see (rule 4).
 import { useEffect } from "react";
-import { Download, FolderOpen, FolderOutput, HardDrive, Palette, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
-import type { Appearance, AppState, UpdateState } from "../../shared/types";
+import { Download, FolderInput, FolderOpen, FolderOutput, HardDrive, MemoryStick, Palette, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import type { Appearance, AppState, CacheInfo, UpdateState } from "../../shared/types";
+import { gibBytes, mbOrGbBytes } from "../../shared/units";
+import { VramLimitRow } from "../JobSettings";
 import { NOT_WHILE_BUSY } from "../../shared/texts";
 import { Accordion, Row, Section, Segmented } from "../panel/Section";
 import { MainBlock, SplitView } from "../panel/SplitView";
@@ -36,6 +38,16 @@ export function SettingsPage(props: { state: AppState; panelShown: boolean; narr
   const busy = state.queueRunning || state.install.status === "running" || state.tensorrt.status === "running";
   // loop: NOT-WORTH — four items per render
   const storageTotal = storage ? storage.reduce((n, i) => n + i.bytes, 0) : null;
+  // the limit new clips start with (row 43): the menu runs up to the card's size as the engine last read it, else the driver's (the queue's pong)
+  const limit = state.settings.vramLimitGb;
+  const pongTotal = state.engine.pong?.vramTotalMb;
+  const cardTotal = state.card?.totalBytes ?? (pongTotal ? pongTotal * 1048576 : null);
+  const c = state.card;
+  const cardLine = c
+    ? `This card: ${c.totalBytes !== null ? gibBytes(c.totalBytes) : "size unknown"}${c.freeBytes !== null ? `, ${gibBytes(c.freeBytes)} free at ${new Date(c.at).toLocaleTimeString()}` : ""}`
+    : pongTotal
+      ? `This card: ${gibBytes(pongTotal * 1048576)}`
+      : "Card size: read with a clip's memory estimate";
 
   const main = (
     <div className="page-body">
@@ -105,6 +117,17 @@ export function SettingsPage(props: { state: AppState; panelShown: boolean; narr
         )}
       </Section>
 
+      {state.system.platform !== "darwin" && (
+        <Section id="memory" icon={MemoryStick} title="Graphics memory" status={limit === null ? "New clips: Auto limit" : `New clips: limit ${limit} GiB`}>
+          {() => (
+            <>
+              <VramLimitRow id="vlimit-default" value={limit} totalBytes={cardTotal} cardText={cardLine} provider={null} onChange={(gb) => void window.ck.setVramLimitDefault(gb)} />
+              <p className="hint-text">For clips added from now on; each clip can change it in its Graphics memory section.</p>
+            </>
+          )}
+        </Section>
+      )}
+
       <Section id="updates" icon={Download} title="Updates" status={updateStatus(u)}>
         {() => <Updates u={u} queueRunning={state.queueRunning} />}
       </Section>
@@ -117,14 +140,21 @@ export function SettingsPage(props: { state: AppState; panelShown: boolean; narr
               {/* loop: NOT-WORTH — three folders per render */}
               {storage.map((i) => (
                 <Row key={i.id} label={`${i.label} · ${i.bytes ? gbBytes(i.bytes) : "empty"}`} hint={i.path}>
-                  <button type="button" className="btn small" disabled={!i.bytes || busy} title={busy ? NOT_WHILE_BUSY : undefined} onClick={() => void window.ck.removeStorage(i.id)}>
-                    <Trash2 size={14} /> Remove…
-                  </button>
+                  <div className="file-pick">
+                    <button type="button" className="btn small" disabled={!i.bytes} onClick={() => void window.ck.openStorageFolder(i.id)}>
+                      <FolderOpen size={14} /> Open
+                    </button>
+                    <button type="button" className="btn small" disabled={!i.bytes || busy} title={busy ? NOT_WHILE_BUSY : undefined} onClick={() => void window.ck.removeStorage(i.id)}>
+                      <Trash2 size={14} /> Remove…
+                    </button>
+                  </div>
                 </Row>
               ))}
+              {state.cache && <CacheFolder cache={state.cache} busy={busy} />}
               <p className="hint-text">
-                Removing asks first. The runtime and models come back through the setup when you need them{state.tensorrt.supported ? ", TensorRT through its switch (Engine settings)" : ""}; your
-                settings and results are never touched here.
+                Per clip: its thumbnail and result stills, and its job&apos;s working files while it runs. Changing the cache folder asks whether to move the files or start fresh. Removing asks first.
+                The runtime and models come back through the setup when you need them{state.tensorrt.supported ? ", TensorRT through its switch (Engine settings)" : ""}; your settings and results are
+                never touched here.
               </p>
             </>
           )
@@ -221,6 +251,67 @@ function Updates({ u, queueRunning }: { u: UpdateState; queueRunning: boolean })
         </Row>
       )}
       {u.notes && <p className="hint-text">{u.notes}</p>}
+    </>
+  );
+}
+
+/**
+ * The cache folder (backlog row 44): where it is (Change…, back to the system's folder, Open), what it holds per
+ * clip in the queue and per TensorRT range, measured with Storage.
+ */
+function CacheFolder({ cache, busy }: { cache: CacheInfo; busy: boolean }) {
+  const locked = busy || cache.moving !== null;
+  return (
+    <>
+      <Row label={`Cache folder · ${cache.bytes ? mbOrGbBytes(cache.bytes) : "empty"}`} hint={cache.dir}>
+        <div className="file-pick">
+          <button type="button" className="btn small" disabled={locked} title={busy ? NOT_WHILE_BUSY : undefined} onClick={() => void window.ck.pickCacheFolder()}>
+            <FolderInput size={14} /> Change…
+          </button>
+          {!cache.isDefault && (
+            <button type="button" className="btn small" disabled={locked} title={busy ? NOT_WHILE_BUSY : cache.defaultDir} onClick={() => void window.ck.pickCacheFolder("default")}>
+              <RotateCcw size={14} /> Default
+            </button>
+          )}
+          <button type="button" className="btn small" disabled={!cache.bytes} onClick={() => void window.ck.openStorageFolder("cache-root")}>
+            <FolderOpen size={14} /> Open
+          </button>
+        </div>
+      </Row>
+      {cache.moving && (
+        <p className="hint-text" role="status">
+          {cache.moving}
+        </p>
+      )}
+      {cache.error && (
+        <p className="estimate no-fit" role="alert">
+          {cache.error}
+        </p>
+      )}
+      {(cache.shots.length > 0 || cache.otherBytes > 0 || cache.trtRanges.length > 0) && (
+        <ul className="sizes" aria-label="What the cache folder holds">
+          {/* loop: HOT-PATH-OK — the queue's clips, per render of Storage (only while it is open) */}
+          {cache.shots.map((s, i) => (
+            <li key={`${i}-${s.name}`}>
+              <span title={s.name}>{s.name}</span>
+              <span>{s.bytes ? mbOrGbBytes(s.bytes) : "empty"}</span>
+            </li>
+          ))}
+          {cache.otherBytes > 0 && (
+            <li>
+              <span>Clips no longer in the queue</span>
+              <span>{mbOrGbBytes(cache.otherBytes)}</span>
+            </li>
+          )}
+          {/* loop: HOT-PATH-OK — a few TensorRT ranges, as above */}
+          {cache.trtRanges.map((r) => (
+            <li key={r.range}>
+              <span title={r.range}>TensorRT engines, range {r.range}</span>
+              <span>{mbOrGbBytes(r.bytes)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </>
   );
 }

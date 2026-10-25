@@ -9,3 +9,8 @@ export function gbBytes(bytes: number): string {
 export function gibBytes(bytes: number): string {
   return `${(bytes / 1073741824).toFixed(1)} GiB`;
 }
+
+/** A smaller byte count in decimal MB below 1 GB, else as gbBytes (the cache's sizes per clip: stills are KB to MB). */
+export function mbOrGbBytes(bytes: number): string {
+  return bytes < 1e9 ? `${(bytes / 1e6).toFixed(1)} MB` : gbBytes(bytes);
+}

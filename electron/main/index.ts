@@ -11,11 +11,11 @@ import { expandPaths, probeClip, still, STILL_WIDTH, VIDEO_EXT, HINT_IMAGE_EXT }
 import { clearJobTemps, Queue } from "./queue";
 import { checkCheckout, checkRustEngine, chooseEngine, loadSettings, saveSettings } from "./settings";
 import { effectivePath, findEngineFiles, findTrtBuilder, isInsideApp, modelSetVersion, windowTitle } from "./engineFind";
-import { addToPathList, appDirs, engineBinName, isMac, isWin, ortLibrary, PLATFORM } from "./platform";
+import { addToPathList, APP_DIR, appDirs, engineBinName, isMac, isWin, ortLibrary, PLATFORM } from "./platform";
 import { HOMEBREW_DIRS, checkFfmpeg, ffmpegState, installFfmpeg, planFor, readOsRelease, wingetFfmpegDirs } from "./ffmpeg";
 import { PROGRESS_EVERY_MS } from "./updateFlow";
 import { MODELS_BYTES, RUNTIME_BYTES, TRT_BYTES, freeBytes, installNeeds, runInstall, runTrtInstall, systemSupport, trtNeeds, trtReady, trtSupported, useTensorrt, type InstallDeps } from "./install";
-import { pruneCache, removeStorage, storageItems, TRT_ENGINES_DIR } from "./storage";
+import { folderBytes, pruneCache, removeStorage, storageItems, TRT_ENGINES_DIR } from "./storage";
 import { readDesktopPalette, watchDesktopPalette } from "./desktopTheme";
 import { Updater } from "./updater";
 import { holdAppImageMountUntilExit } from "./appImageQuit";
@@ -27,6 +27,8 @@ import {
   type GpuInfo,
   type InstallState,
   type StorageItem,
+  type CacheInfo,
+  type CardReading,
   type Job,
   type JobOptions,
   type MemoryEstimateResult,
@@ -36,7 +38,9 @@ import {
 import { NOT_WHILE_BUSY } from "../../src/shared/texts";
 import type { DesktopPalette } from "../../src/ui/theme/palette";
 import { IPC } from "./ipc";
-import { idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir } from "./validate";
+import { idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir, vramLimit } from "./validate";
+import { cacheDirFor, cacheInfo, CACHE_MARKER, clearOldCache, MEDIA_DIR, moveCache, prepareTarget, remapMedia, targetProblem } from "./cacheFolder";
+import { mbOrGbBytes } from "../../src/shared/units";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const devServerUrl = process.env.ELECTRON_RENDERER_URL;
@@ -65,9 +69,10 @@ const IS_WIN = isWin();
 const IS_MAC = isMac();
 // the data folder (runtime, models) and the cache (thumbnails, stills): platform.ts appDirs
 const appFolders = appDirs(process.env, app.getPath("home"));
-const cacheDir = appFolders.cache;
-const mediaDir = join(cacheDir, "media");
 let settings = loadSettings(settingsFile, process.env);
+// the cache folder: the system's, or the app's own folder in the location chosen in App settings, Storage (row 44)
+let cacheDir = cacheDirFor(settings.cacheRoot, appFolders.cache);
+let mediaDir = join(cacheDir, MEDIA_DIR);
 let checkout = checkCheckout(settings.corridorKeyRoot);
 /** Where the Engine page's lists look (engineFind.ts): the app's own engine, a dev build, the in-app install's folder. */
 function enginePlaces() {
@@ -139,6 +144,12 @@ let trt = trtIdle();
 // one install at a time (the runtime and models, or TensorRT's parts): one Stop
 let installAbort: AbortController | null = null;
 let storage: StorageItem[] | null = null;
+let cache: CacheInfo | null = null;
+// a cache move or fresh start running (what App settings shows), and why the last one stopped
+let cacheMoving: string | null = null;
+let cacheError: string | null = null;
+// the card's memory from the engine's last estimate (the limit menus)
+let card: CardReading | null = null;
 let lastInstallProgress = 0;
 async function recheckFfmpeg(): Promise<void> {
   // Windows: winget's ffmpeg folders onto this process's PATH (a running program never sees PATH changes)
@@ -175,6 +186,16 @@ const updater = new Updater({ changed: () => scheduleSend(), version: app.getVer
 
 /** ck-media://f/<encoded path>: only files inside the media cache are served. */
 const mediaUrl = (file: string) => `${MEDIA_SCHEME}://f/${encodeURIComponent(file)}`;
+/** The file a ck-media URL names (null: not one). */
+function mediaFile(url: string): string | null {
+  try {
+    const u = new URL(url);
+    return u.protocol === `${MEDIA_SCHEME}:` ? decodeURIComponent(u.pathname.slice(1)) : null;
+  } catch {
+    // error: NOT-WORTH — not a URL: no file
+    return null;
+  }
+}
 
 function engineScript(): string {
   // packaged: engine/ is unpacked next to app.asar (python can't read inside the asar)
@@ -226,6 +247,8 @@ function state(): AppState {
     install,
     tensorrt: trt,
     storage,
+    cache,
+    card,
     desktopPalette,
     update: updater.state,
     system: { engineBin: engineBinName(), ortLib: ortLibrary().display, platform: PLATFORM },
@@ -340,7 +363,8 @@ async function addPaths(paths: string[]): Promise<void> {
     // loop: NOT-WORTH — the queue's jobs per dropped clip (a drop of N clips is N × jobs comparisons)
     if (queue.jobs.some((j) => j.clip.path === path && j.status === "waiting")) continue;
     const clip = await probeClip(path, kind, mediaDir, mediaUrl);
-    const options: JobOptions = { ...settings.lastOptions, hintFirstFrame: null, hintVideo: null, hintMode: "none" };
+    // the graphics memory limit starts at App settings' default (row 43), whatever the last clip had
+    const options: JobOptions = { ...settings.lastOptions, hintFirstFrame: null, hintVideo: null, hintMode: "none", vramLimitGb: settings.vramLimitGb };
     if (clip.companionHintVideo) Object.assign(options, { hintMode: "video", hintVideo: clip.companionHintVideo });
     else if (clip.companionFirstFrame) Object.assign(options, { hintMode: "first-frame", hintFirstFrame: clip.companionFirstFrame });
     const parent = kind === "frames" && basename(path).toLowerCase() === "input" ? dirname(dirname(path)) : dirname(path);
@@ -365,6 +389,114 @@ async function addPaths(paths: string[]): Promise<void> {
       partial: null,
       log: [],
     });
+  }
+}
+
+/** Storage and the cache folder, measured (walks the folders: only when App settings shows Storage, or after a change). */
+function measureStorage(): void {
+  storage = storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort);
+  cache = { ...cacheInfo(cacheDir, appFolders.cache, queue.jobs, mediaFile), moving: cacheMoving, error: cacheError };
+}
+
+/** The cache folder from now on: `root` the chosen location (null: the system's folder), `dir` the app's folder in it. */
+function switchCache(root: string | null, dir: string): void {
+  settings = { ...settings, cacheRoot: root };
+  persist();
+  cacheDir = dir;
+  mediaDir = join(dir, MEDIA_DIR);
+}
+
+/**
+ * Choose where the cache lives (backlog row 44): a folder dialog (or the system's folder), then, when the cache
+ * holds anything, move the files or start fresh (asked). Refused while the queue or a download runs.
+ */
+async function pickCacheFolder(toDefault: boolean): Promise<void> {
+  if (!mainWindow || cacheMoving) return;
+  if (queue.running || installAbort) {
+    await dialog.showMessageBox(mainWindow, { type: "info", message: NOT_WHILE_BUSY, detail: "Stop it first, then change the cache folder." });
+    return;
+  }
+  let root: string | null = null;
+  if (!toDefault) {
+    const r = await dialog.showOpenDialog(mainWindow, { title: "Location for the cache folder", defaultPath: dirname(cacheDir), properties: ["openDirectory", "createDirectory"] });
+    if (r.canceled || !r.filePaths[0]) return;
+    const picked = r.filePaths[0];
+    // the app's own cache folder itself picked (it carries the marker): its parent is the location
+    // loop: NOT-WORTH — one stat per choice
+    root = basename(picked) === APP_DIR && existsSync(join(picked, CACHE_MARKER)) ? dirname(picked) : picked;
+  }
+  const to = cacheDirFor(root, appFolders.cache);
+  const toOwned = resolve(to) === resolve(appFolders.cache);
+  if (toOwned) root = null;
+  const from = cacheDir;
+  const fromOwned = resolve(from) === resolve(appFolders.cache);
+  const problem = targetProblem(from, to, toOwned);
+  if (problem) {
+    await dialog.showMessageBox(mainWindow, { type: "info", message: "The cache can't go there", detail: problem });
+    return;
+  }
+  const trtBytes = folderBytes(join(from, TRT_ENGINES_DIR));
+  const bytes = folderBytes(join(from, MEDIA_DIR)) + trtBytes;
+  let move = false;
+  if (bytes > 0) {
+    const trt = trtBytes > 0;
+    const r = await dialog.showMessageBox(mainWindow, {
+      type: "question",
+      buttons: ["Move the files", "Start fresh", "Cancel"],
+      defaultId: 0,
+      cancelId: 2,
+      message: `Move the cache folder to ${to}?`,
+      detail:
+        `The cache holds ${mbOrGbBytes(bytes)}: clip thumbnails and result stills${trt ? ", and the TensorRT engines built for your card" : ""}.\n\n` +
+        `Move the files: each file is copied, checked against the original, and only then removed from ${from}. If anything goes wrong, nothing is removed and the cache stays where it is.\n\n` +
+        `Start fresh: the new folder starts empty and the old cache files are deleted. Thumbnails and stills are made again${trt ? "; the TensorRT engines are built again on the next TensorRT job (minutes per resolution range)" : ""}.`,
+    });
+    if (r.response === 2) return;
+    move = r.response === 0;
+  }
+  // one engine at a time, and none while the cache moves (the estimate's engine is the only one that can run now)
+  estimator.stop();
+  cacheMoving = move ? `Moving ${mbOrGbBytes(bytes)} to ${to}…` : `Starting fresh in ${to}…`;
+  cacheError = null;
+  measureStorage();
+  scheduleSend();
+  try {
+    if (move) {
+      const res = await moveCache(from, to, toOwned, fromOwned);
+      if (!res.ok) {
+        cacheError = res.message;
+        return;
+      }
+      const oldMedia = join(from, MEDIA_DIR);
+      switchCache(root, to);
+      // the queued clips' thumbnails and stills moved with the files: same names, new folder
+      // loop: NOT-WORTH — the queue's jobs, once per move
+      for (const j of queue.jobs) {
+        if (j.clip.thumb) j.clip.thumb = remapMedia(j.clip.thumb, oldMedia, mediaDir, mediaFile, mediaUrl);
+        // loop: NOT-WORTH — ≤ four stills per job
+        j.stills = j.stills.map((st) => ({ ...st, url: remapMedia(st.url, oldMedia, mediaDir, mediaFile, mediaUrl) }));
+      }
+      cacheError = res.message;
+    } else {
+      await prepareTarget(to, toOwned);
+      switchCache(root, to);
+      cacheError = await clearOldCache(from, fromOwned);
+      // the queued clips' thumbnails and stills, made again in the new folder
+      // loop: SERIAL-REQUIRED — one ffprobe + ffmpeg still per queued clip, one at a time (as adding them)
+      for (const j of queue.jobs) {
+        j.clip.thumb = (await probeClip(j.clip.path, j.clip.kind, mediaDir, mediaUrl)).thumb;
+        j.stills = [];
+        await makeStills(j);
+        scheduleSend();
+      }
+    }
+  } catch (e) {
+    // error: SHOWN — App settings, Storage shows why (a move that stopped changed nothing)
+    cacheError = `The cache folder wasn't changed: ${(e as Error).message}`;
+  } finally {
+    cacheMoving = null;
+    measureStorage();
+    scheduleSend();
   }
 }
 
@@ -493,13 +625,31 @@ function registerIpc(): void {
   });
   ipcMain.handle(IPC.stopInstall, () => installAbort?.abort());
   ipcMain.handle(IPC.measureStorage, () => {
-    storage = storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort);
+    measureStorage();
+    scheduleSend();
+  });
+  ipcMain.handle(IPC.openStorageFolder, async (_e, idIn: unknown) => {
+    // only the app's own folders: the cache folder, or one Storage lists
+    // loop: NOT-WORTH — four items, once per click
+    const p =
+      idIn === "cache-root" ? cacheDir : storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort).find((i) => i.id === idIn)?.path;
+    // loop: NOT-WORTH — one stat per click
+    if (!p || !existsSync(p)) return;
+    // loop: NOT-WORTH — hands the folder to the file manager once per click
+    const err = await shell.openPath(p);
+    // error: SHOWN — the file manager couldn't be started: a message box says why
+    if (err && mainWindow) await dialog.showMessageBox(mainWindow, { type: "info", message: "The folder couldn't be opened", detail: `${p}: ${err}` });
+  });
+  ipcMain.handle(IPC.pickCacheFolder, async (_e, toIn: unknown) => pickCacheFolder(toIn === "default"));
+  ipcMain.handle(IPC.setVramLimitDefault, (_e, gbIn: unknown) => {
+    settings = { ...settings, vramLimitGb: vramLimit(gbIn) };
+    persist();
     scheduleSend();
   });
   ipcMain.handle(IPC.removeStorage, async (_e, idIn: unknown) => {
     // loop: NOT-WORTH — three items, once per click
     const item = storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort).find((i) => i.id === idIn);
-    if (!item || !mainWindow) return;
+    if (!item || !mainWindow || cacheMoving) return;
     if (queue.running || installAbort) {
       await dialog.showMessageBox(mainWindow, { type: "info", message: NOT_WHILE_BUSY, detail: "Stop it first, then remove." });
       return;
@@ -524,7 +674,7 @@ function registerIpc(): void {
     });
     if (r.response !== 0) return;
     removeStorage(item, enginePlaces().data, cacheDir);
-    storage = storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort);
+    measureStorage();
     install = installIdle();
     trt = trtIdle();
     recheckEngines();
@@ -559,7 +709,13 @@ function registerIpc(): void {
     const job = id ? queue.jobs.find((j) => j.id === id) : undefined;
     if (!job || job.status !== "waiting") return { ok: false, reason: "Only for a clip that hasn't run yet." };
     if (chooseEngine(rustEngine, checkout) !== "rust") return { ok: false, reason: "The memory estimate comes from the Rust engine (set it up on the Engine page)." };
-    return estimator.ask(job.clip.path, queue.running);
+    const r = await estimator.ask(job.clip.path, queue.running, job.options.vramLimitGb);
+    // the card's memory as this reading saw it, for App settings' limit menu
+    if (r.ok && !r.stale && (r.estimate.totalBytes !== null || r.estimate.freeBytes !== null)) {
+      card = { totalBytes: r.estimate.totalBytes, freeBytes: r.estimate.freeBytes, at: r.estimate.at };
+      scheduleSend();
+    }
+    return r;
   });
   ipcMain.handle(IPC.removeJob, (_e, id: unknown) => {
     const v = idArg(id);
@@ -572,7 +728,8 @@ function registerIpc(): void {
   ipcMain.handle(IPC.startQueue, async () => {
     recheckEngines();
     await recheckFfmpeg();
-    if (!chooseEngine(rustEngine, checkout) || !ffmpeg.ok) return scheduleSend();
+    // not while the cache folder moves (a job writes its working files and TensorRT engines there)
+    if (!chooseEngine(rustEngine, checkout) || !ffmpeg.ok || cacheMoving) return scheduleSend();
     // one engine at a time: an estimate still asking gives way to the queue
     estimator.stop();
     return queue.start();

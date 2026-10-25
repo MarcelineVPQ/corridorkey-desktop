@@ -56,7 +56,13 @@ export function JobView({ job }: { job: Job }) {
             <Stat k="Temporal window" v={`${m.hannChunk} / ${m.hannStride}`} />
             <Stat k="Low-memory mode" v={m.lowVram ? "on" : "off"} />
             <Stat k="Chosen" v={m.auto ? "automatically" : "manually"} />
-            {m.budgetGb !== null && <Stat k="Free when it started" v={`${m.budgetGb.toFixed(1)} GiB`} />}
+            {/* the Rust engine says the free memory and the limit apart; the PyTorch engine's budget is the free memory, capped by a limit */}
+            {m.freeGb !== null ? (
+              <Stat k="Free when it started" v={`${m.freeGb.toFixed(1)} GiB`} />
+            ) : (
+              m.budgetGb !== null && <Stat k={job.options.vramLimitGb !== null ? "Budget (free memory, within the limit)" : "Free when it started"} v={`${m.budgetGb.toFixed(1)} GiB`} />
+            )}
+            {m.limitGb !== null && <Stat k="Graphics memory limit" v={`${m.limitGb.toFixed(1)} GiB`} />}
             {m.estimateGb !== null && <Stat k="Runtime's peak estimate" v={`${m.estimateGb.toFixed(1)} GiB`} />}
           </div>
         </MainBlock>

@@ -78,6 +78,23 @@ describe("memory estimate (backlog row 41)", () => {
     expect(h.engines).toHaveLength(2);
   });
 
+  it("weighs the windows against the clip's limit: sent as vram_budget_gb, one reading per limit (backlog row 43)", async () => {
+    expect(estimateRequest("e1", "/c.mov")).not.toHaveProperty("vram_budget_gb");
+    expect(estimateRequest("e1", "/c.mov", 10)).toMatchObject({ vram_budget_gb: 10 });
+    // the engine caps its budget at the request's limit and says so (budget_cap_gb)
+    const h = harness((m) => ({ ...reply(m), budget_bytes: typeof m.vram_budget_gb === "number" ? m.vram_budget_gb * GIB : 13 * GIB, budget_cap_gb: m.vram_budget_gb ?? null }));
+    const auto = await h.est.ask("/c.mov", false, null);
+    const limited = await h.est.ask("/c.mov", false, 6);
+    expect(h.engines).toHaveLength(2);
+    expect(h.engines[1].sent[0]).toMatchObject({ cmd: "estimate", vram_budget_gb: 6 });
+    expect(auto.ok && auto.estimate.capGb).toBeNull();
+    expect(limited.ok && [limited.estimate.capGb, limited.estimate.budgetBytes]).toEqual([6, 6 * GIB]);
+    // each limit keeps its own fresh reading
+    await h.est.ask("/c.mov", false, 6);
+    await h.est.ask("/c.mov", false, null);
+    expect(h.engines).toHaveLength(2);
+  });
+
   it("starts no engine while the queue runs: the last reading, marked stale, or why not", async () => {
     const h = harness();
     const none = await h.est.ask("/c.mov", true);

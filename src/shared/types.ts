@@ -34,6 +34,8 @@ export interface JobOptions {
   cutoutLinear: boolean;
   frameDirFps: number;
   frameDirLinear: boolean;
+  // Graphics memory limit (backlog row 43): the engine's `vram_budget_gb` in GiB; null = Auto (VRAM_LIMIT_AUTO_HELP)
+  vramLimitGb: number | null;
 }
 
 export const DEFAULT_OPTIONS: JobOptions = {
@@ -51,7 +53,31 @@ export const DEFAULT_OPTIONS: JobOptions = {
   cutoutLinear: false,
   frameDirFps: 24,
   frameDirLinear: false,
+  vramLimitGb: null,
 };
+
+// the graphics memory limit's range (GiB): whole numbers, as the menus offer them
+export const VRAM_LIMIT_MIN_GB = 2;
+export const VRAM_LIMIT_MAX_GB = 256;
+// the menu when the card's size hasn't been read yet
+const VRAM_LIMIT_UNREAD: readonly number[] = [2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 32, 48];
+
+/** What "Auto" means (engine-rs pipeline run_job, vram.rs select_vram_profile, ENGINE_PROTOCOL.md `vram_budget_gb`). */
+export const VRAM_LIMIT_AUTO_HELP =
+  "Auto sends no limit: the engine's budget is the memory free on the card when the job starts (plus what it already holds; " +
+  "CK_ENGINE_VRAM_BUDGET_GB caps it when that is set), and the automatic window is the largest whose peak estimate × 1.1 + 0.3 GiB fits it. " +
+  "A limit caps that budget: the automatic window is chosen within the smaller of the free memory and the limit, and on CUDA each network's memory pool is capped at it. " +
+  "A manual window is never resized, so one past the limit can run out of memory. Not used on the CPU or on Apple Silicon (Core ML takes its window from the model set).";
+
+/** The limit menu's whole GiB: 2 up to the card's size when it has been read (the engine's or the driver's total), else a fixed set; `current` always kept. */
+export function vramLimitChoices(totalBytes: number | null, current: number | null): number[] {
+  const top = totalBytes !== null && totalBytes > 0 ? Math.floor(totalBytes / 1073741824) : null;
+  // loop: NOT-WORTH — at most VRAM_LIMIT_MAX_GB numbers, per render of the limit menu
+  const base = top !== null && top >= VRAM_LIMIT_MIN_GB ? Array.from({ length: Math.min(top, VRAM_LIMIT_MAX_GB) - VRAM_LIMIT_MIN_GB + 1 }, (_, i) => VRAM_LIMIT_MIN_GB + i) : [...VRAM_LIMIT_UNREAD];
+  if (current !== null && !base.includes(current)) base.push(current);
+  // loop: NOT-WORTH — as above
+  return base.sort((a, b) => a - b);
+}
 
 /** A video cutout is premultiplied colour without an alpha channel (no video codec here carries one): its alpha is the Alpha output, so a video job with a cutout always writes it (the engine adds it too). */
 export function withCutoutAlpha(o: JobOptions): JobOptions {
@@ -89,6 +115,9 @@ export interface MemoryInfo {
   auto: boolean;
   budgetGb: number | null;
   estimateGb: number | null;
+  // the free memory the engine read (plus its own), and the job's graphics memory limit (`budget_cap_gb`), GiB
+  freeGb: number | null;
+  limitGb: number | null;
 }
 
 // the manual window choices (Graphics memory → Manual): what the picker offers and the estimate asks the engine about
@@ -121,6 +150,10 @@ export interface MemoryEstimate {
   freeBytes: number | null;
   // what the windows are weighed against: the free memory, or less under a configured cap
   budgetBytes: number | null;
+  // the limit the budget was capped by (the request's `vram_budget_gb`, else the engine's CK_ENGINE_VRAM_BUDGET_GB), GiB
+  capGb: number | null;
+  // what the reading came from: cuda / tensorrt / cpu / coreml (null: no reading)
+  provider: string | null;
   windows: WindowEstimate[];
   // when the engine read it (ms since the epoch)
   at: number;
@@ -232,6 +265,11 @@ export interface Settings {
   ortLibrary: string | null;
   // run jobs on TensorRT (the Rust engine, Linux; off by default): sent to the engine only once its parts are installed
   tensorrt: boolean;
+  // the graphics memory limit new clips start with (GiB; null = Auto), backlog row 43
+  vramLimitGb: number | null;
+  // the cache folder's parent chosen in App settings, Storage (the app keeps its own folder inside it); null = the
+  // system's cache folder (platform.ts appDirs), backlog row 44
+  cacheRoot: string | null;
 }
 
 export type EngineKind = "rust" | "python";
@@ -321,6 +359,31 @@ export interface StorageItem {
   bytes: number;
 }
 
+// The cache folder (backlog row 44), measured with Storage: where it is, and what is in it per clip and per TensorRT range.
+export interface CacheInfo {
+  dir: string;
+  // the system's cache folder (Default), and whether the cache is there
+  defaultDir: string;
+  isDefault: boolean;
+  bytes: number;
+  // per clip in the queue: its thumbnail and result stills, and its job's working files while it runs
+  shots: { name: string; bytes: number }[];
+  // stills of clips no longer in the queue (pruned at start: 30 days, 500 MB)
+  otherBytes: number;
+  // the TensorRT engines built for this card, per resolution range (Linux)
+  trtRanges: { range: string; bytes: number }[];
+  // a move or a fresh start in progress, or why the last one stopped
+  moving: string | null;
+  error: string | null;
+}
+
+// The card's memory as the engine last read it (an `estimate` reply), for the limit menus.
+export interface CardReading {
+  totalBytes: number | null;
+  freeBytes: number | null;
+  at: number;
+}
+
 // The system's ffmpeg (electron/main/ffmpeg.ts): ok = ffmpeg + ffprobe with the encoders the engine writes with.
 export interface FfmpegState {
   // false until the first check has answered (the page says "Checking", never "installed", before that)
@@ -361,6 +424,10 @@ export interface AppState {
   tensorrt: TrtState;
   // null until App settings asks for it (measuring walks the folders)
   storage: StorageItem[] | null;
+  // the cache folder, measured with Storage (null until then)
+  cache: CacheInfo | null;
+  // the card's memory from the engine's last estimate (null: not read yet)
+  card: CardReading | null;
   enginePaths: Record<EngineFileKind, string | null>;
   // the desktop's colors (Desktop theme / desktop accent); null = couldn't be read or not asked
   desktopPalette: DesktopPalette | null;
@@ -392,6 +459,12 @@ export interface CorridorKeyApi {
   measureStorage(): Promise<void>;
   // asks for confirmation first (a system dialog); refused while the queue or the install runs
   removeStorage(id: StorageItem["id"]): Promise<void>;
+  // opens a Storage folder (or the cache folder) in the file manager
+  openStorageFolder(id: StorageItem["id"] | "cache-root"): Promise<void>;
+  // choose the cache folder's location (a folder dialog, then: move the files or start fresh, asked); "default": back to the system's
+  pickCacheFolder(to?: "default"): Promise<void>;
+  // the graphics memory limit new clips start with (GiB; null = Auto)
+  setVramLimitDefault(gb: number | null): Promise<void>;
   pathForFile(file: File): string;
   setJobOptions(id: string, options: JobOptions): Promise<void>;
   // the engine's graphics-memory estimate for each manual window of a waiting job's clip (backlog row 41)

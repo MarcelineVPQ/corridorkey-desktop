@@ -1,8 +1,8 @@
 // Settings file (userData/settings.json) and the CorridorKey checkout check.
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import type { CheckoutCheck, EngineKind, Settings } from "../../src/shared/types";
-import { sanitizeAppearance, sanitizeOptions } from "./validate";
+import { sanitizeAppearance, sanitizeOptions, vramLimit } from "./validate";
 
 export function loadSettings(file: string, env: NodeJS.ProcessEnv): Settings {
   let saved: Partial<Settings> = {};
@@ -26,6 +26,9 @@ export function loadSettings(file: string, env: NodeJS.ProcessEnv): Settings {
     modelsDir: path(saved.modelsDir),
     ortLibrary: path(saved.ortLibrary),
     tensorrt: saved.tensorrt === true,
+    vramLimitGb: vramLimit(saved.vramLimitGb),
+    // an absolute folder only (anything else: the system's cache folder)
+    cacheRoot: typeof saved.cacheRoot === "string" && isAbsolute(saved.cacheRoot) ? saved.cacheRoot : null,
   };
 }
 

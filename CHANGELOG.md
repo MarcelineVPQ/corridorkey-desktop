@@ -71,3 +71,10 @@ screen keyer, on its own Rust + ONNX Runtime engine, for Linux, Windows and macO
   (docs/ENGINE_PROTOCOL.md).
 - Graphics memory → Manual shows the engine's own estimate next to each window and the Low-memory switch, before the
   job ("about X GiB of Y GiB free: fits"), from a new `estimate` engine command (docs/ENGINE_PROTOCOL.md; backlog row 41).
+- Graphics memory → Memory limit: Auto or a limit in GiB per clip (the engine's `vram_budget_gb`), with a default for
+  new clips in App settings → Graphics memory, shown with the card's size and free memory from the engine's reading;
+  the estimate is weighed against it. Auto means the free memory when the job starts, as before (docs/GUIDE.md;
+  backlog row 43). A finished job shows the limit it ran with.
+- App settings → Storage: the cache folder can move (Change…, Default; move the files, copy-verified before any
+  delete, or start fresh, asked), shows its size per clip and per TensorRT range, and every folder has Open
+  (docs/GUIDE.md; backlog row 44).
