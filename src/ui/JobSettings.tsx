@@ -2,8 +2,10 @@
 // Every control maps to one engine option (docs/ENGINE_PROTOCOL.md) and
 // changes what the run does (rule 4). Locked once the clip has run.
 import { Clapperboard, Film, FolderOpen, MemoryStick, Wand2, X } from "lucide-react";
-import type { HintFileKind, Job, JobOptions, OutputName } from "../shared/types";
-import { OUTPUT_NAMES } from "../shared/types";
+import { useEffect, useState } from "react";
+import type { HintFileKind, Job, JobOptions, MemoryChoice, MemoryEstimate, MemoryEstimateResult, OutputName, WindowEstimate } from "../shared/types";
+import { MANUAL_WINDOWS, OUTPUT_NAMES } from "../shared/types";
+import { gibBytes } from "../shared/units";
 import { AS_USED, lowerFirst } from "../shared/texts";
 import { Accordion, Row, Section, Segmented } from "./panel/Section";
 
@@ -16,18 +18,21 @@ const OUTPUT_TEXT: Record<OutputName, { label: string; help: string }> = {
 
 const MATTE_HELP = "White = subject, black = background"; // theme-exempt: prose about the matte's values, not a color
 
-const WINDOWS: [number, number][] = [
-  [80, 40],
-  [48, 24],
-  [24, 12],
-  [8, 4],
-  [4, 2],
-  [1, 1],
-];
-
 const HINT_TEXT = { none: "No hint", "first-frame": "First-frame matte", video: "Hint video" } as const;
 
-export function JobSettings({ job, focus, sectionTasks, onChange }: { job: Job; focus: string | null; sectionTasks: Record<string, string>; onChange: (o: JobOptions) => void }) {
+export function JobSettings({
+  job,
+  focus,
+  sectionTasks,
+  queueRunning,
+  onChange,
+}: {
+  job: Job;
+  focus: string | null;
+  sectionTasks: Record<string, string>;
+  queueRunning: boolean;
+  onChange: (o: JobOptions) => void;
+}) {
   const o = job.options;
   const set = (patch: Partial<JobOptions>) => onChange({ ...o, ...patch });
   const locked = job.status !== "waiting" ? lowerFirst(AS_USED) : null;
@@ -176,39 +181,104 @@ export function JobSettings({ job, focus, sectionTasks, onChange }: { job: Job; 
                 onChange={(v) => set({ memory: v === "auto" ? { auto: true } : { auto: false, hannChunk: 24, hannStride: 12, lowVram: false } })}
               />
             </Row>
-            {!o.memory.auto && (
-              <>
-                <Row label="Window / stride" htmlFor="win">
-                  <select
-                    id="win"
-                    value={`${o.memory.hannChunk}/${o.memory.hannStride}`}
-                    onChange={(e) => {
-                      // loop: NOT-WORTH — two numbers per window choice
-                      const [c, s] = e.target.value.split("/").map(Number);
-                      if (!o.memory.auto) set({ memory: { ...o.memory, hannChunk: c, hannStride: s } });
-                    }}
-                  >
-                    {/* loop: HOT-PATH-OK — a few window choices per render */}
-                    {WINDOWS.map(([c, s]) => (
-                      <option key={c} value={`${c}/${s}`}>
-                        {c} / {s}
-                      </option>
-                    ))}
-                  </select>
-                </Row>
-                <Row label="Low-memory mode" hint="Less graphics memory, more disk, slower">
-                  <label className="checks">
-                    <input type="checkbox" checked={o.memory.lowVram} onChange={(e) => !o.memory.auto && set({ memory: { ...o.memory, lowVram: e.target.checked } })} />
-                    Staged inference
-                  </label>
-                </Row>
-              </>
-            )}
+            {!o.memory.auto && <ManualMemory job={job} memory={o.memory} queueRunning={queueRunning} onChange={(memory) => set({ memory })} />}
           </>
         )}
       </Section>
     </Accordion>
   );
+}
+
+type ManualChoice = Extract<MemoryChoice, { auto: false }>;
+
+/**
+ * Manual window / stride and low-memory mode, each choice with the engine's graphics-memory estimate for this clip
+ * (backlog row 41). Rendered only while the section is open in Manual mode, so the engine is asked only then; the
+ * numbers are the engine's `estimate` reply (rule 1): nothing is estimated here.
+ */
+function ManualMemory({ job, memory, queueRunning, onChange }: { job: Job; memory: ManualChoice; queueRunning: boolean; onChange: (m: ManualChoice) => void }) {
+  const [est, setEst] = useState<MemoryEstimateResult | null>(null);
+  // a clip that ran shows the window it really used (JobView); the estimate is for choosing one
+  const waiting = job.status === "waiting";
+  useEffect(() => {
+    let live = true;
+    setEst(null);
+    if (!waiting) return;
+    // one ask per clip shown (and again when the queue starts or ends: the engine's reading changes)
+    void window.ck.estimateMemory(job.id).then((r) => live && setEst(r));
+    return () => {
+      live = false;
+    };
+  }, [job.id, job.clip.path, queueRunning, waiting]);
+  const e = est?.ok ? est.estimate : null;
+  // loop: HOT-PATH-OK — twelve windows, per lookup (a few per render)
+  const of = (c: number, s: number, low: boolean) => e?.windows.find((w) => w.hannChunk === c && w.hannStride === s && w.lowVram === low) ?? null;
+  const fitText = (w: WindowEstimate | null) => (w?.fits === false ? " · doesn't fit" : "");
+  const cur = of(memory.hannChunk, memory.hannStride, memory.lowVram);
+  const other = of(memory.hannChunk, memory.hannStride, !memory.lowVram);
+  const lowOn = memory.lowVram ? cur : other;
+  const lowOff = memory.lowVram ? other : cur;
+  return (
+    <>
+      <Row label="Window / stride" htmlFor="win">
+        <select
+          id="win"
+          className="window-pick"
+          value={`${memory.hannChunk}/${memory.hannStride}`}
+          onChange={(ev) => {
+            // loop: NOT-WORTH — two numbers per window choice
+            const [c, s] = ev.target.value.split("/").map(Number);
+            onChange({ ...memory, hannChunk: c, hannStride: s });
+          }}
+        >
+          {/* loop: HOT-PATH-OK — a few window choices per render */}
+          {MANUAL_WINDOWS.map(([c, s]) => {
+            const w = of(c, s, memory.lowVram);
+            return (
+              <option key={c} value={`${c}/${s}`}>
+                {c} / {s}
+                {w ? ` · about ${gibBytes(w.peakBytes)}${fitText(w)}` : ""}
+              </option>
+            );
+          })}
+        </select>
+      </Row>
+      <Row label="Low-memory mode" hint="Less graphics memory, more disk, slower">
+        <label className="checks">
+          <input type="checkbox" checked={memory.lowVram} onChange={(ev) => onChange({ ...memory, lowVram: ev.target.checked })} />
+          Staged inference
+        </label>
+        {lowOn && lowOff && (
+          <p className="estimate">
+            On: about {gibBytes(lowOn.peakBytes)}
+            {fitText(lowOn)} · off: about {gibBytes(lowOff.peakBytes)}
+            {fitText(lowOff)}
+          </p>
+        )}
+      </Row>
+      {waiting && (
+        <Row label="Graphics memory" hint={e ? `The engine's estimate for this clip (${e.width}×${e.height}, ${e.frames} frames)` : undefined}>
+          <p className={`estimate ${cur?.fits === false ? "no-fit" : ""}`} role="status">
+            {estimateText(est, cur, e)}
+          </p>
+        </Row>
+      )}
+    </>
+  );
+}
+
+/** The estimate row's sentence: about X of Y free, and whether it fits (the engine's verdict, with its margin). */
+function estimateText(est: MemoryEstimateResult | null, w: WindowEstimate | null, e: MemoryEstimate | null): string {
+  if (!est) return "Asking the engine…";
+  if (!est.ok) return est.reason;
+  if (!w || !e) return "No estimate for this window.";
+  const stale = est.stale ? " (free memory read before the queue started)" : "";
+  const peak = `About ${gibBytes(w.peakBytes)}`;
+  if (e.freeBytes === null || w.fits === null) return `${peak}; this system gives no memory reading, so no verdict.`;
+  const capped = e.budgetBytes !== null && e.budgetBytes < e.freeBytes ? ` (the engine's budget: ${gibBytes(e.budgetBytes)})` : "";
+  const card = e.totalBytes !== null ? ` on this ${gibBytes(e.totalBytes)} card` : "";
+  const of = `${peak} of ${gibBytes(e.freeBytes)} free${card}${capped}${stale}`;
+  return w.fits ? `${of}: fits.` : `${of}: doesn't fit (with the engine's safety margin it needs ${gibBytes(w.needsBytes)}).`;
 }
 
 function FilePick({ path, onPick, onClear }: { path: string | null; onPick: () => void; onClear: () => void }) {

@@ -378,6 +378,23 @@ select {
   color: var(--text-3);
   margin-top: 2px;
 }
+/* the manual window's graphics-memory estimate (JobSettings ManualMemory) */
+.estimate {
+  margin: 0;
+  color: var(--text-2);
+}
+.estimate.no-fit {
+  color: var(--status-warn);
+}
+.checks + .estimate {
+  margin-top: 4px;
+  font-size: 12px;
+}
+/* the window picker's choices carry their estimate: as wide as the longest */
+select.window-pick {
+  width: auto;
+  max-width: 100%;
+}
 .seg {
   display: inline-flex;
   border: 1px solid var(--border-2);

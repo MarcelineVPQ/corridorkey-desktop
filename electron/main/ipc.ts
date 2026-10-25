@@ -15,6 +15,7 @@ export const IPC = {
   measureStorage: "ck:measure-storage",
   removeStorage: "ck:remove-storage",
   setJobOptions: "ck:set-job-options",
+  estimateMemory: "ck:estimate-memory",
   removeJob: "ck:remove-job",
   retryJob: "ck:retry-job",
   startQueue: "ck:start-queue",

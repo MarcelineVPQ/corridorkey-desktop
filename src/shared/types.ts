@@ -73,6 +73,44 @@ export interface MemoryInfo {
   estimateGb: number | null;
 }
 
+// the manual window choices (Graphics memory → Manual): what the picker offers and the estimate asks the engine about
+export const MANUAL_WINDOWS: readonly (readonly [number, number])[] = [
+  [80, 40],
+  [48, 24],
+  [24, 12],
+  [8, 4],
+  [4, 2],
+  [1, 1],
+];
+
+// One window's graphics-memory estimate, as the engine's `estimate` reply gives it (docs/ENGINE_PROTOCOL.md, backlog row 41).
+export interface WindowEstimate {
+  hannChunk: number;
+  hannStride: number;
+  lowVram: boolean;
+  // the engine's peak estimate (the automatic window's own), and what it requires of the budget with its margin
+  peakBytes: number;
+  needsBytes: number;
+  // null: no memory reading (no verdict)
+  fits: boolean | null;
+}
+
+export interface MemoryEstimate {
+  width: number;
+  height: number;
+  frames: number;
+  totalBytes: number | null;
+  freeBytes: number | null;
+  // what the windows are weighed against: the free memory, or less under a configured cap
+  budgetBytes: number | null;
+  windows: WindowEstimate[];
+  // when the engine read it (ms since the epoch)
+  at: number;
+}
+
+// `stale`: read before the queue started (the engine is busy keying, so it isn't asked again until the queue ends)
+export type MemoryEstimateResult = { ok: true; estimate: MemoryEstimate; stale: boolean } | { ok: false; reason: string };
+
 export interface JobError {
   code: string;
   message: string;
@@ -338,6 +376,8 @@ export interface CorridorKeyApi {
   removeStorage(id: StorageItem["id"]): Promise<void>;
   pathForFile(file: File): string;
   setJobOptions(id: string, options: JobOptions): Promise<void>;
+  // the engine's graphics-memory estimate for each manual window of a waiting job's clip (backlog row 41)
+  estimateMemory(id: string): Promise<MemoryEstimateResult>;
   removeJob(id: string): Promise<void>;
   retryJob(id: string): Promise<void>;
   startQueue(): Promise<void>;

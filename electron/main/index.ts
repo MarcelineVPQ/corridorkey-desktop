@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { EngineProcess } from "./engine";
+import { EngineProcess, type EngineReply } from "./engine";
+import { Estimator } from "./estimate";
 import { GPU_POLL_MS, readGpu } from "./gpu";
 import { expandPaths, probeClip, still, STILL_WIDTH, VIDEO_EXT, HINT_IMAGE_EXT } from "./media";
 import { clearJobTemps, Queue } from "./queue";
@@ -28,6 +29,7 @@ import {
   type StorageItem,
   type Job,
   type JobOptions,
+  type MemoryEstimateResult,
   type OutputName,
   type TrtState,
 } from "../../src/shared/types";
@@ -179,17 +181,20 @@ function engineScript(): string {
   return app.isPackaged ? join(process.resourcesPath, "app.asar.unpacked", "engine", "ck_engine.py") : resolve(app.getAppPath(), "engine", "ck_engine.py");
 }
 
+/** The Rust engine's process, as the queue and the memory estimate start it. */
+function rustEngineProcess(onReply: (r: EngineReply) => void, onExit: (code: number | null, signal: NodeJS.Signals | null, stderrTail: string[]) => void): EngineProcess {
+  const paths = enginePaths();
+  const trtBuild = findTrtBuilder(paths.binary, app.isPackaged ? null : resolve(app.getAppPath(), "engine-rs", "target", "dist"));
+  return new EngineProcess({ kind: "rust", binary: paths.binary!, models: paths.models!, ort: paths.ort, env: process.env, trtCache: join(cacheDir, TRT_ENGINES_DIR), trtBuild }, onReply, onExit);
+}
+
 // which engine the queue started (TensorRT is asked of the Rust engine only)
 let runningKind: EngineKind | null = null;
 const queue = new Queue({
   makeEngine: (onReply, onExit) => {
     // the Rust engine when it is set up; the PyTorch engine (CorridorKey checkout) until it replaces it
     runningKind = chooseEngine(rustEngine, checkout);
-    if (runningKind === "rust") {
-      const paths = enginePaths();
-      const trtBuild = findTrtBuilder(paths.binary, app.isPackaged ? null : resolve(app.getAppPath(), "engine-rs", "target", "dist"));
-      return new EngineProcess({ kind: "rust", binary: paths.binary!, models: paths.models!, ort: paths.ort, env: process.env, trtCache: join(cacheDir, TRT_ENGINES_DIR), trtBuild }, onReply, onExit);
-    }
+    if (runningKind === "rust") return rustEngineProcess(onReply, onExit);
     const root = settings.corridorKeyRoot!;
     return new EngineProcess({ python: join(root, "venv", "bin", "python"), script: engineScript(), packageRoot: root, env: process.env }, onReply, onExit);
   },
@@ -198,6 +203,8 @@ const queue = new Queue({
   changed: () => scheduleSend(),
   finished: (job) => void makeStills(job),
 });
+// the manual window picker's graphics-memory estimate (backlog row 41): a short-lived Rust engine, only while no queue runs
+const estimator = new Estimator({ makeEngine: rustEngineProcess });
 
 function state(): AppState {
   return {
@@ -546,6 +553,14 @@ function registerIpc(): void {
     settings = { ...settings, lastOptions: { ...options, hintFirstFrame: null, hintVideo: null, hintMode: "none" } };
     persist();
   });
+  ipcMain.handle(IPC.estimateMemory, async (_e, idIn: unknown): Promise<MemoryEstimateResult> => {
+    const id = idArg(idIn);
+    // loop: NOT-WORTH — the queue's jobs, once per estimate asked
+    const job = id ? queue.jobs.find((j) => j.id === id) : undefined;
+    if (!job || job.status !== "waiting") return { ok: false, reason: "Only for a clip that hasn't run yet." };
+    if (chooseEngine(rustEngine, checkout) !== "rust") return { ok: false, reason: "The memory estimate comes from the Rust engine (set it up on the Engine page)." };
+    return estimator.ask(job.clip.path, queue.running);
+  });
   ipcMain.handle(IPC.removeJob, (_e, id: unknown) => {
     const v = idArg(id);
     if (v) queue.remove(v);
@@ -558,6 +573,8 @@ function registerIpc(): void {
     recheckEngines();
     await recheckFfmpeg();
     if (!chooseEngine(rustEngine, checkout) || !ffmpeg.ok) return scheduleSend();
+    // one engine at a time: an estimate still asking gives way to the queue
+    estimator.stop();
     return queue.start();
   });
   ipcMain.handle(IPC.stopQueue, () => queue.stop());
@@ -681,6 +698,7 @@ app.whenReady().then(() => {
 
 app.on("before-quit", () => {
   queue.shutdown();
+  estimator.stop();
   stopPaletteWatch?.();
   updater.stop();
 });

@@ -26,6 +26,7 @@ const api: CorridorKeyApi = {
   removeStorage: (id) => ipcRenderer.invoke(IPC.removeStorage, id),
   pathForFile: (file) => webUtils.getPathForFile(file),
   setJobOptions: (id, options) => ipcRenderer.invoke(IPC.setJobOptions, id, options),
+  estimateMemory: (id) => ipcRenderer.invoke(IPC.estimateMemory, id),
   removeJob: (id) => ipcRenderer.invoke(IPC.removeJob, id),
   retryJob: (id) => ipcRenderer.invoke(IPC.retryJob, id),
   startQueue: () => ipcRenderer.invoke(IPC.startQueue),
