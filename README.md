@@ -390,7 +390,8 @@ docs/ENGINE_RUST.md).
 | 4K 04_2c | 120 | 4.59e-4 | 0.064 | 3.3 % | 56.0 dB | 51.2 / 48.5 dB |
 
 **Correction (2026-10-25):** we wrote that these differences were "fp16 against bf16 rounding". Whether that holds against the
-truth, this is still open; see "What we got wrong" below. With both engines in full precision (fp32, on the processor,
+truth: on the same input, yes, it's the original's bf16 rounding, and ours is the closer of the two (measured
+2026-10-25, "What we got wrong" 1 below). These rows are from before that, when we still read input at 16 bits. With both engines in full precision (fp32, on the processor,
 `engine-rs/tools/e2e_cpu.sh`), the mattes are the same to within rounding: alpha MAE 1.7e-7, max 6.9e-5, no pixel
 off by even 1/255, foreground PSNR 102.6 dB; the low-memory mode matches the normal one exactly (difference 0).
 
@@ -398,7 +399,8 @@ off by even 1/255, foreground PSNR 102.6 dB; the low-memory mode matches the nor
 
 Part of the story, kept here on purpose. Each item: what happened, how it was found, the fix.
 
-**1. A difference in the hair, and two wrong turns finding it (found 2026-10-24 by eye; open).** Marcy saw a
+**1. A difference in the hair, and two wrong turns finding it (found 2026-10-24 by eye; input matched to
+CorridorKey 2.0 and measured 2026-10-25).** Marcy saw a
 difference in the hair on the first day of side-by-side viewing. We filed it as "within the original's variation"
 because our scorecard compared us only with the original's *output*, never with the *truth* (the original's model in
 full fp32 precision). On 2026-10-25 we measured against the truth and published a large hair-edge gap here, then
@@ -406,8 +408,9 @@ withdrew it: the truth and the original's bf16 run were fed 16-bit PNG frames co
 read the video itself, so the inputs weren't the same and the numbers don't count. Acting on them, we also re-exported
 four networks with the original's precision policy (model set onnx.4); the hair didn't measurably change, so that
 wasn't the cause. onnx.4 ships anyway since 2026-10-25, for parity with CorridorKey 2.0's precision policy, not
-because it fixed the hair (its cost: Speed, "onnx.4"). Known deviation from CorridorKey 2.0 in our input: it reads video through OpenCV at
-8 bits; we read 10/12-bit plates at 16 bits (same colour conversion).
+because it fixed the hair (its cost: Speed, "onnx.4"). The one deviation from CorridorKey 2.0 left in our input
+then: it reads video through OpenCV at 8 bits; we read 10/12-bit plates at 16 bits (same colour conversion), and
+rounded 10/12-bit 4:2:2 and 4:2:0 to 8 bits differently from OpenCV.
 
 The fix and the measurement (2026-10-25): our engine now reads input exactly as CorridorKey 2.0 does by default,
 byte for byte (16 bits is an opt-in per clip). Then one run on locked_backdrop (12-bit ProRes 4444, 1280×1080, 80
