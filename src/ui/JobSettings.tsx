@@ -3,8 +3,8 @@
 // changes what the run does (rule 4). Locked once the clip has run.
 import { Clapperboard, Film, FolderOpen, MemoryStick, Wand2, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { HintFileKind, Job, JobOptions, MemoryChoice, MemoryEstimate, MemoryEstimateResult, OutputName, WindowEstimate } from "../shared/types";
-import { MANUAL_WINDOWS, OUTPUT_NAMES } from "../shared/types";
+import type { EngineKind, HintFileKind, Job, JobOptions, MemoryChoice, MemoryEstimate, MemoryEstimateResult, OutputName, VideoCodec, WindowEstimate } from "../shared/types";
+import { MANUAL_WINDOWS, OUTPUT_NAMES, videoCodecsFor, withCutoutAlpha } from "../shared/types";
 import { gibBytes } from "../shared/units";
 import { AS_USED, lowerFirst } from "../shared/texts";
 import { Accordion, Row, Section, Segmented } from "./panel/Section";
@@ -13,7 +13,16 @@ const OUTPUT_TEXT: Record<OutputName, { label: string; help: string }> = {
   alpha: { label: "Alpha", help: "the matte" },
   fg: { label: "Foreground", help: "the predicted foreground color" },
   checker: { label: "Checker", help: "foreground over a checkerboard, despilled" },
-  cutout: { label: "Cutout", help: "straight color + alpha, despilled" },
+  cutout: { label: "Cutout", help: "premultiplied color + alpha, despilled" },
+};
+// no video codec here carries alpha (backlog row 26): the video cutout's alpha is the Alpha output
+const VIDEO_CUTOUT_HELP = "premultiplied color, despilled; its alpha is the Alpha output (video has no alpha channel)";
+
+// the codec menu's names and what each one is (README, Quality, "Video outputs" has the measurements)
+const CODEC_TEXT: Record<VideoCodec, { label: string; short: string; hint: string }> = {
+  "h264-lossless": { label: "Lossless H.264, 10-bit 4:4:4", short: "lossless H.264", hint: "Only the 10-bit rounding is lost (.mp4); large files" },
+  dnxhr444: { label: "DNxHR 444, 10-bit", short: "DNxHR 444", hint: "Avid's edit and finishing codec (.mov): matte within 1.3/255" },
+  "h264-crf12": { label: "H.264 CRF 12 (small files)", short: "H.264 CRF 12", hint: "The original's output: small files; hair edges off by up to 21/255" },
 };
 
 const MATTE_HELP = "White = subject, black = background"; // theme-exempt: prose about the matte's values, not a color
@@ -25,16 +34,27 @@ export function JobSettings({
   focus,
   sectionTasks,
   queueRunning,
+  platform,
+  engineKind,
   onChange,
 }: {
   job: Job;
   focus: string | null;
   sectionTasks: Record<string, string>;
   queueRunning: boolean;
+  platform: string;
+  engineKind: EngineKind | null;
   onChange: (o: JobOptions) => void;
 }) {
   const o = job.options;
-  const set = (patch: Partial<JobOptions>) => onChange({ ...o, ...patch });
+  // a video cutout always comes with the Alpha output (its alpha)
+  const set = (patch: Partial<JobOptions>) => onChange(withCutoutAlpha({ ...o, ...patch }));
+  const video = o.outputFormat === "video";
+  const alphaForCutout = video && o.outputs.includes("cutout");
+  const codecs = videoCodecsFor(platform);
+  // the PyTorch reference engine writes the original's H.264 CRF 12 whatever is chosen (it never gets video_codec)
+  const codec: VideoCodec = engineKind === "python" ? "h264-crf12" : o.videoCodec;
+  const pickable = engineKind !== "python" && codecs.length > 1;
   const locked = job.status !== "waiting" ? lowerFirst(AS_USED) : null;
   const pick = async (kind: HintFileKind) => {
     const path = await window.ck.pickFile(kind);
@@ -51,7 +71,7 @@ export function JobSettings({
   const hintStatus = o.hintMode === "none" ? "No hint · the model picks the subject" : `${HINT_TEXT[o.hintMode]} · trust ${o.hintQuality.toFixed(2)}${hintFile ? "" : " · no file yet"}`;
   const memStatus = o.memory.auto ? "Automatic · from free graphics memory" : `Manual · ${o.memory.hannChunk}/${o.memory.hannStride}${o.memory.lowVram ? " · low-memory" : ""}`;
   // loop: HOT-PATH-OK — ≤ four outputs per render
-  const outStatus = `${o.outputs.map((x) => OUTPUT_TEXT[x].label).join(", ")} · ${o.outputFormat === "exr" ? `EXR ${o.exrDtype}` : "video"}`;
+  const outStatus = `${o.outputs.map((x) => OUTPUT_TEXT[x].label).join(", ")} · ${video ? CODEC_TEXT[codec].short : `EXR ${o.exrDtype}`}`;
 
   return (
     <Accordion page="queue" focus={focus}>
@@ -97,15 +117,19 @@ export function JobSettings({
             <Row label="Files">
               <div className="checks">
                 {/* loop: HOT-PATH-OK — four outputs per render */}
-                {OUTPUT_NAMES.map((name) => (
-                  <label key={name} title={OUTPUT_TEXT[name].help}>
-                    <input type="checkbox" checked={o.outputs.includes(name)} onChange={() => toggleOutput(name)} />
-                    {OUTPUT_TEXT[name].label}
-                  </label>
-                ))}
+                {OUTPUT_NAMES.map((name) => {
+                  const locked = name === "alpha" && alphaForCutout;
+                  const help = locked ? "the matte; also the video cutout's alpha, so it stays on while Cutout is on" : name === "cutout" && video ? VIDEO_CUTOUT_HELP : OUTPUT_TEXT[name].help;
+                  return (
+                    <label key={name} title={help}>
+                      <input type="checkbox" checked={o.outputs.includes(name)} disabled={locked} onChange={() => toggleOutput(name)} />
+                      {OUTPUT_TEXT[name].label}
+                    </label>
+                  );
+                })}
               </div>
             </Row>
-            <Row label="Format" hint={o.outputFormat === "exr" ? "Scene-linear, unclamped HDR" : "Display-referred previews"}>
+            <Row label="Format" hint={o.outputFormat === "exr" ? "Scene-linear, unclamped HDR: the exact deliverable" : "Display-referred sRGB / Rec.709; EXR is the exact deliverable"}>
               <Segmented
                 label="Output format"
                 value={o.outputFormat}
@@ -116,6 +140,25 @@ export function JobSettings({
                 onChange={(outputFormat) => set({ outputFormat })}
               />
             </Row>
+            {video && (
+              <Row label="Codec" hint={engineKind === "python" ? "The PyTorch reference engine writes only this" : CODEC_TEXT[codec].hint} htmlFor={pickable ? "codec" : undefined}>
+                {!pickable ? (
+                  <span>
+                    {CODEC_TEXT[codec].label}
+                    {engineKind !== "python" && platform === "darwin" ? " · ProRes 4444 XQ comes with the Mac release" : ""}
+                  </span>
+                ) : (
+                  <select id="codec" value={codec} onChange={(e) => set({ videoCodec: e.target.value as VideoCodec })}>
+                    {/* loop: HOT-PATH-OK — three codecs per render */}
+                    {codecs.map((c) => (
+                      <option key={c} value={c}>
+                        {CODEC_TEXT[c].label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </Row>
+            )}
             {o.outputFormat === "exr" && (
               <Row label="EXR pixel type">
                 <Segmented
@@ -138,7 +181,7 @@ export function JobSettings({
               </Row>
             )}
             {o.outputs.includes("cutout") && o.outputFormat === "video" && (
-              <Row label="Cutout color">
+              <Row label="Cutout color" hint="Premultiplied, no alpha channel: its alpha is the Alpha output">
                 <label className="checks">
                   <input type="checkbox" checked={o.cutoutLinear} onChange={(e) => set({ cutoutLinear: e.target.checked })} />
                   Scene-linear instead of sRGB

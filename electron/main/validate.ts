@@ -4,7 +4,7 @@
 // with options it would refuse (an unknown output name, a stride past the window) and the settings file can
 // never stop the app from starting.
 import { isAbsolute } from "node:path";
-import { DEFAULT_APPEARANCE, DEFAULT_OPTIONS, OUTPUT_NAMES, type Appearance, type JobOptions, type MemoryChoice, type OutputName } from "../../src/shared/types";
+import { DEFAULT_APPEARANCE, DEFAULT_OPTIONS, OUTPUT_NAMES, videoCodecsFor, withCutoutAlpha, type Appearance, type JobOptions, type MemoryChoice, type OutputName } from "../../src/shared/types";
 
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
 const oneOf = <T extends string>(v: unknown, allowed: readonly T[], fallback: T): T => (typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : fallback);
@@ -33,11 +33,11 @@ function memory(v: unknown): MemoryChoice {
 }
 
 /** Job options from the page or the settings file: each field valid, else its default. */
-export function sanitizeOptions(v: unknown): JobOptions {
+export function sanitizeOptions(v: unknown, platform: string = process.platform): JobOptions {
   const o = obj(v);
   // loop: NOT-WORTH — ≤ four output names
   const outputs = Array.isArray(o.outputs) ? OUTPUT_NAMES.filter((n) => (o.outputs as unknown[]).includes(n)) : [];
-  return {
+  return withCutoutAlpha({
     hintMode: oneOf(o.hintMode, ["none", "first-frame", "video"] as const, DEFAULT_OPTIONS.hintMode),
     hintFirstFrame: pathOrNull(o.hintFirstFrame),
     hintVideo: pathOrNull(o.hintVideo),
@@ -46,12 +46,14 @@ export function sanitizeOptions(v: unknown): JobOptions {
     memory: memory(o.memory),
     outputs: outputs.length ? (outputs as OutputName[]) : [...DEFAULT_OPTIONS.outputs],
     outputFormat: oneOf(o.outputFormat, ["video", "exr"] as const, DEFAULT_OPTIONS.outputFormat),
+    // only what this platform offers (the Mac: lossless H.264 for now)
+    videoCodec: oneOf(o.videoCodec, videoCodecsFor(platform), DEFAULT_OPTIONS.videoCodec),
     exrDtype: oneOf(o.exrDtype, ["half", "float"] as const, DEFAULT_OPTIONS.exrDtype),
     despillStrength: num(o.despillStrength, 0, 1, DEFAULT_OPTIONS.despillStrength),
     cutoutLinear: bool(o.cutoutLinear, DEFAULT_OPTIONS.cutoutLinear),
     frameDirFps: num(o.frameDirFps, 0.001, 1000, DEFAULT_OPTIONS.frameDirFps),
     frameDirLinear: bool(o.frameDirLinear, DEFAULT_OPTIONS.frameDirLinear),
-  };
+  });
 }
 
 /** The appearance from the page or the settings file. */

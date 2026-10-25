@@ -29,6 +29,17 @@ describe("IPC and settings validation", () => {
     expect(sanitizeOptions({ outputs: [] }).outputs).toEqual(["alpha", "fg"]);
   });
 
+  it("video codec: the platform's offer, default lossless H.264; a video cutout brings the Alpha output", () => {
+    expect(sanitizeOptions({ videoCodec: "dnxhr444" }, "linux").videoCodec).toBe("dnxhr444");
+    expect(sanitizeOptions({ videoCodec: "h264-crf12" }, "win32").videoCodec).toBe("h264-crf12");
+    // the Mac: lossless H.264 until ProRes 4444 XQ comes with the Mac work
+    expect(sanitizeOptions({ videoCodec: "dnxhr444" }, "darwin").videoCodec).toBe("h264-lossless");
+    expect(sanitizeOptions({ videoCodec: "prores" }, "linux").videoCodec).toBe("h264-lossless");
+    expect(sanitizeOptions({}).videoCodec).toBe("h264-lossless");
+    expect(sanitizeOptions({ outputs: ["cutout"] }).outputs).toEqual(["alpha", "cutout"]);
+    expect(sanitizeOptions({ outputs: ["cutout"], outputFormat: "exr" }).outputs).toEqual(["cutout"]);
+  });
+
   it("appearance: only known themes and accents", () => {
     expect(sanitizeAppearance({ theme: "solarized", accent: "desktop", glass: "yes" })).toEqual({ ...DEFAULT_APPEARANCE, accent: "desktop" });
   });

@@ -36,8 +36,10 @@ export interface QueueDeps {
 /**
  * The engine's `options` object for a job (docs/ENGINE_PROTOCOL.md). `tensorrt`: the Rust engine runs it on
  * TensorRT (index.ts sends it only with the setting on and the TensorRT parts installed; never to the PyTorch engine).
+ * `rust`: the engine is the Rust engine, which takes `video_codec`; the PyTorch reference engine writes the
+ * original's H.264 CRF 12 whatever the job says (the panel says so), so it never gets the key.
  */
-export function engineOptions(o: JobOptions, kind: "video" | "frames", tensorrt = false): Record<string, unknown> {
+export function engineOptions(o: JobOptions, kind: "video" | "frames", tensorrt = false, rust = false): Record<string, unknown> {
   const out: Record<string, unknown> = {
     hint_quality: o.hintQuality,
     carry_hint: o.carryHint,
@@ -59,6 +61,7 @@ export function engineOptions(o: JobOptions, kind: "video" | "frames", tensorrt 
     out.frame_dir_linear = o.frameDirLinear;
   }
   if (tensorrt) out.tensorrt = true;
+  if (rust && o.outputFormat === "video") out.video_codec = o.videoCodec;
   return out;
 }
 
@@ -266,7 +269,7 @@ export class Queue {
       input: job.clip.path,
       output_dir: staging,
       temp_dir: this.deps.tempDirFor(job.id),
-      options: engineOptions(job.options, job.clip.kind, this.deps.tensorrt?.() ?? false),
+      options: engineOptions(job.options, job.clip.kind, this.deps.tensorrt?.() ?? false, this.engine.pong?.engine === "onnxruntime"),
     });
   }
 

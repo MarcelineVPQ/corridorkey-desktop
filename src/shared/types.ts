@@ -10,6 +10,15 @@ export type HintMode = "none" | "first-frame" | "video";
 
 export type MemoryChoice = { auto: true } | { auto: false; hannChunk: number; hannStride: number; lowVram: boolean };
 
+// The video outputs' codec (the engine's `video_codec`, docs/ENGINE_PROTOCOL.md; backlog row 26). None carries alpha.
+export type VideoCodec = "h264-lossless" | "dnxhr444" | "h264-crf12";
+export const VIDEO_CODECS: VideoCodec[] = ["h264-lossless", "dnxhr444", "h264-crf12"];
+
+/** The codecs offered on a platform: all three on Linux and Windows; the Mac has lossless H.264 until Apple's ProRes 4444 XQ (VideoToolbox) comes with the Mac work. */
+export function videoCodecsFor(platform: string): VideoCodec[] {
+  return platform === "darwin" ? ["h264-lossless"] : VIDEO_CODECS;
+}
+
 export interface JobOptions {
   hintMode: HintMode;
   hintFirstFrame: string | null;
@@ -19,6 +28,7 @@ export interface JobOptions {
   memory: MemoryChoice;
   outputs: OutputName[];
   outputFormat: "video" | "exr";
+  videoCodec: VideoCodec;
   exrDtype: "half" | "float";
   despillStrength: number;
   cutoutLinear: boolean;
@@ -35,12 +45,20 @@ export const DEFAULT_OPTIONS: JobOptions = {
   memory: { auto: true },
   outputs: ["alpha", "fg"],
   outputFormat: "video",
+  videoCodec: "h264-lossless",
   exrDtype: "half",
   despillStrength: 0.5,
   cutoutLinear: false,
   frameDirFps: 24,
   frameDirLinear: false,
 };
+
+/** A video cutout is premultiplied colour without an alpha channel (no video codec here carries one): its alpha is the Alpha output, so a video job with a cutout always writes it (the engine adds it too). */
+export function withCutoutAlpha(o: JobOptions): JobOptions {
+  if (o.outputFormat !== "video" || !o.outputs.includes("cutout") || o.outputs.includes("alpha")) return o;
+  // loop: NOT-WORTH — four output names
+  return { ...o, outputs: OUTPUT_NAMES.filter((x) => x === "alpha" || o.outputs.includes(x)) };
+}
 
 // a video file, or a folder of frames (a frame sequence)
 export type ClipKind = "video" | "frames";

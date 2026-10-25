@@ -1,16 +1,30 @@
 import { describe, expect, it } from "vitest";
 import { checkFfmpeg, installFfmpeg, installPlan, planFor, wingetFfmpegDirs } from "../../electron/main/ffmpeg";
 
-const ENCODERS = " V....D libx264              libx264 H.264\n V....D prores_ks            Apple ProRes (iCodec Pro)\n";
-const runs = (answers: Record<string, string | Error>) => async (cmd: string) => {
-  const a = answers[cmd];
+const ENCODERS = " V....D libx264              libx264 H.264\n VFS..D dnxhd                VC3/DNxHD\n";
+const X264_10 = "Encoder libx264 [libx264 H.264]:\n    Supported pixel formats: yuv420p yuv444p yuv420p10le yuv422p10le yuv444p10le gray10le\n";
+const X264_8 = "Encoder libx264 [libx264 H.264]:\n    Supported pixel formats: yuv420p yuvj420p yuv422p yuv444p nv12 gray\n";
+// answers by program, or by program + arguments ("ffmpeg -hide_banner -h encoder=libx264")
+const runs = (answers: Record<string, string | Error>) => async (cmd: string, args: string[]) => {
+  const a = answers[`${cmd} ${args.join(" ")}`] ?? answers[cmd];
   if (a === undefined || a instanceof Error) throw a ?? Object.assign(new Error("not found"), { code: "ENOENT" });
   return a;
 };
+const H = "ffmpeg -hide_banner -h encoder=libx264";
 
 describe("ffmpeg check", () => {
-  it("is ok with ffprobe and both encoders", async () => {
-    expect(await checkFfmpeg(runs({ ffprobe: "ffprobe version 8", ffmpeg: ENCODERS }))).toEqual({ ok: true, problem: null });
+  it("is ok with ffprobe, libx264 with 10-bit and dnxhd", async () => {
+    expect(await checkFfmpeg(runs({ ffprobe: "ffprobe version 8", ffmpeg: ENCODERS, [H]: X264_10 }), "linux")).toEqual({ ok: true, problem: null });
+  });
+  it("says plainly when libx264 is 8-bit only", async () => {
+    const r = await checkFfmpeg(runs({ ffprobe: "x", ffmpeg: ENCODERS, [H]: X264_8 }), "linux");
+    expect(r.ok).toBe(false);
+    expect(r.problem).toContain("libx264 is 8-bit only");
+  });
+  it("needs dnxhd on Linux and Windows, not on the Mac (lossless H.264 only there for now)", async () => {
+    const noDnx = " V....D libx264              libx264 H.264\n";
+    expect((await checkFfmpeg(runs({ ffprobe: "x", ffmpeg: noDnx, [H]: X264_10 }), "win32")).problem).toBe("This ffmpeg can't write dnxhd (a build without it)");
+    expect(await checkFfmpeg(runs({ ffprobe: "x", ffmpeg: noDnx, [H]: X264_10 }), "darwin")).toEqual({ ok: true, problem: null });
   });
   it("tells a missing ffprobe from one that doesn't answer", async () => {
     const r = await checkFfmpeg(async () => Promise.reject(Object.assign(new Error("timed out"), { code: "ETIMEDOUT" })));
@@ -20,7 +34,7 @@ describe("ffmpeg check", () => {
     expect((await checkFfmpeg(runs({}))).problem).toBe("ffmpeg isn't installed (ffprobe not found)");
   });
   it("catches a build without libx264 (Fedora's ffmpeg-free)", async () => {
-    const r = await checkFfmpeg(runs({ ffprobe: "x", ffmpeg: " V....D prores_ks  ProRes\n V....D libopenh264  OpenH264\n" }));
+    const r = await checkFfmpeg(runs({ ffprobe: "x", ffmpeg: " V....D dnxhd  DNxHD\n V....D libopenh264  OpenH264\n" }), "linux");
     expect(r).toEqual({ ok: false, problem: "This ffmpeg can't write libx264 (a build without it)" });
   });
 });

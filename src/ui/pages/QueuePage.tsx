@@ -95,7 +95,15 @@ export function QueuePage(props: {
       main={main}
       panel={
         job ? (
-          <JobSettings job={job} focus={props.focus} sectionTasks={props.sectionTasks} queueRunning={state.queueRunning} onChange={(o) => void window.ck.setJobOptions(job.id, o)} />
+          <JobSettings
+            job={job}
+            focus={props.focus}
+            sectionTasks={props.sectionTasks}
+            queueRunning={state.queueRunning}
+            platform={state.system.platform}
+            engineKind={state.engineKind}
+            onChange={(o) => void window.ck.setJobOptions(job.id, o)}
+          />
         ) : (
           <p className="hint-text">Select a clip to see its settings.</p>
         )

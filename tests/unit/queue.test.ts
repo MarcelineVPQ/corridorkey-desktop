@@ -321,6 +321,14 @@ describe("engineOptions", () => {
     expect(engineOptions(DEFAULT_OPTIONS, "video", false)).not.toHaveProperty("tensorrt");
     expect(engineOptions(DEFAULT_OPTIONS, "video", true)).toMatchObject({ tensorrt: true });
   });
+
+  it("sends the video codec to the Rust engine only, and only for video outputs", () => {
+    expect(engineOptions(DEFAULT_OPTIONS, "video", false, true)).toMatchObject({ video_codec: "h264-lossless" });
+    expect(engineOptions({ ...DEFAULT_OPTIONS, videoCodec: "dnxhr444" }, "video", false, true)).toMatchObject({ video_codec: "dnxhr444" });
+    // the PyTorch reference engine writes H.264 CRF 12 whatever the job says: it never sees the key
+    expect(engineOptions(DEFAULT_OPTIONS, "video", false, false)).not.toHaveProperty("video_codec");
+    expect(engineOptions({ ...DEFAULT_OPTIONS, outputFormat: "exr" }, "video", false, true)).not.toHaveProperty("video_codec");
+  });
 });
 
 describe("TensorRT in the queue", () => {

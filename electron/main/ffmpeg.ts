@@ -1,7 +1,7 @@
 // ffmpeg / ffprobe: the app and the engine read and write video with the system's copies (not bundled,
-// Marcy 2026-10-24: detect it and offer to install it). The check runs both and asks ffmpeg for the two
-// encoders the engine writes with (libx264 for the comp, prores_ks for the 4444 alpha), since a distro's
-// patent-free build can lack libx264. The install runs the distro's package manager through pkexec (the
+// Marcy 2026-10-24: detect it and offer to install it). The check runs both and asks ffmpeg for the encoders
+// the engine writes with (libx264 with 10-bit for the H.264 outputs; dnxhd for DNxHR 444 on Linux and Windows),
+// since a distro's patent-free build can lack libx264. The install runs the distro's package manager through pkexec (the
 // desktop's own password prompt); where the stock package lacks libx264 (Fedora, openSUSE) the app shows
 // what to enable instead of installing a build that can't write the results.
 import { execFile } from "node:child_process";
@@ -42,7 +42,7 @@ export const WINDOWS_PLAN: InstallPlan = {
   runHint: "The app runs it for you (Windows may ask for permission)",
 };
 
-/** macOS: Homebrew's ffmpeg (it has libx264 and ProRes); brew needs no password. Needs Homebrew itself. */
+/** macOS: Homebrew's ffmpeg (it has libx264; the check reads its bit depths); brew needs no password. Needs Homebrew itself. */
 export const MAC_PLAN: InstallPlan = {
   command: "brew install ffmpeg",
   argv: ["brew", "install", "ffmpeg"],
@@ -103,7 +103,7 @@ export function installPlan(osRelease: string): InstallPlan {
 const notFound = (e: unknown) => (e as { code?: unknown }).code === "ENOENT";
 
 /** Is a usable ffmpeg there: both programs, and the encoders the engine writes with. */
-export async function checkFfmpeg(run: RunFn = runFile): Promise<{ ok: boolean; problem: string | null }> {
+export async function checkFfmpeg(run: RunFn = runFile, platform: NodeJS.Platform = process.platform): Promise<{ ok: boolean; problem: string | null }> {
   try {
     // loop: SERIAL-REQUIRED — one check at a time [bounded: CHECK_TIMEOUT_MS]
     await run("ffprobe", ["-version"], CHECK_TIMEOUT_MS);
@@ -119,9 +119,21 @@ export async function checkFfmpeg(run: RunFn = runFile): Promise<{ ok: boolean; 
     // error: SHOWN — as above
     return { ok: false, problem: notFound(e) ? "ffmpeg isn't installed (ffprobe is, ffmpeg isn't)" : `ffmpeg didn't answer (${(e as Error).message})` };
   }
+  // libx264 for the H.264 outputs; DNxHR (ffmpeg's own dnxhd encoder) is offered on Linux and Windows only
+  const needed = platform === "darwin" ? ["libx264"] : ["libx264", "dnxhd"];
   // loop: NOT-WORTH — two encoder names
-  const missing = ["libx264", "prores_ks"].filter((e) => !new RegExp(`\\s${e}\\s`).test(encoders));
+  const missing = needed.filter((e) => !new RegExp(`\\s${e}\\s`).test(encoders));
   if (missing.length) return { ok: false, problem: `This ffmpeg can't write ${missing.join(" or ")} (a build without it)` };
+  // the video outputs are 10-bit 4:4:4 (the default is lossless H.264 10-bit): an 8-bit-only libx264 can't write them
+  let x264: string;
+  try {
+    // loop: SERIAL-REQUIRED — one check at a time [bounded: CHECK_TIMEOUT_MS]
+    x264 = await run("ffmpeg", ["-hide_banner", "-h", "encoder=libx264"], CHECK_TIMEOUT_MS);
+  } catch (e) {
+    // error: SHOWN — as above
+    return { ok: false, problem: `ffmpeg didn't describe its libx264 encoder (${(e as Error).message})` };
+  }
+  if (!/\byuv444p10le\b/.test(x264)) return { ok: false, problem: "This ffmpeg's libx264 is 8-bit only: it can't write the 10-bit 4:4:4 video outputs. Install an ffmpeg whose libx264 has 10-bit" };
   return { ok: true, problem: null };
 }
 

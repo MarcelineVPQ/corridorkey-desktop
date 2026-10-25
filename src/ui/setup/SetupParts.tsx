@@ -128,7 +128,7 @@ export function FfmpegBox({ ff }: { ff: FfmpegState }) {
   if (ff.ok)
     return (
       <div className="check-line ok">
-        <Check size={15} aria-hidden /> ffmpeg and ffprobe found, with the H.264 and ProRes 4444 encoders
+        <Check size={15} aria-hidden /> ffmpeg and ffprobe found, with the encoders the video outputs need (10-bit H.264)
       </div>
     );
   return (
