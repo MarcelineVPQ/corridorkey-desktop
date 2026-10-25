@@ -352,7 +352,7 @@ CUDA's window (0.0.6-dev above is what the app's switch runs). It needed a one-t
 | walking_sitting | 44.6 s | 63.1 s | 94.2 s | 0.47× |
 | with_motion_blur | 10.1 s | 12.3 s | 19.0 s | 0.53× |
 
-## Quality: the same mattes
+## Quality: the mattes against the original and the truth
 
 Speed only counts if the result is the same. `tools/matte_compare.py` compares every frame of CorridorKey Desktop's
 alpha and foreground against the original's from the same runs. For scale: the original's own shipping GPU mode
@@ -372,9 +372,54 @@ docs/ENGINE_RUST.md).
 | 4K 08_3a | 120 | 2.37e-4 | 0.082 | 1.6 % | 57.5 dB | 46.2 / 45.5 dB |
 | 4K 04_2c | 120 | 4.59e-4 | 0.064 | 3.3 % | 56.0 dB | 51.2 / 48.5 dB |
 
-These differences are fp16 against bf16 rounding. With both engines in full precision (fp32, on the processor,
+**Correction (2026-10-25):** we wrote that these differences were "fp16 against bf16 rounding". Measured against the
+truth, that wasn't the whole story; see "What we got wrong" below. With both engines in full precision (fp32, on the processor,
 `engine-rs/tools/e2e_cpu.sh`), the mattes are the same to within rounding: alpha MAE 1.7e-7, max 6.9e-5, no pixel
 off by even 1/255, foreground PSNR 102.6 dB; the low-memory mode matches the normal one exactly (difference 0).
+
+### What we got wrong, and what we're doing about it
+
+Part of the story, kept here on purpose. Each item: what happened, how it was found, the fix.
+
+**1. Hair edges further from the truth than the original's (found 2026-10-24 by eye, measured 2026-10-25; fix in
+progress).** Marcy saw a difference in the hair on the first day of side-by-side viewing. We filed it as "within the
+original's variation" because our scorecard compared us only with the original's *output*, never with the *truth*
+(the original's model in full fp32 precision). Measured against the truth, at the same window (12/6), on
+locked_backdrop:
+
+| Against fp32 (the truth) | Ours, models onnx.3 (fp16) | The original as it ships (bf16) |
+| --- | --- | --- |
+| Alpha MAE | 3.82e-4 | 3.63e-4 |
+| Hair-edge pixels off by > 1/255 | 54.7 % | 9.7 % |
+| Worst pixel | 0.075 | 0.038 |
+
+On godiva_close (40/20): alpha MAE 6.09e-3 against 1.37e-3, worst pixel 0.245 against 0.052. The average looked the
+same; the hair didn't. The likely cause, from our export scripts: the original runs under PyTorch's autocast, which
+keeps the precision-sensitive operations (normalisation, softmax, sums, exponentials) in fp32 and drops only the heavy
+maths to bf16. We exported C-RADIO that way, but MoGe, RVM, stage 1 and stage 2 as pure fp16, sensitive operations
+included. Stage 1 and 2 make the alpha. The fix: model set onnx.4, those four networks exported with the original's
+precision policy. Its result against the truth and its cost in speed and memory go here when measured; it ships only
+if it is as close to the truth as the original.
+
+**2. The scorecard measured the wrong reference (2026-10-24).** Comparing with the original's output can't tell
+which of two roundings is closer to the right answer. From now on quality is measured against the fp32 truth. The
+overnight precision-floor run also failed (the fp32 reference didn't fit 12 GiB at the original's window, then our
+comparisons hit memory limits we had guessed), and had to be run again.
+
+**3. Options of the original we hadn't carried over (found 2026-10-24 watching the launch video).** `--model_scale`,
+the linear brightness/contrast adjust (ported but fixed at identity), `--start_mode` and `--seed`. All now ported and
+tested against PyTorch; every option of `infer.py` has a written verdict in docs/PARITY.md.
+
+**4. TensorRT's one-time build was never explained, and fallbacks were silent (2026-10-25).** Switching TensorRT on
+meant a first job sat through about 5 minutes of building at 4K, when CUDA alone finishes the clip in under 3; and a
+job that ran on CUDA instead didn't say so. Now every job page shows what it ran on and why, and TensorRT builds in
+the background with a progress bar and an explanation, never inside a job.
+
+**5. The memory estimate wasn't an upper bound (2026-10-24).** The old table was off by −32 % to +73 % against
+measured peaks. Recalibrated on 96 measured points; it is now above every one of them (+6 % margin).
+
+**6. Smaller ones.** The README's time column once showed time to the first frames instead of the total (corrected).
+An early reading that longer temporal windows give steadier hair was overturned by three more plates.
 
 ### Deep input: 10- and 12-bit plates reach the model in full (1.0)
 
