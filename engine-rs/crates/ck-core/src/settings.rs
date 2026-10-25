@@ -62,6 +62,8 @@ pub(crate) struct SettingsLog<'a> {
     pub(crate) decoders: &'a crate::decode::Decoders,
     /// EXR jobs: how the frames are numbered (clip.rs FrameNumbers::describe; an additive line at the end)
     pub(crate) exr_frames: Option<String>,
+    /// colour-managed jobs: the OCIO lines (ocio::ColorJob::settings_lines; additive lines at the end)
+    pub(crate) color: Option<String>,
 }
 
 pub(crate) fn settings_text(s: &SettingsLog) -> String {
@@ -105,6 +107,9 @@ pub(crate) fn settings_text(s: &SettingsLog) -> String {
     if let Some(f) = &s.exr_frames {
         t.push_str(&format!("EXR Frame Numbers: {f}\n"));
     }
+    if let Some(c) = &s.color {
+        t.push_str(c);
+    }
     t
 }
 
@@ -139,6 +144,7 @@ mod tests {
                 num_frames: -1,
                 decoders: &d,
                 exr_frames,
+                color: None,
             })
         };
         assert!(log(Some("source (65-184)".into())).ends_with("FFprobe: 8.0\nEXR Frame Numbers: source (65-184)\n"));

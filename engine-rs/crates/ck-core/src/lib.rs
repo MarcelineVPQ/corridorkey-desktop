@@ -10,6 +10,7 @@ pub mod gpu;
 pub mod hann;
 pub mod image;
 pub mod job;
+pub mod ocio;
 pub(crate) mod outputs;
 pub mod pipeline;
 pub mod proc;

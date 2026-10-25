@@ -16,6 +16,13 @@ pub struct RenderOpts {
     pub cutout_linear: bool,
     pub exr: bool,
     pub adjust: LinearAdjust,
+    /// EXR outputs (backlog row 29): linear Rec.709 -> the job's output colour space, applied to the foreground
+    /// and the cutout's colour after despill (despill works in the model's space, as trained). Alpha is data and is
+    /// never transformed; the checker preview stays as it is. None: linear Rec.709, as before.
+    pub color_out: Option<crate::ocio::XformRef>,
+    /// the output space is scene-linear: the EXR cutout is premultiplied there; in a log or display space it is
+    /// straight colour + alpha (the Nuke convention; the study §6)
+    pub out_linear: bool,
 }
 
 /// video_io.make_checker: 64 px squares, 0.75 / 0.5 grey, (3, h, w) as one plane (all three are equal).
@@ -118,8 +125,13 @@ fn render_row_exr<L: ToF32>(
         if o.cutout || o.checker {
             let d = despill(lin, o.despill);
             if let Some(c) = cu.as_deref_mut() {
-                // premultiplied, the EXR / Nuke convention (backlog row 30 c; the original writes straight colour)
-                c[4 * x..4 * x + 4].copy_from_slice(&[d[2] * pa, d[1] * pa, d[0] * pa, pa]);
+                if o.color_out.is_some() {
+                    // straight here: the output processor and the premultiply follow for the whole row (below)
+                    c[4 * x..4 * x + 4].copy_from_slice(&[d[2], d[1], d[0], pa]);
+                } else {
+                    // premultiplied, the EXR / Nuke convention (backlog row 30 c; the original writes straight colour)
+                    c[4 * x..4 * x + 4].copy_from_slice(&[d[2] * pa, d[1] * pa, d[0] * pa, pa]);
+                }
             }
             if let Some(k) = ck.as_deref_mut() {
                 let bl = srgb_to_linear(checker_srgb[y * w + x]);
@@ -128,6 +140,33 @@ fn render_row_exr<L: ToF32>(
             }
         }
     }
+    if let Some(xf) = &o.color_out {
+        if let Some(f) = fg {
+            apply_bgr(xf, f, 3);
+        }
+        if let Some(c) = cu {
+            apply_bgr(xf, c, 4);
+            if o.out_linear {
+                // loop: HOT-PATH-OK — one output row
+                for px in c.chunks_exact_mut(4) {
+                    let a = px[3];
+                    px[0] *= a;
+                    px[1] *= a;
+                    px[2] *= a;
+                }
+            }
+        }
+    }
+}
+
+/// An OCIO processor on one row of BGR(A) pixels (`stride` 3 or 4 floats; alpha untouched): to RGB order, the
+/// processor, back to BGR.
+fn apply_bgr(xf: &crate::ocio::Xform, row: &mut [f32], stride: usize) {
+    // loop: HOT-PATH-OK — one output row, swapped in place
+    row.chunks_exact_mut(stride).for_each(|px| px.swap(0, 2));
+    xf.apply(row, stride);
+    // loop: HOT-PATH-OK — and back
+    row.chunks_exact_mut(stride).for_each(|px| px.swap(0, 2));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -182,7 +221,18 @@ mod tests {
     use super::*;
 
     fn opts(exr: bool) -> RenderOpts {
-        RenderOpts { alpha: true, fg: true, checker: true, cutout: true, despill: 0.5, cutout_linear: false, exr, adjust: LinearAdjust::default() }
+        RenderOpts {
+            alpha: true,
+            fg: true,
+            checker: true,
+            cutout: true,
+            despill: 0.5,
+            cutout_linear: false,
+            exr,
+            adjust: LinearAdjust::default(),
+            color_out: None,
+            out_linear: true,
+        }
     }
 
     #[test]
@@ -208,6 +258,69 @@ mod tests {
         let vid = render(&v, &lg, (1, 1), (0, 0), (1, 1), &[0.75]);
         let (Batch::U16(vf), Batch::U16(vc)) = (&vid[1].1, &vid[3].1) else { panic!() };
         assert_eq!(&vc[..3], &vf[..3]);
+    }
+
+    /// Test 6 (the study's plan): alpha is data, byte-identical for every output colour space; the foreground and the
+    /// cutout's colour go through the output processor after despill; the cutout is premultiplied only in a linear
+    /// output space.
+    #[test]
+    fn output_colour_space_changes_colour_never_alpha() {
+        // 2x3 pixels; alpha logits across [0, 1] and beyond, colour logits signed
+        let (h, w) = (2, 3);
+        let n = h * w;
+        // loop: NOT-WORTH — a 6-pixel test frame
+        let lg: Vec<f32> = (0..4 * n).map(|i| if i < n { i as f32 * 0.3 - 0.2 } else { ((i * 37) % 23) as f32 / 23.0 - 0.3 }).collect();
+        let ck = vec![0.75f32; n];
+        let mut base = opts(true);
+        base.despill = 0.5;
+        let plain = render(&base, &lg, (h, w), (0, 0), (h, w), &ck);
+        let alpha = |out: &Vec<(&'static str, Batch)>| match &out[0].1 {
+            Batch::F32(a) => a.iter().map(|v| v.to_bits()).collect::<Vec<u32>>(),
+            _ => panic!(),
+        };
+        // loop: NOT-WORTH — five output spaces
+        for space in [crate::ocio::MODEL_SPACE, "ACEScg", "ACES2065-1", "ACEScct", "sRGB Encoded Rec.709 (sRGB)", "Raw"] {
+            let j = crate::ocio::color_job(Some("ocio://studio-config-latest"), None, Some("ACEScg"), Some(space)).unwrap().unwrap();
+            let mut o = base.clone();
+            o.color_out = j.output.clone();
+            o.out_linear = j.output_linear;
+            let got = render(&o, &lg, (h, w), (0, 0), (h, w), &ck);
+            assert_eq!(alpha(&got), alpha(&plain), "{space}: alpha changed");
+            let (Batch::F32(fg0), Batch::F32(fg), Batch::F32(cu0), Batch::F32(cu)) = (&plain[1].1, &got[1].1, &plain[3].1, &got[3].1) else { panic!() };
+            // the checker preview is not colour-managed
+            let (Batch::F32(k0), Batch::F32(k)) = (&plain[2].1, &got[2].1) else { panic!() };
+            assert_eq!(k0, k, "{space}: checker changed");
+            let Batch::F32(a) = &plain[0].1 else { panic!() };
+            match &j.output {
+                None => {
+                    // linear Rec.709 out: exactly today's outputs
+                    assert_eq!((fg0, cu0), (fg, cu), "{space}");
+                }
+                Some(x) => {
+                    // fg: the processor on today's linear fg (BGR rows)
+                    let mut want = fg0.clone();
+                    super::apply_bgr(x, &mut want, 3);
+                    assert_eq!(fg.iter().map(|v| v.to_bits()).collect::<Vec<_>>(), want.iter().map(|v| v.to_bits()).collect::<Vec<_>>(), "{space}");
+                    // cutout: today's premultiplied colour / alpha = the straight despilled colour, transformed
+                    // loop: NOT-WORTH — six pixels
+                    for i in 0..n {
+                        let ai = a[i];
+                        assert_eq!(cu[4 * i + 3].to_bits(), ai.to_bits());
+                        if ai < 1e-3 {
+                            continue;
+                        }
+                        let mut s = [cu0[4 * i] / ai, cu0[4 * i + 1] / ai, cu0[4 * i + 2] / ai];
+                        super::apply_bgr(x, &mut s, 3);
+                        let m = if j.output_linear { ai } else { 1.0 };
+                        // loop: NOT-WORTH — three channels
+                        for c in 0..3 {
+                            let (g, e) = (cu[4 * i + c], s[c] * m);
+                            assert!((g - e).abs() <= 1e-5 * e.abs().max(1.0), "{space} px {i} c {c}: {g} vs {e}");
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]

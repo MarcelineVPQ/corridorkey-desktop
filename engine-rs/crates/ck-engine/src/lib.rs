@@ -171,6 +171,18 @@ pub fn serve<B: Backend, R: BufRead + Send + 'static, W: Write>(backend: &mut B,
                 r.send(p);
             }
             "quit" => return,
+            // the colour spaces a config offers (backlog row 29, ck_core::ocio::describe): answered at once, between jobs
+            "colorspaces" => {
+                let cfg = str_field(&req, "config");
+                let mut reply = match ck_core::ocio::describe(cfg.as_deref(), ck_core::ocio::env_ocio().as_deref()) {
+                    Ok(v) => v,
+                    Err(e) => json!({"type": "error", "code": e.code.as_str(), "message": e.message}),
+                };
+                if !id.is_null() {
+                    reply["id"] = id;
+                }
+                r.send(reply);
+            }
             "cancel" => match str_field(&req, "id") {
                 Some(jid) => {
                     pending_cancel.insert(jid);

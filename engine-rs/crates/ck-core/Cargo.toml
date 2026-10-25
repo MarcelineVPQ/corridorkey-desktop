@@ -7,7 +7,11 @@ publish.workspace = true
 license-file.workspace = true
 
 [features]
-default = ["ort-static"]
+default = ["ort-static", "ocio"]
+# OpenColorIO built from source and linked in (ocio-rs `bundled`; a few minutes the first time). Every shipped
+# engine has it; without it the OCIO calls are a stub and the engine refuses to start (colour::require_real_ocio).
+# Only the macOS lint from Linux (tools/check_targets.sh) goes without: OCIO can't be built for macOS here.
+ocio = ["ocio-rs/bundled"]
 # ONNX Runtime linked in (pyke's static CPU build, downloaded at build time): CPU only, for tests
 ort-static = ["ort/download-binaries", "ort/tls-rustls", "ort/copy-dylibs"]
 # ONNX Runtime loaded at run time (--ort / CK_ENGINE_ORT / ORT_DYLIB_PATH): the GPU build
@@ -27,3 +31,4 @@ libloading.workspace = true
 rayon.workspace = true
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 exr = "1.73"
+ocio-rs.workspace = true

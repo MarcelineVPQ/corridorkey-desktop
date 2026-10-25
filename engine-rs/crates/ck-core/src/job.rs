@@ -36,6 +36,12 @@ pub struct JobConfig {
     /// graphics memory this job may use (GB): caps the automatic window's budget and the providers' arenas;
     /// None = the free memory (the engine's CK_ENGINE_VRAM_BUDGET_GB, config.rs, is applied by Pipeline::run)
     pub vram_budget_gb: Option<f64>,
+    /// colour management (backlog row 29, ocio.rs): the OCIO config (a path or an `ocio://` name; None = `$OCIO`,
+    /// else the built-in ACES studio config), the clip's colour space (None = read as CorridorKey 2.0 reads it) and
+    /// the EXR outputs' colour space (None = the input's own space when one is given, else linear Rec.709)
+    pub color_config: Option<String>,
+    pub input_colorspace: Option<String>,
+    pub output_colorspace: Option<String>,
 }
 
 fn num(o: &serde_json::Map<String, Value>, k: &str) -> Result<Option<f64>, Error> {
@@ -223,6 +229,10 @@ pub fn parse(req: &Value) -> Result<JobConfig, Error> {
             // the engine-wide default (CK_ENGINE_VRAM_BUDGET_GB) is the pipeline's to apply: parsing reads no environment
             None => None,
         },
+        // an empty string is absent (the app may send "" for "not set")
+        color_config: string(o, "color_config").filter(|s| !s.trim().is_empty()),
+        input_colorspace: string(o, "input_colorspace").filter(|s| !s.trim().is_empty()),
+        output_colorspace: string(o, "output_colorspace").filter(|s| !s.trim().is_empty()),
     })
 }
 
@@ -253,6 +263,15 @@ mod tests {
         assert_eq!((c.hint_quality, c.carry_hint, c.carry_hint_quality, c.despill_strength), (0.95, true, 0.95, 0.5));
         assert_eq!((c.exr, c.exr_float, c.num_frames, c.frame_dir_fps, c.tensorrt), (false, false, -1, 24.0, false));
         assert_eq!((c.writer.crf, c.writer.preset.as_str(), c.writer.pix_fmt.as_str()), (12, "medium", "yuv444p10le"));
+        assert_eq!((c.color_config, c.input_colorspace, c.output_colorspace), (None, None, None));
+    }
+
+    #[test]
+    fn colour_fields() {
+        let c = parse(&req(json!({"color_config": "ocio://studio-config-latest", "input_colorspace": "ACEScg", "output_colorspace": ""}))).unwrap();
+        assert_eq!(c.color_config.as_deref(), Some("ocio://studio-config-latest"));
+        assert_eq!(c.input_colorspace.as_deref(), Some("ACEScg"));
+        assert_eq!(c.output_colorspace, None);
     }
 
     #[test]

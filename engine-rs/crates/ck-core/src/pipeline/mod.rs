@@ -134,6 +134,37 @@ fn f1(v: f64) -> String {
     format!("{v:.1}")
 }
 
+/// The job's colour management (backlog row 29, ocio.rs), checked before anything loads: None when the job sets no
+/// colour space (today's behaviour, no config read). Phase 1 takes EXR and image sequences only: a colour space on
+/// a video input is refused (its YCbCr matrix and range must be decoded as tagged first, the study §1).
+pub(crate) fn color_setup(job: &JobConfig, is_dir: bool, sink: &mut dyn Sink) -> Result<Option<crate::ocio::ColorJob>, Error> {
+    if !is_dir && job.input_colorspace.is_some() {
+        return Err(Error::bad_request(
+            "input_colorspace is set for a video: colour-managed video input comes in the next version. For now, give the plate as an EXR or 16-bit image sequence (or key the video without a colour space).".into(),
+        ));
+    }
+    let env = crate::ocio::env_ocio();
+    let color = crate::ocio::color_job(job.color_config.as_deref(), env.as_deref(), job.input_colorspace.as_deref(), job.output_colorspace.as_deref())?;
+    if let Some(c) = &color {
+        sink.log(&format!(
+            "  colour: OCIO {} config {} ({}), input {}, output {}, {}",
+            c.ocio_version,
+            c.config_name,
+            c.config_source.as_str(),
+            c.input_space.as_deref().unwrap_or("as CorridorKey 2.0"),
+            c.output_space.as_deref().unwrap_or(crate::ocio::MODEL_SPACE),
+            crate::ocio::OPTIMIZATION
+        ));
+        if !job.exr && c.output_space.is_some() {
+            sink.log(&format!(
+                "  colour: the output colour space ({}) applies to EXR outputs only; these video outputs stay display sRGB / Rec.709",
+                c.output_space.as_deref().unwrap_or_default()
+            ));
+        }
+    }
+    Ok(color)
+}
+
 impl Pipeline<OrtLoader> {
     /// The engine's pipeline: ONNX Runtime sessions in the process's runtime `rt`.
     pub fn new(rt: &'static Runtime, models: ModelSet) -> Pipeline {
@@ -451,6 +482,9 @@ impl Pipeline<OrtLoader> {
         if !Path::new(&job.input).exists() {
             return Err(Error::input(format!("input not found: {}", job.input)));
         }
+        let is_dir = Path::new(&job.input).is_dir();
+        // colour management (backlog row 29), before any network loads: a bad config or space is a bad-request now
+        let color = color_setup(job, is_dir, sink)?;
         let vram_cap = match provider {
             Provider::Cpu => None,
             _ => job.vram_budget_gb.map(|g| (g * 1073741824.0) as u64),
@@ -466,7 +500,6 @@ impl Pipeline<OrtLoader> {
         sink.send(json!({"type": "progress", "stage": "probe"}));
         std::fs::create_dir_all(&job.temp_dir).map_err(|e| Error::write("the temporary folder", &job.temp_dir, &e))?;
         std::fs::create_dir_all(&job.output_dir).map_err(|e| Error::write("the output folder", &job.output_dir, &e))?;
-        let is_dir = Path::new(&job.input).is_dir();
         let mut meta = if is_dir {
             probe_frame_dir(Path::new(&job.input), job.num_frames, job.frame_dir_fps, job.frame_dir_linear)?
         } else {
@@ -489,7 +522,10 @@ impl Pipeline<OrtLoader> {
                     meta.pad.t,
                     meta.pad.b
                 ));
-                if !job.frame_dir_linear && p.first().is_some_and(|f| f.to_string_lossy().to_lowercase().ends_with(".exr")) {
+                if !job.frame_dir_linear
+                    && color.as_ref().is_none_or(|c| c.input_space.is_none())
+                    && p.first().is_some_and(|f| f.to_string_lossy().to_lowercase().ends_with(".exr"))
+                {
                     sink.log("  [WARNING] EXR input frames are being treated as display-coded and clipped to [0, 1]. For scene-linear HDR EXR plates, pass --frame_dir_linear.");
                 }
             }
@@ -500,6 +536,8 @@ impl Pipeline<OrtLoader> {
             ));
         }
         meta.exr_linear = is_dir && job.frame_dir_linear;
+        // a colour-managed clip goes through its input processor instead (decode.rs prep_frame_views)
+        meta.color_in = color.as_ref().and_then(|c| c.input.clone());
         let (mut chunk, mut stride, mut low_vram) = (job.hann_chunk, job.hann_stride, job.low_vram);
         if job.manual {
             sink.send(json!({"type": "memory", "hann_chunk": chunk, "hann_stride": stride, "low_vram": low_vram, "auto": false, "provider": provider.name()}));
@@ -621,6 +659,7 @@ impl Pipeline<OrtLoader> {
                 num_frames: job.num_frames,
                 decoders: &decoders,
                 exr_frames: exr_numbers.as_ref().map(|n| n.describe()),
+                color: color.as_ref().map(|c| c.settings_lines()),
             });
             if let Err(e) = std::fs::write(&settings_path, text) {
                 sink.log(&format!("[WARNING] Failed to write settings file: {e}"));
@@ -630,7 +669,12 @@ impl Pipeline<OrtLoader> {
 
         let mut report = FrameReport { total: t_all, last_sent: None, last_done: None };
         let setup_s = job_t.elapsed().as_secs_f64();
-        let ctx = JobCtx::new(job, &meta, &meta, trt_ref, &clip);
+        let mut ctx = JobCtx::new(job, &meta, &meta, trt_ref, &clip);
+        // colour-managed EXR outputs only: video outputs stay display sRGB / Rec.709 (decision 2)
+        if let Some(c) = color.as_ref().filter(|_| job.exr) {
+            ctx.color_out = c.output.clone();
+            ctx.out_linear = c.output_linear;
+        }
         let mut plan = JobPlan { chunk, stride, low_vram, key };
         let res = self.attempts(&ctx, &mut plan, &mut writers, &mut report, sink, &mut |p, sink| write_settings(p.chunk, p.stride, p.low_vram, sink));
         // release every writer (its encoder finishes the file), the first failure wins

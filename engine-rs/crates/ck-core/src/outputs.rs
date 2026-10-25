@@ -164,7 +164,18 @@ mod tests {
     }
 
     fn opts() -> RenderOpts {
-        RenderOpts { alpha: true, fg: false, checker: false, cutout: false, despill: 0.5, cutout_linear: false, exr: false, adjust: Default::default() }
+        RenderOpts {
+            alpha: true,
+            fg: false,
+            checker: false,
+            cutout: false,
+            despill: 0.5,
+            cutout_linear: false,
+            exr: false,
+            adjust: Default::default(),
+            color_out: None,
+            out_linear: true,
+        }
     }
 
     #[test]

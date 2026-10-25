@@ -14,8 +14,9 @@ name = "corridorkey-engine"
 path = "src/main.rs"
 
 [features]
-default = ["ort-static"]
+default = ["ort-static", "ocio"]
 ort-static = ["ck-core/ort-static"]
+ocio = ["ck-core/ocio"]
 ort-dynamic = ["ck-core/ort-dynamic"]
 cuda = ["ck-core/cuda"]
 tensorrt = ["ck-core/tensorrt"]

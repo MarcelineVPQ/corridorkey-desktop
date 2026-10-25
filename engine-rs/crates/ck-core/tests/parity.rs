@@ -83,6 +83,7 @@ fn meta(h: usize, w: usize, sh: usize, sw: usize) -> ClipMeta {
         num_frames: 1,
         exr_linear: false,
         video_bits: 8,
+        color_in: None,
     }
 }
 
@@ -182,7 +183,18 @@ fn render_paths() {
     let checker = make_checker(30, 44);
     // loop: NOT-WORTH — three render modes
     for (exr, lin) in [(false, false), (false, true), (true, false)] {
-        let o = RenderOpts { alpha: true, fg: true, checker: true, cutout: true, despill: 0.5, cutout_linear: lin, exr, adjust: LinearAdjust::default() };
+        let o = RenderOpts {
+            alpha: true,
+            fg: true,
+            checker: true,
+            cutout: true,
+            despill: 0.5,
+            cutout_linear: lin,
+            exr,
+            adjust: LinearAdjust::default(),
+            color_out: None,
+            out_linear: true,
+        };
         let out = render(&o, &logits, (40, 56), (5, 6), (30, 44), &checker);
         // loop: NOT-WORTH — four outputs
         for (name, b) in &out {

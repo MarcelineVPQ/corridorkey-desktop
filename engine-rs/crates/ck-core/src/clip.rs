@@ -31,12 +31,15 @@ pub struct ClipMeta {
     /// a video source's bits per sample (8 for frame folders and 8-bit video): above 8, frames are decoded at
     /// 16 bits so 10/12-bit ProRes 4444, DNxHR and HEVC reach the model at full precision (decode.rs)
     pub video_bits: u32,
+    /// the clip's colour space -> the model's linear Rec.709 (ocio.rs; backlog row 29). None: read as CorridorKey
+    /// 2.0 reads it (display-coded sRGB, or scene-linear EXR with `exr_linear`)
+    pub color_in: Option<crate::ocio::XformRef>,
 }
 
 impl ClipMeta {
     fn with_shape(source: Source, fps: f64, h: usize, w: usize, num_frames: usize, exr_linear: bool) -> ClipMeta {
         let (shape_h, shape_w) = (ceil_to_multiple(h, SHAPE_QUANTUM), ceil_to_multiple(w, SHAPE_QUANTUM));
-        ClipMeta { source, fps, h, w, shape_h, shape_w, pad: center_pad(h, w, shape_h, shape_w), num_frames, exr_linear, video_bits: 8 }
+        ClipMeta { source, fps, h, w, shape_h, shape_w, pad: center_pad(h, w, shape_h, shape_w), num_frames, exr_linear, video_bits: 8, color_in: None }
     }
 }
 

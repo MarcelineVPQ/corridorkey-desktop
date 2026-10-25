@@ -370,8 +370,16 @@ pub fn prep_frame(display_or_linear: Planar, exr_linear: bool, meta: &ClipMeta, 
 
 /// `prep_frame`; without `need_model` only the display view (the RVM and foundation passes need no more,
 /// as the runtime's need_model=False readers). Spread over the cores.
+///
+/// A colour-managed clip (`meta.color_in`, backlog row 29): the decoded values are the clip's own code values (EXR
+/// float, 16-bit or 8-bit / full scale), made finite, converted by OCIO to linear Rec.709 in float32, and then take
+/// the scene-linear path below (model view signed, negatives kept: decision 3; display view clipped).
 pub(crate) fn prep_frame_views(display_or_linear: Planar, exr_linear: bool, meta: &ClipMeta, denom: f32, need_model: bool) -> Prepped {
     use rayon::prelude::*;
+    let (display_or_linear, exr_linear) = match &meta.color_in {
+        Some(x) => (to_model_space(display_or_linear, x), true),
+        None => (display_or_linear, exr_linear),
+    };
     let padded = if meta.pad == (crate::image::Pad { l: 0, r: 0, t: 0, b: 0 }) { display_or_linear } else { pad_reflect101(&display_or_linear, meta.pad) };
     // EXR frames can hold NaN / infinity: made finite first (`finite_input`), a no-op for every finite value
     let display_of = |v: f32| {
@@ -400,6 +408,19 @@ pub(crate) fn prep_frame_views(display_or_linear: Planar, exr_linear: bool, meta
         Vec::new()
     };
     Prepped { model: std::sync::Arc::new(model), display: std::sync::Arc::new(display) }
+}
+
+/// A colour-managed frame to the model's space: NaN / infinity made finite first (OCIO's matrices would spread one
+/// NaN to the other channels), the input processor in float32 (rows in parallel), and finite again (a matrix can
+/// take values near INPUT_MAX past float32's range).
+fn to_model_space(mut img: Planar, x: &crate::ocio::Xform) -> Planar {
+    use rayon::prelude::*;
+    // loop: HOT-PATH-OK — one pass per frame, parallel, in place
+    img.data.par_iter_mut().with_min_len(1 << 14).for_each(|v| *v = finite_input(*v));
+    x.apply_planar(&mut img.data, img.h, img.w);
+    // loop: HOT-PATH-OK — as above
+    img.data.par_iter_mut().with_min_len(1 << 14).for_each(|v| *v = finite_input(*v));
+    img
 }
 
 /// A clip's frames in order, ready for the networks (a `FrameReader`, or a test's frames made in memory).
@@ -691,6 +712,7 @@ mod tests {
             num_frames: 1,
             video_bits: 8,
             exr_linear: true,
+            color_in: None,
         };
         // loop: NOT-WORTH — both EXR codings
         for linear in [true, false] {

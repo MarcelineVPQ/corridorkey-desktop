@@ -4,6 +4,8 @@
 [workspace]
 resolver = "2"
 members = ["crates/ck-core", "crates/ck-engine"]
+# vendor/: patched third-party crates (vendor/README.md), not ours to lint or test
+exclude = ["vendor"]
 
 [workspace.package]
 version = "0.2.0"
@@ -21,6 +23,13 @@ half = { version = "2", features = ["bytemuck"] }
 bytemuck = "1"
 libloading = "0.8"
 rayon = "1"
+# OpenColorIO (the real C++ library, OCIO 2.5.x, built from source and linked in with `bundled`; backlog row 29,
+# docs/OCIO_STUDY_2026-10.md). Without `bundled` it is a stub that does no colour work: the engine refuses to start.
+ocio-rs = { version = "=0.3.0", default-features = false }
+
+# ocio-sys 0.3.0 with the MinGW cross-build fixes (vendor/README.md): offered upstream, used from here until then
+[patch.crates-io]
+ocio-sys = { path = "vendor/ocio-sys" }
 
 [profile.release]
 opt-level = 3

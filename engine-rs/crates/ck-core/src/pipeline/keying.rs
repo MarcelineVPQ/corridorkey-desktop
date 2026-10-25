@@ -50,6 +50,10 @@ pub(crate) struct JobCtx<'a> {
     pub(crate) frames: &'a dyn FrameSource,
     pub(crate) trt: Option<&'a dyn Fn(&str) -> TrtSettings>,
     pub(crate) temps: TempPaths,
+    /// EXR jobs with an output colour space: the output processor (RenderOpts::color_out) and whether that space is
+    /// scene-linear (RenderOpts::out_linear); None / true otherwise
+    pub(crate) color_out: Option<crate::ocio::XformRef>,
+    pub(crate) out_linear: bool,
 }
 
 impl<'a> JobCtx<'a> {
@@ -60,7 +64,7 @@ impl<'a> JobCtx<'a> {
         trt: Option<&'a dyn Fn(&str) -> TrtSettings>,
         clip: &'a str,
     ) -> JobCtx<'a> {
-        JobCtx { job, meta, frames, trt, temps: TempPaths::new(&job.temp_dir, clip) }
+        JobCtx { job, meta, frames, trt, temps: TempPaths::new(&job.temp_dir, clip), color_out: None, out_linear: true }
     }
 }
 
@@ -173,6 +177,8 @@ impl<L: Loader> Pipeline<L> {
             cutout_linear: job.cutout_linear,
             exr: job.exr,
             adjust: LinearAdjust::default(),
+            color_out: ctx.color_out.clone(),
+            out_linear: ctx.out_linear,
         };
         let checker = make_checker(meta.h, meta.w);
         // render + hand-off to the writers on their own thread (the writers come back when `render` ends)

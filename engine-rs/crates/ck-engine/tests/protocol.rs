@@ -135,6 +135,31 @@ fn run(id: &str, input: &str) -> Value {
 }
 
 #[test]
+fn colorspaces_lists_a_configs_spaces_and_a_bad_config_is_a_bad_request() {
+    let (r, fake) = talk(
+        &[
+            json!({"cmd": "colorspaces", "id": "c1", "config": "ocio://studio-config-latest"}),
+            json!({"cmd": "colorspaces", "config": "/no/such/config.ocio"}),
+            run("j1", "/a.mp4"),
+        ],
+        &[],
+    );
+    assert_eq!((r[0]["type"].as_str(), r[0]["id"].as_str()), (Some("colorspaces"), Some("c1")));
+    let name = r[0]["config"]["name"].as_str().unwrap();
+    assert!(name.starts_with("ocio://studio-config-v"), "{name}");
+    assert!(r[0]["config"]["ocio"].as_str().unwrap().starts_with("2.5."));
+    assert!(!r[0]["config"]["cache_id"].as_str().unwrap().is_empty());
+    assert_eq!(r[0]["roles"]["scene_linear"], "ACEScg");
+    // loop: NOT-WORTH — a config's few dozen spaces
+    let cg = r[0]["colorspaces"].as_array().unwrap().iter().find(|s| s["name"] == "ACEScg").unwrap().clone();
+    assert_eq!((cg["family"].as_str().is_some(), cg["isdata"].as_bool(), cg["aliases"].is_array()), (true, Some(false), true));
+    assert_eq!((r[1]["type"].as_str(), r[1]["code"].as_str()), (Some("error"), Some("bad-request")));
+    assert!(r[1]["message"].as_str().unwrap().contains("/no/such/config.ocio"));
+    // the engine keeps going
+    assert_eq!(fake.ran, vec!["j1"]);
+}
+
+#[test]
 fn ping_pong() {
     let (r, _) = talk(&[json!({"cmd": "ping"})], &[]);
     assert_eq!(r[0]["type"], "pong");
