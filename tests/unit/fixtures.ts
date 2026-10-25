@@ -86,6 +86,8 @@ export const trtState = (over: Partial<TrtState> = {}): TrtState => ({
   done: 0,
   total: 0,
   error: null,
+  built: [],
+  prebuild: { status: "idle", ranges: [], fraction: 0, startedAt: null, note: null },
   ...over,
 });
 

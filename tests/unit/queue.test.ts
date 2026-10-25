@@ -15,7 +15,7 @@ afterAll(() => rmSync(OUT, { recursive: true, force: true }));
 // a waiting job (fixtures.ts) whose results go into a real folder under OUT
 const job = (id: string, extra: Partial<Job> = {}): Job => fixtureJob(id, { outputDir: join(OUT, `out_${id}`), ...extra });
 
-function harness(opts: { pongProtocol?: number; failStart?: boolean; slowStart?: boolean; tempRoot?: string; tensorrt?: () => boolean } = {}) {
+function harness(opts: { pongProtocol?: number; failStart?: boolean; slowStart?: boolean; tempRoot?: string; tensorrt?: () => boolean; tensorrtWhyNot?: () => string | null } = {}) {
   const sent: Record<string, unknown>[] = [];
   let reply: (r: EngineReply) => void = () => {};
   let exit: (c: number | null, s: NodeJS.Signals | null, t: string[]) => void = () => {};
@@ -51,6 +51,7 @@ function harness(opts: { pongProtocol?: number; failStart?: boolean; slowStart?:
     },
     tempDirFor: (id) => join(opts.tempRoot ?? "/nonexistent-ck-test", id),
     tensorrt: opts.tensorrt,
+    tensorrtWhyNot: opts.tensorrtWhyNot,
     changed: () => {},
     finished: () => {},
     now: () => clock,
@@ -386,5 +387,61 @@ describe("TensorRT in the queue", () => {
       "TensorRT not used: the models folder has no TensorRT-ready models. Runs on CUDA.",
     );
     expect(providerText({ type: "provider", provider: "tensorrt", fallbacks: {}, build_s: {} })).toBe("Runs on TensorRT.");
+  });
+
+  it("keeps what ran the job from both provider replies, and why the app didn't ask for TensorRT", async () => {
+    const h = harness({ tensorrt: () => true });
+    h.q.add(job("a"));
+    await h.q.start();
+    await h.flush();
+    expect(h.q.jobs[0].tech).toMatchObject({ provider: null, notAsked: null });
+    h.reply({ type: "provider", id: "a", provider: "tensorrt", precision: "fp16", tensorrt_requested: true, range: "h1792-2176_w3584-4096_t1-8_f1-4", cache: "reused" });
+    h.reply({ type: "provider", id: "a", provider: "tensorrt+cuda", pieces: {}, fallbacks: { stage1: "no tactic" }, build_s: {} });
+    expect(h.q.jobs[0].tech).toEqual({
+      provider: "tensorrt+cuda",
+      precision: "fp16",
+      tensorrtRequested: true,
+      fallbackReason: null,
+      fallbacks: { stage1: "no tactic" },
+      range: "h1792-2176_w3584-4096_t1-8_f1-4",
+      cache: "reused",
+      notAsked: null,
+    });
+
+    // 08_3a, 2026-10-25: the parts weren't installed yet, so the job didn't ask, and the page says why
+    const n = harness({ tensorrt: () => false, tensorrtWhyNot: () => "TensorRT's parts weren't installed when the job started (Engine settings, TensorRT)" });
+    n.q.add(job("b"));
+    await n.q.start();
+    await n.flush();
+    n.reply({ type: "provider", id: "b", provider: "cuda", precision: "fp16", tensorrt_requested: false });
+    expect(n.q.jobs[0].tech).toMatchObject({ provider: "cuda", tensorrtRequested: false, notAsked: "TensorRT's parts weren't installed when the job started (Engine settings, TensorRT)" });
+  });
+
+  it("stays on Keying while low-memory mode loads stage 2 (04_5d_fg, 2026-10-25: the page went back to Loading the model)", async () => {
+    const h = harness({ tensorrt: () => true });
+    h.q.add(job("a"));
+    await h.q.start();
+    await h.flush();
+    // the Rust engine's order for a TensorRT job that builds its engines (low-memory mode, pipeline/mod.rs + keying.rs)
+    const order: EngineReply[] = [
+      { type: "progress", stage: "probe" },
+      { type: "provider", provider: "tensorrt", precision: "fp16", tensorrt_requested: true, range: "h1792-2176_w3584-4096_t1-8_f1-4", cache: "build" },
+      { type: "progress", stage: "optimize", detail: "C-RADIO (1/5)" },
+      { type: "progress", stage: "optimize", detail: "stage 2 (5/5)" },
+      { type: "progress", stage: "load" },
+      { type: "provider", provider: "tensorrt", pieces: {}, fallbacks: {}, build_s: { stage2: 57.8 } },
+      { type: "progress", stage: "rvm" },
+      { type: "progress", stage: "load" },
+      { type: "progress", stage: "foundations" },
+      { type: "progress", stage: "load" },
+      { type: "progress", stage: "keying" },
+      { type: "progress", stage: "keying", p: 1, detail: "window 29/29 done" },
+      { type: "progress", stage: "load" },
+      { type: "frames", done: 80, total: 120 },
+    ];
+    // loop: NOT-WORTH — a test's fourteen replies
+    for (const r of order) h.reply({ ...r, id: "a" });
+    expect(h.q.jobs[0].stage).toBe("keying");
+    expect(h.q.jobs[0].stageDetail).toBe("window 29/29 done");
   });
 });

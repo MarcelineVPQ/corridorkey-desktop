@@ -12,6 +12,7 @@ export const IPC = {
   startInstall: "ck:start-install",
   stopInstall: "ck:stop-install",
   setTensorrt: "ck:set-tensorrt",
+  trtPrebuild: "ck:trt-prebuild",
   measureStorage: "ck:measure-storage",
   removeStorage: "ck:remove-storage",
   openStorageFolder: "ck:open-storage-folder",

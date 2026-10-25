@@ -1,7 +1,8 @@
 // Text for numbers shown in the UI. Measured values only; when something
 // isn't known yet the UI says so instead of guessing (rule 1).
-import type { ClipInfo, Job, Stage } from "../shared/types";
+import type { ClipInfo, Job, JobTech, Stage } from "../shared/types";
 import { CANT_READ_CLIP } from "../shared/texts";
+import { PIECE_NAMES, rangeText } from "../shared/trt";
 
 export function clipFacts(c: ClipInfo): string {
   const parts: string[] = [];
@@ -45,13 +46,44 @@ export function statusText(job: Job): string {
     case "running":
       if (job.stage === "keying" && job.framesTotal) return `${job.framesDone} / ${job.framesTotal} frames`;
       return job.stage ? STAGE_TEXT[job.stage] : "Starting";
-    case "done":
-      return job.startedAt && job.finishedAt ? `Done in ${duration((job.finishedAt - job.startedAt) / 1000)}` : "Done";
+    case "done": {
+      const ran = providerName(job.tech?.provider ?? null);
+      const done = job.startedAt && job.finishedAt ? `Done in ${duration((job.finishedAt - job.startedAt) / 1000)}` : "Done";
+      return ran ? `${done} · ${ran}` : done;
+    }
     case "failed":
       return "Failed";
     case "cancelled":
       return "Cancelled";
   }
+}
+
+/** The engine's provider name on screen ("tensorrt+cuda" → "TensorRT + CUDA"); null when the engine sent none. */
+export function providerName(p: string | null): string | null {
+  if (!p) return null;
+  const names: Record<string, string> = { cuda: "CUDA", tensorrt: "TensorRT", "tensorrt+cuda": "TensorRT + CUDA", cpu: "CPU", coreml: "Core ML" };
+  return names[p] ?? p;
+}
+
+/** What ran a job, from the engine's provider replies: "TensorRT + CUDA · fp16 (stage 1 on CUDA)". */
+export function ranOnText(t: JobTech): string | null {
+  const name = providerName(t.provider);
+  if (!name) return null;
+  // loop: NOT-WORTH — at most five networks
+  const onCuda = Object.keys(t.fallbacks).map((k) => PIECE_NAMES[k] ?? k);
+  const partly = t.provider === "tensorrt+cuda" && onCuda.length ? ` (${onCuda.join(", ")} on CUDA)` : "";
+  return `${name}${t.precision ? ` · ${t.precision}` : ""}${partly}`;
+}
+
+/** The TensorRT line of a job: why it wasn't used (the engine's reason, or the app's), or the range it ran. */
+export function trtJobText(t: JobTech): string | null {
+  if (t.notAsked) return `not asked: ${t.notAsked}`;
+  if (!t.tensorrtRequested) return null;
+  if (t.fallbackReason) return `not used: ${t.fallbackReason}`;
+  // loop: NOT-WORTH — at most five networks
+  const fell = Object.entries(t.fallbacks).map(([k, why]) => `${PIECE_NAMES[k] ?? k} on CUDA (${why})`);
+  if (t.range) return `range ${rangeText(t.range)}, ${t.cache === "build" ? "built in this job" : "built before"}${fell.length ? `; ${fell.join("; ")}` : ""}`;
+  return null;
 }
 
 // decimal GB for disks and downloads: one definition, shared with the main process

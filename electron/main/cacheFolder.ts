@@ -14,6 +14,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { constants } from "node:fs";
 import { APP_DIR } from "./platform";
 import { folderBytes, TRT_ENGINES_DIR } from "./storage";
+import { trtRangeDirs } from "./trtPrebuild";
 import type { CacheInfo, Job } from "../../src/shared/types";
 
 /** The marker file in a cache folder the app made in a chosen location. */
@@ -271,15 +272,9 @@ export function cacheInfo(dir: string, defaultDir: string, jobs: readonly Job[],
   // loop: NOT-WORTH — the attributed stills, as above
   const attributed = [...seen].reduce((n, f) => n + size(f), 0);
   const trt = join(dir, TRT_ENGINES_DIR);
-  let ranges: string[] = [];
-  try {
-    // loop: NOT-WORTH — one readdir of the TensorRT engines folder (a few ranges), when App settings shows Storage
-    ranges = readdirSync(trt).filter((n) => statSync(join(trt, n)).isDirectory());
-  } catch {
-    // error: NOT-WORTH — no TensorRT engines built
-  }
-  // loop: NOT-WORTH — a few ranges, as above
-  const trtRanges = ranges.map((range) => ({ range, bytes: folderBytes(join(trt, range)) }));
+  // the ranges sit one level down, in the card's folder (`<card>/<range>`; listing the card folder named it a range)
+  // loop: NOT-WORTH — a few ranges, when App settings shows Storage
+  const trtRanges = trtRangeDirs(trt).map(({ range, dir }) => ({ range, bytes: folderBytes(dir) }));
   return {
     dir,
     defaultDir,

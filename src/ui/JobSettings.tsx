@@ -1,12 +1,13 @@
 // The Queue page's panel: the selected clip's settings, one Section each.
 // Every control maps to one engine option (docs/ENGINE_PROTOCOL.md) and
 // changes what the run does (rule 4). Locked once the clip has run.
-import { Clapperboard, Film, FolderOpen, MemoryStick, Scaling, SunMedium, Wand2, X } from "lucide-react";
+import { Clapperboard, Film, FolderOpen, MemoryStick, Scaling, SunMedium, Wand2, X, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { EngineKind, HintFileKind, Job, JobOptions, MemoryChoice, MemoryEstimate, MemoryEstimateResult, ModelScale, OutputName, VideoCodec, WindowEstimate } from "../shared/types";
+import type { EngineKind, HintFileKind, Job, JobOptions, MemoryChoice, MemoryEstimate, MemoryEstimateResult, ModelScale, OutputName, TrtState, VideoCodec, WindowEstimate } from "../shared/types";
 import { LINEAR_RANGES, MANUAL_WINDOWS, OUTPUT_NAMES, VRAM_LIMIT_AUTO_HELP, scaledSize, videoCodecsFor, vramLimitChoices, withCutoutAlpha } from "../shared/types";
 import { gibBytes } from "../shared/units";
 import { AS_USED, lowerFirst } from "../shared/texts";
+import { builtWindows, tradeoffFor, trtSizeKey, TRT_TRADEOFF_4K } from "../shared/trt";
 import { Accordion, Row, Section, Segmented } from "./panel/Section";
 
 const OUTPUT_TEXT: Record<OutputName, { label: string; help: string }> = {
@@ -45,6 +46,7 @@ export function JobSettings({
   queueRunning,
   platform,
   engineKind,
+  tensorrt,
   onChange,
 }: {
   job: Job;
@@ -53,6 +55,8 @@ export function JobSettings({
   queueRunning: boolean;
   platform: string;
   engineKind: EngineKind | null;
+  // the TensorRT setting and what is built (a waiting clip's line); absent: no line
+  tensorrt?: TrtState;
   onChange: (o: JobOptions) => void;
 }) {
   const o = job.options;
@@ -97,6 +101,8 @@ export function JobSettings({
   const linearStatus = linearSet
     ? `Brightness ${o.linearBrightness.toFixed(2)} · contrast ${o.linearContrast.toFixed(2)}${o.linearContrast !== 1 ? ` around ${o.linearContrastPivot.toFixed(2)}` : ""}`
     : "Off · as shot";
+
+  const trtPlan = job.status === "waiting" && tensorrt ? trtPlanFor(job, tensorrt, engineKind) : null;
 
   return (
     <Accordion page="queue" focus={focus}>
@@ -310,8 +316,54 @@ export function JobSettings({
       <Section id="memory" icon={MemoryStick} title="Graphics memory" status={memStatus} disabled={locked}>
         {() => <MemorySection job={job} options={o} queueRunning={queueRunning} platform={platform} set={set} />}
       </Section>
+
+      {trtPlan && (
+        <Section id="tensorrt" icon={Zap} title="TensorRT" status={trtPlan.status}>
+          {() => (
+            <>
+              <p className="hint-text">{trtPlan.text}</p>
+              <p className="hint-text">The choice is in Engine settings, TensorRT. What really ran shows on the clip&apos;s page once it starts.</p>
+            </>
+          )}
+        </Section>
+      )}
     </Accordion>
   );
+}
+
+/**
+ * What a waiting clip will ask for and run on, before it runs: the setting, the parts, whether its size's TensorRT
+ * range is built (the cache), and the measured trade-off (README). Null where TensorRT doesn't exist (Windows, macOS).
+ */
+export function trtPlanFor(job: Job, trt: TrtState, engineKind: EngineKind | null): { status: string; text: string } | null {
+  if (!trt.supported) return null;
+  const { width, height } = job.clip;
+  const key = width && height && job.options.modelScale === 1 ? trtSizeKey(width, height) : null;
+  const tradeoff = key ? tradeoffFor(key) : TRT_TRADEOFF_4K;
+  if (engineKind !== "rust") return { status: "Not with this engine · CUDA", text: "TensorRT runs on the ONNX Runtime engine only; this clip runs on the PyTorch engine." };
+  if (!trt.on) return { status: "Off · runs on CUDA", text: `TensorRT is off, so this clip runs on CUDA. ${tradeoff}` };
+  if (!trt.ready) return { status: "On, not installed · runs on CUDA", text: `TensorRT's parts aren't installed, so this clip runs on CUDA. ${tradeoff}` };
+  if (job.options.modelScale !== 1)
+    return {
+      status: "On · depends on the internal resolution",
+      text: "The internal resolution sets the size the networks run at, and so the TensorRT range; it runs on TensorRT where that range is built.",
+    };
+  if (!width || !height) return { status: "On", text: "Used where the clip's size has a built TensorRT range; the clip's size isn't known yet." };
+  if (!key) return { status: "Outside TensorRT's ranges · CUDA", text: `${width}×${height} is outside the sizes TensorRT is built for (up to 4096×2176), so it runs on CUDA.` };
+  const windows = builtWindows(key, trt.built);
+  if (windows.length)
+    return {
+      status: "On · built for this size",
+      text: `Built for ${width}×${height} with windows up to ${windows.join(" or ")} frames: it runs on TensorRT when the job's automatic window is one of those (at 4K on a 16 GB card it is 8). ${tradeoff}`,
+    };
+  // loop: NOT-WORTH — two ranges
+  const building = trt.prebuild.status === "running" && trt.prebuild.ranges.some((r) => trtSizeKey(r.width, r.height) === key && r.state !== "done");
+  return {
+    status: building ? "On · building in the background · CUDA until then" : "On · not built for this size · runs on CUDA",
+    text: building
+      ? `TensorRT for this size is building in the background now (Engine settings, TensorRT); if this clip starts first, it runs on CUDA. ${tradeoff}`
+      : `TensorRT isn't built for ${width}×${height} yet, so this clip runs on CUDA: jobs never wait on a build. Engine settings, TensorRT builds 4K and HD in the background. ${tradeoff}`,
+  };
 }
 
 type ManualChoice = Extract<MemoryChoice, { auto: false }>;

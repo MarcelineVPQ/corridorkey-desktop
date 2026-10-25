@@ -145,6 +145,24 @@ export interface MemoryInfo {
   limitGb: number | null;
 }
 
+// What ran the job (the engine's `provider` reply, docs/ENGINE_PROTOCOL.md), plus why the app didn't ask for
+// TensorRT when it didn't (the app's own decision at the job's start: the setting, the parts, the engine).
+export interface JobTech {
+  // cuda | tensorrt | tensorrt+cuda | cpu | coreml (null: the engine sent no provider reply, e.g. the PyTorch engine)
+  provider: string | null;
+  precision: string | null;
+  tensorrtRequested: boolean;
+  // the engine's reason a requested TensorRT ran on CUDA (`fallback_reason`)
+  fallbackReason: string | null;
+  // networks TensorRT couldn't take, and why (`fallbacks`: stage1 → "no tactic …")
+  fallbacks: Record<string, string>;
+  // the TensorRT engine range (`range`) and whether it was built for this job (`cache`: build | reused)
+  range: string | null;
+  cache: string | null;
+  // the app didn't ask for TensorRT: why (null when it asked, or where TensorRT doesn't exist: Windows, macOS)
+  notAsked: string | null;
+}
+
 // the manual window choices (Graphics memory → Manual): what the picker offers and the estimate asks the engine about
 export const MANUAL_WINDOWS: readonly (readonly [number, number])[] = [
   [80, 40],
@@ -209,6 +227,8 @@ export interface Job {
   // Measured from the frames written so far (null until there are enough).
   framesPerSecond: number | null;
   memory: MemoryInfo | null;
+  // what ran it (set when the job starts; absent on jobs from before this field)
+  tech?: JobTech | null;
   startedAt: number | null;
   finishedAt: number | null;
   outputs: string[];
@@ -374,6 +394,43 @@ export interface TrtState {
   done: number;
   total: number;
   error: string | null;
+  // the TensorRT ranges built for this card (engine range keys, "h1792-2176_w3584-4096_t1-8_f1-4"), read from the cache
+  built: string[];
+  // the background build of the common ranges (trtPrebuild.ts): jobs never build, they run on CUDA until it's done
+  prebuild: TrtPrebuild;
+}
+
+/** Another program holding this much graphics memory is named before a run, and holds back the background TensorRT
+ * build (desktops and browsers hold less; the engine bench refuses to start above 1 GiB, tools/engine_bench.mjs). */
+export const OTHER_GPU_USER_MB = 512;
+
+export type PrebuildStatus = "idle" | "running" | "paused" | "done" | "stopped" | "blocked" | "error";
+
+export interface PrebuildRange {
+  // "4K" or "HD", and the size built for
+  label: string;
+  width: number;
+  height: number;
+  state: "todo" | "building" | "done" | "failed";
+  // the network being built (cradio, moge, rvm, stage1, stage2), and this range's fraction done (by network, weighted
+  // by the measured 4K build times where they exist)
+  piece: string | null;
+  fraction: number;
+  // the engine's range key once known, and networks that couldn't be built (they run on CUDA)
+  range: string | null;
+  fallbacks: Record<string, string>;
+  error: string | null;
+}
+
+export interface TrtPrebuild {
+  status: PrebuildStatus;
+  ranges: PrebuildRange[];
+  // all ranges' fraction done
+  fraction: number;
+  // when this run started (the elapsed clock), null when not running
+  startedAt: number | null;
+  // what it waits for, why it stopped, or the error
+  note: string | null;
 }
 
 // What the app keeps on disk (electron/main/storage.ts), measured when App settings shows Storage.
@@ -483,6 +540,8 @@ export interface CorridorKeyApi {
   stopInstall(): Promise<void>;
   // the TensorRT setting (Linux; ignored elsewhere)
   setTensorrt(on: boolean): Promise<void>;
+  // the background TensorRT build (Engine settings, TensorRT): start it (or again), or stop it
+  trtPrebuild(action: "start" | "stop"): Promise<void>;
   measureStorage(): Promise<void>;
   // asks for confirmation first (a system dialog); refused while the queue or the install runs
   removeStorage(id: StorageItem["id"]): Promise<void>;

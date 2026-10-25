@@ -3,7 +3,7 @@
 import { memo } from "react";
 import { ProgressBar } from "../ProgressBar";
 import { FolderPlus, Play, Plus, Square, Trash2 } from "lucide-react";
-import type { AppState, Job } from "../../shared/types";
+import { OTHER_GPU_USER_MB, type AppState, type Job, type TrtPrebuild } from "../../shared/types";
 import { missingInput, startBlocked } from "../../shared/tasks";
 import { AS_USED, CANT_READ_CLIP } from "../../shared/texts";
 import { JobSettings } from "../JobSettings";
@@ -68,7 +68,7 @@ export function QueuePage(props: {
             state.jobs.map((j) => <JobRow key={j.id} job={j} selected={j.id === selected} onSelect={() => onSelect(j.id)} />)
           )}
         </nav>
-        <section className="detail">{job ? <Detail job={job} /> : <div className="detail-empty">Add a clip to start.</div>}</section>
+        <section className="detail">{job ? <Detail job={job} prebuild={state.tensorrt.prebuild} /> : <div className="detail-empty">Add a clip to start.</div>}</section>
       </div>
     </div>
   );
@@ -85,6 +85,7 @@ export function QueuePage(props: {
             queueRunning={state.queueRunning}
             platform={state.system.platform}
             engineKind={state.engineKind}
+            tensorrt={state.tensorrt}
             onChange={(o) => void window.ck.setJobOptions(job.id, o)}
           />
         ) : (
@@ -152,7 +153,7 @@ function JobRowView({ job, selected, onSelect }: { job: Job; selected: boolean; 
   );
 }
 
-function Detail({ job }: { job: Job }) {
+function Detail({ job, prebuild }: { job: Job; prebuild: TrtPrebuild }) {
   return (
     <>
       <div className="detail-head">
@@ -173,14 +174,10 @@ function Detail({ job }: { job: Job }) {
           <div>{job.clip.probeError}</div>
         </section>
       )}
-      <JobView job={job} />
+      <JobView job={job} prebuild={prebuild} />
     </>
   );
 }
-
-/** Another program holding this much graphics memory is named before a run (desktops and browsers hold less;
- * the engine bench refuses to start above 1 GiB, tools/engine_bench.mjs). */
-const OTHER_GPU_USER_MB = 512;
 
 function OtherGpuUsers({ state }: { state: AppState }) {
   // loop: HOT-PATH-OK — a few compute processes per render

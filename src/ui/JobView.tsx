@@ -4,11 +4,12 @@
 import { useEffect, useState } from "react";
 import { ProgressBar } from "./ProgressBar";
 import { FolderOpen, RotateCcw } from "lucide-react";
-import { LOG_SHOWN, type Job } from "../shared/types";
-import { duration, remaining, STAGE_ORDER, STAGE_TEXT } from "./format";
+import { LOG_SHOWN, type Job, type TrtPrebuild } from "../shared/types";
+import { prebuildStep, TRT_NOT_BUILT } from "../shared/trt";
+import { duration, ranOnText, remaining, STAGE_ORDER, STAGE_TEXT, trtJobText } from "./format";
 import { MainBlock } from "./panel/SplitView";
 
-export function JobView({ job }: { job: Job }) {
+export function JobView({ job, prebuild }: { job: Job; prebuild?: TrtPrebuild }) {
   // A 1 s tick for the elapsed clock, only while this job runs and the page is visible (rule 3).
   const [, tick] = useState(0);
   useEffect(() => {
@@ -23,6 +24,11 @@ export function JobView({ job }: { job: Job }) {
   const elapsed = job.startedAt ? ((job.finishedAt ?? Date.now()) - job.startedAt) / 1000 : null;
   const nowIdx = job.stage ? STAGE_ORDER.indexOf(job.stage) : -1;
   const m = job.memory;
+  // what ran it, from the engine's provider replies (and the app's reason when it didn't ask for TensorRT)
+  const tech = job.tech ?? null;
+  const ranOn = tech ? ranOnText(tech) : null;
+  const trtLine = tech ? trtJobText(tech) : null;
+  const notBuilt = tech?.fallbackReason === TRT_NOT_BUILT;
 
   return (
     <>
@@ -47,6 +53,23 @@ export function JobView({ job }: { job: Job }) {
             <Stat k="Elapsed" v={elapsed !== null ? duration(elapsed) : "—"} />
             {job.stageDetail && <Stat k="Stage 1" v={job.stageDetail} />}
           </div>
+        </MainBlock>
+      )}
+
+      {tech && (ranOn || trtLine) && (
+        <MainBlock title="Technology for this run">
+          <div className="stats">
+            {ranOn && <Stat k="Ran on" v={ranOn} />}
+            {trtLine && <Stat k="TensorRT" v={trtLine} />}
+          </div>
+          {notBuilt && (
+            <p className="hint-text">
+              {prebuild?.status === "running"
+                ? `It builds in the background now: ${prebuildStep(prebuild.ranges) ?? "starting"}. Clips after it run on TensorRT.`
+                : "Engine settings, TensorRT builds it in the background; until then clips of this size run on CUDA."}
+            </p>
+          )}
+          {notBuilt && prebuild?.status === "running" && <ProgressBar value={Math.round(prebuild.fraction * 1000)} max={1000} />}
         </MainBlock>
       )}
 

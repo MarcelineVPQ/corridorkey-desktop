@@ -1,11 +1,13 @@
 // The first-run install and the ffmpeg check as one control each, shared by the setup page
 // (pages/SetupPage.tsx) and the Engine page's panel, so the two never drift apart.
 import { Check, Download, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { FfmpegState, InstallState, TrtState } from "../../shared/types";
 import { installMissing } from "../../shared/tasks";
 import { INSTALL_FIRST } from "../../shared/texts";
 import { Row } from "../panel/Section";
-import { gbBytes } from "../format";
+import { duration, gbBytes } from "../format";
+import { PIECE_NAMES, prebuildStep, rangeText, trtSizeKey, TRT_TRADEOFF_4K, TRT_TRADEOFF_HD } from "../../shared/trt";
 import { ProgressBar } from "../ProgressBar";
 
 export const installPct = (inst: Pick<InstallState, "done" | "total">) => (inst.total ? Math.floor((inst.done / inst.total) * 100) : 0);
@@ -93,8 +95,8 @@ export function TrtBox({ trt, inst, platform }: { trt: TrtState; inst: InstallSt
         </label>
       </Row>
       <p className="hint-text">
-        About 2× the original&apos;s speed at HD, with the same mattes (README, Speed, 0.0.6-dev). The first job at each resolution optimizes for it once, about 4.5 minutes on an RTX 5080 (about 5 at
-        4K); later jobs reuse that. Best on graphics cards with 16 GB. 4K (DCI 4K and UHD) runs on TensorRT too; open gate and larger frames run on CUDA. An extra {gbBytes(trt.fullBytes)} download:
+        TensorRT optimizes the CorridorKey networks for this exact graphics card, once per resolution range, with the same mattes as CUDA (README, Speed, 0.0.6-dev and 0.0.7-dev). {TRT_TRADEOFF_4K}{" "}
+        {TRT_TRADEOFF_HD} Best on graphics cards with 16 GB. 4K (DCI 4K and UHD) runs on TensorRT too; open gate and larger frames run on CUDA. An extra {gbBytes(trt.fullBytes)} download:
         NVIDIA&apos;s TensorRT libraries and the TensorRT models.
       </p>
       {trt.on &&
@@ -111,13 +113,97 @@ export function TrtBox({ trt, inst, platform }: { trt: TrtState; inst: InstallSt
             <InstallControls p={trt} canStart={inst.gpuOk && inst.status !== "running"} start={() => void window.ck.startInstall("tensorrt")} />
           </>
         ) : trt.ready ? (
-          <div className="check-line ok">
-            <Check size={15} aria-hidden /> Installed: jobs run on TensorRT
-          </div>
+          <>
+            <div className="check-line ok">
+              <Check size={15} aria-hidden /> Installed
+            </div>
+            <PrebuildBox trt={trt} />
+          </>
         ) : (
           <p className="hint-text">Installed for the downloaded runtime and models, but the engine uses other files (ONNX Runtime engine, below), so jobs run on CUDA.</p>
         ))}
       {!trt.on && !needParts && <p className="hint-text">Installed. App settings, Storage removes it.</p>}
+    </>
+  );
+}
+
+/**
+ * The background TensorRT build (electron/main/trtPrebuild.ts): what it is and why, the ranges built, a progress bar
+ * by network (weighted by the measured 4K build times; HD one share per network), the step, the elapsed time, and
+ * Stop / Build now. Jobs never build: until a range is built, its clips run on CUDA.
+ */
+function PrebuildBox({ trt }: { trt: TrtState }) {
+  const p = trt.prebuild;
+  // a 1 s tick for the elapsed clock, only while the build runs and the page is visible (rule 3)
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (p.status !== "running") return;
+    // lifetime: OK — cleared when the build stops or the box unmounts
+    // loop: HOT-PATH-OK — one re-render per second while the background build runs and the page is visible
+    const t = setInterval(() => document.visibilityState === "visible" && tick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [p.status]);
+  const step = prebuildStep(p.ranges);
+  const canStart = p.status !== "running" && p.status !== "done";
+  return (
+    <>
+      <p className="hint-text">
+        Jobs never wait on a TensorRT build: the app builds 4K and HD in the background, about 5 minutes for 4K (measured), and pauses while you key. It builds again only after a graphics driver,
+        TensorRT or model update. Until a size is built, its clips run on CUDA.
+      </p>
+      <ul className="check-list">
+        {/* loop: HOT-PATH-OK — two ranges per render */}
+        {p.ranges.map((r) => (
+          <li key={r.label} className="hint-text">
+            {r.label} ({r.width}×{r.height}):{" "}
+            {r.state === "done"
+              ? `built${r.range ? `, ${rangeText(r.range)}` : ""}${
+                  Object.keys(r.fallbacks).length
+                    ? ` (${Object.keys(r.fallbacks)
+                        .map((k) => PIECE_NAMES[k] ?? k)
+                        .join(", ")} on CUDA)`
+                    : ""
+                }`
+              : r.state === "building"
+                ? "building"
+                : r.state === "failed"
+                  ? `couldn't be built: ${r.error}`
+                  : "not built yet"}
+          </li>
+        ))}
+        {/* loop: HOT-PATH-OK — a few built ranges per render */}
+        {trt.built
+          .filter((k) => !p.ranges.some((r) => r.range === k || k.startsWith(`${trtSizeKey(r.width, r.height)}_t`)))
+          .map((k) => (
+            <li key={k} className="hint-text">
+              Also built: {rangeText(k)}
+            </li>
+          ))}
+      </ul>
+      {p.status === "running" && (
+        <>
+          <ProgressBar value={Math.round(p.fraction * 1000)} max={1000} />
+          <p className="hint-text">
+            {step ?? "Starting the engine"} · {Math.floor(p.fraction * 100)} % of 4K and HD · {p.startedAt ? `${duration((Date.now() - p.startedAt) / 1000)} elapsed` : ""}
+          </p>
+        </>
+      )}
+      {p.status === "paused" && <p className="hint-text">Paused while the queue runs; it goes on by itself when the queue stops.</p>}
+      {p.status === "blocked" && <p className="hint-text">Not started: {p.note}. It doesn&apos;t take the card from another program by itself; Build now starts it anyway.</p>}
+      {p.status === "stopped" && <p className="hint-text">Stopped. What was built is kept; Build now goes on from there.</p>}
+      {p.status === "error" && <p className="notice error">The background build stopped: {p.note}</p>}
+      <div className="file-pick">
+        {p.status === "running" && (
+          <button type="button" className="btn small" onClick={() => void window.ck.trtPrebuild("stop")}>
+            <X size={14} /> Stop
+          </button>
+        )}
+        {canStart && p.status !== "paused" && (
+          <button type="button" className="btn small" onClick={() => void window.ck.trtPrebuild("start")}>
+            <Download size={14} /> Build now
+          </button>
+        )}
+      </div>
     </>
   );
 }

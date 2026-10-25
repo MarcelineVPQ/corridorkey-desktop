@@ -14,8 +14,24 @@ import { effectivePath, findEngineFiles, findTrtBuilder, isInsideApp, modelSetVe
 import { addToPathList, APP_DIR, appDirs, engineBinName, isMac, isWin, ortLibrary, PLATFORM } from "./platform";
 import { HOMEBREW_DIRS, checkFfmpeg, ffmpegState, installFfmpeg, planFor, readOsRelease, wingetFfmpegDirs } from "./ffmpeg";
 import { PROGRESS_EVERY_MS } from "./updateFlow";
-import { MODELS_BYTES, RUNTIME_BYTES, TRT_BYTES, freeBytes, installNeeds, runInstall, runTrtInstall, systemSupport, trtNeeds, trtReady, trtSupported, useTensorrt, type InstallDeps } from "./install";
+import {
+  MODELS_BYTES,
+  RUNTIME_BYTES,
+  TRT_BYTES,
+  freeBytes,
+  installNeeds,
+  runInstall,
+  runTrtInstall,
+  systemSupport,
+  trtNeeds,
+  trtReady,
+  trtSupported,
+  tensorrtWhyNot,
+  useTensorrt,
+  type InstallDeps,
+} from "./install";
 import { folderBytes, pruneCache, removeStorage, storageItems, TRT_ENGINES_DIR } from "./storage";
+import { builtRanges, Prebuilder } from "./trtPrebuild";
 import { readDesktopPalette, watchDesktopPalette } from "./desktopTheme";
 import { Updater } from "./updater";
 import { holdAppImageMountUntilExit } from "./appImageQuit";
@@ -34,6 +50,7 @@ import {
   type MemoryEstimateResult,
   type OutputName,
   type TrtState,
+  OTHER_GPU_USER_MB,
 } from "../../src/shared/types";
 import { NOT_WHILE_BUSY } from "../../src/shared/texts";
 import type { DesktopPalette } from "../../src/ui/theme/palette";
@@ -126,7 +143,7 @@ function installIdle(): InstallState {
 }
 let install = installIdle();
 // the opt-in TensorRT parts: what is installed, for the setting's install box; progress while its install runs
-function trtParts(): Omit<TrtState, "status" | "step" | "done" | "total" | "error"> {
+function trtParts(): Omit<TrtState, "status" | "step" | "done" | "total" | "error" | "built" | "prebuild"> {
   const supported = trtSupported(PLATFORM);
   const need = trtNeeds(enginePlaces().data);
   const paths = enginePaths();
@@ -141,7 +158,7 @@ function trtParts(): Omit<TrtState, "status" | "step" | "done" | "total" | "erro
     fullBytes: TRT_BYTES,
   };
 }
-const trtIdle = (): TrtState => ({ ...trtParts(), status: "idle", step: null, done: 0, total: 0, error: null });
+const trtIdle = (): Omit<TrtState, "built" | "prebuild"> => ({ ...trtParts(), status: "idle", step: null, done: 0, total: 0, error: null });
 let trt = trtIdle();
 // one install at a time (the runtime and models, or TensorRT's parts): one Stop
 let installAbort: AbortController | null = null;
@@ -223,11 +240,48 @@ const queue = new Queue({
   },
   tempDirFor: (id) => join(cacheDir, "jobs", id),
   tensorrt: () => useTensorrt({ platform: PLATFORM, setting: settings.tensorrt, engine: runningKind, ready: trtReady(enginePaths().ort, enginePaths().models) }),
-  changed: () => scheduleSend(),
-  finished: (job) => void makeStills(job),
+  tensorrtWhyNot: () => tensorrtWhyNot({ platform: PLATFORM, setting: settings.tensorrt, engine: runningKind, ready: trtReady(enginePaths().ort, enginePaths().models) }),
+  changed: () => {
+    // the queue's end resumes a paused background TensorRT build
+    if (!queue.running) prebuild.queueStopped();
+    scheduleSend();
+  },
+  finished: (job) => {
+    void makeStills(job);
+    refreshTrtBuilt();
+  },
 });
 // the manual window picker's graphics-memory estimate (backlog row 41): a short-lived Rust engine, only while no queue runs
 const estimator = new Estimator({ makeEngine: rustEngineProcess });
+// the TensorRT ranges built for this card (read from the cache after a build, a job, a move or a removal; not per push)
+let trtBuilt: string[] = [];
+function refreshTrtBuilt(): void {
+  trtBuilt = trtSupported(PLATFORM) ? builtRanges(join(cacheDir, TRT_ENGINES_DIR)) : [];
+  prebuild.refresh();
+}
+// the background TensorRT build of the common ranges (trtPrebuild.ts): jobs never build; only while no queue runs
+const prebuild: Prebuilder = new Prebuilder({
+  makeEngine: rustEngineProcess,
+  changed: () => {
+    if (!prebuild.running) trtBuilt = builtRanges(join(cacheDir, TRT_ENGINES_DIR));
+    scheduleSend();
+  },
+  allowed: () =>
+    !queue.running &&
+    !cacheMoving &&
+    useTensorrt({ platform: PLATFORM, setting: settings.tensorrt, engine: chooseEngine(rustEngine, checkout), ready: trtReady(enginePaths().ort, enginePaths().models) }),
+  othersOnGpu: async () => {
+    try {
+      // loop: NOT-WORTH — a few compute processes, once per automatic start
+      return (await readGpu(new Set())).processes.filter((p) => p.usedMb >= OTHER_GPU_USER_MB).map((p) => p.name);
+    } catch {
+      // error: NOT-WORTH — no reading (nvidia-smi missing or stuck): nothing known to wait for
+      return [];
+    }
+  },
+  built: () => (trtSupported(PLATFORM) ? builtRanges(join(cacheDir, TRT_ENGINES_DIR)) : []),
+});
+refreshTrtBuilt();
 
 function state(): AppState {
   return {
@@ -247,7 +301,7 @@ function state(): AppState {
     enginePaths: enginePaths(),
     ffmpeg,
     install,
-    tensorrt: trt,
+    tensorrt: { ...trt, built: trtBuilt, prebuild: prebuild.state },
     storage,
     cache,
     cacheMissing,
@@ -482,6 +536,7 @@ async function pickCacheFolder(toDefault: boolean): Promise<void> {
   }
   // one engine at a time, and none while the cache moves (the estimate's engine is the only one that can run now)
   estimator.stop();
+  prebuild.stop();
   cacheMoving = move ? `Moving ${mbOrGbBytes(bytes)} to ${to}…` : `Starting fresh in ${to}…`;
   cacheError = null;
   measureStorage();
@@ -522,6 +577,7 @@ async function pickCacheFolder(toDefault: boolean): Promise<void> {
   } finally {
     cacheMoving = null;
     measureStorage();
+    refreshTrtBuilt();
     scheduleSend();
   }
 }
@@ -640,6 +696,8 @@ function registerIpc(): void {
     install = { ...installIdle(), ...(!isTrt && error ? { status: "error" as const, error } : {}) };
     trt = { ...trtIdle(), ...(isTrt && error ? { status: "error" as const, error } : {}) };
     recheckEngines();
+    // TensorRT's parts just arrived: build the common ranges in the background (the setting is on: the box was shown)
+    if (isTrt && !error) void prebuild.start(false);
     scheduleSend();
   });
   ipcMain.handle(IPC.setTensorrt, (_e, on: unknown) => {
@@ -647,7 +705,14 @@ function registerIpc(): void {
     settings = { ...settings, tensorrt: on === true };
     trt = { ...trt, ...trtParts() };
     persist();
+    // switched on with its parts there: the background build; switched off: it stops
+    if (settings.tensorrt) void prebuild.start(false);
+    else prebuild.stop();
     scheduleSend();
+  });
+  ipcMain.handle(IPC.trtPrebuild, (_e, action: unknown) => {
+    if (action === "start") void prebuild.start(true);
+    else if (action === "stop") prebuild.stop();
   });
   ipcMain.handle(IPC.stopInstall, () => installAbort?.abort());
   ipcMain.handle(IPC.measureStorage, () => {
@@ -699,10 +764,13 @@ function registerIpc(): void {
       detail: `This deletes ${what} (${(item.bytes / 1e9).toFixed(2)} GB). ${again}`,
     });
     if (r.response !== 0) return;
+    // the background TensorRT build writes into the cache folder: it ends first
+    prebuild.stop();
     removeStorage(item, enginePlaces().data, cacheDir);
     measureStorage();
     install = installIdle();
     trt = trtIdle();
+    refreshTrtBuilt();
     recheckEngines();
     scheduleSend();
   });
@@ -759,6 +827,8 @@ function registerIpc(): void {
     if (!chooseEngine(rustEngine, checkout) || !ffmpeg.ok || cacheMoving) return scheduleSend();
     // one engine at a time: an estimate still asking gives way to the queue
     estimator.stop();
+    // the queue has the card: the background TensorRT build pauses, and goes on when the queue stops
+    prebuild.pause();
     return queue.start();
   });
   ipcMain.handle(IPC.stopQueue, () => queue.stop());
@@ -883,6 +953,7 @@ app.whenReady().then(() => {
 app.on("before-quit", () => {
   queue.shutdown();
   estimator.stop();
+  prebuild.stop();
   stopPaletteWatch?.();
   updater.stop();
 });

@@ -1,6 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { parseApps, parseGpuLine, processName } from "../../electron/main/gpu";
+import { isOurs, parentPid, parseApps, parseGpuLine, processName } from "../../electron/main/gpu";
 import { checkCheckout } from "../../electron/main/settings";
+
+describe("the app's own GPU processes", () => {
+  it("counts the TensorRT builder the engine started as ours, not as another program", () => {
+    // /proc/<pid>/stat as Linux writes it: pid (comm) state ppid …; a name may hold spaces and parentheses
+    const stats: Record<number, string> = { 1961206: "1961206 (ck-trt-build) R 1958754 1958754 1909457 0 -1", 777: "777 (my (odd) app) S 1 777 777", 888: "" };
+    const stat = (pid: number) => stats[pid] ?? "";
+    expect(parentPid(stats[777])).toBe(1);
+    const engine = new Set([1958754]);
+    expect(isOurs(1958754, engine, stat)).toBe(true);
+    expect(isOurs(1961206, engine, stat)).toBe(true);
+    expect(isOurs(777, engine, stat)).toBe(false);
+    expect(isOurs(888, engine, stat)).toBe(false);
+    expect(isOurs(1961206, new Set(), stat)).toBe(false);
+  });
+});
 
 describe("nvidia-smi parsing", () => {
   it("reads the GPU line and the compute apps", () => {

@@ -44,6 +44,9 @@ pub struct JobConfig {
     pub writer: WriterConfig,
     /// opt-in TensorRT (docs/BACKLOG.md row 12); off by default
     pub tensorrt: bool,
+    /// a TensorRT job may build its range's engines (default); false: a range not built yet runs on CUDA, exactly as
+    /// a job without TensorRT (the app builds ranges in the background with `trt_build`, never inside a job)
+    pub tensorrt_build: bool,
     /// graphics memory this job may use (GB): caps the automatic window's budget and the providers' arenas;
     /// None = the free memory (the engine's CK_ENGINE_VRAM_BUDGET_GB, config.rs, is applied by Pipeline::run)
     pub vram_budget_gb: Option<f64>,
@@ -286,6 +289,7 @@ pub fn parse(req: &Value) -> Result<JobConfig, Error> {
         linear_contrast_pivot: num(o, "linear_contrast_pivot")?.unwrap_or(0.18),
         writer,
         tensorrt: boolean(o, "tensorrt", false),
+        tensorrt_build: boolean(o, "tensorrt_build", true),
         vram_budget_gb: match num(o, "vram_budget_gb")? {
             Some(v) if v > 0.0 => Some(v),
             Some(v) => return Err(Error::input(format!("vram_budget_gb must be above 0, got {v}"))),
@@ -378,6 +382,9 @@ mod tests {
         assert_eq!(parse(&req(json!({"vram_budget_gb": 12}))).unwrap().vram_budget_gb, Some(12.0));
         let c = parse(&req(json!({"outputs": ["fg", "checker", "alpha"], "tensorrt": true}))).unwrap();
         assert_eq!((c.outputs.join(","), c.tensorrt), ("alpha,checker,fg".to_string(), true));
+        // `tensorrt_build` (additive): absent = a job may build its range, as before
+        assert!(c.tensorrt_build);
+        assert!(!parse(&req(json!({"tensorrt": true, "tensorrt_build": false}))).unwrap().tensorrt_build);
     }
 
     #[test]

@@ -4,7 +4,7 @@
 import { readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { EngineReply } from "./engine";
-import type { EngineState, Job, JobOptions, OutputName, Stage } from "../../src/shared/types";
+import type { EngineState, Job, JobOptions, JobTech, OutputName, Stage } from "../../src/shared/types";
 import { missingInput } from "../../src/shared/tasks";
 import { discard, finalPath, PARTIAL_DIR as PARTIAL_NAME, prepare, promote } from "./partial";
 
@@ -30,6 +30,8 @@ export interface QueueDeps {
   finished(job: Job): void;
   // ask the running engine for TensorRT (asked per job: the Rust engine, the setting on, its parts installed)
   tensorrt?: () => boolean;
+  // why a job doesn't ask for TensorRT (install.ts tensorrtWhyNot), shown on its page
+  tensorrtWhyNot?: () => string | null;
   now?: () => number;
 }
 
@@ -70,7 +72,11 @@ export function engineOptions(o: JobOptions, kind: "video" | "frames", tensorrt 
     out.linear_contrast = o.linearContrast;
     out.linear_contrast_pivot = o.linearContrastPivot;
   }
-  if (tensorrt) out.tensorrt = true;
+  // a job never builds TensorRT engines: a range not built yet runs on CUDA while the app builds it in the background (trtPrebuild.ts)
+  if (tensorrt) {
+    out.tensorrt = true;
+    out.tensorrt_build = false;
+  }
   if (rust && o.outputFormat === "video") out.video_codec = o.videoCodec;
   return out;
 }
@@ -89,6 +95,35 @@ export function providerText(r: EngineReply): string | null {
   if (r.tensorrt_requested === true && typeof r.range === "string")
     return r.cache === "build" ? `TensorRT: building the engines for this resolution (${r.range}), once.` : `TensorRT: engines for this resolution (${r.range}) reused.`;
   return null;
+}
+
+const NO_TECH: JobTech = { provider: null, precision: null, tensorrtRequested: false, fallbackReason: null, fallbacks: {}, range: null, cache: null, notAsked: null };
+
+/**
+ * What ran a job, from the engine's `provider` replies, each field as the engine sent it. A TensorRT job gets two:
+ * the first at its start (provider, precision, range, cache), the second once its networks are loaded (the real
+ * provider and the networks that fell back to CUDA); the second keeps what only the first said.
+ */
+export function techFrom(r: EngineReply, prev: JobTech | null | undefined): JobTech {
+  const p = prev ?? NO_TECH;
+  const str = (v: unknown, was: string | null) => (typeof v === "string" ? v : was);
+  let fallbacks = p.fallbacks;
+  if (r.fallbacks && typeof r.fallbacks === "object") {
+    fallbacks = {};
+    // loop: NOT-WORTH — at most five networks, once per job
+    for (const [k, why] of Object.entries(r.fallbacks as Record<string, unknown>)) fallbacks[k] = String(why);
+  }
+  const requested = typeof r.tensorrt_requested === "boolean" ? r.tensorrt_requested : p.tensorrtRequested;
+  return {
+    provider: str(r.provider, p.provider),
+    precision: str(r.precision, p.precision),
+    tensorrtRequested: requested,
+    fallbackReason: str(r.fallback_reason, p.fallbackReason),
+    fallbacks,
+    range: str(r.range, p.range),
+    cache: str(r.cache, p.cache),
+    notAsked: requested ? null : p.notAsked,
+  };
 }
 
 const STAGES = new Set<Stage>(["load", "optimize", "probe", "rvm", "foundations", "keying"]);
@@ -139,6 +174,7 @@ export class Queue {
       framesTotal: null,
       framesPerSecond: null,
       memory: null,
+      tech: null,
       startedAt: null,
       finishedAt: null,
       outputs: [],
@@ -273,13 +309,16 @@ export class Queue {
       this.next();
       return;
     }
+    const trt = this.deps.tensorrt?.() ?? false;
+    // what ran it comes from the engine's provider reply; the app's own part is why it didn't ask for TensorRT
+    job.tech = { ...NO_TECH, notAsked: trt ? null : (this.deps.tensorrtWhyNot?.() ?? null) };
     this.proc!.send({
       cmd: "run",
       id: job.id,
       input: job.clip.path,
       output_dir: staging,
       temp_dir: this.deps.tempDirFor(job.id),
-      options: engineOptions(job.options, job.clip.kind, this.deps.tensorrt?.() ?? false, this.engine.pong?.engine === "onnxruntime"),
+      options: engineOptions(job.options, job.clip.kind, trt, this.engine.pong?.engine === "onnxruntime"),
     });
   }
 
@@ -288,6 +327,9 @@ export class Queue {
     if (!job || r.id !== job.id) return;
     switch (r.type) {
       case "progress":
+        // low-memory mode loads stage 2 after the last stage-1 window (pipeline/keying.rs stage2_pass): that load is
+        // part of keying, whose frames go on, so the page stays on Keying with its window count
+        if (r.stage === "load" && job.stage === "keying") break;
         if (STAGES.has(r.stage as Stage)) job.stage = r.stage as Stage;
         job.stageDetail = typeof r.detail === "string" ? r.detail : null;
         break;
@@ -317,10 +359,12 @@ export class Queue {
         break;
       }
       case "provider": {
+        job.tech = techFrom(r, job.tech);
         const text = providerText(r);
-        if (!text) return;
-        job.log.push(text);
-        if (job.log.length > LOG_LINES) job.log.splice(0, job.log.length - LOG_LINES);
+        if (text) {
+          job.log.push(text);
+          if (job.log.length > LOG_LINES) job.log.splice(0, job.log.length - LOG_LINES);
+        }
         break;
       }
       case "log":

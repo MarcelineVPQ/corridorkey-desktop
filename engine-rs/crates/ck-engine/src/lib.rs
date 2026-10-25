@@ -28,6 +28,30 @@ pub trait Backend {
     fn vram_budget_gb(&self) -> Option<f64> {
         None
     }
+    /// The `trt_build` command: the TensorRT engines a clip of this size would use, built ahead of any job.
+    fn trt_build(&mut self, _width: usize, _height: usize, _frames: usize, _vram_budget_gb: Option<f64>, _sink: &mut dyn Sink) -> Result<Value, Error> {
+        Err(Error::bad_request("this engine has no TensorRT".into()))
+    }
+}
+
+/// The `trt_build` command's request checks, then the build (its progress and logs carry the request's id).
+fn trt_build_job<B: Backend, W: Write>(backend: &mut B, req: &Value, id: &str, r: &mut Replies<W>) {
+    let size = |k: &str| req.get(k).and_then(|v| v.as_u64()).filter(|v| *v > 0 && *v <= 16384).map(|v| v as usize);
+    let (Some(w), Some(h)) = (size("width"), size("height")) else {
+        r.send(json!({"type": "error", "id": id, "code": "bad-request", "message": "trt_build needs width and height (1 to 16384)"}));
+        return;
+    };
+    // a long clip by default: the window a clip shorter than it would pick may differ (the `frames` it has)
+    let frames = req.get("frames").and_then(|v| v.as_u64()).filter(|v| *v > 0).map(|v| v as usize).unwrap_or(1000);
+    let cap = req.get("vram_budget_gb").and_then(|v| v.as_f64()).filter(|g| g.is_finite() && *g > 0.0);
+    r.job = Some(id.to_string());
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| backend.trt_build(w, h, frames, cap, r)))
+        .unwrap_or_else(|p| Err(Error::engine(format!("internal error: {}", ck_core::panic_message(&*p)))));
+    match res {
+        Ok(v) => r.send(v),
+        Err(e) => r.send(json!({"type": "error", "code": e.code.as_str(), "message": e.message})),
+    }
+    r.job = None;
 }
 
 /// The `estimate` command (backlog row 41): the peak graphics memory per window for a clip, before any job.
@@ -229,6 +253,11 @@ pub fn serve<B: Backend, R: BufRead + Send + 'static, W: Write>(backend: &mut B,
                 }
                 r.send(reply);
             }
+            // build the TensorRT engines for a size ahead of any job (the app's background build); between jobs
+            "trt_build" => match str_field(&req, "id") {
+                Some(bid) => trt_build_job(backend, &req, &bid, &mut r),
+                None => r.send(json!({"type": "error", "id": id, "code": "bad-request", "message": "trt_build needs an id"})),
+            },
             "cancel" => match str_field(&req, "id") {
                 Some(jid) => {
                     pending_cancel.insert(jid);

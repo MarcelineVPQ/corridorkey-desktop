@@ -14,6 +14,20 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 
+#[test]
+fn a_job_never_builds_tensorrt_when_told_not_to() {
+    let range = |built| TrtRange {
+        bucket: crate::tensorrt::bucket_for(2176, 4096, 8, true).unwrap(),
+        card_dir: PathBuf::from("/c"),
+        dir: PathBuf::from("/c/r"),
+        built,
+    };
+    // built: used either way; not built: built by the job only when it may build (the app's jobs may not)
+    assert!(trt_job_may_use(range(true), false).is_ok());
+    assert!(trt_job_may_use(range(false), true).is_ok_and(|r| !r.built));
+    assert_eq!(trt_job_may_use(range(false), false).err().as_deref(), Some(TRT_NOT_BUILT));
+}
+
 /// A scratch folder, removed with everything in it when dropped.
 struct Dir(PathBuf);
 

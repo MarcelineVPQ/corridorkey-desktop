@@ -209,6 +209,21 @@ pub(crate) struct BuildLock {
     path: PathBuf,
 }
 
+/// Whether a build lock's holder (the pid it holds) has ended: false when that can't be told (no pid, or a system
+/// without /proc), so only the lock's age decides there.
+pub(crate) fn lock_holder_gone(text: &str, alive: impl Fn(u32) -> Option<bool>) -> bool {
+    text.trim().parse::<u32>().ok().and_then(alive).is_some_and(|a| !a)
+}
+
+/// Whether a process runs: Linux reads /proc; elsewhere None (unknown).
+fn pid_alive(pid: u32) -> Option<bool> {
+    if cfg!(target_os = "linux") {
+        Some(Path::new("/proc").join(pid.to_string()).exists())
+    } else {
+        None
+    }
+}
+
 /// How often a waiting engine looks at another engine's build lock.
 const LOCK_POLL: std::time::Duration = std::time::Duration::from_millis(500);
 
@@ -239,7 +254,9 @@ impl BuildLock {
                 Err(e) => return Err(e),
             }
             let age = std::fs::metadata(&path).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok());
-            if age.is_some_and(|a| a > stale_after) || std::time::Instant::now() >= end {
+            // the app ends its background build by killing that engine: its lock then names a process that is gone
+            let gone = std::fs::read_to_string(&path).is_ok_and(|t| lock_holder_gone(&t, pid_alive));
+            if gone || age.is_some_and(|a| a > stale_after) || std::time::Instant::now() >= end {
                 // gone stale, or past the deadline: take it over (a removal that loses a race just loops again)
                 let _ = std::fs::remove_file(&path);
                 continue;
@@ -416,6 +433,16 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_killed_builders_lock_is_taken_over() {
+        // the app kills its background build's engine (pause, cancel): the lock it left names a pid that is gone
+        assert!(lock_holder_gone("4242\n", |_| Some(false)));
+        assert!(!lock_holder_gone("4242\n", |_| Some(true)));
+        // unknown (no /proc) or no pid: only the lock's age decides
+        assert!(!lock_holder_gone("4242\n", |_| None));
+        assert!(!lock_holder_gone("", |_| Some(false)));
     }
 
     #[test]

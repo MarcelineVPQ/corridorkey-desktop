@@ -56,6 +56,32 @@ function cmdline(pid: number): string {
   }
 }
 
+/** The parent pid in `/proc/<pid>/stat` (its 4th field, after the name in parentheses, which may hold spaces). */
+export function parentPid(stat: string): number | null {
+  const m = /^\)\s+\S+\s+(\d+)/.exec(stat.slice(stat.lastIndexOf(")")));
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * Whether a compute process is the app's own: the engine, or a child it started (the TensorRT engine builder,
+ * ck-trt-build, holds the card while it builds; Linux reads the parent from /proc, elsewhere the engine alone counts).
+ */
+export function isOurs(pid: number, ourPids: Set<number>, stat: (pid: number) => string = procStat): boolean {
+  if (ourPids.has(pid)) return true;
+  const parent = parentPid(stat(pid));
+  return parent !== null && ourPids.has(parent);
+}
+
+function procStat(pid: number): string {
+  try {
+    // loop: HOT-PATH-OK — one /proc/<pid>/stat read per compute process (a few), every 2 s only while a job runs and the window is shown
+    return readFileSync(`/proc/${pid}/stat`, "utf8");
+  } catch {
+    // error: NOT-WORTH — no /proc (Windows), or the process ended: not counted as ours
+    return "";
+  }
+}
+
 export async function readGpu(ourPids: Set<number>): Promise<GpuInfo> {
   const [gpu, apps] = await Promise.all([
     // loop: HOT-PATH-OK — nvidia-smi every 2 s while a job runs and the window is shown; GPU_READ_TIMEOUT_MS 5 s and one read at a time (this pass)
@@ -67,6 +93,6 @@ export async function readGpu(ourPids: Set<number>): Promise<GpuInfo> {
   if (!head) throw new Error("nvidia-smi gave no GPU line");
   // loop: HOT-PATH-OK — a few compute processes, every GPU_POLL_MS only while a job runs and the window is shown
   // the full command line where /proc has it (Linux: Sonata runs as python, its script names it), else nvidia-smi's program name
-  const processes: GpuProcess[] = parseApps(apps.stdout).map(({ pid, exe, usedMb }) => ({ pid, usedMb, name: processName(cmdline(pid) || exe), ours: ourPids.has(pid) }));
+  const processes: GpuProcess[] = parseApps(apps.stdout).map(({ pid, exe, usedMb }) => ({ pid, usedMb, name: processName(cmdline(pid) || exe), ours: isOurs(pid, ourPids) }));
   return { ...head, processes, at: Date.now() };
 }

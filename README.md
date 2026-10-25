@@ -46,9 +46,11 @@ Status: 1.0 is almost ready, for Linux, Windows and macOS (Apple Silicon).
 - Optional, Linux: **TensorRT** (Engine settings, TensorRT; off by default) for about 2× the original's speed at HD
   and about 3.7-4.2× at 4K, with the same mattes (Speed, 0.0.6-dev and 0.0.7-dev). Switching it on offers its own download: NVIDIA's TensorRT 10.16
   libraries (3.7 GB, from pypi.nvidia.com) and the TensorRT models (3.1 GB, from this repository's releases; C-RADIO's
-  weights are copied from the models you already have), 6.9 GB in all, 7.5 GB on disk. The first job at each
-  resolution optimizes for it once (about 4.5 minutes for the five networks on an RTX 5080, about 5 at 4K; about
-  half that once TensorRT's timing cache is warm). 4K (DCI 4K and UHD, up to 2176×4096) runs on TensorRT too, at
+  weights are copied from the models you already have), 6.9 GB in all, 7.5 GB on disk. Each
+  resolution range is optimized once (about 4.5 minutes for the five networks on an RTX 5080, about 5 at 4K; about
+  half that once TensorRT's timing cache is warm): the app builds 4K and HD in the background when TensorRT is
+  switched on, with a progress bar in Engine settings, and pauses while you key. Jobs never wait on a build: a clip
+  whose range isn't built yet runs on CUDA, and its page says so. 4K (DCI 4K and UHD, up to 2176×4096) runs on TensorRT too, at
   the 8/4 window on 16 GB cards; open gate and larger frames stay on CUDA (Speed, 0.0.7-dev). Best on 16 GB cards: where a network can't be built (stage 1 at 80-frame windows), that network runs on CUDA and
   the job's log says so. Windows needs its own TensorRT builder (a later version); macOS has no TensorRT.
 

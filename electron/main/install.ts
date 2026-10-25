@@ -516,6 +516,17 @@ export function useTensorrt(s: { platform: NodeJS.Platform; setting: boolean; en
   return trtSupported(s.platform) && s.setting && s.engine === "rust" && s.ready;
 }
 
+/**
+ * Why a job doesn't ask for TensorRT, in the words the job page shows (useTensorrt's conditions, in order). Null when
+ * it asks, and where TensorRT doesn't exist in this version (Windows, macOS): nothing to decide there.
+ */
+export function tensorrtWhyNot(s: { platform: NodeJS.Platform; setting: boolean; engine: EngineKind | null; ready: boolean }): string | null {
+  if (!trtSupported(s.platform) || useTensorrt(s)) return null;
+  if (!s.setting) return "TensorRT is off (Engine settings)";
+  if (s.engine !== "rust") return "TensorRT runs on the ONNX Runtime engine only, not the PyTorch engine";
+  return "TensorRT's parts weren't installed when the job started (Engine settings, TensorRT)";
+}
+
 /** models.json as the engine reads it: {"<precision or tensorrt-…>": {"<network>": "<file>"}}. */
 type ModelsJson = Record<string, Record<string, string>>;
 // loop: NOT-WORTH — reads one small models.json per install / removal

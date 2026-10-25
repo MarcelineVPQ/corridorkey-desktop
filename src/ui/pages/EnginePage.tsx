@@ -43,9 +43,15 @@ export function EnginePage(props: {
       ? downloadingStatus(installPct(trt))
       : !trt.on
         ? "off"
-        : trt.ready
-          ? "on"
-          : "on · not installed yet";
+        : !trt.ready
+          ? "on · not installed yet"
+          : trt.prebuild.status === "running"
+            ? `on · building ${Math.floor(trt.prebuild.fraction * 100)} %`
+            : trt.prebuild.status === "paused"
+              ? "on · build paused while keying"
+              : trt.prebuild.status === "done"
+                ? "on · built for 4K and HD"
+                : "on · not built yet: clips run on CUDA";
   const checks = (c: { ok: boolean; problems: string[] }, okText: string) =>
     c.ok ? (
       <div className="check-line ok">

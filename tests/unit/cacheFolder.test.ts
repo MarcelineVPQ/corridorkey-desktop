@@ -26,7 +26,7 @@ describe("cache folder", () => {
     const dir = join(fresh(), "corridorkey-desktop");
     put(join(dir, "media", "a.jpg"), "still a");
     put(join(dir, "media", "b.jpg"), "still b!");
-    put(join(dir, "tensorrt", "1280x720-1920x1088", "stage1.engine"), "engine bytes");
+    put(join(dir, "tensorrt", "rtx-5080__fp16", "h1024-1280_w1792-2176_t1-48_f1-4", "stage1.engine"), "engine bytes");
     return dir;
   };
   const tree = (dir: string): string[] =>
@@ -67,8 +67,8 @@ describe("cache folder", () => {
     const to = join(place(), "corridorkey-desktop");
     const r = await moveCache(from, to, false, true);
     expect(r).toMatchObject({ ok: true, message: null, files: 3, bytes: "still a".length + "still b!".length + "engine bytes".length });
-    expect(tree(to)).toEqual([CACHE_MARKER, "media/a.jpg", "media/b.jpg", "tensorrt/1280x720-1920x1088/stage1.engine"].sort());
-    expect(readFileSync(join(to, "tensorrt", "1280x720-1920x1088", "stage1.engine"), "utf8")).toBe("engine bytes");
+    expect(tree(to)).toEqual([CACHE_MARKER, "media/a.jpg", "media/b.jpg", "tensorrt/rtx-5080__fp16/h1024-1280_w1792-2176_t1-48_f1-4/stage1.engine"].sort());
+    expect(readFileSync(join(to, "tensorrt", "rtx-5080__fp16", "h1024-1280_w1792-2176_t1-48_f1-4", "stage1.engine"), "utf8")).toBe("engine bytes");
     // the system's folder stays (empty); its moved parts are gone
     expect(existsSync(from)).toBe(true);
     expect(tree(from)).toEqual([]);
@@ -99,7 +99,7 @@ describe("cache folder", () => {
     const r = await moveCache(from, to, false, true);
     expect(r.ok).toBe(false);
     expect(r.message).toMatch(/Nothing was moved: .*link\.jpg/);
-    expect(tree(from)).toEqual(["media/a.jpg", "media/b.jpg", "tensorrt/1280x720-1920x1088/stage1.engine"]);
+    expect(tree(from)).toEqual(["media/a.jpg", "media/b.jpg", "tensorrt/rtx-5080__fp16/h1024-1280_w1792-2176_t1-48_f1-4/stage1.engine"]);
     expect(existsSync(to)).toBe(false);
 
     // a file already in the target (one of our folders): never overwritten; the copies made before it are taken back
@@ -109,7 +109,7 @@ describe("cache folder", () => {
     put(join(ours, "media", "b.jpg"), "theirs, older");
     const r2 = await moveCache(from2, ours, false, true);
     expect(r2.ok).toBe(false);
-    expect(tree(from2)).toEqual(["media/a.jpg", "media/b.jpg", "tensorrt/1280x720-1920x1088/stage1.engine"]);
+    expect(tree(from2)).toEqual(["media/a.jpg", "media/b.jpg", "tensorrt/rtx-5080__fp16/h1024-1280_w1792-2176_t1-48_f1-4/stage1.engine"]);
     expect(tree(ours)).toEqual([CACHE_MARKER, "media/b.jpg"].sort());
     expect(readFileSync(join(ours, "media", "b.jpg"), "utf8")).toBe("theirs, older");
   });
@@ -124,7 +124,7 @@ describe("cache folder", () => {
     expect(r.ok).toBe(false);
     expect(r.message).toMatch(/drive connected/);
     expect(existsSync(gone)).toBe(false);
-    expect(tree(from)).toEqual(["media/a.jpg", "media/b.jpg", "tensorrt/1280x720-1920x1088/stage1.engine"]);
+    expect(tree(from)).toEqual(["media/a.jpg", "media/b.jpg", "tensorrt/rtx-5080__fp16/h1024-1280_w1792-2176_t1-48_f1-4/stage1.engine"]);
     // a location that is there: only its own folder is made
     const there = place();
     await prepareTarget(join(there, "corridorkey-desktop"), false);
@@ -170,7 +170,7 @@ describe("cache folder", () => {
       { name: "shot02", bytes: 0 },
     ]);
     expect(info.otherBytes).toBe("still b!".length);
-    expect(info.trtRanges).toEqual([{ range: "1280x720-1920x1088", bytes: "engine bytes".length }]);
+    expect(info.trtRanges).toEqual([{ range: "h1024-1280_w1792-2176_t1-48_f1-4", bytes: "engine bytes".length }]);
     expect(info.bytes).toBe("still a".length + "still b!".length + "engine bytes".length + 5);
     expect(info.isDefault).toBe(false);
   });

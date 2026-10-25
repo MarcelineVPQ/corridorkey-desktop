@@ -54,8 +54,21 @@ gets the same signal.
 → {"cmd":"cancel","id":"j2"}
 → {"cmd":"colorspaces","id":"c1","config":"ocio://studio-config-latest"}
 → {"cmd":"estimate","id":"e1","input":"/clips/04_5h","windows":[[8,4,true],[16,8,true]]}
+→ {"cmd":"trt_build","id":"b1","width":4096,"height":2160}
 → {"cmd":"quit"}
 ```
+
+`trt_build` (Rust engine, additive, 2026-10-25): build the TensorRT engines a clip of `width` × `height` would use,
+ahead of any job (the app's background build, so a job never waits on one). `frames` (default 1000, a long clip) and
+`vram_budget_gb` (as the run option) as a run takes them. The engine pads the size as a run does, picks the window a
+TensorRT job of that size picks (the automatic window in low-VRAM mode, against the free memory it reads now), and
+builds every network of that range not built yet with the same builder a job uses (`progress` replies, stage
+`optimize`, with `piece`; `log` lines). Then `{"type":"trt_built","id":"b1","width":4096,"height":2160,
+"range":"h1792-2176_w3584-4096_t1-8_f1-4","hann_chunk":8,"hann_stride":4,"reused":false,"built_s":{"stage1":139.2,…},
+"fallbacks":{}}` (`reused`: everything was built before; `fallbacks`: networks that couldn't be built, which run on
+CUDA). Without the graphics card and ONNX Runtime's TensorRT provider, or for a size outside the TensorRT ranges, a
+`bad-request` that says why. Answered between jobs; the app ends it by killing the engine (the builder dies with it,
+and a half-built network is built again next time). The PyTorch engine answers `unknown cmd`.
 
 `colorspaces` (Rust engine, additive): the colour spaces an OpenColorIO config offers, for the app's menus. `config`
 as `color_config` (absent = `$OCIO`, else the built-in ACES studio config); `id` optional, echoed. Answered at once
@@ -92,6 +105,7 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
 | `low_vram` | bool | staged low-memory mode |
 | `vram_budget_gb` | number | cap on the graphics memory this job may use (the automatic window is chosen within it; the engine refuses to go past it). Absent = the free memory |
 | `tensorrt` | bool | Rust engine: run on TensorRT (opt-in, false). Engines are built once per resolution range and cached; a network TensorRT can't build runs on CUDA, and the `provider` reply says so |
+| `tensorrt_build` | bool | Rust engine (additive, 2026-10-25): with `tensorrt`, whether the job may build its range's engines (true, absent). false: a range not built yet runs exactly as a job without TensorRT (CUDA's own automatic window too), with `fallback_reason` "TensorRT for this resolution range isn't built yet" and a `log` line; the app sends false and builds ranges with `trt_build` |
 | `outputs` | list | any of `alpha fg checker cutout` (`alpha fg`) |
 | `output_format` | `video` \| `exr` | `video` |
 | `exr_dtype` | `half` \| `float` | `half` |
@@ -145,7 +159,9 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
 ```
 
 - `progress.p` is the stage's own fraction when the stage reports one (stage-1
-  windows), otherwise absent. The app never invents a fraction.
+  windows), otherwise absent. The app never invents a fraction. An `optimize` progress (Rust engine, additive)
+  names the network being built in `piece` (`cradio`, `moge`, `rvm`, `stage1`, `stage2`, built in that order).
+  In low-VRAM mode a `load` comes after the last stage-1 window (stage 2 loading); the app keeps showing keying.
 - Video cutout (Rust engine, backlog row 26): no `video_codec` carries alpha, so the video cutout is three channels,
   despilled colour premultiplied in the file's own coding (sRGB-coded, or linear with `cutout_linear`, × alpha), and
   its alpha is the `alpha` output: a video job with `cutout` always writes `alpha` too (added when not asked for, a
