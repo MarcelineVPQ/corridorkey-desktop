@@ -317,6 +317,7 @@ impl FakeFrames {
             num_frames: self.n,
             exr_linear: false,
             video_bits: 8,
+            deep_input: false,
             color_in: None,
         }
     }

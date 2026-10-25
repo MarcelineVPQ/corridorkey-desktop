@@ -39,9 +39,11 @@ pub struct ClipMeta {
     pub num_frames: usize,
     /// frame folders of scene-linear EXRs (frame_dir_linear)
     pub exr_linear: bool,
-    /// a video source's bits per sample (8 for frame folders and 8-bit video): above 8, frames are decoded at
-    /// 16 bits so 10/12-bit ProRes 4444, DNxHR and HEVC reach the model at full precision (decode.rs)
+    /// a video source's bits per sample (8 for frame folders and 8-bit video), as probed
     pub video_bits: u32,
+    /// the job's `input_bit_depth` 16 (backlog row 27): a video above 8 bits is decoded at 16 bits and 16-bit PNG
+    /// read at full depth. false (the default) = CorridorKey 2.0's own reader: 8 bits, as cv2 reads them (decode.rs)
+    pub deep_input: bool,
     /// the clip's colour space -> the model's linear Rec.709 (ocio.rs; backlog row 29). None: read as CorridorKey
     /// 2.0 reads it (display-coded sRGB, or scene-linear EXR with `exr_linear`)
     pub color_in: Option<crate::ocio::XformRef>,
@@ -67,8 +69,14 @@ impl ClipMeta {
             num_frames,
             exr_linear,
             video_bits: 8,
+            deep_input: false,
             color_in: None,
         }
+    }
+
+    /// The video is decoded at 16 bits: asked for (`deep_input`) and a source above 8 bits.
+    pub fn decode_deep(&self) -> bool {
+        self.deep_input && self.video_bits > 8
     }
 
     /// The networks run below (or above) the native size: frames and outputs are resized.

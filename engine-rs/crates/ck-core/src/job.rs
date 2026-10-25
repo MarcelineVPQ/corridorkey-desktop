@@ -56,6 +56,10 @@ pub struct JobConfig {
     pub color_config: Option<String>,
     pub input_colorspace: Option<String>,
     pub output_colorspace: Option<String>,
+    /// `input_bit_depth` (backlog row 27): 8 (absent) = CorridorKey 2.0's own reader exactly (cv2: video through
+    /// VideoCapture at 8 bits, 16-bit PNG reduced to its high byte); 16 = video above 8 bits decoded at 16 bits and
+    /// 16-bit PNG at full depth (differs from CorridorKey 2.0). EXR is float either way
+    pub input_bits: u32,
 }
 
 fn num(o: &serde_json::Map<String, Value>, k: &str) -> Result<Option<f64>, Error> {
@@ -300,6 +304,11 @@ pub fn parse(req: &Value) -> Result<JobConfig, Error> {
         color_config: string(o, "color_config").filter(|s| !s.trim().is_empty()),
         input_colorspace: string(o, "input_colorspace").filter(|s| !s.trim().is_empty()),
         output_colorspace: string(o, "output_colorspace").filter(|s| !s.trim().is_empty()),
+        input_bits: match string(o, "input_bit_depth").as_deref().map(str::trim) {
+            None | Some("8") => 8,
+            Some("16") => 16,
+            Some(s) => return Err(Error::bad_request(format!("input_bit_depth must be \"8\" or \"16\", got {s}"))),
+        },
     })
 }
 
@@ -411,6 +420,18 @@ mod tests {
         }
         // an EXR job doesn't use them
         assert!(parse(&req(json!({"output_format": "exr", "preset": "warp"}))).is_ok());
+    }
+
+    #[test]
+    fn input_bit_depth_defaults_to_corridorkeys_8_bits() {
+        assert_eq!(parse(&req(json!({}))).unwrap().input_bits, 8);
+        assert_eq!(parse(&req(json!({"input_bit_depth": "8"}))).unwrap().input_bits, 8);
+        assert_eq!(parse(&req(json!({"input_bit_depth": "16"}))).unwrap().input_bits, 16);
+        assert_eq!(parse(&req(json!({"input_bit_depth": 16}))).unwrap().input_bits, 16);
+        // loop: NOT-WORTH — a test's few options
+        for o in [json!({"input_bit_depth": "12"}), json!({"input_bit_depth": 10}), json!({"input_bit_depth": "deep"})] {
+            assert_eq!(parse(&req(o.clone())).unwrap_err().code.as_str(), "bad-request", "{o}");
+        }
     }
 
     #[test]

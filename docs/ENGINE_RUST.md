@@ -180,6 +180,14 @@ Ported math against the Python functions' own outputs (`cargo test -p ck-core --
 | render: EXR float (relative) | ≤ 7.5e-9 |
 | stills: 8- and 16-bit PNG, JPEG (libjpeg-turbo), 16-bit hint | 0 |
 | video decode vs cv2 4.11 (ProRes 4444 plate, BT.709-tagged and untagged H.264, 10-bit 4:4:4) | 0 |
+| default input reading vs CorridorKey 2.0's reader, bytes (12-bit ProRes 4444, 10-bit ProRes 422 HQ, 16-bit PNG RGB / RGBA / gray; `default_reading_is_corridorkey_byte_identical`, fixtures from `tools/gen_input_fixtures.py`) | 0 (identical bytes) |
+
+Input reading (2026-10-25): by default the engine reads every input as CorridorKey 2.0's video_io does, 8 bits
+through OpenCV's conversion (video at any depth, 16-bit PNG by its high byte). `input_bit_depth: "16"`
+(ENGINE_PROTOCOL.md) keeps a deep source's bits instead (backlog row 27), on purpose different from the original.
+The 8-bit video read asks ffmpeg for `bgr24`, as OpenCV asks swscale: with `rgb24` (before 2026-10-25) swscale's
+other output writer rounded 10/12-bit 4:2:2 and 4:2:0 sources differently, by up to 4 levels on more than half the
+samples (8-bit sources and 4:4:4 were identical either way).
 
 End to end, tiny clip (320×200, 8 frames, window 4/2), against PyTorch fp32 on the CPU (the ONNX spike's
 `run_parity.py torch`); fg compared after the same float16 rounding the reference was stored with:

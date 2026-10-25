@@ -78,6 +78,8 @@ export function engineOptions(o: JobOptions, kind: "video" | "frames", tensorrt 
     out.tensorrt_build = false;
   }
   if (rust && o.outputFormat === "video") out.video_codec = o.videoCodec;
+  // deep input (row 27): the Rust engine only, and only when asked; absent = CorridorKey 2.0's own 8-bit read
+  if (rust && o.deepInput) out.input_bit_depth = "16";
   return out;
 }
 

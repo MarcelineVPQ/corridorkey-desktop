@@ -6,7 +6,9 @@
 #
 #   --old-engine  an engine built before deep input (commit 5a89777^): it decodes all video at 8 bits
 #                 (git worktree add /tmp/ck-old 5a89777^ && (cd /tmp/ck-old && tools/build_engine.sh))
-#   --new-engine  an engine with deep input (5a89777 or later; tools/build_engine.sh)
+#   --new-engine  an engine with deep input (5a89777 or later; tools/build_engine.sh). Since 2026-10-25 deep input is
+#                 opt-in (`input_bit_depth` 16; the default reads as CorridorKey 2.0 does, at 8 bits): the new engine's
+#                 runs here ask for it. A current engine also serves as --old-engine (its default is the 8-bit read)
 #   --plate       a scene-linear EXR sequence (default ~/Videos/corridorkey-tests/4k/04_5d, the Tears of Steel plate)
 #   --out         the work folder (default ~/.cache/claude-scratch/bit-depth-bench; about 45 GB at 4K, 120 frames)
 #
@@ -79,16 +81,18 @@ rm -rf "$OUT/png_src"
 echo "== keying ($(date +%T))"
 if pgrep -fai 'mount_sonata|Sonata.AppImage' > /dev/null; then die "Sonata is running: no GPU work while it plays"; fi
 exec 9> "$HOME/.cache/claude-scratch/gpu.lock"; flock 9
-key() { # engine run-name input
-  cap 16 env NODE_OPTIONS=--max-old-space-size=2048 node "$here/tools/engine_bench.mjs" rust --bin "$1" --device cuda \
-    --models "$MODELS" --ort "$ORT" --env LD_LIBRARY_PATH="$LIBS" --option output_format=\"exr\" --out "$OUT/runs/$2" "$3" \
-    > "$OUT/runs-$2.log" 2>&1 || die "$2: engine_bench failed (see $OUT/runs-$2.log)"
-  [ -d "$OUT/runs/$2/out/plate" ] || die "$2: no outputs"
+key() { # engine run-name input [engine_bench options...]
+  local bin="$1" run="$2" input="$3"; shift 3
+  cap 16 env NODE_OPTIONS=--max-old-space-size=2048 node "$here/tools/engine_bench.mjs" rust --bin "$bin" --device cuda \
+    --models "$MODELS" --ort "$ORT" --env LD_LIBRARY_PATH="$LIBS" --option output_format=\"exr\" "$@" --out "$OUT/runs/$run" "$input" \
+    > "$OUT/runs-$run.log" 2>&1 || die "$run: engine_bench failed (see $OUT/runs-$run.log)"
+  [ -d "$OUT/runs/$run/out/plate" ] || die "$run: no outputs"
 }
+DEEP=(--option input_bit_depth=\"16\")
 # loop: SERIAL-REQUIRED — one GPU job at a time
 for v in prores hevc; do
   f="$(ls "$OUT/in/$v"/plate.*)"
-  key "$OLD" "${v}8" "$f"; key "$NEW" "${v}16" "$f"; key "$NEW" "${v}ref" "$OUT/in/${v}_ref/plate"
+  key "$OLD" "${v}8" "$f"; key "$NEW" "${v}16" "$f" "${DEEP[@]}"; key "$NEW" "${v}ref" "$OUT/in/${v}_ref/plate" "${DEEP[@]}"
 done
 exec 9>&-
 

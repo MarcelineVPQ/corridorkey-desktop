@@ -643,7 +643,7 @@ mod tests {
         let p = dir.join("f.exr");
         // BGR data: blue 0.25, green 0.5, red 2.0 (HDR survives)
         write_exr(&p, 2, 1, 3, &[0.25, 0.5, 2.0, 0.25, 0.5, 2.0], ExrType::Float).unwrap();
-        let img = crate::decode::read_image_rgb(&p).unwrap();
+        let img = crate::decode::read_image_rgb(&p, false).unwrap();
         assert_eq!(img.data, vec![2.0, 2.0, 0.5, 0.5, 0.25, 0.25]);
         std::fs::remove_dir_all(&dir).unwrap();
     }

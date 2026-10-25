@@ -1,12 +1,16 @@
 //! Frame input (video_io readers) and the per-frame preprocessing (preprocess_video_frame_views,
 //! preprocess_frame_dir_path, the hint readers).
 //!
-//! Video is decoded by ffmpeg with the colour conversion OpenCV's VideoCapture uses (BT.601 matrix, bicubic
-//! chroma). 8-bit sources become 8-bit RGB: measured bit-identical to cv2 4.11 on an untagged and a BT.709-tagged
-//! H.264 clip (docs/ENGINE_RUST.md). Sources above 8 bits (10/12-bit ProRes 4444, DNxHR, HEVC) become 16-bit RGB
-//! (2026-10-24, the film-quality path): the original reads them through cv2 at 8 bits and loses the rest, this
-//! engine keeps them (it no longer matches the original on those, on purpose). Frame folders: 8-bit PNG/JPEG as
-//! cv2.imread does, 16-bit PNG at full depth (cv2 keeps the high byte), float RGB for EXR.
+//! By default every input is read exactly as CorridorKey 2.0 reads it (video_io: cv2.VideoCapture -> 8-bit BGR,
+//! cv2.imread(IMREAD_COLOR) for PNG/JPEG, then RGB / 255). Video is decoded by ffmpeg with the colour conversion
+//! OpenCV's VideoCapture uses (BT.601 matrix, bicubic chroma) to 8-bit RGB, whatever the source's depth: byte-identical
+//! to cv2 4.11 on 8-bit H.264 and on 10/12-bit ProRes (tests: `default_reading_is_corridorkey_byte_identical`).
+//! Frame folders: 8-bit PNG/JPEG as cv2.imread does, 16-bit PNG reduced to its high byte as cv2's IMREAD_COLOR
+//! does, float RGB for EXR (cv2's IMREAD_UNCHANGED).
+//!
+//! Opt-in `input_bit_depth` 16 (backlog row 27, the film-quality path; `ClipMeta::deep_input`): video above 8 bits
+//! (10/12-bit ProRes 4444, DNxHR, HEVC) is decoded to 16-bit RGB and 16-bit PNG read at full depth. That differs
+//! from CorridorKey 2.0 on purpose.
 use crate::clip::ClipMeta;
 use crate::color::{bf16_round, finite_input, linear_to_asinh, linear_to_srgb, srgb_to_linear};
 use crate::image::{pad_reflect101, resize_lanczos4, Planar};
@@ -15,11 +19,13 @@ use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdout, Command, Stdio};
 
-/// The ffmpeg filter that reproduces cv2.VideoCapture's YUV -> BGR24 conversion.
+/// The ffmpeg filter that reproduces cv2.VideoCapture's YUV -> BGR24 conversion. The 8-bit output must be bgr24 as
+/// cv2's: swscale's rgb24 writer rounds differently on 10/12-bit 4:2:2 and 4:2:0 sources (up to 4 levels on more than
+/// half the samples, measured 2026-10-25 against cv2 4.11; identical on 8-bit and 4:4:4 sources).
 pub(crate) const CV2_SCALE: &str = "scale=in_color_matrix=bt601:flags=bicubic";
 
-/// RGB frames of a video (8-bit, or 16-bit for sources above 8 bits), from an ffmpeg child process (killed when
-/// dropped).
+/// RGB frames of a video (8-bit, or 16-bit with `input_bit_depth` 16 for sources above 8 bits), from an ffmpeg
+/// child process (killed when dropped).
 pub(crate) struct VideoDecoder {
     child: Child,
     out: BufReader<ChildStdout>,
@@ -28,12 +34,12 @@ pub(crate) struct VideoDecoder {
     pub(crate) h: usize,
     pub(crate) decoded: usize,
     buf: Vec<u8>,
-    /// 16-bit samples (rgb48le) instead of 8-bit (rgb24)
+    /// 16-bit samples (rgb48le) instead of 8-bit (bgr24, as cv2.VideoCapture)
     deep: bool,
 }
 
 impl VideoDecoder {
-    /// `deep`: decode at 16 bits (a source above 8 bits, ClipMeta::video_bits); hint videos stay 8-bit masks.
+    /// `deep`: decode at 16 bits (ClipMeta::decode_deep); hint videos stay 8-bit masks.
     /// `start`: the first frame (the job's start frame, `--start_mode`): the frames before it are decoded and
     /// dropped by ffmpeg's `trim` filter, counted as decoded (cv2's CAP_PROP_POS_FRAMES seek lands on the same frame).
     pub(crate) fn open(path: &Path, w: usize, h: usize, start: usize, max_frames: usize, deep: bool) -> Result<VideoDecoder, Error> {
@@ -43,7 +49,7 @@ impl VideoDecoder {
             .arg(path)
             .args(["-map", "0:v:0", "-an", "-sn", "-dn", "-fps_mode", "passthrough", "-frames:v"])
             .arg(max_frames.to_string())
-            .args(["-vf", &vf, "-f", "rawvideo", "-pix_fmt", if deep { "rgb48le" } else { "rgb24" }, "pipe:1"])
+            .args(["-vf", &vf, "-f", "rawvideo", "-pix_fmt", if deep { "rgb48le" } else { "bgr24" }, "pipe:1"])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -53,8 +59,9 @@ impl VideoDecoder {
         Ok(VideoDecoder { child, out, path: path.to_path_buf(), w, h, decoded: 0, buf: vec![0; w * h * if deep { 6 } else { 3 }], deep })
     }
 
-    /// The next frame as interleaved RGB bytes, or an error naming the frame that could not be decoded.
-    pub(crate) fn next_rgb(&mut self) -> Result<&[u8], Error> {
+    /// The next frame as ffmpeg wrote it (8-bit BGR, or 16-bit RGB when deep), or an error naming the frame that
+    /// could not be decoded.
+    fn next_raw(&mut self) -> Result<&mut [u8], Error> {
         let mut got = 0;
         // loop: HOT-PATH-OK — read() fills the frame in a few large pieces
         while got < self.buf.len() {
@@ -66,14 +73,25 @@ impl VideoDecoder {
             }
         }
         self.decoded += 1;
-        Ok(&self.buf)
+        Ok(&mut self.buf)
+    }
+
+    /// The next frame as interleaved RGB bytes (cv2's BGR frame after cvtColor(BGR2RGB)); 8-bit decoders only.
+    pub(crate) fn next_rgb(&mut self) -> Result<&[u8], Error> {
+        debug_assert!(!self.deep, "next_rgb reads 8-bit frames");
+        use rayon::prelude::*;
+        let w = self.w;
+        let raw = self.next_raw()?;
+        // loop: HOT-PATH-OK — one pass per frame (hint videos and tests; the keyed frames go through next_planar), rows in parallel
+        raw.par_chunks_mut(w * 3).with_min_len(crate::image::ROWS_MIN).for_each(|row| row.chunks_exact_mut(3).for_each(|px| px.swap(0, 2)));
+        Ok(raw)
     }
 
     /// The next frame as (3, h, w) float32 in [0, 1], at the depth it was decoded at.
     pub(crate) fn next_planar(&mut self) -> Result<Planar, Error> {
         let (h, w, deep) = (self.h, self.w, self.deep);
-        let raw = self.next_rgb()?;
-        Ok(if deep { rgb48_to_planar(raw, h, w) } else { rgb8_to_planar(raw, h, w) })
+        let raw = self.next_raw()?;
+        Ok(if deep { rgb48_to_planar(raw, h, w) } else { interleaved8_to_planar(raw, h, w, [2, 1, 0]) })
     }
 }
 
@@ -87,7 +105,13 @@ impl Drop for VideoDecoder {
 
 /// Interleaved RGB bytes -> (3, h, w) float32 in [0, 1] (`astype(float32) / 255`).
 pub fn rgb8_to_planar(rgb: &[u8], h: usize, w: usize) -> Planar {
+    interleaved8_to_planar(rgb, h, w, [0, 1, 2])
+}
+
+/// Interleaved 8-bit pixels -> (3, h, w) RGB float32 in [0, 1]; `order`: where R, G and B sit in a pixel (BGR: 2, 1, 0).
+fn interleaved8_to_planar(rgb: &[u8], h: usize, w: usize, order: [usize; 3]) -> Planar {
     use rayon::prelude::*;
+    let [ri, gi, bi] = order;
     let mut p = Planar::new(3, h, w);
     let (r, gb) = p.data.split_at_mut(h * w);
     let (g, b) = gb.split_at_mut(h * w);
@@ -97,9 +121,9 @@ pub fn rgb8_to_planar(rgb: &[u8], h: usize, w: usize) -> Planar {
         |(((r, g), b), src)| {
             // loop: HOT-PATH-OK — one row of pixels
             for (x, px) in src.chunks_exact(3).enumerate() {
-                r[x] = px[0] as f32 / 255.0;
-                g[x] = px[1] as f32 / 255.0;
-                b[x] = px[2] as f32 / 255.0;
+                r[x] = px[ri] as f32 / 255.0;
+                g[x] = px[gi] as f32 / 255.0;
+                b[x] = px[bi] as f32 / 255.0;
             }
         },
     );
@@ -332,8 +356,9 @@ pub(crate) fn image_size(p: &Path) -> Result<(usize, usize), Error> {
 }
 
 /// video_io.read_image_rgb: cv2.imread(IMREAD_COLOR) / 255 for PNG/JPEG (gray replicated, alpha dropped,
-/// 16-bit reduced to its high byte), the float RGB of an EXR.
-pub fn read_image_rgb(p: &Path) -> Result<Planar, Error> {
+/// 16-bit reduced to its high byte), the float RGB of an EXR. `deep` (`input_bit_depth` 16): 16-bit PNG at full
+/// depth (/ 65535) instead.
+pub fn read_image_rgb(p: &Path, deep: bool) -> Result<Planar, Error> {
     let to_planar = |ch: usize, h: usize, w: usize, get: &dyn Fn(usize) -> f32| {
         let mut out = Planar::new(3, h, w);
         let n = h * w;
@@ -348,8 +373,10 @@ pub fn read_image_rgb(p: &Path) -> Result<Planar, Error> {
     };
     Ok(match read_still(p)? {
         Still::U8 { ch, h, w, data } => to_planar(ch, h, w, &|i| data[i] as f32 / 255.0),
-        // 16-bit PNG at full depth (cv2 keeps only the high byte; the film-quality path keeps all 16 bits)
-        Still::U16 { ch, h, w, data } => to_planar(ch, h, w, &|i| data[i] as f32 / 65535.0),
+        // 16-bit PNG at full depth (opt-in: the film-quality path keeps all 16 bits)
+        Still::U16 { ch, h, w, data } if deep => to_planar(ch, h, w, &|i| data[i] as f32 / 65535.0),
+        // cv2.imread(IMREAD_COLOR) keeps the high byte (libpng's strip_16), then / 255
+        Still::U16 { ch, h, w, data } => to_planar(ch, h, w, &|i| (data[i] >> 8) as f32 / 255.0),
         Still::F32 { ch, h, w, data } => to_planar(ch, h, w, &|i| data[i]),
     })
 }
@@ -514,7 +541,7 @@ const FOLDER_BATCH: usize = 4;
 impl FrameReader {
     pub(crate) fn open(meta: &ClipMeta) -> Result<FrameReader, Error> {
         let video = match &meta.source {
-            crate::clip::Source::Video(p) => Some(VideoDecoder::open(p, meta.w, meta.h, meta.start_frame, meta.num_frames, meta.video_bits > 8)?),
+            crate::clip::Source::Video(p) => Some(VideoDecoder::open(p, meta.w, meta.h, meta.start_frame, meta.num_frames, meta.decode_deep())?),
             crate::clip::Source::Frames(_) => None,
         };
         Ok(FrameReader { seconds: 0.0, meta: meta.clone(), video, next: 0, denom: crate::color::asinh_denom(), need_model: true, ready: Default::default() })
@@ -549,7 +576,7 @@ impl FrameReader {
                 let done: Vec<Result<Prepped, Error>> = paths[self.next..end]
                     .par_iter()
                     .map(|p| {
-                        let img = read_image_rgb(p)?;
+                        let img = read_image_rgb(p, meta.deep_input)?;
                         if (img.h, img.w) != (meta.h, meta.w) {
                             return Err(Error::input(format!(
                                 "{}: frame size {}x{} differs from the first frame's {}x{}",
@@ -782,6 +809,7 @@ mod tests {
             pad: crate::image::Pad { l: 0, r: 0, t: 0, b: 0 },
             num_frames: 1,
             video_bits: 8,
+            deep_input: false,
             exr_linear: true,
             color_in: None,
         };
@@ -816,6 +844,60 @@ mod tests {
         let p = rgb48_to_planar(&px, 1, 2);
         assert_eq!(p.data, vec![1.0, 0.0, 0.0, 1.0, v as f32 / 65535.0, 1.0 / 65535.0]);
         assert!((p.data[4] - 51.0 / 255.0).abs() > 1e-4, "more than 8 bits survive");
+    }
+
+    /// The default reading is CorridorKey 2.0's own reader, byte for byte: the 12-bit ProRes 4444 and 10-bit ProRes
+    /// 422 HQ clips through cv2.VideoCapture, the 16-bit PNGs through cv2.imread(IMREAD_COLOR), against the uint8 RGB
+    /// cv2 made of them (tests/fixtures/input, tools/gen_input_fixtures.py). Video: the strict check runs on x86-64
+    /// Linux, where the references were made (another platform's ffmpeg build prints its difference).
+    #[test]
+    fn default_reading_is_corridorkey_byte_identical() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/input");
+        let reference = |name: &str| std::fs::read(dir.join(format!("{name}.cv2.rgb"))).unwrap();
+        let count = |a: &[u8], b: &[u8]| a.iter().zip(b).filter(|(x, y)| x != y).count();
+        // (3, h, w) floats that must be 8-bit levels / 255 -> interleaved RGB bytes
+        let to_bytes = |p: &Planar, name: &str| -> Vec<u8> {
+            let n = p.h * p.w;
+            // loop: NOT-WORTH — a 64x48 fixture
+            assert!(p.data.iter().all(|v| (v * 255.0).round() / 255.0 == *v), "{name}: not 8-bit levels / 255");
+            // loop: NOT-WORTH — as above
+            (0..3 * n).map(|i| (p.data[(i % 3) * n + i / 3] * 255.0).round() as u8).collect()
+        };
+        // loop: NOT-WORTH — three stills
+        for name in ["rgb16.png", "rgba16.png", "gray16.png"] {
+            let got = to_bytes(&read_image_rgb(&dir.join(name), false).unwrap(), name);
+            let want = reference(name);
+            assert_eq!(got.len(), want.len(), "{name}: size");
+            assert_eq!(count(&got, &want), 0, "{name}: bytes differ from cv2.imread(IMREAD_COLOR)");
+            println!("{name}: {} bytes identical to CorridorKey 2.0's read", got.len());
+        }
+        if Command::new("ffmpeg").arg("-version").output().is_err() {
+            eprintln!("no ffmpeg: video skipped");
+            return;
+        }
+        // loop: NOT-WORTH — two clips
+        for name in ["prores4444_12bit.mov", "prores422hq_10bit.mov"] {
+            let path = dir.join(name);
+            let meta = crate::clip::probe_video(&path, &crate::clip::ProbeOpts::frames(-1)).unwrap();
+            assert!(meta.video_bits > 8 && !meta.deep_input && !meta.decode_deep(), "{name}: the default must read at 8 bits");
+            let mut v = VideoDecoder::open(&path, meta.w, meta.h, meta.start_frame, meta.num_frames, meta.decode_deep()).unwrap();
+            let mut got = Vec::new();
+            // loop: NOT-WORTH — the fixture's three frames
+            for _ in 0..meta.num_frames {
+                // the keyed path (next_planar: / 255 floats), back to bytes
+                let p = v.next_planar().unwrap();
+                got.extend(to_bytes(&p, name));
+            }
+            let want = reference(name);
+            assert_eq!(got.len(), want.len(), "{name}: size");
+            let differ = count(&got, &want);
+            println!("{name} ({}-bit): {differ} of {} bytes differ from cv2.VideoCapture", meta.video_bits, got.len());
+            if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+                assert_eq!(differ, 0, "{name}: bytes differ from cv2.VideoCapture");
+            }
+            // input_bit_depth 16 opts in to the deep decode
+            assert!(ClipMeta { deep_input: true, ..meta }.decode_deep());
+        }
     }
 
     #[test]

@@ -42,6 +42,8 @@ export interface JobOptions {
   linearBrightness: number;
   linearContrast: number;
   linearContrastPivot: number;
+  // read 10/12-bit video and 16-bit PNG at 16 bits (the engine's `input_bit_depth` "16", backlog row 27); off = CorridorKey 2.0's own 8-bit read
+  deepInput: boolean;
 }
 
 export const DEFAULT_OPTIONS: JobOptions = {
@@ -64,6 +66,7 @@ export const DEFAULT_OPTIONS: JobOptions = {
   linearBrightness: 1,
   linearContrast: 1,
   linearContrastPivot: 0.18,
+  deepInput: false,
 };
 
 // Internal resolution: the plugin's Full / ¾ / ½ / ¼ (the original's --model_scale takes any value above 0)

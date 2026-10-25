@@ -76,6 +76,8 @@ pub(crate) struct SettingsLog<'a> {
     pub(crate) color: Option<String>,
     /// video jobs: the codec's protocol name (backlog row 26; an additive line at the end)
     pub(crate) video_codec: Option<&'a str>,
+    /// `input_bit_depth` (backlog row 27): 8 = CorridorKey 2.0's reader, 16 = deep (an additive line at the end)
+    pub(crate) input_bit_depth: u32,
 }
 
 pub(crate) fn settings_text(s: &SettingsLog) -> String {
@@ -127,6 +129,7 @@ pub(crate) fn settings_text(s: &SettingsLog) -> String {
     if let Some(v) = s.video_codec {
         t.push_str(&format!("Video Codec: {v}\n"));
     }
+    t.push_str(&format!("Input Bit Depth: {}\n", s.input_bit_depth));
     t
 }
 
@@ -171,17 +174,18 @@ mod tests {
                 video_codec: exr_frames.is_none().then_some("h264-lossless"),
                 exr_frames,
                 color: None,
+                input_bit_depth: 8,
             })
         };
         let t = log(Some("source (65-184)".into()));
-        assert!(t.ends_with("FFprobe: 8.0\nStart Frame: 12\nLinear Adjust Applied: True\nEXR Frame Numbers: source (65-184)\n"), "{t}");
+        assert!(t.ends_with("FFprobe: 8.0\nStart Frame: 12\nLinear Adjust Applied: True\nEXR Frame Numbers: source (65-184)\nInput Bit Depth: 8\n"), "{t}");
         assert!(
             t.contains(
                 "Model Scale: 0.5\nNum Frames: -1\nStart Mode: middle\nSeed: 3\nLinear Brightness: 2.0\nLinear Contrast: 1.0\nLinear Contrast Pivot: 0.18\n"
             ),
             "{t}"
         );
-        assert!(log(None).ends_with("Linear Adjust Applied: True\nVideo Codec: h264-lossless\n"));
+        assert!(log(None).ends_with("Linear Adjust Applied: True\nVideo Codec: h264-lossless\nInput Bit Depth: 8\n"));
     }
 
     #[test]

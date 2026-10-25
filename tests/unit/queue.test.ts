@@ -341,6 +341,14 @@ describe("engineOptions", () => {
     expect(engineOptions({ ...DEFAULT_OPTIONS, outputFormat: "exr" }, "video", false, true)).not.toHaveProperty("video_codec");
   });
 
+  it("sends 16-bit input reading to the Rust engine only when asked (backlog row 27)", () => {
+    // the default is CorridorKey 2.0's own 8-bit read: no key at all
+    expect(engineOptions(DEFAULT_OPTIONS, "video", false, true)).not.toHaveProperty("input_bit_depth");
+    expect(engineOptions({ ...DEFAULT_OPTIONS, deepInput: true }, "frames", false, true)).toMatchObject({ input_bit_depth: "16" });
+    // the PyTorch reference engine reads as the original, always
+    expect(engineOptions({ ...DEFAULT_OPTIONS, deepInput: true }, "video", false, false)).not.toHaveProperty("input_bit_depth");
+  });
+
   it("sends the internal resolution when not full, and the linear adjust for video clips when set (backlog rows 42, 45)", () => {
     const d = engineOptions(DEFAULT_OPTIONS, "video");
     expect(d).not.toHaveProperty("model_scale");

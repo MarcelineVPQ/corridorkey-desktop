@@ -649,6 +649,15 @@ impl Pipeline<OrtLoader> {
             sink.log("  linear brightness / contrast: not applied (as in the original, only video inputs take them)");
         }
         meta.exr_linear = is_dir && job.frame_dir_linear;
+        // `input_bit_depth` (backlog row 27): 8 (the default) reads as CorridorKey 2.0 does; 16 keeps a deep source's bits
+        meta.deep_input = job.input_bits == 16;
+        if !is_dir && meta.video_bits > 8 {
+            sink.log(&if meta.decode_deep() {
+                format!("  input: a {}-bit video, read at 16 bits (input_bit_depth 16; differs from CorridorKey 2.0)", meta.video_bits)
+            } else {
+                format!("  input: a {}-bit video, read at 8 bits as CorridorKey 2.0 reads it (input_bit_depth 16 keeps every bit)", meta.video_bits)
+            });
+        }
         // a colour-managed clip goes through its input processor instead (decode.rs prep_frame_views)
         meta.color_in = color.as_ref().and_then(|c| c.input.clone());
         let (mut chunk, mut stride, mut low_vram) = (job.hann_chunk, job.hann_stride, job.low_vram);
@@ -827,6 +836,7 @@ impl Pipeline<OrtLoader> {
                 decoders: &decoders,
                 exr_frames: exr_numbers.as_ref().map(|n| n.describe()),
                 color: color.as_ref().map(|c| c.settings_lines()),
+                input_bit_depth: job.input_bits,
             });
             if let Err(e) = std::fs::write(&settings_path, text) {
                 sink.log(&format!("[WARNING] Failed to write settings file: {e}"));

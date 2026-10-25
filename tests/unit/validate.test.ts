@@ -34,6 +34,7 @@ describe("IPC and settings validation", () => {
     expect([o.modelScale, o.linearBrightness, o.linearContrast, o.linearContrastPivot]).toEqual([0.25, 2, 0.5, 0.3]);
     const bad = sanitizeOptions({ modelScale: 0.6, linearBrightness: 0, linearContrast: 9, linearContrastPivot: "x" });
     expect([bad.modelScale, bad.linearBrightness, bad.linearContrast, bad.linearContrastPivot]).toEqual([1, 1, 1, 0.18]);
+    expect([sanitizeOptions({}).deepInput, sanitizeOptions({ deepInput: true }).deepInput, sanitizeOptions({ deepInput: "yes" }).deepInput]).toEqual([false, true, false]);
   });
 
   it("sizes the internal resolution as the engine does (Python round, half to even)", () => {

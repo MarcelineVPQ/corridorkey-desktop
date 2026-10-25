@@ -78,6 +78,7 @@ export function sanitizeOptions(v: unknown, platform: string = process.platform)
     linearBrightness: num(o.linearBrightness, LINEAR_RANGES.brightness[0], LINEAR_RANGES.brightness[1], DEFAULT_OPTIONS.linearBrightness),
     linearContrast: num(o.linearContrast, LINEAR_RANGES.contrast[0], LINEAR_RANGES.contrast[1], DEFAULT_OPTIONS.linearContrast),
     linearContrastPivot: num(o.linearContrastPivot, LINEAR_RANGES.pivot[0], LINEAR_RANGES.pivot[1], DEFAULT_OPTIONS.linearContrastPivot),
+    deepInput: bool(o.deepInput, DEFAULT_OPTIONS.deepInput),
   });
 }
 

@@ -407,8 +407,25 @@ read the video itself, so the inputs weren't the same and the numbers don't coun
 four networks with the original's precision policy (model set onnx.4); the hair didn't measurably change, so that
 wasn't the cause. onnx.4 ships anyway since 2026-10-25, for parity with CorridorKey 2.0's precision policy, not
 because it fixed the hair (its cost: Speed, "onnx.4"). Known deviation from CorridorKey 2.0 in our input: it reads video through OpenCV at
-8 bits; we read 10/12-bit plates at 16 bits (same colour conversion). Next: one comparison where all three are fed
-exactly the same frames through CorridorKey 2.0's own reader. The result goes here.
+8 bits; we read 10/12-bit plates at 16 bits (same colour conversion).
+
+The fix and the measurement (2026-10-25): our engine now reads input exactly as CorridorKey 2.0 does by default,
+byte for byte (16 bits is an opt-in per clip). Then one run on locked_backdrop (12-bit ProRes 4444, 1280×1080, 80
+frames), the same .mov fed to all three through their own readers, the same window (12/6, low-memory), float EXR
+outputs, compared exactly (`tools/matte_compare.py`; the method checked first on a known-equal pair: truth vs
+itself is exactly 0). Truth = CorridorKey 2.0's own `infer.py` with its bf16 autocast switched off (fp32 model on
+the runtime's own inputs; Corridor's files untouched, a wrapper patches autocast at run time):
+
+| vs the fp32 truth | Alpha MAE | Alpha max | % > 1/255 | Hair edges MAE | Hair edges % > 1/255 | fg PSNR |
+| --- | --- | --- | --- | --- | --- | --- |
+| CorridorKey 2.0 as it ships (bf16) | 3.6e-4 | 0.053 | 0.63 % | 1.9e-3 | 9.45 % | 57.3 dB |
+| **CorridorKey Desktop (CUDA fp16, onnx.4)** | **2.6e-5** | **0.0065** | **0.00004 %** | **2.1e-4** | **0.0007 %** | **73.6 dB** |
+
+Fed the same pixels, our matte is closer to the truth than CorridorKey 2.0's own shipping run on every measure
+(hair-edge error about 9× smaller). Our engine against CorridorKey 2.0 as it ships: alpha MAE 3.7e-4, hair edges
+9.1 % > 1/255, fg 57.2 dB, about the original's own distance from the truth: on the same input, what separates us
+from the original is its bf16 rounding. Not measured in this run: how much of the hair difference seen before came
+from the 16-bit read (that run would be the next step, "expanding the bit depth").
 
 **2. The scorecard measured the wrong reference (2026-10-24).** Comparing with the original's output can't tell
 which of two roundings is closer to the right answer. From now on quality is measured against the fp32 truth. The
@@ -434,8 +451,10 @@ An early reading that longer temporal windows give steadier hair was overturned 
 
 Film plates come as 10- or 12-bit ProRes 4444 / HEVC 4:4:4 or 16-bit image sequences. The original reads video
 and PNG at 8 bits (OpenCV), so everything above 8 bits is rounded away before the model sees it. CorridorKey
-Desktop now decodes deep video to 16-bit RGB and reads 16-bit PNG at full depth (8-bit sources take the same path
-as before, unchanged).
+Desktop can decode deep video to 16-bit RGB and read 16-bit PNG at full depth (8-bit sources take the same path
+as before, unchanged). Since 2026-10-25 this is an opt-in per clip (Input precision, "Read 10/12-bit plates at 16
+bits (differs from CorridorKey 2.0)"; the engine's `input_bit_depth`): by default every input is read exactly as
+CorridorKey 2.0 reads it, byte for byte, so a comparison with the original starts from the same pixels.
 
 Measured on 2026-10-24 on the 4K plate 04_5d (120 frames), encoded as 10-bit ProRes 4444 XQ and as 12-bit HEVC
 4:4:4. The reference is the same plate decoded to 16-bit PNG frames (exactly the values the video holds), keyed by

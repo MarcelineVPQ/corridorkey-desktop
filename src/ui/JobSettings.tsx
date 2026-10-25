@@ -1,7 +1,7 @@
 // The Queue page's panel: the selected clip's settings, one Section each.
 // Every control maps to one engine option (docs/ENGINE_PROTOCOL.md) and
 // changes what the run does (rule 4). Locked once the clip has run.
-import { Clapperboard, Film, FolderOpen, MemoryStick, Scaling, SunMedium, Wand2, X, Zap } from "lucide-react";
+import { Clapperboard, Film, FolderOpen, Layers, MemoryStick, Scaling, SunMedium, Wand2, X, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { EngineKind, HintFileKind, Job, JobOptions, MemoryChoice, MemoryEstimate, MemoryEstimateResult, ModelScale, OutputName, TrtState, VideoCodec, WindowEstimate } from "../shared/types";
 import { LINEAR_RANGES, MANUAL_WINDOWS, OUTPUT_NAMES, VRAM_LIMIT_AUTO_HELP, scaledSize, videoCodecsFor, vramLimitChoices, withCutoutAlpha } from "../shared/types";
@@ -99,6 +99,15 @@ export function JobSettings({
       : scale === 1
         ? "The networks run at the clip's own size"
         : `Faster and lighter; the result is resized back to ${cw && ch ? `${cw}×${ch}` : "the clip's size"} (Lanczos, as the original), with less edge detail`;
+  // input precision (backlog row 27): off = CorridorKey 2.0's own 8-bit read; the PyTorch engine always reads that way
+  const deep = engineKind !== "python" && o.deepInput;
+  const deepStatus = deep ? "16-bit · differs from CorridorKey 2.0" : "8-bit · as CorridorKey 2.0 reads it";
+  const deepHint =
+    engineKind === "python"
+      ? "The PyTorch reference engine reads as the original: 8 bits"
+      : deep
+        ? "10/12-bit video and 16-bit PNG reach the model in full; 8-bit clips and EXR are the same either way"
+        : "Off: the same 8-bit read as CorridorKey 2.0, byte for byte. On keeps every bit of 10/12-bit video and 16-bit PNG";
   const linearSet = o.linearBrightness !== 1 || o.linearContrast !== 1;
   const linearStatus = linearSet
     ? `Brightness ${o.linearBrightness.toFixed(2)} · contrast ${o.linearContrast.toFixed(2)}${o.linearContrast !== 1 ? ` around ${o.linearContrastPivot.toFixed(2)}` : ""}`
@@ -250,6 +259,21 @@ export function JobSettings({
               <span>Full</span>
             ) : (
               <Segmented label="Internal resolution" value={String(o.modelScale)} options={SCALE_OPTIONS} onChange={(v) => set({ modelScale: Number(v) as ModelScale })} />
+            )}
+          </Row>
+        )}
+      </Section>
+
+      <Section id="input-depth" icon={Layers} title="Input precision" status={deepStatus} disabled={locked}>
+        {() => (
+          <Row label="Bit depth" hint={deepHint}>
+            {engineKind === "python" ? (
+              <span>8-bit</span>
+            ) : (
+              <label className="checks">
+                <input type="checkbox" checked={o.deepInput} onChange={(e) => set({ deepInput: e.target.checked })} />
+                Read 10/12-bit plates at 16 bits (differs from CorridorKey 2.0)
+              </label>
             )}
           </Row>
         )}
