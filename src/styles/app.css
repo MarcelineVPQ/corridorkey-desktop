@@ -427,6 +427,15 @@ select + .estimate {
   margin-top: 4px;
   font-size: 13px;
 }
+/* a TensorRT size's range, state and costs under its tick (Engine settings, TensorRT; a waiting clip's TensorRT) */
+.size-note {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.btn + .size-note {
+  margin-top: 6px;
+}
 /* the cache folder's sizes per clip and per TensorRT range (App settings, Storage) */
 .sizes {
   list-style: none;

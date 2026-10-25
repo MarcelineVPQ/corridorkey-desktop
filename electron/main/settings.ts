@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFile
 import { dirname, isAbsolute, join } from "node:path";
 import type { CheckoutCheck, EngineKind, Settings } from "../../src/shared/types";
 import { sanitizeAppearance, sanitizeOptions, vramLimit } from "./validate";
+import { sanitizeTrtSizes } from "../../src/shared/trt";
 
 export function loadSettings(file: string, env: NodeJS.ProcessEnv): Settings {
   let saved: Partial<Settings> = {};
@@ -27,6 +28,8 @@ export function loadSettings(file: string, env: NodeJS.ProcessEnv): Settings {
     ortLibrary: path(saved.ortLibrary),
     tensorrt: saved.tensorrt === true,
     vramLimitGb: vramLimit(saved.vramLimitGb),
+    // the sizes TensorRT builds for (row 56); absent: 4K DCI and HD, what the background build always did
+    trtSizes: sanitizeTrtSizes(saved.trtSizes),
     // an absolute folder only (anything else: the system's cache folder)
     cacheRoot: typeof saved.cacheRoot === "string" && isAbsolute(saved.cacheRoot) ? saved.cacheRoot : null,
   };

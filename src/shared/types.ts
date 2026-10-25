@@ -1,4 +1,5 @@
 import type { DesktopPalette } from "../ui/theme/palette";
+import type { TrtSize } from "./trt";
 
 // Types shared by the main process, the preload and the page. The engine's
 // own messages are in docs/ENGINE_PROTOCOL.md; these are the app's view of them.
@@ -216,6 +217,9 @@ export interface JobError {
 
 // the engine-log lines the page shows per job (and all a state push carries)
 export const LOG_SHOWN = 12;
+// the engine-log lines a job keeps for its saved log and Copy log (backlog row 55): a job logs tens to hundreds of
+// lines; a runaway log is cut from its start, and the file says how many lines went
+export const LOG_KEPT = 20_000;
 
 export interface Job {
   id: string;
@@ -241,8 +245,12 @@ export interface Job {
   // a failed / cancelled job: what happened to the files it had started (removed, or why not); null otherwise
   partial: string | null;
   log: string[];
-  // the log's full length: a state push carries only its last LOG_SHOWN lines (the job keeps them all)
+  // the log's full length: a state push carries only its last LOG_SHOWN lines (the job keeps up to LOG_KEPT)
   logLines?: number;
+  // lines dropped from the start of a log longer than LOG_KEPT (the saved file says so)
+  logDropped?: number;
+  // the whole log saved next to the results as <clip>_log.txt when the job ended (backlog row 55), or why it couldn't be
+  logSaved?: { path: string; error: string | null } | null;
 }
 
 export interface Pong {
@@ -315,6 +323,8 @@ export interface Settings {
   tensorrt: boolean;
   // the graphics memory limit new clips start with (GiB; null = Auto), backlog row 43
   vramLimitGb: number | null;
+  // the sizes TensorRT builds for in the background (Engine settings, TensorRT; backlog row 56), one per range
+  trtSizes: TrtSize[];
   // the cache folder's parent chosen in App settings, Storage (the app keeps its own folder inside it); null = the
   // system's cache folder (platform.ts appDirs), backlog row 44
   cacheRoot: string | null;
@@ -399,8 +409,11 @@ export interface TrtState {
   error: string | null;
   // the TensorRT ranges built for this card (engine range keys, "h1792-2176_w3584-4096_t1-8_f1-4"), read from the cache
   built: string[];
-  // the background build of the common ranges (trtPrebuild.ts): jobs never build, they run on CUDA until it's done
+  // the background build of the chosen sizes (trtPrebuild.ts): jobs never build, they run on CUDA until it's done
   prebuild: TrtPrebuild;
+  // each range built on this card: its size on disk (read from the cache) and how long its build took here (recorded
+  // when the app built it; null: built before this was recorded, or by a job)
+  onDisk: { range: string; bytes: number; buildSeconds: number | null }[];
 }
 
 /** Another program holding this much graphics memory is named before a run, and holds back the background TensorRT
@@ -410,7 +423,7 @@ export const OTHER_GPU_USER_MB = 512;
 export type PrebuildStatus = "idle" | "running" | "paused" | "done" | "stopped" | "blocked" | "error";
 
 export interface PrebuildRange {
-  // "4K" or "HD", and the size built for
+  // the size's name ("4K DCI", "HD", a clip's name, "Your size") and the size built for
   label: string;
   width: number;
   height: number;
@@ -546,6 +559,8 @@ export interface CorridorKeyApi {
   setTensorrt(on: boolean): Promise<void>;
   // the background TensorRT build (Engine settings, TensorRT): start it (or again), or stop it
   trtPrebuild(action: "start" | "stop"): Promise<void>;
+  // choose a size to build for (it builds now), or remove one: its range's built engines are deleted (asked first)
+  trtSize(action: "add" | "remove", size: TrtSize): Promise<void>;
   measureStorage(): Promise<void>;
   // asks for confirmation first (a system dialog); refused while the queue or the install runs
   removeStorage(id: StorageItem["id"]): Promise<void>;
@@ -566,6 +581,8 @@ export interface CorridorKeyApi {
   showInFolder(path: string): Promise<void>;
   // puts text (a path) on the system clipboard; false when it was refused
   copyText(text: string): Promise<boolean>;
+  // puts a job's whole engine log (as its <clip>_log.txt has it) on the clipboard; false when there is no such job
+  copyJobLog(id: string): Promise<boolean>;
   setAppearance(appearance: Appearance): Promise<void>;
   pickOutputRoot(): Promise<void>;
   clearOutputRoot(): Promise<void>;

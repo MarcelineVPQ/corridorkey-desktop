@@ -4,11 +4,10 @@
 import { readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { EngineReply } from "./engine";
-import type { EngineState, Job, JobOptions, JobTech, OutputName, Stage } from "../../src/shared/types";
+import { LOG_KEPT, type EngineState, type Job, type JobOptions, type JobTech, type OutputName, type Stage } from "../../src/shared/types";
 import { missingInput } from "../../src/shared/tasks";
 import { discard, finalPath, PARTIAL_DIR as PARTIAL_NAME, prepare, promote } from "./partial";
 
-const LOG_LINES = 300;
 // Frames per second is shown once this many frames and seconds are measured.
 const RATE_MIN_FRAMES = 3;
 const RATE_MIN_SECONDS = 2;
@@ -28,6 +27,8 @@ export interface QueueDeps {
   tempDirFor(jobId: string): string;
   changed(): void;
   finished(job: Job): void;
+  // saves the ended job's whole log next to its results (jobLog.ts; backlog row 55)
+  saveLog?: (job: Job) => { path: string; error: string | null };
   // ask the running engine for TensorRT (asked per job: the Rust engine, the setting on, its parts installed)
   tensorrt?: () => boolean;
   // why a job doesn't ask for TensorRT (install.ts tensorrtWhyNot), shown on its page
@@ -128,6 +129,16 @@ export function techFrom(r: EngineReply, prev: JobTech | null | undefined): JobT
   };
 }
 
+/** One engine-log line kept for the job (up to LOG_KEPT; a longer log loses its oldest lines, counted). */
+function addLog(job: Job, line: string): void {
+  job.log.push(line);
+  if (job.log.length > LOG_KEPT) {
+    const cut = job.log.length - LOG_KEPT;
+    job.log.splice(0, cut);
+    job.logDropped = (job.logDropped ?? 0) + cut;
+  }
+}
+
 const STAGES = new Set<Stage>(["load", "optimize", "probe", "rvm", "foundations", "keying"]);
 
 export class Queue {
@@ -184,6 +195,8 @@ export class Queue {
       error: null,
       partial: null,
       log: [],
+      logDropped: 0,
+      logSaved: null,
     });
     this.deps.changed();
     if (this.running && !this.current) this.next();
@@ -363,15 +376,11 @@ export class Queue {
       case "provider": {
         job.tech = techFrom(r, job.tech);
         const text = providerText(r);
-        if (text) {
-          job.log.push(text);
-          if (job.log.length > LOG_LINES) job.log.splice(0, job.log.length - LOG_LINES);
-        }
+        if (text) addLog(job, text);
         break;
       }
       case "log":
-        job.log.push(String(r.text));
-        if (job.log.length > LOG_LINES) job.log.splice(0, job.log.length - LOG_LINES);
+        addLog(job, String(r.text));
         break;
       case "result": {
         // loop: NOT-WORTH — ≤ four output paths, once per job
@@ -424,6 +433,8 @@ export class Queue {
     job.finishedAt = this.now();
     job.error = error;
     if (status !== "done") job.stage = null;
+    // after the discard: a failed job's log stays in its folder (which then isn't removed as empty)
+    if (this.deps.saveLog) job.logSaved = this.deps.saveLog(job);
     this.deps.changed();
     this.deps.finished(job);
   }

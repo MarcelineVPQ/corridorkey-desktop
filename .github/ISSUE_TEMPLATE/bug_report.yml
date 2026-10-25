@@ -53,9 +53,8 @@ body:
   - type: textarea
     id: log
     attributes:
-      label: Engine log
-      description: The job's "Engine log" (open the job in the queue), copied as text
-      render: text
+      label: The job's log file
+      description: "`<clip>_log.txt` in the job's output folder (written for every job, failed and cancelled ones too). Drag the file in here (or paste it: Copy log on the job's page copies it)."
   - type: textarea
     id: settings
     attributes:

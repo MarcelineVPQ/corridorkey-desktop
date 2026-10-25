@@ -7,7 +7,20 @@ import { installMissing } from "../../shared/tasks";
 import { INSTALL_FIRST } from "../../shared/texts";
 import { Row } from "../panel/Section";
 import { duration, gbBytes } from "../format";
-import { PIECE_NAMES, prebuildStep, rangeText, trtSizeKey, TRT_BUILD_NOT_MEASURED, TRT_NOT_MEASURED } from "../../shared/trt";
+import {
+  PIECE_NAMES,
+  prebuildStep,
+  rangeText,
+  sizeRangeText,
+  sizeText,
+  trtSizeKey,
+  trtSizeRows,
+  TRT_BUILD_NOT_MEASURED,
+  TRT_MAX_SIDE,
+  TRT_NOT_MEASURED,
+  TRT_PIECES,
+  type TrtSize,
+} from "../../shared/trt";
 import { ProgressBar } from "../ProgressBar";
 import { More } from "../More";
 import { PathText } from "../PathText";
@@ -101,14 +114,17 @@ export function TrtBox({ trt, inst, platform }: { trt: TrtState; inst: InstallSt
       </p>
       <More>
         <p className="hint-text">
-          The download is NVIDIA&apos;s TensorRT libraries and the TensorRT models. The app builds 4K and HD in the background; jobs never wait on a build. Best on graphics cards with 16 GB. 4K (DCI
-          4K and UHD) runs on TensorRT too; open gate and larger frames run on CUDA.
+          The download is NVIDIA&apos;s TensorRT libraries and the TensorRT models. The app builds the sizes you choose (4K DCI and HD to start with) in the background; jobs never wait on a build.
+          Best on graphics cards with 16 GB. 4K (DCI 4K and UHD) runs on TensorRT too; open gate and larger frames run on CUDA.
         </p>
         <p className="hint-text">{CHECKED_AND_RESUMED}</p>
       </More>
       {trt.on &&
         (baseMissing ? (
-          <p className="hint-text">{INSTALL_FIRST} (Runtime and models, above).</p>
+          <>
+            <p className="hint-text">{INSTALL_FIRST} (Runtime and models, above).</p>
+            <TrtSizes trt={trt} />
+          </>
         ) : needParts || trt.status !== "idle" ? (
           <>
             <ul className="check-list">
@@ -118,6 +134,7 @@ export function TrtBox({ trt, inst, platform }: { trt: TrtState; inst: InstallSt
             </ul>
             <p className="hint-text">Until they are installed, jobs run on CUDA.</p>
             <InstallControls p={trt} canStart={inst.gpuOk && inst.status !== "running"} start={() => void window.ck.startInstall("tensorrt")} />
+            <TrtSizes trt={trt} />
           </>
         ) : trt.ready ? (
           <>
@@ -127,7 +144,10 @@ export function TrtBox({ trt, inst, platform }: { trt: TrtState; inst: InstallSt
             <PrebuildBox trt={trt} />
           </>
         ) : (
-          <p className="hint-text">Installed for the downloaded runtime and models, but the engine uses other files (ONNX Runtime engine, below), so jobs run on CUDA.</p>
+          <>
+            <p className="hint-text">Installed for the downloaded runtime and models, but the engine uses other files (ONNX Runtime engine, below), so jobs run on CUDA.</p>
+            <TrtSizes trt={trt} />
+          </>
         ))}
       {!trt.on && !needParts && <p className="hint-text">Installed. App settings, Storage removes it.</p>}
     </>
@@ -135,9 +155,9 @@ export function TrtBox({ trt, inst, platform }: { trt: TrtState; inst: InstallSt
 }
 
 /**
- * The background TensorRT build (electron/main/trtPrebuild.ts): what it is and why, the ranges built, a progress bar
- * by network (weighted by the measured 4K build times; HD one share per network), the step, the elapsed time, and
- * Stop / Build now. Jobs never build: until a range is built, its clips run on CUDA.
+ * The background TensorRT build (electron/main/trtPrebuild.ts): what it is and why, the sizes to build (TrtSizes), a
+ * progress bar by network (weighted by the measured 4K build times; other sizes one share per network), the step, the
+ * elapsed time, and Stop / Build now. Jobs never build: until a range is built, its clips run on CUDA.
  */
 function PrebuildBox({ trt }: { trt: TrtState }) {
   const p = trt.prebuild;
@@ -154,44 +174,16 @@ function PrebuildBox({ trt }: { trt: TrtState }) {
   const canStart = p.status !== "running" && p.status !== "done";
   return (
     <>
-      <p className="hint-text">The app builds 4K and HD in the background and pauses while you key. Until a size is built, its clips run on CUDA.</p>
+      <p className="hint-text">The app builds the sizes ticked below in the background and pauses while you key. Until a size is built, its clips run on CUDA.</p>
       <More>
         <p className="hint-text">Jobs never wait on a TensorRT build. It builds again only after a graphics driver, TensorRT or model update. {TRT_BUILD_NOT_MEASURED}</p>
       </More>
-      <ul className="check-list">
-        {/* loop: HOT-PATH-OK — two ranges per render */}
-        {p.ranges.map((r) => (
-          <li key={r.label} className="hint-text">
-            {r.label} ({r.width}×{r.height}):{" "}
-            {r.state === "done"
-              ? `built${r.range ? `, ${rangeText(r.range)}` : ""}${
-                  Object.keys(r.fallbacks).length
-                    ? ` (${Object.keys(r.fallbacks)
-                        .map((k) => PIECE_NAMES[k] ?? k)
-                        .join(", ")} on CUDA)`
-                    : ""
-                }`
-              : r.state === "building"
-                ? "building"
-                : r.state === "failed"
-                  ? `couldn't be built: ${r.error}`
-                  : "not built yet"}
-          </li>
-        ))}
-        {/* loop: HOT-PATH-OK — a few built ranges per render */}
-        {trt.built
-          .filter((k) => !p.ranges.some((r) => r.range === k || k.startsWith(`${trtSizeKey(r.width, r.height)}_t`)))
-          .map((k) => (
-            <li key={k} className="hint-text">
-              Also built: {rangeText(k)}
-            </li>
-          ))}
-      </ul>
+      <TrtSizes trt={trt} />
       {p.status === "running" && (
         <>
           <ProgressBar value={Math.round(p.fraction * 1000)} max={1000} />
           <p className="hint-text">
-            {step ?? "Starting the engine"} · {Math.floor(p.fraction * 100)} % of 4K and HD · {p.startedAt ? `${duration((Date.now() - p.startedAt) / 1000)} elapsed` : ""}
+            {step ?? "Starting the engine"} · {Math.floor(p.fraction * 100)} % of the chosen sizes · {p.startedAt ? `${duration((Date.now() - p.startedAt) / 1000)} elapsed` : ""}
           </p>
         </>
       )}
@@ -211,6 +203,91 @@ function PrebuildBox({ trt }: { trt: TrtState }) {
           </button>
         )}
       </div>
+    </>
+  );
+}
+
+/** A size range's state and costs, under its tick: what is built and what it took here, or "not measured yet". */
+function sizeNote(trt: TrtState, key: string): string {
+  // loop: HOT-PATH-OK — a few built ranges, per row per render
+  const onDisk = trt.onDisk.filter((d) => d.range.startsWith(`${key}_t`));
+  // loop: NOT-WORTH — the few chosen sizes
+  const r = trt.prebuild.ranges.find((x) => trtSizeKey(x.width, x.height) === key);
+  const range = sizeRangeText(key);
+  if (r?.state === "building")
+    return `${range} · building: ${r.piece ? `${PIECE_NAMES[r.piece] ?? r.piece} (network ${TRT_PIECES.indexOf(r.piece as (typeof TRT_PIECES)[number]) + 1} of ${TRT_PIECES.length})` : "starting"}`;
+  if (r?.state === "failed") return `${range} · couldn't be built: ${r.error}`;
+  if (onDisk.length) {
+    // loop: NOT-WORTH — a few built ranges
+    const bytes = onDisk.reduce((n, d) => n + d.bytes, 0);
+    // loop: NOT-WORTH — as above
+    const secs = onDisk.map((d) => d.buildSeconds).filter((x): x is number => x !== null);
+    // loop: NOT-WORTH — at most five networks
+    const fell = Object.keys(r?.fallbacks ?? {}).map((k) => PIECE_NAMES[k] ?? k);
+    // loop: NOT-WORTH — a few built ranges
+    const windows = onDisk.map((d) => rangeText(d.range).replace(/^up to \d+×\d+, /, "")).join("; ");
+    return `${range} · built (${windows})${fell.length ? `, ${fell.join(", ")} on CUDA` : ""} · ${gbBytes(bytes)} on disk · ${secs.length ? `the build took ${duration(secs[0])} here` : "build time not recorded"}`;
+  }
+  return `${range} · ${r ? "chosen, not built yet" : "not built"} · build time and disk size on this model set: not measured yet`;
+}
+
+/**
+ * Which sizes TensorRT builds for (backlog row 56): the engine's size ranges with common sizes named, each ticked when
+ * it is built or chosen, with what it costs (measured here once built; "not measured yet" before). Tick: it is built
+ * now in the background; untick: its engines are removed (asked first). Plus a size of your own, and the named sizes
+ * past TensorRT's ranges (CUDA). The chosen sizes are the background build's list (prebuild.ranges).
+ */
+function TrtSizes({ trt }: { trt: TrtState }) {
+  const p = trt.prebuild;
+  // loop: HOT-PATH-OK — the few chosen sizes per render
+  const chosen: TrtSize[] = p.ranges.map((r) => ({ label: r.label, width: r.width, height: r.height }));
+  const { rows, outside } = trtSizeRows(chosen, trt.built);
+  const [w, setW] = useState(2560);
+  const [h, setH] = useState(1440);
+  const ownKey = trtSizeKey(w, h);
+  // loop: NOT-WORTH — a dozen rows
+  const ownRow = ownKey ? rows.find((r) => r.key === ownKey) : undefined;
+  // loop: NOT-WORTH — a few sizes in the row
+  const ownWith = ownRow?.sizes.map((x) => x.label).join(", ");
+  // loop: NOT-WORTH — a few built ranges, the few chosen sizes
+  const ownDone = ownKey !== null && (trt.built.some((k) => k.startsWith(`${ownKey}_t`)) || chosen.some((c) => trtSizeKey(c.width, c.height) === ownKey));
+  return (
+    <>
+      <p className="hint-text">{trt.ready ? "Sizes to build for:" : "Sizes to build for, once TensorRT is installed:"}</p>
+      <ul className="check-list">
+        {/* loop: HOT-PATH-OK — a dozen rows per render */}
+        {rows.map((r) => {
+          // loop: NOT-WORTH — a few built ranges, the few chosen sizes
+          const on = trt.built.some((k) => k.startsWith(`${r.key}_t`)) || chosen.some((c) => trtSizeKey(c.width, c.height) === r.key);
+          return (
+            <li key={r.key}>
+              <label className="checks">
+                <input type="checkbox" checked={on} onChange={(e) => void window.ck.trtSize(e.target.checked ? "add" : "remove", r.build)} />
+                {/* loop: NOT-WORTH — a few sizes per row */}
+                {r.sizes.map(sizeText).join(" · ")}
+              </label>
+              <p className="size-note">{sizeNote(trt, r.key)}</p>
+            </li>
+          );
+        })}
+      </ul>
+      {/* loop: NOT-WORTH — two sizes */}
+      {outside.length > 0 && <p className="hint-text">Past TensorRT&apos;s sizes, so they run on CUDA: {outside.map(sizeText).join(", ")}.</p>}
+      <Row label="A size of my own" hint="Width × height in pixels">
+        <div className="file-pick">
+          <input type="number" aria-label="Width" min={16} max={16384} step={1} value={w} onChange={(e) => setW(Math.round(Number(e.target.value)) || 0)} />
+          ×
+          <input type="number" aria-label="Height" min={16} max={16384} step={1} value={h} onChange={(e) => setH(Math.round(Number(e.target.value)) || 0)} />
+          <button type="button" className="btn small" disabled={!ownKey || ownDone} onClick={() => void window.ck.trtSize("add", { label: "Your size", width: w, height: h })}>
+            <Download size={14} /> Build
+          </button>
+        </div>
+      </Row>
+      <p className="size-note">
+        {ownKey
+          ? `${w}×${h} falls in the range ${sizeRangeText(ownKey)}${ownWith ? ` (with ${ownWith})` : ""}: ${ownDone ? "already built or chosen" : "not built"}.`
+          : `${w}×${h} is past TensorRT's sizes (at most ${TRT_MAX_SIDE} px a side and 4096×2176 in area), so it runs on CUDA.`}
+      </p>
     </>
   );
 }

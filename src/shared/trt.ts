@@ -94,3 +94,118 @@ export function buildFraction(piece: string | null, measured: boolean): number {
   // loop: NOT-WORTH — as above
   return TRT_PIECES.slice(0, i).reduce((s, p) => s + weight(p), 0) / total;
 }
+
+// Which sizes TensorRT builds for (backlog row 56). A size the app builds ahead: what it sends to the engine's
+// `trt_build`, and its name on screen.
+export interface TrtSize {
+  label: string;
+  width: number;
+  height: number;
+}
+
+/** What the app builds before anyone has chosen: 4K first (the minutes a 4K job would wait), then HD. */
+export const DEFAULT_TRT_SIZES: readonly TrtSize[] = [
+  { label: "4K DCI", width: 4096, height: 2160 },
+  { label: "HD", width: 1920, height: 1080 },
+];
+
+/**
+ * Common production sizes, named, in Engine settings' list. Sizes that pad into the same engine range share a row,
+ * built for the first of them (the background build's own size where it has one). The last two are past TensorRT's
+ * ranges: they always run on CUDA, and the list says so.
+ */
+export const TRT_NAMED_SIZES: readonly TrtSize[] = [
+  { label: "720p", width: 1280, height: 720 },
+  { label: "HD", width: 1920, height: 1080 },
+  { label: "2K DCI", width: 2048, height: 1080 },
+  { label: "2K full aperture", width: 2048, height: 1556 },
+  { label: "2.8K", width: 2880, height: 1620 },
+  { label: "4K DCI", width: 4096, height: 2160 },
+  { label: "UHD", width: 3840, height: 2160 },
+  { label: "4K open gate", width: 4096, height: 3072 },
+  { label: "6K", width: 6144, height: 3240 },
+];
+
+/** A size as people write it: "HD 1920×1080". */
+export const sizeText = (s: TrtSize) => `${s.label} ${s.width}×${s.height}`;
+
+/** The size part of a range key ("h1024-1280_w1792-2176_t1-48_f1-4" → "h1024-1280_w1792-2176"), null if not one. */
+export const sizeKeyOf = (rangeKey: string) => /^h\d+-\d+_w\d+-\d+/.exec(rangeKey)?.[0] ?? null;
+
+/** The largest frame a size range takes ("h1024-1280_w1792-2176" → "up to 2176×1280"). */
+export function sizeRangeText(sizeKey: string): string {
+  const m = /^h(\d+)-(\d+)_w(\d+)-(\d+)/.exec(sizeKey);
+  return m ? `up to ${m[4]}×${m[2]}` : sizeKey;
+}
+
+/** One row of the size list: a size range, the named and chosen sizes in it, and the size it is built for. */
+export interface TrtSizeRow {
+  key: string;
+  sizes: TrtSize[];
+  build: TrtSize;
+}
+
+/**
+ * The size list's rows: the named sizes grouped by range, then each chosen size outside them, then any range built
+ * on this card that none of them names (an earlier version's). `outside`: the named sizes TensorRT can't take.
+ * A chosen size is built at its own size (a row's named size could get another window).
+ */
+export function trtSizeRows(chosen: readonly TrtSize[], built: readonly string[]): { rows: TrtSizeRow[]; outside: TrtSize[] } {
+  const rows: TrtSizeRow[] = [];
+  const outside: TrtSize[] = [];
+  // loop: NOT-WORTH — nine named sizes and the few chosen ones, per render of the TensorRT section
+  for (const s of [...TRT_NAMED_SIZES, ...chosen]) {
+    const key = trtSizeKey(s.width, s.height);
+    if (!key) {
+      outside.push(s);
+      continue;
+    }
+    // loop: NOT-WORTH — a dozen rows
+    const row = rows.find((r) => r.key === key);
+    if (!row) rows.push({ key, sizes: [s], build: s });
+    // loop: NOT-WORTH — a few sizes per row
+    else if (!row.sizes.some((x) => x.width === s.width && x.height === s.height)) row.sizes.push(s);
+  }
+  // loop: NOT-WORTH — the few chosen sizes
+  for (const c of chosen) {
+    // loop: NOT-WORTH — a dozen rows
+    const row = rows.find((r) => r.key === trtSizeKey(c.width, c.height));
+    if (row) row.build = c;
+  }
+  // loop: NOT-WORTH — a few built ranges
+  for (const k of built) {
+    const key = sizeKeyOf(k);
+    // loop: NOT-WORTH — a dozen rows
+    if (!key || rows.some((r) => r.key === key)) continue;
+    const m = /^h(\d+)-(\d+)_w(\d+)-(\d+)/.exec(key)!;
+    const s = { label: "Built earlier", width: Number(m[4]), height: Number(m[2]) };
+    rows.push({ key, sizes: [s], build: s });
+  }
+  return { rows, outside };
+}
+
+/** A chosen size from the page or settings.json, checked: a name of at most 80 characters and whole sides from 16 to 16384 px. */
+export function sanitizeTrtSize(v: unknown): TrtSize | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const side = (n: unknown) => (typeof n === "number" && Number.isInteger(n) && n >= 16 && n <= 16384 ? n : null);
+  const width = side(o.width);
+  const height = side(o.height);
+  if (typeof o.label !== "string" || !o.label.trim() || width === null || height === null) return null;
+  return { label: o.label.trim().slice(0, 80), width, height };
+}
+
+/** The chosen sizes from settings.json: each checked, one per range (the first kept), at most 32; absent = the defaults. */
+export function sanitizeTrtSizes(v: unknown): TrtSize[] {
+  // loop: NOT-WORTH — two sizes, once at start
+  if (!Array.isArray(v)) return DEFAULT_TRT_SIZES.map((s) => ({ ...s }));
+  const out: TrtSize[] = [];
+  // loop: NOT-WORTH — at most 32 sizes, once at start
+  for (const x of v.slice(0, 32)) {
+    const s = sanitizeTrtSize(x);
+    const key = s && trtSizeKey(s.width, s.height);
+    // loop: NOT-WORTH — as above
+    if (s && key && !out.some((o) => trtSizeKey(o.width, o.height) === key)) out.push(s);
+  }
+  return out;
+}

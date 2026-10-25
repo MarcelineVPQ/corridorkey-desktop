@@ -37,6 +37,8 @@ export function EnginePage(props: {
   const needInstall = installMissing(inst);
   const pct = installPct(inst);
   const trt = state.tensorrt;
+  // loop: NOT-WORTH — the few chosen sizes, per render
+  const builtFor = trt.prebuild.ranges.map((r) => r.label).join(", ");
   const trtStatus = !trt.supported
     ? state.system.platform === "darwin"
       ? "not on Macs"
@@ -52,7 +54,9 @@ export function EnginePage(props: {
             : trt.prebuild.status === "paused"
               ? "on · build paused while keying"
               : trt.prebuild.status === "done"
-                ? "on · built for 4K and HD"
+                ? builtFor
+                  ? `on · built for ${builtFor}`
+                  : "on · no sizes chosen: clips run on CUDA"
                 : "on · not built yet: clips run on CUDA";
   const checks = (c: { ok: boolean; problems: string[] }, okText: string) =>
     c.ok ? (

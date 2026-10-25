@@ -12,6 +12,7 @@ import {
   type TrtState,
   type UpdateState,
 } from "../../src/shared/types";
+import { DEFAULT_TRT_SIZES } from "../../src/shared/trt";
 
 /** A readable 640×360 video clip of 24 frames, /c/<id>.mp4. */
 export const clipInfo = (id: string, over: Partial<ClipInfo> = {}): ClipInfo => ({
@@ -88,6 +89,7 @@ export const trtState = (over: Partial<TrtState> = {}): TrtState => ({
   error: null,
   built: [],
   prebuild: { status: "idle", ranges: [], fraction: 0, startedAt: null, note: null },
+  onDisk: [],
   ...over,
 });
 
@@ -117,6 +119,7 @@ export const settings = (over: Partial<Settings> = {}): Settings => ({
   tensorrt: false,
   vramLimitGb: null,
   cacheRoot: null,
+  trtSizes: DEFAULT_TRT_SIZES.map((s) => ({ ...s })),
   ...over,
 });
 
