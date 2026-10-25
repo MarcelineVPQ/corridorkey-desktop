@@ -372,8 +372,8 @@ docs/ENGINE_RUST.md).
 | 4K 08_3a | 120 | 2.37e-4 | 0.082 | 1.6 % | 57.5 dB | 46.2 / 45.5 dB |
 | 4K 04_2c | 120 | 4.59e-4 | 0.064 | 3.3 % | 56.0 dB | 51.2 / 48.5 dB |
 
-**Correction (2026-10-25):** we wrote that these differences were "fp16 against bf16 rounding". Measured against the
-truth, that wasn't the whole story; see "What we got wrong" below. With both engines in full precision (fp32, on the processor,
+**Correction (2026-10-25):** we wrote that these differences were "fp16 against bf16 rounding". Whether that holds against the
+truth, this is still open; see "What we got wrong" below. With both engines in full precision (fp32, on the processor,
 `engine-rs/tools/e2e_cpu.sh`), the mattes are the same to within rounding: alpha MAE 1.7e-7, max 6.9e-5, no pixel
 off by even 1/255, foreground PSNR 102.6 dB; the low-memory mode matches the normal one exactly (difference 0).
 
@@ -381,25 +381,16 @@ off by even 1/255, foreground PSNR 102.6 dB; the low-memory mode matches the nor
 
 Part of the story, kept here on purpose. Each item: what happened, how it was found, the fix.
 
-**1. Hair edges further from the truth than the original's (found 2026-10-24 by eye, measured 2026-10-25; fix in
-progress).** Marcy saw a difference in the hair on the first day of side-by-side viewing. We filed it as "within the
-original's variation" because our scorecard compared us only with the original's *output*, never with the *truth*
-(the original's model in full fp32 precision). Measured against the truth, at the same window (12/6), on
-locked_backdrop:
-
-| Against fp32 (the truth) | Ours, models onnx.3 (fp16) | The original as it ships (bf16) |
-| --- | --- | --- |
-| Alpha MAE | 3.82e-4 | 3.63e-4 |
-| Hair-edge pixels off by > 1/255 | 54.7 % | 9.7 % |
-| Worst pixel | 0.075 | 0.038 |
-
-On godiva_close (40/20): alpha MAE 6.09e-3 against 1.37e-3, worst pixel 0.245 against 0.052. The average looked the
-same; the hair didn't. The likely cause, from our export scripts: the original runs under PyTorch's autocast, which
-keeps the precision-sensitive operations (normalisation, softmax, sums, exponentials) in fp32 and drops only the heavy
-maths to bf16. We exported C-RADIO that way, but MoGe, RVM, stage 1 and stage 2 as pure fp16, sensitive operations
-included. Stage 1 and 2 make the alpha. The fix: model set onnx.4, those four networks exported with the original's
-precision policy. Its result against the truth and its cost in speed and memory go here when measured; it ships only
-if it is as close to the truth as the original.
+**1. A difference in the hair, and two wrong turns finding it (found 2026-10-24 by eye; open).** Marcy saw a
+difference in the hair on the first day of side-by-side viewing. We filed it as "within the original's variation"
+because our scorecard compared us only with the original's *output*, never with the *truth* (the original's model in
+full fp32 precision). On 2026-10-25 we measured against the truth and published a large hair-edge gap here, then
+withdrew it: the truth and the original's bf16 run were fed 16-bit PNG frames converted by ffmpeg, while our engine
+read the video itself, so the inputs weren't the same and the numbers don't count. Acting on them, we also re-exported
+four networks with the original's precision policy (model set onnx.4); the hair didn't change, so that wasn't the
+cause and onnx.4 is not shipped. Known deviation from CorridorKey 2.0 in our input: it reads video through OpenCV at
+8 bits; we read 10/12-bit plates at 16 bits (same colour conversion). Next: one comparison where all three are fed
+exactly the same frames through CorridorKey 2.0's own reader. The result goes here.
 
 **2. The scorecard measured the wrong reference (2026-10-24).** Comparing with the original's output can't tell
 which of two roundings is closer to the right answer. From now on quality is measured against the fp32 truth. The
