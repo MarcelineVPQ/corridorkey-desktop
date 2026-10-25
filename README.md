@@ -448,6 +448,11 @@ spread over this PC's 32 threads (Ryzen 9 9950X3D; 51-119 ms and 18-70 ms on one
 space), on the decoding and rendering threads that run beside the graphics card. On the 8-frame CPU test the job took
 the same time with and without it (20.6-21.6 s against 21.5 s).
 
+Two limits, stated plainly: the Windows numbers were measured under Wine on this PC, not yet on a real Windows
+machine; and the engine always runs OCIO in its exact mode (LOSSLESS), which makes one rare case slow: a show LUT
+used *inverted* as an input space (about 9 s per 4K frame in the test config). We keep exactness as the default and
+will revisit if a real studio config needs it.
+
 ### Test it yourself
 
 The clips are free to download (their owners don't allow re-hosting, so they aren't in this repository):
