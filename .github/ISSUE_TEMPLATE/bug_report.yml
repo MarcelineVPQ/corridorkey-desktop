@@ -1,0 +1,64 @@
+name: Bug report
+description: Something doesn't work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Questions and ideas go to [Discussions](https://github.com/MarcelineVPQ/corridorkey-desktop/discussions); this form is for bugs.
+        Please don't attach your clips unless you're sure you may share them. A description, the log and the settings file are usually enough.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Add a clip (format, resolution, frames)\n2. Settings…\n3. Start the queue"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: CorridorKey Desktop version
+      description: About page, or the file name you downloaded
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: System
+      options:
+        - Linux
+        - Windows 10/11
+        - macOS (Apple Silicon)
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Distribution / version, graphics card, driver
+      placeholder: "e.g. Ubuntu 24.04, RTX 4070 12 GB, driver 570"
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Engine
+      options:
+        - Rust + ONNX (the default)
+        - Rust + ONNX with TensorRT
+        - PyTorch (the original, from a checkout)
+  - type: textarea
+    id: log
+    attributes:
+      label: Engine log
+      description: The job's "Engine log" (open the job in the queue), copied as text
+      render: text
+  - type: textarea
+    id: settings
+    attributes:
+      label: The job's settings file
+      description: "`<clip>_settings.txt` in the job's output folder, if the job got that far"
+      render: text
