@@ -281,6 +281,13 @@ def _texture(h, w, seed=1):
     return np.repeat(t[..., None], 3, axis=2)
 
 
+def write_matte_a(path, a):
+    """A matte alone in channel A, float, as the Rust engine writes it (BACKLOG row 30 b; OpenCV can't write that)."""
+    import OpenEXR
+
+    OpenEXR.File({"compression": OpenEXR.ZIP_COMPRESSION, "type": OpenEXR.scanlineimage}, {"A": np.ascontiguousarray(a, np.float32)}).write(path)
+
+
 def self_test(work=None):
     h, w, T = 96, 128, 8
     fails = []
@@ -302,7 +309,8 @@ def self_test(work=None):
         check(f"{k} mean", s[k]["mean"], 0.0)
     check("moving pixels", s["moving_flow"]["px_per_frame"], 0.0)
 
-    print("2. identical frames written to disk (EXR alpha + fg, 16-bit PNG plate), read back: exactly 0")
+    print("2. identical frames written to disk (the engine's layout: <clip>_alpha.<n>.exr with the matte alone in channel A,")
+    print("   RGB fg EXR, 16-bit PNG plate), read back: exactly 0, and the matte read back bit-exact")
     work = work or tempfile.mkdtemp(prefix="ck-stability-")
     out = os.path.join(work, "out")
     os.makedirs(os.path.join(out, "c_alpha_exr"), exist_ok=True)
@@ -310,9 +318,11 @@ def self_test(work=None):
     os.makedirs(os.path.join(work, "plate"), exist_ok=True)
     # loop: NOT-WORTH — eight tiny frames
     for t in range(T):
-        cv2.imwrite(os.path.join(out, "c_alpha_exr", f"c_alpha.{1001 + t}.exr"), base)
+        write_matte_a(os.path.join(out, "c_alpha_exr", f"c_alpha.{1001 + t}.exr"), base)
         cv2.imwrite(os.path.join(out, "c_fg_exr", f"c_fg.{1001 + t}.exr"), plate.astype(np.float32))
         cv2.imwrite(os.path.join(work, "plate", f"p.{1001 + t}.png"), (plate * 65535 + 0.5).astype(np.uint16))
+    back = next(mc.Source(out).alpha())
+    check("matte read back from channel A, max difference", float(np.abs(back - base).max()), 0.0)
     s, _ = run(out, os.path.join(work, "plate"))
     # loop: NOT-WORTH — four measures
     for k in ("static", "static_edge", "sizzle_edge", "fg_static_subject"):

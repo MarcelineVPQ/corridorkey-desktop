@@ -304,6 +304,7 @@ def build(out):
         L += ["> **REHEARSAL, NOT A MEASUREMENT.** Run on the processor with tiny inputs to prove the tool works: the",
               "> \"original\" columns are a second run of CorridorKey Desktop's engine standing in for CorridorKey 2.0",
               "> (the original needs an NVIDIA card). None of these numbers may be quoted.", ""]
+    at_summary = len(L)
     L.append(f"Measured {meta.get('date', '?')} on one machine, same clips, same settings ({meta.get('settings', '?')}), by "
              f"`tools/vs_original.sh` at commit {meta.get('commit', '?')[:10]} ({meta.get('mode', '?')} run, "
              f"{meta.get('repeats', '?')} repeat(s); medians).")
@@ -505,7 +506,7 @@ def build(out):
               "The key is kept outside the report folder (meta.json says where); open it only after judging."]
 
     head = ["", "## Summary", "", "| Axis | Result |", "|---|---|"] + [f"| {a} | {b} |" for a, b in summary]  # loop: NOT-WORTH — six axes
-    L[3:3] = head
+    L[at_summary:at_summary] = head[1:] + [""]
     text = "\n".join(L) + "\n"
     with open(os.path.join(out, "report.md"), "w") as fh:
         fh.write(text)

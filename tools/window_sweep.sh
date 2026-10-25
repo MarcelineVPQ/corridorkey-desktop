@@ -11,7 +11,9 @@
 # matte against the plate, and the EXR frames are deleted (--keep-outputs keeps them).
 #
 # Options:
-#   --plate CLIP         the plate (default ~/Videos/corridorkey-tests/4k/04_5h: curly hair through glasses)
+#   --plate CLIP         the plate (default ~/Videos/corridorkey-tests/godiva_close.mov, HD: on a 16 GB card 4K fits only
+#                        8/4 (BACKLOG row 37, measured 2026-10-24), so the window range is an HD question; a 4K plate
+#                        such as 4k/04_5h runs too, and the windows that don't fit say so)
 #   --windows L          chunk/stride pairs (default 8/4,16/8,24/12,48/24)
 #   --frames N           only the first N frames (default: all)
 #   --low-vram B         true | false (default true)
@@ -36,7 +38,7 @@ SCRATCH="$HOME/.cache/claude-scratch"
 PY="${CK_PY:-$SCRATCH/corridorkey-onnx/venv/bin/python}"
 MEMRUN="$SCRATCH/tools/memrun.sh"
 export CK_SLICE="${CK_SLICE:-claude-work.slice}"
-PLATE="$HOME/Videos/corridorkey-tests/4k/04_5h" WINDOWS="8/4,16/8,24/12,48/24" FRAMES="" LOW=true BUDGET=14 FORMAT=exr-float
+PLATE="$HOME/Videos/corridorkey-tests/godiva_close.mov" WINDOWS="8/4,16/8,24/12,48/24" FRAMES="" LOW=true BUDGET=14 FORMAT=exr-float
 ENGINE="$REPO/engine-rs/target/dist/corridorkey-engine"
 MODELS="$HOME/.local/share/corridorkey-desktop/models/2.0.0-onnx.3"
 RUNTIME="$HOME/.local/share/corridorkey-desktop/runtime/ort-1.31.0-cuda13"
