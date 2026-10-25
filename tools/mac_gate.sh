@@ -19,16 +19,23 @@
 #
 # Options:
 #   --host USER@HOST     the Mac (required)
-#   --provider P         the engine's --device on the Mac (default cpu: the engine has auto|cuda|cpu today; pass coreml
-#                        once the engine has it). The provider that really ran is read from the engine's replies.
+#   --provider P         the engine's --device on the Mac (default cpu; coreml = the real gate: ONNX Runtime's Core ML
+#                        provider on the Core ML model set). The provider that really ran is read from the engine's replies.
 #   --precision P        fp16 (default, as CUDA ships) | fp32 | engine (the engine's own default); both sides alike
-#   --window C/S         the Hann window, both sides (default 8/4: what the 4K plate gets in 14 GB, and a 16 GB Mac's size)
+#   --window C/S         the Hann window, both sides (default 8/4: what the 4K plate gets in 14 GB, and a 16 GB Mac's size;
+#                        coreml: default 4/2, and it must be a window the Core ML set was built for)
+#   --coreml-set DIR     coreml: the Core ML set (engine-rs/export/coreml/build_coreml_models.sh's OUT/set: the files,
+#                        coreml.json, SHA256SUMS; default ~/.cache/claude-scratch/coreml-p1/set). Copied next to the
+#                        model set on the Mac, every file's sha256 checked on both sides
+#   --coreml-units U     coreml: Core ML's compute units on the Mac: all (default) | cpu-gpu | cpu-ane | cpu
 #   --no-low-vram        normal mode instead of staged low-memory mode (identical mattes; low-memory is the default)
 #   --frames N           key only the first N frames of each clip (default: all)
-#   --clips A,B,...      clips (files or frame folders) instead of the default set
+#   --clips A,B,...      clips (files or frame folders) instead of the default set (coreml's default: the HD clips the
+#                        Core ML set has a size for, decode-stable first: an exact 1280x1080 crop of the 4K EXR plate 04_5d
+#                        made here (half-float EXR, no decoder involved), then the three 12-bit ProRes HD clips)
 #   --ref DIR            an existing CUDA reference (an engine_bench --out folder with bench.json and out/<clip>/)
 #   --out DIR            the report folder (default ~/.cache/claude-scratch/mac-gate/<date>-<commit>)
-#   --stall-s S          kill an engine silent this long (default 3600 for cpu: one 4K window on a CPU is slow; else 900)
+#   --stall-s S          kill an engine silent this long (default 3600 for cpu and coreml; else 900)
 #   --max-hours H        stop following the Mac's run after this long (default 24; the run itself keeps going)
 #   --models DIR         the model set (default ~/.local/share/corridorkey-desktop/models/2.0.0-onnx.3)
 #   --fresh              key again on the Mac even if this exact run finished before
@@ -39,10 +46,15 @@
 # ~/.cache/claude-scratch/tools/memrun.sh (when present) and ~/.cache/claude-scratch/heavy.lock.
 set -euo pipefail
 
-HOST="" PROVIDER=cpu PRECISION=fp16 WINDOW=8/4 LOW_VRAM=true FRAMES="" CLIPS="" REF="" OUT="" STALL="" MAX_HOURS=24
+HOST="" PROVIDER=cpu PRECISION=fp16 WINDOW="" LOW_VRAM=true COREML_UNITS=all FRAMES="" CLIPS="" REF="" OUT="" STALL="" MAX_HOURS=24
 MODELS="$HOME/.local/share/corridorkey-desktop/models/2.0.0-onnx.3" FRESH=0 DRY=0 STEPS=1,2,3,4,5,6,7
+COREML_SET="$HOME/.cache/claude-scratch/coreml-p1/set"
 T="$HOME/Videos/corridorkey-tests"
 DEFAULT_CLIPS="$T/metal_glasses.mov,$T/locked_backdrop.mov,$T/with_motion_blur.mov,$T/4k/04_5d"
+# coreml: HD only (the Core ML set has the HD size, 1152x1280 padded); the EXR crop first (no video decoder: the row-31
+# study found 8-bit video decodes differ by CPU SIMD, so a decoded-input difference can't hide a model difference)
+HD_EXR="$HOME/.cache/claude-scratch/mac-gate/clips/04_5d_hd"
+DEFAULT_CLIPS_COREML="$HD_EXR,$T/metal_glasses.mov,$T/locked_backdrop.mov,$T/with_motion_blur.mov"
 die() { echo "mac_gate: $*" >&2; exit 1; }
 # loop: NOT-WORTH — the command line
 while [ $# -gt 0 ]; do
@@ -51,6 +63,8 @@ while [ $# -gt 0 ]; do
     --provider) PROVIDER=$2; shift 2 ;;
     --precision) PRECISION=$2; shift 2 ;;
     --window) WINDOW=$2; shift 2 ;;
+    --coreml-set) COREML_SET=$2; shift 2 ;;
+    --coreml-units) COREML_UNITS=$2; shift 2 ;;
     --no-low-vram) LOW_VRAM=false; shift ;;
     --frames) FRAMES=$2; shift 2 ;;
     --clips) CLIPS=$2; shift 2 ;;
@@ -67,11 +81,14 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$HOST" ] || die "--host USER@HOST is required (the Mac, e.g. marcy@mac-mini.local)"
+[ -n "$WINDOW" ] || { [ "$PROVIDER" = coreml ] && WINDOW=4/2 || WINDOW=8/4; }
 [[ "$WINDOW" =~ ^[0-9]+/[0-9]+$ ]] || die "--window wants CHUNK/STRIDE, e.g. 8/4"
+[[ "$COREML_UNITS" =~ ^(all|cpu-gpu|cpu-ane|cpu)$ ]] || die "--coreml-units: all | cpu-gpu | cpu-ane | cpu"
 [[ "$PRECISION" =~ ^(fp16|fp32|engine)$ ]] || die "--precision: fp16 | fp32 | engine"
 [[ "$PROVIDER" =~ ^[a-z0-9_]+$ ]] || die "--provider: a device name like cpu or coreml"
 [ -z "$FRAMES" ] || [[ "$FRAMES" =~ ^[0-9]+$ ]] || die "--frames wants a number"
-[ -n "$STALL" ] || { [ "$PROVIDER" = cpu ] && STALL=3600 || STALL=900; }
+# (cpu: one 4K window is slow; coreml: the first load compiles each network for Core ML, minutes possible)
+[ -n "$STALL" ] || { [[ "$PROVIDER" =~ ^(cpu|coreml)$ ]] && STALL=3600 || STALL=900; }
 CHUNK=${WINDOW%/*} STRIDE=${WINDOW#*/}
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)
@@ -126,17 +143,60 @@ echo "commit: $COMMIT ($(git log -1 --format=%s))"
 for t in ssh rsync node git ffprobe flock; do command -v "$t" >/dev/null || die "this PC is missing $t"; done
 [ -x "$PY" ] || die "no Python with numpy + OpenCV at $PY (set CK_PY)"
 [ -f "$MODELS/manifest.json" ] || die "no model set at $MODELS (manifest.json missing)"
-IFS=, read -r -a CLIP_LIST <<<"${CLIPS:-$DEFAULT_CLIPS}"
+if [ "$PROVIDER" = coreml ]; then
+  # the Core ML set: present, built from this model set, and built for this window (stage 1 at CHUNK frames; the
+  # low-memory prepass calls C-RADIO / MoGe 4 frames at a time, normal mode CHUNK at a time)
+  [ -f "$COREML_SET/coreml.json" ] && [ -f "$COREML_SET/SHA256SUMS" ] || die "no Core ML set at $COREML_SET (coreml.json + SHA256SUMS; engine-rs/export/coreml/build_coreml_models.sh)"
+  "$PY" -I - "$COREML_SET/coreml.json" "$MODELS/manifest.json" "$CHUNK" "$LOW_VRAM" <<'PYEOF' || die "the Core ML set doesn't fit this run"
+import json, sys
+cm, man, chunk, low = json.load(open(sys.argv[1])), json.load(open(sys.argv[2])), int(sys.argv[3]), sys.argv[4] == "true"
+if cm.get("source_set") != man.get("version"):
+    sys.exit(f"the Core ML set was built from {cm.get('source_set')}, the model set is {man.get('version')}")
+fb = 4 if low else chunk
+# loop: NOT-WORTH — the set's few sizes
+for size, files in cm["fp16"].items():
+    need = [f"rvm-t1", f"stage2-t1", f"stage1-t{chunk}", f"cradio-t{fb}", f"moge-t{fb}"]
+    # loop: NOT-WORTH — five names
+    miss = [n for n in need if n not in files]
+    if miss:
+        sys.exit(f"the Core ML set has no {', '.join(miss)} at {size} (it has {', '.join(sorted(files))}): pick --window to match")
+    print(f"Core ML set: {size} for window {chunk} ({'low-memory' if low else 'normal'} mode)")
+PYEOF
+fi
+IFS=, read -r -a CLIP_LIST <<<"${CLIPS:-$([ "$PROVIDER" = coreml ] && echo "$DEFAULT_CLIPS_COREML" || echo "$DEFAULT_CLIPS")}"
+# the HD EXR clip: an exact 1280x1080 crop (x 2304-3583, y 0-1079: both actors' hair, the green screen) of the 4K
+# Tears of Steel plate 04_5d, half-float in, half-float out: no resampling, no decoder; made once
+if [[ ",${CLIP_LIST[*]}," == *"$HD_EXR"* ]] && [ ! -f "$HD_EXR/.complete" ]; then
+  printf '+ (the HD EXR excerpt: %s cropped to 1280x1080 into %s)\n' "$T/4k/04_5d" "$HD_EXR"
+  if [ "$DRY" = 0 ]; then
+    rm -rf "$HD_EXR" && mkdir -p "$HD_EXR"
+    OPENCV_IO_ENABLE_OPENEXR=1 "$PY" -I - "$T/4k/04_5d" "$HD_EXR" <<'PYEOF' || die "couldn't make the HD EXR excerpt"
+import os, sys
+import cv2
+src, dst = sys.argv[1:3]
+names = sorted(n for n in os.listdir(src) if n.lower().endswith(".exr"))
+# loop: SERIAL-REQUIRED — 120 frames, one 4K frame in memory at a time
+for n in names:
+    im = cv2.imread(os.path.join(src, n), cv2.IMREAD_UNCHANGED)
+    assert im is not None and im.shape[:2] == (2160, 4096), n
+    out = im[0:1080, 2304:3584]
+    ok = cv2.imwrite(os.path.join(dst, n.replace("04_5d", "04_5d_hd")), out, [cv2.IMWRITE_EXR_TYPE, cv2.IMWRITE_EXR_TYPE_HALF])
+    assert ok, n
+print(f"HD EXR excerpt: {len(names)} frames, 1280x1080")
+PYEOF
+    touch "$HD_EXR/.complete"
+  fi
+fi
 CLIP_NAMES=()
 # loop: NOT-WORTH — the gate's few clips
 for c in "${CLIP_LIST[@]}"; do
-  [ -e "$c" ] || die "clip not found: $c"
+  [ -e "$c" ] || [ "$DRY" = 1 ] || die "clip not found: $c"
   b=$(basename "$c"); CLIP_NAMES+=("${b%.*}")
 done
 echo "clips: ${CLIP_NAMES[*]}"
 OUT=${OUT:-$SCRATCH/mac-gate/$(date +%F)-$SHORT}
 WIN_TAG="w${CHUNK}-${STRIDE}$([ "$LOW_VRAM" = true ] && echo low)${FRAMES:+-f$FRAMES}"
-KEY="$SHORT-$PROVIDER-$PRECISION-$WIN_TAG"
+KEY="$SHORT-$PROVIDER$([ "$PROVIDER" = coreml ] && echo "-$COREML_UNITS")-$PRECISION-$WIN_TAG"
 echo "run: $KEY → report in $OUT"
 if [ "$DRY" = 0 ]; then
   mkdir -p "$OUT"
@@ -148,7 +208,10 @@ fi
 BENCH_OPTS=(--option 'output_format="exr"' --option 'exr_dtype="float"' --option "hann_chunk=$CHUNK" --option "hann_stride=$STRIDE" --option "low_vram=$LOW_VRAM")
 [ -z "$FRAMES" ] || BENCH_OPTS+=(--option "num_frames=$FRAMES")
 [ "$PRECISION" = engine ] || BENCH_OPTS+=(--env "CK_ENGINE_PRECISION=$PRECISION")
-SETTINGS="window $CHUNK/$STRIDE$([ "$LOW_VRAM" = true ] && echo ' low-memory'), precision $PRECISION, EXR float, outputs alpha+fg${FRAMES:+, first $FRAMES frames}"
+# the Mac's side only: Core ML's compute units
+MAC_OPTS=()
+[ "$PROVIDER" != coreml ] || MAC_OPTS+=(--env "CK_ENGINE_COREML_UNITS=$COREML_UNITS")
+SETTINGS="$([ "$PROVIDER" = coreml ] && echo "Core ML units $COREML_UNITS, ")window $CHUNK/$STRIDE$([ "$LOW_VRAM" = true ] && echo ' low-memory'), precision $PRECISION, EXR float, outputs alpha+fg${FRAMES:+, first $FRAMES frames}"
 # where things are, for every step
 SET=$(basename "$MODELS")
 FACTS="$OUT/facts.txt"
@@ -290,6 +353,17 @@ remote <<EOF
 mkdir -p "\$HOME/$R/models/$SET"
 EOF
 xfer -a --partial --include='*.onnx' --include='*.onnx.data' --include='*.json' --exclude='*' "$MODELS/" "$HOST:$R/models/$SET/"
+if [ "$PROVIDER" = coreml ]; then
+  # the Core ML set next to the model set (its files keep their weights in the set's .onnx.data); its own checksums
+  # here first, then on the Mac below with the rest
+  printf '+ (the Core ML set %s checked against its SHA256SUMS, added to the list)\n' "$COREML_SET"
+  if [ "$DRY" = 0 ]; then
+    (cd "$COREML_SET" && sha256sum --quiet -c SHA256SUMS) || die "the Core ML set at $COREML_SET doesn't match its SHA256SUMS"
+    cat "$COREML_SET/SHA256SUMS" >>"$SUMS"
+    echo "$(sha256sum "$COREML_SET/coreml.json" | cut -d' ' -f1)  coreml.json" >>"$SUMS"
+  fi
+  xfer -a --partial "$COREML_SET/coreml.json" "$COREML_SET"/*.onnx "$HOST:$R/models/$SET/"
+fi
 xfer "$SUMS" "$HOST:$R/models/$SET/.sha256"
 remote SET="$SET" <<'EOF'
 cd "$HOME/ck-gate/models/$SET"
@@ -339,6 +413,7 @@ EOF
 # the run, detached (nohup + caffeinate: the Mac stays awake, a dropped SSH connection doesn't end it); a finished run
 # of this exact key is kept unless --fresh, a live one is followed again
 opts_q=$(printf '%q ' "${BENCH_OPTS[@]}") clips_q=$(printf '%q ' "${MAC_CLIPS[@]}")
+[ ${#MAC_OPTS[@]} = 0 ] || opts_q+="$(printf '%q ' "${MAC_OPTS[@]}")"
 remote RUN="$RUN" FRESH="$FRESH" SET="$SET" RT="$RT_NAME" PROVIDER="$PROVIDER" STALL="$STALL" \
   OPTS="${opts_q% }" CLIPS="${clips_q% }" <<'EOF'
 cd "$HOME/ck-gate"

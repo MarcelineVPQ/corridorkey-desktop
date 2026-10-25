@@ -46,9 +46,23 @@ For the times you want to see the Mac's desktop (first app runs, the original's 
 ## A test run (the gate, one command on the Linux PC)
 
 ```
-tools/mac_gate.sh --host <user>@<mac>.local                     # today: the engine on the Mac's CPU
-tools/mac_gate.sh --host <user>@<mac>.local --provider coreml   # once the engine has the Core ML provider
+tools/mac_gate.sh --host <user>@<mac>.local --provider coreml --window 4/2   # THE gate: Core ML, HD, EXR clip first
+tools/mac_gate.sh --host <user>@<mac>.local --provider coreml --window 4/2 --coreml-units cpu-gpu   # then: no Neural Engine
+tools/mac_gate.sh --host <user>@<mac>.local --provider coreml --window 8/4 --steps 5,6,7            # then: the longer window
+tools/mac_gate.sh --host <user>@<mac>.local                     # a CPU rehearsal (not a gate run)
 ```
+
+Core ML (phase 1, BACKLOG row 24): Core ML compiles for fixed shapes, so the gate runs the **Core ML set** built
+offline for the HD size only (1280x1080 clips, padded 1152x1280; stage 1 at 4 or 8 frames per window, C-RADIO /
+MoGe at 4 per call in low-memory mode): `engine-rs/export/coreml/build_coreml_models.sh` → `OUT/set` (default
+`--coreml-set ~/.cache/claude-scratch/coreml-p1/set`; release assets later, never in git). The gate copies it next to
+the model set on the Mac (sha256 checked on both sides) and refuses a window the set wasn't built for. Its default
+clips are HD only, decode-stable first: an exact 1280x1080 crop of the 4K half-float EXR plate 04_5d (made here once,
+no decoder, no resampling; the row-31 study found 8-bit video decodes differ by CPU SIMD), then the three 12-bit
+ProRes HD clips. Window 4/2: stage 1's attention scores at 1152x1280 take ~2 GB fp16 at 4 frames, ~4 GB at 8 (the
+Core ML study), so 4/2 is the safe first run in 16 GB of unified memory and 8/4 the second. The first load compiles
+each network for Core ML (minutes possible; cached in `~/Library/Caches/corridorkey-desktop/coreml`), so the stall
+watchdog is 3600 s for coreml.
 
 From this PC's committed HEAD (it refuses a dirty tree), over SSH, no GitHub: preflight (macOS, chip, memory,
 disk, tools; it names what's missing), the code copied to `~/ck-gate/src` and the engine built there, the pinned
