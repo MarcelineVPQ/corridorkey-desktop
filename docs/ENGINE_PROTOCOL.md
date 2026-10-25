@@ -190,9 +190,12 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
   clip's shape range, one `progress` per network built (`detail`: "stage 1 (4/5)");
   the builder reports no fraction, so it has no `p`. `build_s` in the second
   `provider` reply gives each build's seconds.
-- A TensorRT job with an automatic window gets the longest window its range was
-  built for: the `memory` reply then has `estimate_basis: "tensorrt-range"` and
-  `range` instead of the measured table's estimate.
+- A TensorRT job with an automatic window gets the window the CUDA path would
+  choose within its budget, always in low-VRAM mode (the measured table's
+  normal-mode peaks are CUDA's; TensorRT's are unmeasured, backlog row 54): its
+  `memory` reply is the same as a CUDA job's, with
+  `estimate_basis: "onnxruntime-cuda-measured"`; the shape range is in the
+  `provider` reply (`range`).
 - A request the engine can't read is answered with
   `{"type":"error","code":"bad-request","message":"..."}` and the engine keeps
   running. After a job's `error` the engine also keeps running and takes the
