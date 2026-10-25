@@ -284,16 +284,25 @@ function render() {
     "  converted to ONNX from Corridor Digital's checkpoint, downloaded from this app's GitHub releases",
     `  (https://github.com/${dl.repo}/releases/tag/models-${dl.set}). CorridorKey 2.0 is © Corridor Digital, under the`,
     "  CorridorKey licence (https://github.com/nikopueringer/CorridorKey2.0).",
-    "- Three of the five networks are foundation models, under their publishers' licences (as listed in CorridorKey",
-    "  2.0's THIRD_PARTY_NOTICES.md):",
-    "  - C-RADIOv4-SO400M, NVIDIA Corporation (https://huggingface.co/nvidia/C-RADIOv4-SO400M): the",
-    "    [NVIDIA Open Model License](https://developer.download.nvidia.com/licenses/nvidia-open-model-license-agreement-june-2024.pdf).",
+    "- **Modified:** every network is converted from the original PyTorch checkpoint to ONNX, weights in fp16 (or fp32",
+    "  where named), with exact graph rewrites for speed and portrait input (listed in the set's manifest.json); the",
+    "  TensorRT set adds TensorRT-specific rewrites. Each model release carries ATTRIBUTION.md, NOTICE and the licence",
+    "  texts below.",
+    "- Three of the five networks are foundation models. They stay under their publishers' licences, **not** under the",
+    "  CorridorKey licence, with no added terms:",
+    "  - **C-RADIOv4-SO400M**, NVIDIA Corporation (https://huggingface.co/nvidia/C-RADIOv4-SO400M, revision",
+    "    `c0457f5dc26ca145f954cd4fc5bb6114e5705ad8`): the NVIDIA Open Model License (June 14, 2024; full text below).",
     "    Licensed by NVIDIA Corporation under the NVIDIA Open Model License.",
-    "  - MoGe-2 ViT-B, Microsoft Corporation (https://github.com/microsoft/MoGe, weights",
-    "    https://huggingface.co/Ruicheng/moge-2-vitb-normal): MIT (code and weights), Copyright (c) Microsoft Corporation;",
-    "    its code includes DINOv2 (Meta Platforms, Inc.), Apache-2.0.",
-    "  - RVM (Recurrent Video MAE), small, Google DeepMind (https://github.com/google-deepmind/representations4d):",
-    "    Apache-2.0 (code), Creative Commons Attribution 4.0 (weights).",
+    "  - **MoGe-2 ViT-B (normal)**, Microsoft Corporation (https://github.com/microsoft/MoGe; weights",
+    "    https://huggingface.co/Ruicheng/moge-2-vitb-normal, revision `ca5f0e07ff01d3e5a364c1d954ed12ee1814b368`): MIT,",
+    "    Copyright (c) Microsoft Corporation (full text below); its DINOv2 backbone (Meta AI): Apache-2.0 (full text below).",
+    "  - **RVM small** (Recurrent Video Masked Autoencoders, checkpoint `pretrain_rvm_small16_256_204031069`), © 2026",
+    "    Google LLC (https://github.com/google-deepmind/representations4d): weights under Creative Commons Attribution 4.0",
+    "    (https://creativecommons.org/licenses/by/4.0/), provided AS IS without warranties; code Apache-2.0. Paper: Zoran",
+    '    et al., "Recurrent Video Masked Autoencoders", arXiv:2512.13684.',
+    "- **A gift back:** CorridorKey Desktop is free and stays free, and it is offered back to Corridor Crew and the",
+    "  CorridorKey community in full. Corridor is welcome to use, adopt or take over anything here; if anything isn't what",
+    "  Corridor wants, it will be changed or taken down at their word.",
     "",
     "## System tools used, not shipped",
     "",
@@ -314,6 +323,14 @@ function render() {
   L.push("### npm packages", "");
   // loop: NOT-WORTH — ~100 texts
   for (const g of npm.texts) L.push(`#### ${g.id}: ${users(g)}`, "", fence(g.text), "");
+  L.push("### The foundation models", "");
+  // loop: NOT-WORTH — three licence files, once per generation
+  for (const [title, file] of [
+    ["NVIDIA Open Model License (June 14, 2024): C-RADIOv4-SO400M", "licenses/models/NVIDIA-Open-Model-License-2024-06.txt"],
+    ["MIT: MoGe-2 (Copyright (c) Microsoft Corporation)", "licenses/models/MoGe-MIT.txt"],
+    ["Apache-2.0: DINOv2 (in MoGe-2), RVM code", "licenses/models/Apache-2.0.txt"],
+  ])
+    L.push(`#### ${title}`, "", fence(readFileSync(join(APP, file), "utf8").trimEnd()), "");
   return L.join("\n").replace(/\n+$/, "") + "\n";
 }
 
