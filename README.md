@@ -18,8 +18,8 @@ and wrapped it in a desktop app that installs itself.
 
 On my RTX 5080 it keys 4K at about two frames a second: 2.4-2.7× faster than the original on the same machine
 (1.5-1.8× at HD), with the same mattes, less graphics memory and RAM, and less than half the install. Every number
-is below, with the clips and the commands to check them yourself. On Linux, an optional TensorRT mode takes HD to
-about 2× the original's speed. Rust and ONNX Runtime also mean one engine for every platform: NVIDIA on Linux and
+is below, with the clips and the commands to check them yourself. On Linux, an optional TensorRT mode takes that to
+about 2× the original's speed at HD and about 3.7-4.2× at 4K. Rust and ONNX Runtime also mean one engine for every platform: NVIDIA on Linux and
 Windows, and Apple Silicon through Core ML.
 
 It's free, it stays free, and it's Corridor's model. Huge thanks to Niko, Zachary Harris and the Corridor crew.
@@ -44,7 +44,7 @@ Status: 1.0 is almost ready, for Linux, Windows and macOS (Apple Silicon).
   the CorridorKey models (a 4.9 GB download on Linux and Windows, about 3.3 GB on macOS, once). If `ffmpeg` is
   missing, it offers to install it (apt or pacman on Linux, `winget` on Windows, Homebrew on macOS).
 - Optional, Linux: **TensorRT** (Engine settings, TensorRT; off by default) for about 2× the original's speed at HD
-  with the same mattes (Speed, 0.0.6-dev). Switching it on offers its own download: NVIDIA's TensorRT 10.16
+  and about 3.7-4.2× at 4K, with the same mattes (Speed, 0.0.6-dev and 0.0.7-dev). Switching it on offers its own download: NVIDIA's TensorRT 10.16
   libraries (3.7 GB, from pypi.nvidia.com) and the TensorRT models (3.1 GB, from this repository's releases; C-RADIO's
   weights are copied from the models you already have), 6.9 GB in all, 7.5 GB on disk. The first job at each
   resolution optimizes for it once (about 4.5 minutes for the five networks on an RTX 5080, about 5 at 4K; about
@@ -157,6 +157,30 @@ The same HD bench, run on different days as the engine improved (totals, seconds
 | smoke | 76.5 | 96.8 | 51.8 / 51.7 | 74.7 | **46.8** |
 | walking_sitting | 94.2 | 116.2 | 63.2 / 63.1 | 91.5 | **56.1** |
 | with_motion_blur | 19.0 | 22.7 | 12.4 / 12.3 | 20.8 | **11.4** |
+
+The steps after that, on the same HD bench (totals, seconds, all on 2026-10-24, back to back; the original from the
+column above; TensorRT is the optional Linux mode):
+
+| Clip | 2026-10-24 Original | **0.0.3-dev** CUDA (as shipped) | **0.0.4-dev** CUDA | **0.0.5-dev** TensorRT, shorter windows (mattes differ, not shipped) | **0.0.6-dev** TensorRT, CUDA's window (in the app) | 0.0.6-dev vs the original |
+| --- | --- | --- | --- | --- | --- | --- |
+| godiva_close | 61.1 | 39.6 | 37.3 | 30.9 | **34.6** | 1.77× |
+| locked_backdrop | 31.3 | 19.5 | 19.1 | 15.9 | **15.2** | 2.06× |
+| metal_glasses | 42.3 | 26.7 | 25.8 | 20.2 | **21.2** | 2.00× |
+| smoke | 74.7 | 46.8 | 46.5 | 33.3 | **36.4** | 2.05× |
+| walking_sitting | 91.5 | 56.1 | 58.4 | 40.8 | **43.9** | 2.08× |
+| with_motion_blur | 20.8 | 11.4 | 11.8 | 9.5 | **11.2** | 1.86× |
+
+And at 4K (Tears of Steel, 120 frames each, totals in seconds; 0.0.4-dev was measured on 04_5h only):
+
+| Shot | 2026-10-24 Original | **0.0.3-dev** CUDA | **0.0.4-dev** CUDA | **0.0.7-dev** CUDA | **0.0.7-dev** TensorRT | 0.0.7-dev TensorRT vs the original |
+| --- | --- | --- | --- | --- | --- | --- |
+| 04_5h | 471.7 | 172.3 | 162.7 | 151.5 | **113.0** | 4.17× |
+| 04_5d | 449.5 | 171.8 | | 147.5 | **112.6** | 3.99× |
+| 08_3a | 416.6 | 174.4 | | 147.3 | **112.4** | 3.71× |
+| 04_2c | 413.4 | 170.4 | | 148.1 | **111.5** | 3.71× |
+
+The original and 0.0.3-dev wrote video outputs; the 0.0.7-dev runs wrote EXR, so those columns aren't strictly the
+same job. Each step's own section below has its details and its mattes.
 
 - The straight port (0.0.1-dev) was *slower* than the original on four of six clips. The speed came from measuring
   where the time went and rewriting those parts of the graphs exactly (same output): window padding, the depatchify
@@ -464,8 +488,8 @@ Every result in this README is reproducible with the tools in this repository. T
 
 | Test | What it checks | Result |
 | --- | --- | --- |
-| `npm run check` | TypeScript types, formatting, the theme gate (colours only from one place), the loop gate (every loop, timer and wait in the app and engine carries a written verdict: 793 rows listed, 723 with a required verdict; plain Rust loops over small collections are exempt), 172 unit tests, the PyTorch engine's own tests | pass |
-| `npm run check:engine` | Rust formatting, clippy with every warning an error, 119 engine tests | pass |
+| `npm run check` | TypeScript types, formatting, the theme gate (colours only from one place), the loop gate (every loop, timer and wait in the app and engine carries a written verdict: 846 rows listed, 768 with a required verdict; plain Rust loops over small collections are exempt), 172 unit tests, the PyTorch engine's own tests | pass |
+| `npm run check:engine` | Rust formatting, clippy with every warning an error, 132 engine tests | pass |
 | CPU end to end (`e2e_cpu.sh`) | the Rust engine against PyTorch, both fp32: frame folder, H.264 and hint inputs, EXR and video outputs, low-memory mode | pass: alpha MAE 1.7e-7, low-memory mode identical |
 | GPU speed and quality, HD and 4K | `engine_bench.mjs` + `matte_compare.py`, ten clips, both engines | pass (the tables above) |
 | Memory soak | an isolated copy keys the six HD clips three times in a row (18 jobs) while every process's memory is sampled every 5 s | pass: no growth (below) |
@@ -527,7 +551,7 @@ against this app's own engine. As of the evening of 2026-10-24:
 
 ## Why it's built this way
 
-- **Rust + ONNX Runtime instead of Python + PyTorch:** the tables above. One small program (3.8 MB) with no Python,
+- **Rust + ONNX Runtime instead of Python + PyTorch:** the tables above. One program (9.6 MB, with OpenColorIO built in) with no Python,
   half the RAM, less graphics memory, 1.5-2.7× faster, same mattes.
 - **fp16 on the graphics card:** the original runs bf16; fp16 is what NVIDIA's tensor cores and ONNX Runtime's CUDA
   kernels do fastest, and the Quality table shows it agrees with the original as closely as the original's own
