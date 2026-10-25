@@ -152,6 +152,7 @@ export const appState = (over: Partial<AppState> = {}): AppState => ({
   tensorrt: trtState(),
   storage: null,
   cache: null,
+  cacheMissing: null,
   card: null,
   enginePaths: { binary: null, models: null, ort: null },
   desktopPalette: null,

@@ -4,7 +4,7 @@ import { memo } from "react";
 import { ProgressBar } from "../ProgressBar";
 import { FolderPlus, Play, Plus, Square, Trash2 } from "lucide-react";
 import type { AppState, Job } from "../../shared/types";
-import { missingInput } from "../../shared/tasks";
+import { missingInput, startBlocked } from "../../shared/tasks";
 import { AS_USED, CANT_READ_CLIP } from "../../shared/texts";
 import { JobSettings } from "../JobSettings";
 import { JobView } from "../JobView";
@@ -25,8 +25,7 @@ export function QueuePage(props: {
   const { state, selected, onSelect } = props;
   // loop: HOT-PATH-OK — the queue's jobs per render (≤ 10/s while shown)
   const job = state.jobs.find((j) => j.id === selected) ?? null;
-  // loop: HOT-PATH-OK — the queue's jobs per render (≤ 10/s while shown)
-  const runnable = state.jobs.some((j) => j.status === "waiting" && !j.clip.probeError && !missingInput(j));
+  const blocked = startBlocked(state);
 
   const main = (
     <div className="queue-page">
@@ -44,23 +43,7 @@ export function QueuePage(props: {
             <Square size={16} /> Stop
           </button>
         ) : (
-          <button
-            type="button"
-            className="btn primary"
-            disabled={!runnable || !state.engineKind || !state.ffmpeg.ok}
-            title={
-              !state.engineKind
-                ? "Set up the engine first (Engine page)"
-                : !state.ffmpeg.ok
-                  ? state.ffmpeg.checked
-                    ? "Install ffmpeg first (Engine page)"
-                    : "Checking ffmpeg…"
-                  : !runnable
-                    ? "Add a clip that's ready to run"
-                    : undefined
-            }
-            onClick={() => window.ck.startQueue()}
-          >
+          <button type="button" className="btn primary" disabled={blocked !== null} title={blocked ?? undefined} onClick={() => window.ck.startQueue()}>
             <Play size={16} /> Start queue
           </button>
         )}

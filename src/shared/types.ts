@@ -426,6 +426,8 @@ export interface AppState {
   storage: StorageItem[] | null;
   // the cache folder, measured with Storage (null until then)
   cache: CacheInfo | null;
+  // the chosen cache folder's drive isn't there (why; null: fine): the cache is in the system's folder for now
+  cacheMissing: string | null;
   // the card's memory from the engine's last estimate (null: not read yet)
   card: CardReading | null;
   enginePaths: Record<EngineFileKind, string | null>;

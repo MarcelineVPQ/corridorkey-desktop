@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { CACHE_MARKER, cacheDirFor, cacheInfo, clearOldCache, moveCache, remapMedia, targetProblem } from "../../electron/main/cacheFolder";
+import { CACHE_MARKER, cacheDirFor, cacheInfo, cacheUnavailable, clearOldCache, moveCache, prepareTarget, remapMedia, targetProblem } from "../../electron/main/cacheFolder";
 import { job } from "./fixtures";
 
 // the cache folder's location (backlog row 44): only the app's own folders are ever written or removed
@@ -11,6 +11,12 @@ describe("cache folder", () => {
   afterAll(() => rmSync(root, { recursive: true, force: true }));
   let n = 0;
   const fresh = () => join(root, `t${++n}`);
+  /** A location the user chose: a folder that is there. */
+  const place = () => {
+    const p = fresh();
+    mkdirSync(p);
+    return p;
+  };
   const put = (p: string, text: string) => {
     mkdirSync(dirname(p), { recursive: true });
     writeFileSync(p, text);
@@ -58,7 +64,7 @@ describe("cache folder", () => {
 
   it("moves: every file copied and verified, then the originals removed; the new folder carries the marker", async () => {
     const from = filled();
-    const to = join(fresh(), "corridorkey-desktop");
+    const to = join(place(), "corridorkey-desktop");
     const r = await moveCache(from, to, false, true);
     expect(r).toMatchObject({ ok: true, message: null, files: 3, bytes: "still a".length + "still b!".length + "engine bytes".length });
     expect(tree(to)).toEqual([CACHE_MARKER, "media/a.jpg", "media/b.jpg", "tensorrt/1280x720-1920x1088/stage1.engine"].sort());
@@ -81,7 +87,7 @@ describe("cache folder", () => {
     put(join(from2, CACHE_MARKER), "");
     put(join(from2, "media", "a.jpg"), "a");
     put(join(from2, "notes.txt"), "someone's");
-    expect((await moveCache(from2, join(fresh(), "x"), false, false)).ok).toBe(true);
+    expect((await moveCache(from2, join(place(), "x"), false, false)).ok).toBe(true);
     expect(tree(from2)).toEqual([CACHE_MARKER, "notes.txt"].sort());
   });
 
@@ -89,7 +95,7 @@ describe("cache folder", () => {
     // a link inside the cache (not a plain file): refused before anything is copied
     const from = filled();
     symlinkSync(join(from, "media", "a.jpg"), join(from, "media", "link.jpg"));
-    const to = join(fresh(), "corridorkey-desktop");
+    const to = join(place(), "corridorkey-desktop");
     const r = await moveCache(from, to, false, true);
     expect(r.ok).toBe(false);
     expect(r.message).toMatch(/Nothing was moved: .*link\.jpg/);
@@ -106,6 +112,39 @@ describe("cache folder", () => {
     expect(tree(from2)).toEqual(["media/a.jpg", "media/b.jpg", "tensorrt/1280x720-1920x1088/stage1.engine"]);
     expect(tree(ours)).toEqual([CACHE_MARKER, "media/b.jpg"].sort());
     expect(readFileSync(join(ours, "media", "b.jpg"), "utf8")).toBe("theirs, older");
+  });
+
+  it("an unplugged drive: the chosen location is never made, only the app's own folder inside one that is there", async () => {
+    const from = filled();
+    const gone = join(fresh(), "disk");
+    const to = join(gone, "corridorkey-desktop");
+    expect(targetProblem(from, to, false)).toMatch(/isn't there: is its drive connected\?/);
+    await expect(prepareTarget(to, false)).rejects.toThrow(/isn't there: is its drive connected\?/);
+    const r = await moveCache(from, to, false, true);
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/drive connected/);
+    expect(existsSync(gone)).toBe(false);
+    expect(tree(from)).toEqual(["media/a.jpg", "media/b.jpg", "tensorrt/1280x720-1920x1088/stage1.engine"]);
+    // a location that is there: only its own folder is made
+    const there = place();
+    await prepareTarget(join(there, "corridorkey-desktop"), false);
+    expect(tree(there)).toEqual([join("corridorkey-desktop", CACHE_MARKER)]);
+  });
+
+  it("the chosen folder is unavailable when its location is gone or the marked folder isn't in it (Linux, Windows, macOS paths)", () => {
+    expect(cacheUnavailable(null)).toBeNull();
+    const there = new Set(["/media/m/disk", "E:\\", "/Volumes/Fast", join("/Volumes/Fast", "corridorkey-desktop", CACHE_MARKER)]);
+    const exists = (p: string) => there.has(p);
+    expect(cacheUnavailable("/Volumes/Fast", exists)).toBeNull();
+    expect(cacheUnavailable("/Volumes/Gone", exists)).toMatch(/\/Volumes\/Gone isn't there/);
+    expect(cacheUnavailable("F:\\", exists)).toMatch(/isn't there: is its drive connected/);
+    // an empty mount point left behind (the drive not mounted): the marked folder isn't in it
+    expect(cacheUnavailable("/media/m/disk", exists)).toMatch(/The cache folder isn't in \/media\/m\/disk/);
+    // real folders
+    const ours = place();
+    put(join(ours, "corridorkey-desktop", CACHE_MARKER), "");
+    expect(cacheUnavailable(ours)).toBeNull();
+    expect(cacheUnavailable(join(root, "unplugged"))).toMatch(/isn't there/);
   });
 
   it("starting fresh removes only the old cache's own parts", async () => {

@@ -78,3 +78,7 @@ screen keyer, on its own Rust + ONNX Runtime engine, for Linux, Windows and macO
 - App settings → Storage: the cache folder can move (Change…, Default; move the files, copy-verified before any
   delete, or start fresh, asked), shows its size per clip and per TensorRT range, and every folder has Open
   (docs/GUIDE.md; backlog row 44).
+- Cache folder on a drive that isn't connected: the app never makes the chosen location itself (only its own folder
+  inside one that is there); Storage says "Drive not available", the cache uses the default folder for now (nothing
+  moved or deleted, the choice kept for the next start), with Use the default folder from now on. Start queue is
+  disabled with "Moving the cache folder…" while the cache moves.

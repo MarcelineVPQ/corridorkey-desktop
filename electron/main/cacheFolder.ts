@@ -28,6 +28,20 @@ export function cacheDirFor(cacheRoot: string | null, defaultDir: string): strin
   return cacheRoot ? join(cacheRoot, APP_DIR) : defaultDir;
 }
 
+/**
+ * Why the chosen cache folder can't be used now (null: it can, or none is chosen): its location is gone (a drive
+ * unplugged, a volume or network share not mounted, a drive letter gone), or the app's marked folder isn't in it
+ * (an empty mount point left behind on Linux). The app never makes the chosen location itself, only its own folder
+ * inside an existing one.
+ */
+export function cacheUnavailable(cacheRoot: string | null, exists: (p: string) => boolean = existsSync): string | null {
+  if (!cacheRoot) return null;
+  // loop: NOT-WORTH — one or two stats, at start and when the cache is about to be written
+  if (!exists(cacheRoot)) return `${cacheRoot} isn't there: is its drive connected?`;
+  if (!exists(join(cacheRoot, APP_DIR, CACHE_MARKER))) return `The cache folder isn't in ${cacheRoot}: is its drive connected?`;
+  return null;
+}
+
 const inside = (child: string, parent: string) => {
   const r = relative(resolve(parent), resolve(child));
   // another drive (Windows) comes back absolute
@@ -42,6 +56,9 @@ export function targetProblem(from: string, to: string, owned: boolean): string 
   if (resolve(from) === resolve(to)) return "The cache is already there.";
   if (inside(to, from)) return "That folder is inside the current cache folder.";
   if (inside(from, to)) return "The current cache folder is inside that folder.";
+  // the chosen location itself is never made (an unplugged drive's mount path): it must be there
+  // loop: NOT-WORTH — one stat per location choice
+  if (!owned && !existsSync(dirname(to))) return `${dirname(to)} isn't there: is its drive connected?`;
   // loop: NOT-WORTH — one stat per location choice
   if (owned || !existsSync(to)) return null;
   let names: string[];
@@ -96,8 +113,14 @@ export interface MoveResult {
 
 /** Make `to` the app's cache folder: created, with the marker unless it is the system's folder. */
 export async function prepareTarget(to: string, owned: boolean): Promise<void> {
+  // a chosen location: only the app's own folder is made, inside a location that is there (never the location itself)
   // loop: NOT-WORTH — one mkdir per location change
-  await mkdir(to, { recursive: true });
+  if (owned) await mkdir(to, { recursive: true });
+  else
+    await mkdir(to).catch((e: NodeJS.ErrnoException) => {
+      if (e.code === "ENOENT") throw new Error(`${dirname(to)} isn't there: is its drive connected?`);
+      if (e.code !== "EEXIST") throw e;
+    });
   // loop: NOT-WORTH — one small write per location change
   if (!owned) await writeFile(join(to, CACHE_MARKER), "CorridorKey Desktop's cache folder. Safe to remove when the app doesn't use it.\n");
 }
@@ -121,6 +144,9 @@ export async function moveCache(from: string, to: string, owned: boolean, fromOw
     for (const { part, rel } of plan) {
       const src = join(from, part, rel);
       const dst = join(to, part, rel);
+      // the drive gone mid-move: never made again at its bare mount path
+      // loop: NOT-WORTH — one stat per file, once per move
+      if (!existsSync(to)) throw new Error(`${to} is no longer there: is its drive connected?`);
       // loop: NOT-WORTH — one mkdir per file (exists after the first)
       await mkdir(dirname(dst), { recursive: true });
       // never over a file already there (COPYFILE_EXCL): the target was empty or a cache folder of ours

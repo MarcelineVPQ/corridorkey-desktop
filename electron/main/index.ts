@@ -39,7 +39,7 @@ import { NOT_WHILE_BUSY } from "../../src/shared/texts";
 import type { DesktopPalette } from "../../src/ui/theme/palette";
 import { IPC } from "./ipc";
 import { idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir, vramLimit } from "./validate";
-import { cacheDirFor, cacheInfo, CACHE_MARKER, clearOldCache, MEDIA_DIR, moveCache, prepareTarget, remapMedia, targetProblem } from "./cacheFolder";
+import { cacheDirFor, cacheInfo, cacheUnavailable, CACHE_MARKER, clearOldCache, MEDIA_DIR, moveCache, prepareTarget, remapMedia, targetProblem } from "./cacheFolder";
 import { mbOrGbBytes } from "../../src/shared/units";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -70,8 +70,10 @@ const IS_MAC = isMac();
 // the data folder (runtime, models) and the cache (thumbnails, stills): platform.ts appDirs
 const appFolders = appDirs(process.env, app.getPath("home"));
 let settings = loadSettings(settingsFile, process.env);
-// the cache folder: the system's, or the app's own folder in the location chosen in App settings, Storage (row 44)
-let cacheDir = cacheDirFor(settings.cacheRoot, appFolders.cache);
+// the cache folder: the system's, or the app's own folder in the location chosen in App settings, Storage (row 44);
+// a chosen location that isn't there (drive unplugged): the system's folder for now, the setting kept, Storage says so
+let cacheMissing = cacheUnavailable(settings.cacheRoot);
+let cacheDir = cacheMissing ? appFolders.cache : cacheDirFor(settings.cacheRoot, appFolders.cache);
 let mediaDir = join(cacheDir, MEDIA_DIR);
 let checkout = checkCheckout(settings.corridorKeyRoot);
 /** Where the Engine page's lists look (engineFind.ts): the app's own engine, a dev build, the in-app install's folder. */
@@ -248,6 +250,7 @@ function state(): AppState {
     tensorrt: trt,
     storage,
     cache,
+    cacheMissing,
     card,
     desktopPalette,
     update: updater.state,
@@ -358,6 +361,7 @@ async function makeStills(job: Job): Promise<void> {
 }
 
 async function addPaths(paths: string[]): Promise<void> {
+  checkCacheDrive();
   // loop: SERIAL-REQUIRED — ffprobe/ffmpeg per clip, one at a time so a big drop doesn't fork dozens
   for (const { path, kind } of expandPaths(paths)) {
     // loop: NOT-WORTH — the queue's jobs per dropped clip (a drop of N clips is N × jobs comparisons)
@@ -392,8 +396,22 @@ async function addPaths(paths: string[]): Promise<void> {
   }
 }
 
+/**
+ * The chosen cache folder's drive gone while the app runs (it is checked before the cache is written): the system's
+ * folder for now, nothing moved or deleted, the setting kept for the next start; Storage says so.
+ */
+function checkCacheDrive(): void {
+  if (cacheMissing || cacheMoving || !settings.cacheRoot) return;
+  cacheMissing = cacheUnavailable(settings.cacheRoot);
+  if (!cacheMissing) return;
+  cacheDir = appFolders.cache;
+  mediaDir = join(cacheDir, MEDIA_DIR);
+  scheduleSend();
+}
+
 /** Storage and the cache folder, measured (walks the folders: only when App settings shows Storage, or after a change). */
 function measureStorage(): void {
+  checkCacheDrive();
   storage = storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort);
   cache = { ...cacheInfo(cacheDir, appFolders.cache, queue.jobs, mediaFile), moving: cacheMoving, error: cacheError };
 }
@@ -402,6 +420,7 @@ function measureStorage(): void {
 function switchCache(root: string | null, dir: string): void {
   settings = { ...settings, cacheRoot: root };
   persist();
+  cacheMissing = null;
   cacheDir = dir;
   mediaDir = join(dir, MEDIA_DIR);
 }
@@ -414,6 +433,13 @@ async function pickCacheFolder(toDefault: boolean): Promise<void> {
   if (!mainWindow || cacheMoving) return;
   if (queue.running || installAbort) {
     await dialog.showMessageBox(mainWindow, { type: "info", message: NOT_WHILE_BUSY, detail: "Stop it first, then change the cache folder." });
+    return;
+  }
+  // the chosen drive isn't there and the cache is in the system's folder for now: Default keeps it there from now on
+  if (toDefault && cacheMissing && resolve(cacheDir) === resolve(appFolders.cache)) {
+    switchCache(null, appFolders.cache);
+    measureStorage();
+    scheduleSend();
     return;
   }
   let root: string | null = null;
@@ -728,6 +754,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.startQueue, async () => {
     recheckEngines();
     await recheckFfmpeg();
+    checkCacheDrive();
     // not while the cache folder moves (a job writes its working files and TensorRT engines there)
     if (!chooseEngine(rustEngine, checkout) || !ffmpeg.ok || cacheMoving) return scheduleSend();
     // one engine at a time: an estimate still asking gives way to the queue

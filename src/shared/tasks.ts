@@ -49,6 +49,17 @@ export function missingInput(job: Job): string | null {
   return null;
 }
 
+/** Why Start queue can't start now (null: it can); the button is disabled with this as its reason. */
+export function startBlocked(state: AppState): string | null {
+  if (!state.engineKind) return "Set up the engine first (Engine page)";
+  if (!state.ffmpeg.ok) return state.ffmpeg.checked ? "Install ffmpeg first (Engine page)" : "Checking ffmpeg…";
+  // a job writes its working files and TensorRT engines into the cache folder
+  if (state.cache?.moving) return "Moving the cache folder… the queue can start when it's done";
+  // loop: HOT-PATH-OK — the queue's jobs per render (≤ 10/s while shown)
+  if (!state.jobs.some((j) => j.status === "waiting" && !j.clip.probeError && !missingInput(j))) return "Add a clip that's ready to run";
+  return null;
+}
+
 export function tasksOf(state: AppState): Task[] {
   const tasks: Task[] = [];
   // the first-run install is what's missing (the engine's own setup task would only repeat it)
@@ -78,6 +89,8 @@ export function tasksOf(state: AppState): Task[] {
   // no usable ffmpeg: nothing can be read or written (the Engine page offers the install)
   if (state.ffmpeg.checked && !state.ffmpeg.ok && state.ffmpeg.problem) tasks.push({ id: "ffmpeg", page: "engine", section: "ffmpeg", level: "task", text: state.ffmpeg.problem });
   if (state.engine.status === "failed") tasks.push({ id: "engine", page: "engine", section: "", level: "error", text: `${ENGINE_FAILED}: ${state.engine.error ?? "unknown error"}` });
+  // the chosen cache folder's drive isn't there: the cache is in the system's folder for now (App settings, Storage)
+  if (state.cacheMissing) tasks.push({ id: "cache-missing", page: "settings", section: "storage", level: "task", text: `Drive not available for the cache folder: ${state.cacheMissing}` });
   // loop: NOT-WORTH — a queue of tens of clips, on each state change (≤ 10/s while running)
   for (const job of state.jobs) {
     // a clip the app can't read (bug hunt 2026-10 A9): its reason is on the row; the user removes or replaces it

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dots, jobToSelect, missingInput, tasksOf } from "../../src/shared/tasks";
+import { dots, jobToSelect, missingInput, startBlocked, tasksOf } from "../../src/shared/tasks";
 import { DEFAULT_OPTIONS, type InstallStatus } from "../../src/shared/types";
 import { appState as state, clipInfo, ffmpegState, installState, job, trtState } from "./fixtures";
 
@@ -61,5 +61,23 @@ describe("tasks (the one mechanism)", () => {
     expect(dots(t).pages.queue).toBe("b: Can't read this clip (ffprobe: Invalid data found when processing input)");
     // it clears when the clip is removed
     expect(tasksOf(state({ jobs: [job("a")] }))).toEqual([]);
+  });
+});
+
+describe("Start queue", () => {
+  const ready = job("j1");
+  it("is disabled with the reason while the cache folder moves; enabled once it is done", () => {
+    const cache = { dir: "/c", defaultDir: "/c", isDefault: true, bytes: 0, shots: [], otherBytes: 0, trtRanges: [], moving: "Moving 1 GB to /media/m/disk/corridorkey-desktop…", error: null };
+    expect(startBlocked(state({ jobs: [ready], cache }))).toBe("Moving the cache folder… the queue can start when it's done");
+    expect(startBlocked(state({ jobs: [ready], cache: { ...cache, moving: null } }))).toBeNull();
+    expect(startBlocked(state({ jobs: [] }))).toBe("Add a clip that's ready to run");
+  });
+});
+
+describe("cache folder drive", () => {
+  it("a chosen cache folder's drive not there is a task on Storage", () => {
+    expect(tasksOf(state({ cacheMissing: "/media/m/disk isn't there: is its drive connected?" }))).toEqual([
+      expect.objectContaining({ id: "cache-missing", page: "settings", section: "storage", level: "task" }),
+    ]);
   });
 });
