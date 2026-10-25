@@ -49,7 +49,9 @@ Status: 1.0 is almost ready, for Linux, Windows and macOS (Apple Silicon).
   weights are copied from the models you already have), 5.5 GB in all, 6.1 GB on disk. Each
   resolution range is optimized once (about 4.5 minutes for the five networks on an RTX 5080, about 5 at 4K; about
   half that once TensorRT's timing cache is warm): the app builds 4K and HD in the background when TensorRT is
-  switched on, with a progress bar in Engine settings, and pauses while you key. Jobs never wait on a build: a clip
+  switched on, with a progress bar in Engine settings, and pauses while you key. Engine settings, TensorRT lists the
+  common sizes (720p to 6K) by range: tick a size to build it, untick to remove it, or enter a size of your own; a
+  waiting clip offers "Build for this clip's size". Jobs never wait on a build: a clip
   whose range isn't built yet runs on CUDA, and its page says so. 4K (DCI 4K and UHD, up to 2176×4096) runs on TensorRT too, at
   the 8/4 window on 16 GB cards; open gate and larger frames stay on CUDA (Speed, 0.0.7-dev). Best on 16 GB cards: where a network can't be built (stage 1 at 80-frame windows), that network runs on CUDA and
   the job's log says so. Windows needs its own TensorRT builder (a later version); macOS has no TensorRT.

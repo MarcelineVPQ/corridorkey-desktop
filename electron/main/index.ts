@@ -32,7 +32,8 @@ import {
   type InstallDeps,
 } from "./install";
 import { folderBytes, pruneCache, removeStorage, storageItems, TRT_ENGINES_DIR } from "./storage";
-import { builtRanges, Prebuilder } from "./trtPrebuild";
+import { builtRanges, Prebuilder, rangesOnDisk, recordBuild, removeSize } from "./trtPrebuild";
+import { jobLogText, saveJobLog } from "./jobLog";
 import { readDesktopPalette, watchDesktopPalette } from "./desktopTheme";
 import { Updater } from "./updater";
 import { holdAppImageMountUntilExit } from "./appImageQuit";
@@ -58,7 +59,8 @@ import type { DesktopPalette } from "../../src/ui/theme/palette";
 import { IPC } from "./ipc";
 import { idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir, vramLimit } from "./validate";
 import { cacheDirFor, cacheInfo, cacheUnavailable, CACHE_MARKER, clearOldCache, MEDIA_DIR, moveCache, prepareTarget, remapMedia, targetProblem } from "./cacheFolder";
-import { mbOrGbBytes } from "../../src/shared/units";
+import { gbBytes, mbOrGbBytes } from "../../src/shared/units";
+import { sanitizeTrtSize, sizeRangeText, sizeText, trtSizeKey } from "../../src/shared/trt";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const devServerUrl = process.env.ELECTRON_RENDERER_URL;
@@ -144,7 +146,7 @@ function installIdle(): InstallState {
 }
 let install = installIdle();
 // the opt-in TensorRT parts: what is installed, for the setting's install box; progress while its install runs
-function trtParts(): Omit<TrtState, "status" | "step" | "done" | "total" | "error" | "built" | "prebuild"> {
+function trtParts(): Omit<TrtState, "status" | "step" | "done" | "total" | "error" | "built" | "prebuild" | "onDisk"> {
   const supported = trtSupported(PLATFORM);
   const need = trtNeeds(enginePlaces().data);
   const paths = enginePaths();
@@ -159,7 +161,7 @@ function trtParts(): Omit<TrtState, "status" | "step" | "done" | "total" | "erro
     fullBytes: TRT_BYTES,
   };
 }
-const trtIdle = (): Omit<TrtState, "built" | "prebuild"> => ({ ...trtParts(), status: "idle", step: null, done: 0, total: 0, error: null });
+const trtIdle = (): Omit<TrtState, "built" | "prebuild" | "onDisk"> => ({ ...trtParts(), status: "idle", step: null, done: 0, total: 0, error: null });
 let trt = trtIdle();
 // one install at a time (the runtime and models, or TensorRT's parts): one Stop
 let installAbort: AbortController | null = null;
@@ -251,21 +253,34 @@ const queue = new Queue({
     void makeStills(job);
     refreshTrtBuilt();
   },
+  saveLog: (job) => saveJobLog(job, app.getVersion()),
 });
 // the manual window picker's graphics-memory estimate (backlog row 41): a short-lived Rust engine, only while no queue runs
 const estimator = new Estimator({ makeEngine: rustEngineProcess });
 // the TensorRT ranges built for this card (read from the cache after a build, a job, a move or a removal; not per push)
 let trtBuilt: string[] = [];
+// each built range's size on disk and recorded build time (Engine settings, TensorRT's size list; read with trtBuilt)
+let trtOnDisk: TrtState["onDisk"] = [];
+function readTrtCache(): void {
+  const root = join(cacheDir, TRT_ENGINES_DIR);
+  trtBuilt = trtSupported(PLATFORM) ? builtRanges(root) : [];
+  trtOnDisk = trtSupported(PLATFORM) ? rangesOnDisk(root, folderBytes) : [];
+}
 function refreshTrtBuilt(): void {
-  trtBuilt = trtSupported(PLATFORM) ? builtRanges(join(cacheDir, TRT_ENGINES_DIR)) : [];
+  readTrtCache();
   prebuild.refresh();
 }
 // the background TensorRT build of the common ranges (trtPrebuild.ts): jobs never build; only while no queue runs
 const prebuild: Prebuilder = new Prebuilder({
   makeEngine: rustEngineProcess,
   changed: () => {
-    if (!prebuild.running) trtBuilt = builtRanges(join(cacheDir, TRT_ENGINES_DIR));
+    if (!prebuild.running) readTrtCache();
     scheduleSend();
+  },
+  sizes: () => settings.trtSizes,
+  recordBuild: (range, seconds) => {
+    recordBuild(join(cacheDir, TRT_ENGINES_DIR), range, seconds);
+    trtOnDisk = rangesOnDisk(join(cacheDir, TRT_ENGINES_DIR), folderBytes);
   },
   allowed: () =>
     !queue.running &&
@@ -302,7 +317,7 @@ function state(): AppState {
     enginePaths: enginePaths(),
     ffmpeg,
     install,
-    tensorrt: { ...trt, built: trtBuilt, prebuild: prebuild.state },
+    tensorrt: { ...trt, built: trtBuilt, prebuild: prebuild.state, onDisk: trtOnDisk },
     storage,
     cache,
     cacheMissing,
@@ -715,6 +730,55 @@ function registerIpc(): void {
     if (action === "start") void prebuild.start(true);
     else if (action === "stop") prebuild.stop();
   });
+  // the sizes TensorRT builds for (Engine settings, TensorRT; a waiting clip's "Build for this clip's size"; row 56)
+  ipcMain.handle(IPC.trtSize, async (_e, actionIn: unknown, sizeIn: unknown) => {
+    const size = sanitizeTrtSize(sizeIn);
+    const key = size && trtSizeKey(size.width, size.height);
+    if (!trtSupported(PLATFORM) || !size || !key) return;
+    // loop: NOT-WORTH — the few chosen sizes, once per click
+    const others = settings.trtSizes.filter((s) => trtSizeKey(s.width, s.height) !== key);
+    if (actionIn === "add") {
+      // one size per range: the newest choice is the size it is built for
+      settings = { ...settings, trtSizes: [...others, size] };
+      persist();
+      prebuild.refresh();
+      // the user asked: it builds now (also while another program uses the card), or after the queue
+      if (queue.running) prebuild.waitForQueue();
+      else void prebuild.start(true);
+      return scheduleSend();
+    }
+    if (actionIn !== "remove" || !mainWindow || cacheMoving) return;
+    const root = join(cacheDir, TRT_ENGINES_DIR);
+    // loop: NOT-WORTH — the few built ranges, once per click
+    const onDisk = trtOnDisk.filter((r) => r.range.startsWith(`${key}_t`));
+    if (onDisk.length > 0) {
+      // a job may be running on these engines
+      if (queue.running) {
+        await dialog.showMessageBox(mainWindow, { type: "info", message: "Not while the queue runs", detail: "Stop it first, then remove." });
+        return;
+      }
+      // loop: NOT-WORTH — as above
+      const bytes = onDisk.reduce((n, r) => n + r.bytes, 0);
+      const r = await dialog.showMessageBox(mainWindow, {
+        type: "question",
+        buttons: ["Remove", "Cancel"],
+        defaultId: 1,
+        cancelId: 1,
+        message: `Remove TensorRT for ${sizeRangeText(key)}?`,
+        detail: `This deletes the engines built for ${sizeText(size)} and every size in its range (${gbBytes(bytes)}). Clips of these sizes run on CUDA until it is built again.`,
+      });
+      if (r.response !== 0) return;
+    }
+    // the background build writes into these folders: it ends first, and goes on with the other sizes after
+    const wasRunning = prebuild.running;
+    prebuild.stop();
+    settings = { ...settings, trtSizes: others };
+    persist();
+    removeSize(root, key);
+    refreshTrtBuilt();
+    if (wasRunning) void prebuild.start(true);
+    scheduleSend();
+  });
   ipcMain.handle(IPC.stopInstall, () => installAbort?.abort());
   ipcMain.handle(IPC.measureStorage, () => {
     measureStorage();
@@ -841,6 +905,15 @@ function registerIpc(): void {
   ipcMain.handle(IPC.copyText, (_e, textIn: unknown) => {
     if (typeof textIn !== "string" || textIn.length === 0 || textIn.length > 4096) return false;
     clipboard.writeText(textIn);
+    return true;
+  });
+  // Copy log (the job page): the whole log as its <clip>_log.txt has it, built from the job the main process keeps
+  ipcMain.handle(IPC.copyJobLog, (_e, idIn: unknown) => {
+    const id = idArg(idIn);
+    // loop: NOT-WORTH — the queue's jobs, once per click
+    const job = id ? queue.jobs.find((j) => j.id === id) : undefined;
+    if (!job) return false;
+    clipboard.writeText(jobLogText(job, app.getVersion()));
     return true;
   });
   ipcMain.handle(IPC.setAppearance, (_e, aIn: unknown) => {

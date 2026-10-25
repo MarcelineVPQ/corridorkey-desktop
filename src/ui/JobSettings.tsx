@@ -7,7 +7,7 @@ import type { EngineKind, HintFileKind, Job, JobOptions, MemoryChoice, MemoryEst
 import { LINEAR_RANGES, MANUAL_WINDOWS, OUTPUT_NAMES, VRAM_LIMIT_AUTO_HELP, scaledSize, videoCodecsFor, vramLimitChoices, withCutoutAlpha } from "../shared/types";
 import { gibBytes } from "../shared/units";
 import { AS_USED } from "../shared/texts";
-import { builtWindows, trtSizeKey, TRT_NOT_MEASURED } from "../shared/trt";
+import { builtWindows, sizeRangeText, trtSizeKey, TRT_NOT_MEASURED, type TrtSize } from "../shared/trt";
 import { Accordion, Row, Section, Segmented } from "./panel/Section";
 import { More } from "./More";
 import { PathText } from "./PathText";
@@ -348,6 +348,17 @@ export function JobSettings({
           {() => (
             <>
               <p className="hint-text">{trtPlan.text}</p>
+              {trtPlan.build && (
+                <>
+                  <button type="button" className="btn small" onClick={() => void window.ck.trtSize("add", trtPlan.build!)}>
+                    <Zap size={14} /> Build for this clip&apos;s size
+                  </button>
+                  <p className="size-note">
+                    {trtPlan.build.width}×{trtPlan.build.height}, range {sizeRangeText(trtSizeKey(trtPlan.build.width, trtPlan.build.height)!)}: built once in the background (it waits while the queue
+                    runs). Build time and disk size on this model set: not measured yet. Engine settings, TensorRT lists it.
+                  </p>
+                </>
+              )}
               <More>
                 <p className="hint-text">The choice is in Engine settings, TensorRT. What really ran shows on the clip&apos;s page once it starts. {TRT_NOT_MEASURED}</p>
               </More>
@@ -363,7 +374,7 @@ export function JobSettings({
  * What a waiting clip will ask for and run on, before it runs: the setting, the parts, whether its size's TensorRT
  * range is built (the cache). Null where TensorRT doesn't exist (Windows, macOS).
  */
-export function trtPlanFor(job: Job, trt: TrtState, engineKind: EngineKind | null): { status: string; text: string } | null {
+export function trtPlanFor(job: Job, trt: TrtState, engineKind: EngineKind | null): { status: string; text: string; build?: TrtSize } | null {
   if (!trt.supported) return null;
   const { width, height } = job.clip;
   const key = width && height && job.options.modelScale === 1 ? trtSizeKey(width, height) : null;
@@ -385,11 +396,15 @@ export function trtPlanFor(job: Job, trt: TrtState, engineKind: EngineKind | nul
     };
   // loop: NOT-WORTH — two ranges
   const building = trt.prebuild.status === "running" && trt.prebuild.ranges.some((r) => trtSizeKey(r.width, r.height) === key && r.state !== "done");
+  // loop: NOT-WORTH — the few chosen sizes
+  const chosen = trt.prebuild.ranges.some((r) => trtSizeKey(r.width, r.height) === key);
   return {
-    status: building ? "On · building in the background · CUDA until then" : "On · not built for this size · runs on CUDA",
+    status: building ? "On · building in the background · CUDA until then" : chosen ? "On · chosen, not built yet · runs on CUDA" : "On · not built for this size · runs on CUDA",
     text: building
       ? "TensorRT for this size is building in the background now (Engine settings, TensorRT); if this clip starts first, it runs on CUDA."
-      : `TensorRT isn't built for ${width}×${height} yet, so this clip runs on CUDA: jobs never wait on a build. Engine settings, TensorRT builds 4K and HD in the background.`,
+      : `TensorRT isn't built for ${width}×${height} yet, so this clip runs on CUDA: jobs never wait on a build.`,
+    // building it: this clip's own size (its window is the one the build picks for it)
+    build: building ? undefined : { label: job.clip.name, width, height },
   };
 }
 

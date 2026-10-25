@@ -1,8 +1,8 @@
 // Queue: the clips (left), the selected clip's readouts (main view), its
 // settings in the panel. Start/Stop and Add clips sit in the page's own bar.
-import { memo } from "react";
+import { memo, useEffect, useState } from "react";
 import { ProgressBar } from "../ProgressBar";
-import { FolderPlus, Play, Plus, Square, Trash2 } from "lucide-react";
+import { Check, ClipboardCopy, FolderPlus, Play, Plus, Square, Trash2 } from "lucide-react";
 import { OTHER_GPU_USER_MB, type AppState, type Job, type TrtPrebuild } from "../../shared/types";
 import { missingInput, startBlocked } from "../../shared/tasks";
 import { AS_USED, CANT_READ_CLIP } from "../../shared/texts";
@@ -168,6 +168,7 @@ function Detail({ job, prebuild }: { job: Job; prebuild: TrtPrebuild }) {
           <div className="hint-text" style={{ marginTop: 8 }}>
             Results: <PathText path={job.outputDir} />
           </div>
+          {job.status !== "waiting" && <LogLine job={job} />}
           {(job.clip.companionFirstFrame || job.clip.companionHintVideo) && job.status === "waiting" && <div className="hint-text">Found a hint next to the clip and selected it.</div>}
         </div>
       </div>
@@ -178,6 +179,49 @@ function Detail({ job, prebuild }: { job: Job; prebuild: TrtPrebuild }) {
         </section>
       )}
       <JobView job={job} prebuild={prebuild} />
+    </>
+  );
+}
+
+/** How long Copy log says "Copied". */
+const COPIED_MS = 1500;
+
+/**
+ * The job's engine log (backlog row 55): Copy log puts the whole log on the clipboard (the main process builds it, as
+ * the saved file has it: the page holds only the last lines), and the line names the <clip>_log.txt written when the
+ * job ended, or why it couldn't be.
+ */
+function LogLine({ job }: { job: Job }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    // lifetime: OK — one timer per copy, cleared on unmount or the next copy
+    // loop: NOT-WORTH — one 1.5 s timer per Copy log press
+    const t = setTimeout(() => setCopied(false), COPIED_MS);
+    return () => clearTimeout(t);
+  }, [copied]);
+  const saved = job.logSaved ?? null;
+  return (
+    <>
+      <div className="hint-text">
+        {saved ? (
+          saved.error ? (
+            `The log couldn't be saved: ${saved.error}`
+          ) : (
+            <>
+              Log: <PathText path={saved.path} />
+            </>
+          )
+        ) : (
+          "The log is saved next to the results when the job ends."
+        )}
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <button type="button" className="btn small" onClick={() => void window.ck.copyJobLog(job.id).then(setCopied)}>
+          {copied ? <Check size={14} aria-hidden /> : <ClipboardCopy size={14} aria-hidden />}
+          <span aria-live="polite">{copied ? "Copied" : "Copy log"}</span>
+        </button>
+      </div>
     </>
   );
 }
