@@ -5,7 +5,23 @@ Scripts: `engine-rs/export/` (they load the model code and weights from the Corr
 (the Electron app's `engine-rs`). This document is the single source of truth for the model files
 the engine loads: names, opsets, precisions, inputs/outputs, and the host-side steps around them.
 
-## Production model set (`2.0.0-onnx.3`, built 2026-10-22)
+## Production model set (`2.0.0-onnx.4`, built 2026-10-25)
+
+**`2.0.0-onnx.4`** (release `models-2.0.0-onnx.4`; local copy `~/.cache/claude-scratch/models/2.0.0-onnx.4/`) is
+`2.0.0-onnx.3` with the fp16 files of MoGe, RVM, stage 1 and stage 2 exported under CorridorKey 2.0's own precision
+policy, the `torch.autocast` it runs under: `export.py --amp` traces under fp16 autocast with CUDA autocast's fp32
+list registered for the CPU trace (`autocast_policy.py`: norms, softmax, exp/pow, sums and upsampling in fp32;
+convolutions, matrix multiplies, linear layers and attention in fp16), then `fold_casts.py` turns the weight casts
+autocast leaves in front of each conv/matmul into fp16 weights (outputs bit-identical, file sizes as onnx.3).
+onnx.3 exported these four from `model.half()`: residual streams, norms and resizes ran in fp16. C-RADIO's fp16
+file and every fp32 file are onnx.3's, byte-identical. Inputs follow the original's types: stage 1 `rgb`, `hint`,
+`hint_quality` and stage 2 `rgb` are fp16 (the original feeds bf16), the rest fp32; the engine feeds each input in
+its graph's declared type (no engine change; `runtime.rs` test with a mixed set). `build_models.sh` builds onnx.4
+(`CK_REUSE_FROM` copies the unchanged files; `CK_MEM_<STEP>_<piece>` caps each step). Why: parity with how
+CorridorKey 2.0 computes, not a measured quality gain (README, Quality, "What we got wrong" 1). Speed and memory
+against onnx.3: README, Speed, "onnx.4". Everything below about onnx.3 holds for onnx.4 except the fp16 files'
+precision (per file in manifest.json, `precision_note`). The TensorRT set from it (`2.0.0-onnx.4-trt`): "TensorRT
+set" below.
 
 **`2.0.0-onnx.3`** (`~/.cache/claude-scratch/corridorkey-onnx/models-2.0.0-onnx.3/`) is `2.0.0-onnx.2` with C-RADIO
 re-exported so its position grid follows the input's rows and columns: it takes portrait frames (taller than wide),
@@ -323,6 +339,15 @@ End to end on the six real clips (Rust engine, docs/ENGINE_RUST.md in corridorke
 the PyTorch engine is unchanged to three digits (e.g. locked_backdrop alpha MAE 6.12e-4 with either set).
 
 ## TensorRT set (`build_trt_models.sh`, 2026-10-21)
+
+**`2.0.0-onnx.4-trt` (2026-10-25):** from onnx.4. Stage 1 and stage 2 are re-exported with `--amp` + `fold_casts.py`
+(as the set), so they are mixed precision too; `to_trt.py` now reads each op's type by ONNX type inference
+(`elem_types`) instead of the file's input type: the attention scale takes Q's type, MoGe's antialiased resize stays
+in fp32 where the policy put it, and FP32 islands move only ops that compute in fp16 (fp32 ops stay as they are).
+C-RADIO's TensorRT file comes out byte-identical to onnx.3-trt's (the same source file; a check that fully fp16
+inputs give what they gave before). MoGe's and RVM's `.onnx.data` are about half onnx.3-trt's: their weights sit
+behind a Transpose, so the islands cast them to fp32 in the graph instead of storing fp32 copies (same values;
+TensorRT folds the cast at build time).
 
 For corridorkey-engine's opt-in TensorRT path. Built next to a production set (never over it); scratch copy:
 `~/.cache/claude-scratch/corridorkey-onnx/models-trt-1/` (made from `2.0.0-onnx.2`: its C-RADIO, MoGe and RVM

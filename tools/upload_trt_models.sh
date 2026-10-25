@@ -2,15 +2,15 @@
 # Publish a TensorRT model set as this repository's GitHub release `models-<set>` (the app's TensorRT download,
 # electron/main/install.ts TENSORRT.models, reads it from there by exact name, size and SHA-256).
 #
-#   tools/upload_trt_models.sh DIR [SET]     SET defaults to 2.0.0-onnx.3-trt
+#   tools/upload_trt_models.sh DIR [SET]     SET defaults to 2.0.0-onnx.4-trt
 #
-# DIR holds the set as CorridorKey2.0's engine-rs/export/build_trt_models.sh writes it: ck2-*-trt-fp16.onnx,
+# DIR holds the set as engine-rs/export/build_trt_models.sh writes it: ck2-*-trt-fp16.onnx,
 # their .onnx.data, the -ctx.onnx EPContext stubs, and models.json. Idempotent: creates the release only if it is
 # missing (never as Latest), uploads only what isn't there with the right size, and at the end checks every asset's
 # size and SHA-256 on GitHub against the files here. Run it again after a failure. Publishing needs Marcy's OK.
 set -euo pipefail
 DIR=${1:?usage: tools/upload_trt_models.sh DIR [SET]}
-SET=${2:-2.0.0-onnx.3-trt}
+SET=${2:-2.0.0-onnx.4-trt}
 TAG="models-$SET"
 REPO=MarcelineVPQ/corridorkey-desktop
 cd "$DIR"
@@ -26,7 +26,7 @@ if ! gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
   cat >"$NOTES" <<EOF
 CorridorKey 2.0 prepared for TensorRT, for CorridorKey Desktop's optional TensorRT mode (Linux): model set \`$SET\`, fp16, strongly typed (FP32 islands for weight GEMMs and convolutions; docs/ENGINE_RUST.md "TensorRT"). The app downloads these when you switch TensorRT on and checks every file's SHA-256 (listed below). You don't need to download them by hand.
 
-**CorridorKey** is by Corridor Digital: designed and trained by Zachary Harris with Niko Pueringer and Corridor Digital. Converted from \`corridorkey_v2.safetensors\` (https://huggingface.co/nikopueringer/CorridorKey2.0) with CorridorKey2.0's \`engine-rs/export/build_trt_models.sh\` (docs/ONNX_EXPORT.md, "TensorRT set"). Licensed under the CorridorKey licence (a CC BY-NC-SA 4.0 variant with additional terms; LICENSE in this repository): free to use, never sold.
+**CorridorKey** is by Corridor Digital: designed and trained by Zachary Harris with Niko Pueringer and Corridor Digital. Converted from \`corridorkey_v2.safetensors\` (https://huggingface.co/nikopueringer/CorridorKey2.0) with this repository's \`engine-rs/export/build_trt_models.sh\` (docs/ONNX_EXPORT.md, "TensorRT set"). Licensed under the CorridorKey licence (a CC BY-NC-SA 4.0 variant with additional terms; LICENSE in this repository): free to use, never sold.
 
 **Foundation models inside:** C-RADIO by NVIDIA (NVIDIA Open Model License), MoGe by Microsoft (MIT), RVM by Google DeepMind (code Apache 2.0, weights CC-BY 4.0).
 

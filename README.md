@@ -45,8 +45,8 @@ Status: 1.0 is almost ready, for Linux, Windows and macOS (Apple Silicon).
   missing, it offers to install it (apt or pacman on Linux, `winget` on Windows, Homebrew on macOS).
 - Optional, Linux: **TensorRT** (Engine settings, TensorRT; off by default) for about 2× the original's speed at HD
   and about 3.7-4.2× at 4K, with the same mattes (Speed, 0.0.6-dev and 0.0.7-dev). Switching it on offers its own download: NVIDIA's TensorRT 10.16
-  libraries (3.7 GB, from pypi.nvidia.com) and the TensorRT models (3.1 GB, from this repository's releases; C-RADIO's
-  weights are copied from the models you already have), 6.9 GB in all, 7.5 GB on disk. Each
+  libraries (3.7 GB, from pypi.nvidia.com) and the TensorRT models (1.8 GB, from this repository's releases; C-RADIO's
+  weights are copied from the models you already have), 5.5 GB in all, 6.1 GB on disk. Each
   resolution range is optimized once (about 4.5 minutes for the five networks on an RTX 5080, about 5 at 4K; about
   half that once TensorRT's timing cache is warm): the app builds 4K and HD in the background when TensorRT is
   switched on, with a progress bar in Engine settings, and pauses while you key. Jobs never wait on a build: a clip
@@ -98,7 +98,7 @@ back, with the same settings. Measured 2026-10-24 with `tools/engine_bench.mjs`.
 | Processor, memory | AMD Ryzen 9 9950X3D (16 cores), 60 GB RAM |
 | System | Kubuntu 26.04, Linux 7.0.0, KDE Plasma (Wayland) |
 | Original CorridorKey 2.0 | PyTorch 2.9.1 (CUDA 12.8, cuDNN 9.10), Python 3.12, its shipping mode: bf16 autocast |
-| CorridorKey Desktop | Rust engine on ONNX Runtime 1.31.0 (CUDA 13.4, cuDNN 9.27), fp16, model set `2.0.0-onnx.3`: the engine and GPU runtime the app ships and downloads |
+| CorridorKey Desktop | Rust engine on ONNX Runtime 1.31.0 (CUDA 13.4, cuDNN 9.27), fp16, model set `2.0.0-onnx.3`: the engine and GPU runtime the app shipped and downloaded then (since 2026-10-25 it downloads `2.0.0-onnx.4`; "onnx.4" below) |
 
 **Method**
 
@@ -337,6 +337,23 @@ Today's CUDA 4K totals (147-152 s) are below the 4K table's 170-174 s (0.0.3-dev
 took 04_5h from 170.1 to 162.7 s; these runs also write EXR instead of video, and the rest of the gap wasn't measured
 on its own. The 4K table above stays as measured.
 
+### onnx.4: CorridorKey 2.0's precision policy (2026-10-25)
+
+The app now downloads model set `2.0.0-onnx.4`: MoGe, RVM, stage 1 and stage 2 compute the way CorridorKey 2.0 does
+under its autocast (fp16 convolutions, matrix multiplies and attention; fp32 norms, softmax, exp/pow, sums and
+upsampling), where `onnx.3` ran those four entirely in fp16. C-RADIO is unchanged. Measured 2026-10-25, RTX 5080, CUDA,
+the app's normal settings (automatic window, 12 GB budget, alpha + foreground video outputs), the same engine binary,
+onnx.4 then onnx.3 back to back:
+
+| Clip | onnx.3: total · first frames · steady | onnx.4: total · first frames · steady | Change | Graphics memory (GiB), onnx.3 → onnx.4 | RAM (GiB), onnx.3 → onnx.4 |
+| --- | --- | --- | --- | --- | --- |
+| locked_backdrop 1280×1080, 80 frames (48/24) | 20.2 s · 13.9 s · 18.65 fps | 24.5 s · 17.7 s · 16.80 fps | +21 % | 8.21 → 9.07 | 5.15 → 6.49 |
+| 04_5d 4096×2160 EXR, 120 frames (8/4) | 161.7 s · 84.7 s · 1.95 fps | 180.5 s · 92.6 s · 1.66 fps | +12 % | 9.26 → 9.29 | 13.62 → 13.55 |
+
+The cost is real: 12-21 % more time, and at HD 0.9 GiB more graphics memory and 1.3 GiB more RAM; the gain is parity
+with how CorridorKey 2.0 itself computes, not a measured quality change (Quality, "What we got wrong" 1). The tables
+above stay as measured with onnx.3.
+
 ### TensorRT, first measurement (2026-10-21)
 
 TensorRT's first measurement in the engine, on 2026-10-21 (`onnx.2` models, the same HD bench), before it took
@@ -387,8 +404,9 @@ because our scorecard compared us only with the original's *output*, never with 
 full fp32 precision). On 2026-10-25 we measured against the truth and published a large hair-edge gap here, then
 withdrew it: the truth and the original's bf16 run were fed 16-bit PNG frames converted by ffmpeg, while our engine
 read the video itself, so the inputs weren't the same and the numbers don't count. Acting on them, we also re-exported
-four networks with the original's precision policy (model set onnx.4); the hair didn't change, so that wasn't the
-cause and onnx.4 is not shipped. Known deviation from CorridorKey 2.0 in our input: it reads video through OpenCV at
+four networks with the original's precision policy (model set onnx.4); the hair didn't measurably change, so that
+wasn't the cause. onnx.4 ships anyway since 2026-10-25, for parity with CorridorKey 2.0's precision policy, not
+because it fixed the hair (its cost: Speed, "onnx.4"). Known deviation from CorridorKey 2.0 in our input: it reads video through OpenCV at
 8 bits; we read 10/12-bit plates at 16 bits (same colour conversion). Next: one comparison where all three are fed
 exactly the same frames through CorridorKey 2.0's own reader. The result goes here.
 
@@ -556,7 +574,7 @@ Run both engines the same way with `tools/engine_bench.mjs` (it writes this tabl
 ```
 node tools/engine_bench.mjs python --python <CorridorKey2.0>/venv/bin/python --script engine/ck_engine.py \
   --package-root <CorridorKey2.0> --out out/pytorch --vram-budget 12 CLIP...
-node tools/engine_bench.mjs rust --bin <corridorkey-engine> --models <models>/2.0.0-onnx.3 \
+node tools/engine_bench.mjs rust --bin <corridorkey-engine> --models <models>/2.0.0-onnx.4 \
   --ort <runtime>/onnxruntime/capi/libonnxruntime.so.1.31.0 --env LD_LIBRARY_PATH=<runtime's library folders> \
   --device cuda --out out/rust --vram-budget 12 CLIP...
 ```
@@ -668,7 +686,7 @@ CorridorKey writes only these folders (plus the results you ask for, next to you
 
 - **App settings → Storage** shows each folder's real size and removes the runtime, the models or the cache (it asks
   first; the setup downloads them again when needed). On Linux, TensorRT is its own item: its libraries and models
-  (inside the data folder, about 7.5 GB) and the engines built for your card (`~/.cache/corridorkey-desktop/tensorrt`).
+  (inside the data folder, about 6.1 GB) and the engines built for your card (`~/.cache/corridorkey-desktop/tensorrt`).
 - The cache cleans itself: stills older than 30 days go, and it never grows past 500 MB. Job temp files are removed
   when a job ends, and anything left by a crash at the next start.
 - **Windows:** uninstalling from Apps & features asks whether to remove the downloaded runtime, models, cache and

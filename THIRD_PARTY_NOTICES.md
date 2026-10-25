@@ -279,14 +279,15 @@ publishers' licences; the wheels' own licence files are kept next to the librari
 
 ### The CorridorKey models
 
-- The model set `2.0.0-onnx.3` (and `2.0.0-onnx.3-trt` for the opt-in TensorRT jobs): CorridorKey 2.0's five networks
+- The model set `2.0.0-onnx.4` (and `2.0.0-onnx.4-trt` for the opt-in TensorRT jobs): CorridorKey 2.0's five networks
   converted to ONNX from Corridor Digital's checkpoint, downloaded from this app's GitHub releases
-  (https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.3). CorridorKey 2.0 is © Corridor Digital, under the
+  (https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.4). CorridorKey 2.0 is © Corridor Digital, under the
   CorridorKey licence (https://github.com/nikopueringer/CorridorKey2.0).
-- **Modified:** every network is converted from the original PyTorch checkpoint to ONNX, weights in fp16 (or fp32
-  where named), with exact graph rewrites for speed and portrait input (listed in the set's manifest.json); the
-  TensorRT set adds TensorRT-specific rewrites. Each model release carries ATTRIBUTION.md, NOTICE and the licence
-  texts below.
+- **Modified:** every network is converted from the original PyTorch checkpoint to ONNX, with exact graph rewrites
+  for speed and portrait input (listed in the set's manifest.json); the fp16 files follow CorridorKey 2.0's own
+  precision policy (fp16 convolutions, matrix multiplies and attention; fp32 norms, softmax, exp/pow, sums and
+  upsampling); the TensorRT set adds TensorRT-specific rewrites. Each model release carries ATTRIBUTION.md, NOTICE
+  and the licence texts below.
 - Three of the five networks are foundation models. They stay under their publishers' licences, **not** under the
   CorridorKey licence, with no added terms:
   - **C-RADIOv4-SO400M**, NVIDIA Corporation (https://huggingface.co/nvidia/C-RADIOv4-SO400M, revision

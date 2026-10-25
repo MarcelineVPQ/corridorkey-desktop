@@ -25,7 +25,7 @@
 #   --window C/S         the Hann window, both sides (default 8/4: what the 4K plate gets in 14 GB, and a 16 GB Mac's size;
 #                        coreml: default 4/2, and it must be a window the Core ML set was built for)
 #   --coreml-set DIR     coreml: the Core ML set (engine-rs/export/coreml/build_coreml_models.sh's OUT/set: the files,
-#                        coreml.json, SHA256SUMS; default ~/.cache/claude-scratch/coreml-p1/set). Copied next to the
+#                        coreml.json, SHA256SUMS; default ~/.cache/claude-scratch/coreml-p4/set, built from 2.0.0-onnx.4). Copied next to the
 #                        model set on the Mac, every file's sha256 checked on both sides
 #   --coreml-units U     coreml: Core ML's compute units on the Mac: all (default) | cpu-gpu | cpu-ane | cpu
 #   --no-low-vram        normal mode instead of staged low-memory mode (identical mattes; low-memory is the default)
@@ -37,7 +37,8 @@
 #   --out DIR            the report folder (default ~/.cache/claude-scratch/mac-gate/<date>-<commit>)
 #   --stall-s S          kill an engine silent this long (default 3600 for cpu and coreml; else 900)
 #   --max-hours H        stop following the Mac's run after this long (default 24; the run itself keeps going)
-#   --models DIR         the model set (default ~/.local/share/corridorkey-desktop/models/2.0.0-onnx.3)
+#   --models DIR         the model set (default the app's installed 2.0.0-onnx.4, else the published set's local copy
+#                        ~/.cache/claude-scratch/models/2.0.0-onnx.4)
 #   --fresh              key again on the Mac even if this exact run finished before
 #   --steps 1,2,...      run only these steps (default all; every step is safe to repeat, e.g. --steps 7 reports again)
 #   --dry-run            print every step and command; no SSH, no GPU, nothing written
@@ -47,8 +48,9 @@
 set -euo pipefail
 
 HOST="" PROVIDER=cpu PRECISION=fp16 WINDOW="" LOW_VRAM=true COREML_UNITS=all FRAMES="" CLIPS="" REF="" OUT="" STALL="" MAX_HOURS=24
-MODELS="$HOME/.local/share/corridorkey-desktop/models/2.0.0-onnx.3" FRESH=0 DRY=0 STEPS=1,2,3,4,5,6,7
-COREML_SET="$HOME/.cache/claude-scratch/coreml-p1/set"
+MODELS="$HOME/.local/share/corridorkey-desktop/models/2.0.0-onnx.4" FRESH=0 DRY=0 STEPS=1,2,3,4,5,6,7
+[ -d "$MODELS" ] || MODELS="$HOME/.cache/claude-scratch/models/2.0.0-onnx.4"
+COREML_SET="$HOME/.cache/claude-scratch/coreml-p4/set"
 T="$HOME/Videos/corridorkey-tests"
 DEFAULT_CLIPS="$T/metal_glasses.mov,$T/locked_backdrop.mov,$T/with_motion_blur.mov,$T/4k/04_5d"
 # coreml: HD only (the Core ML set has the HD size, 1152x1280 padded); the EXR crop first (no video decoder: the row-31

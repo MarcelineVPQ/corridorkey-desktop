@@ -12,7 +12,7 @@ screen keyer, on its own Rust + ONNX Runtime engine, for Linux, Windows and macO
 - The CorridorKey engine in Rust on ONNX Runtime (CUDA, fp16), inside the app: 1.5-1.8× faster
   than the PyTorch version on every HD test clip and 2.4-2.7× faster on 4K (RTX 5080; README, Speed),
   using less graphics memory and RAM, with the same mattes (README, Quality); portrait clips
-  work (model set `2.0.0-onnx.3`). The PyTorch engine stays available as the reference.
+  work (model set `2.0.0-onnx.4`, computed with CorridorKey 2.0's own precision policy). The PyTorch engine stays available as the reference.
 - A setup screen on first start: three steps, each ticked when done (download the runtime and
   models, ffmpeg, add your first clip). Engine, Open the setup brings it back.
 - Installs itself: the setup downloads the GPU runtime (ONNX Runtime and

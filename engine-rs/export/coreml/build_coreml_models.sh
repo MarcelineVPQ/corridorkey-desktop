@@ -7,7 +7,7 @@
 # go into the shipped set's folder next to it, with coreml.json, which the engine reads for --device coreml.
 #
 #   build_coreml_models.sh SET_DIR OUT_DIR HxW PIECE:T [PIECE:T ...]
-#   e.g. build_coreml_models.sh ~/.local/share/corridorkey-desktop/models/2.0.0-onnx.3 OUT 1152x1280 \
+#   e.g. build_coreml_models.sh ~/.local/share/corridorkey-desktop/models/2.0.0-onnx.4 OUT 1152x1280 \
 #          cradio:4 moge:4 rvm:1 stage1:4 stage1:8 stage2:1
 #
 # Steps per file (all CPU; ONNX Runtime's CPU kernels evaluate the folded constants, so folding is exact):

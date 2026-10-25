@@ -20,7 +20,7 @@
 #   --vram-budget GB     the run option vram_budget_gb (default 14: what a 16 GB card leaves for one job)
 #   --format F           exr-float (default) | exr-half | video (x264 CRF 12: adds codec noise to the flicker)
 #   --engine BIN         default engine-rs/target/dist/corridorkey-engine
-#   --models DIR         default ~/.local/share/corridorkey-desktop/models/2.0.0-onnx.3
+#   --models DIR         default ~/.local/share/corridorkey-desktop/models/2.0.0-onnx.4
 #   --runtime DIR        default ~/.local/share/corridorkey-desktop/runtime/ort-1.31.0-cuda13
 #   --flow-width PX      the stability metric's optical-flow width (default 960)
 #   --out DIR            default ~/.cache/claude-scratch/window-sweep/<date>-<plate>
@@ -40,7 +40,7 @@ MEMRUN="$SCRATCH/tools/memrun.sh"
 export CK_SLICE="${CK_SLICE:-claude-work.slice}"
 PLATE="$HOME/Videos/corridorkey-tests/godiva_close.mov" WINDOWS="8/4,16/8,24/12,48/24" FRAMES="" LOW=true BUDGET=14 FORMAT=exr-float
 ENGINE="$REPO/engine-rs/target/dist/corridorkey-engine"
-MODELS="$HOME/.local/share/corridorkey-desktop/models/2.0.0-onnx.3"
+MODELS="$HOME/.local/share/corridorkey-desktop/models/2.0.0-onnx.4"
 RUNTIME="$HOME/.local/share/corridorkey-desktop/runtime/ort-1.31.0-cuda13"
 FLOW=960 OUT="" CPU=0 KEEP=0 DRY=0
 die() { echo "window_sweep: $*" >&2; exit 1; }

@@ -83,6 +83,9 @@ def main():
     ap.add_argument("--tag", default="")
     ap.add_argument("--autocast16", action="store_true",
                     help="fp32 weights, export traced under fp16 autocast (mixed precision graph)")
+    ap.add_argument("--amp", action="store_true",
+                    help="the original's precision policy: fp32 weights, traced under fp16 autocast with CUDA "
+                         "autocast's fp32 list (autocast_policy.py); inputs in the original's types")
     ap.add_argument("--half", action="store_true",
                     help="export a native fp16 graph (model.half(), fp16 inputs)")
     a = ap.parse_args()
@@ -104,13 +107,19 @@ def main():
                 with torch.autocast("cpu", dtype=torch.float16):
                     return self.inner(rgb)
         mod = _AC().eval()
+    elif a.amp:
+        import autocast_policy
+        mod = autocast_policy.autocast_piece(mod, names_in).eval()
+        # inputs in the original's types (autocast_policy.LOW_INPUTS)
+        args = tuple(x.half() if n in autocast_policy.LOW_INPUTS.get(a.piece, ()) else x
+                     for n, x in zip(names_in, args))
     elif a.half:
         mod = mod.half()
         args = tuple(x.half() for x in args)
-    tag = a.tag or ("fp16" if (a.half or a.autocast16) else f"{a.exporter}{'_static' if a.static else ''}")
+    tag = a.tag or ("fp16" if (a.half or a.autocast16 or a.amp) else f"{a.exporter}{'_static' if a.static else ''}")
     out = ONNX_DIR / f"{a.piece}_{tag}.onnx"
     rec = {"piece": a.piece, "exporter": a.exporter, "static": a.static,
-           "opset": a.opset, "patch": a.patch, "half": a.half, "shape": [a.T, a.H, a.W], "file": str(out)}
+           "opset": a.opset, "patch": a.patch, "half": a.half, "amp": a.amp, "shape": [a.T, a.H, a.W], "file": str(out)}
     t0 = time.time()
     try:
         with torch.no_grad():

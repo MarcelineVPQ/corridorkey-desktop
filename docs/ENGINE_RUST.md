@@ -54,10 +54,13 @@ existing default name is used: `<piece>_fp16.onnx`, `<piece>_op23fp16.onnx`, `<p
 `rvm`, `stage1`, `stage2` (the ONNX spike's exports, `engine-rs/export`,
 built from the CorridorKey2.0 clone). Precision: fp16 on the GPU, fp32 on the CPU; `CK_ENGINE_PRECISION` overrides.
 
-Use the **`2.0.0-onnx.3`** set: `2.0.0-onnx.2` (stage 1 and stage 2 with three exact graph rewrites: window
-pads, depatchify ConvTranspose, grouped 7×7 convs; `engine-rs/export/speed_patches.py`) with C-RADIO
-re-exported so it takes portrait frames (`docs/ONNX_EXPORT.md` "Portrait").
-Same inputs and outputs as `2.0.0-onnx.1`. The engine runs all three. The current speed numbers (onnx.3, the
+Use the **`2.0.0-onnx.4`** set (the app downloads it since 2026-10-25): `2.0.0-onnx.3` with MoGe, RVM, stage 1 and
+stage 2 computed under CorridorKey 2.0's own precision policy (fp16 conv/matmul/attention, fp32 norms, softmax,
+exp/pow, sums and upsampling; `docs/ONNX_EXPORT.md` "Production model set"). Its fp16 stage inputs are fp16; the
+engine feeds each input in its graph's declared type. `2.0.0-onnx.3` is `2.0.0-onnx.2` (stage 1 and stage 2 with
+three exact graph rewrites: window pads, depatchify ConvTranspose, grouped 7×7 convs;
+`engine-rs/export/speed_patches.py`) with C-RADIO re-exported so it takes portrait frames (`docs/ONNX_EXPORT.md`
+"Portrait"). Same outputs as `2.0.0-onnx.1`. The engine runs all four. The current speed numbers (onnx.3, the
 engine and runtime the app ships) are in the README, "Speed"; the table below is the onnx.2 run of 2026-10-21, and
 onnx.3 gives identical landscape output at the same speed ("Portrait" below). The engine reads the set's version
 from `manifest.json` and refuses portrait clips up front (an `input` error) only for onnx.1 / onnx.2.

@@ -41,7 +41,7 @@ def mha_to_plain(model, fp16):
             cons.setdefault(i, []).append(n)
     inits = {i.name: i for i in g.initializer}
     drop, add, count = set(), {}, 0
-    dt = np.float16 if fp16 else np.float32
+    types = elem_types(model)
     for n in g.node:
         if not (n.op_type == "MultiHeadAttention" and n.domain == "com.microsoft"):
             continue
@@ -62,8 +62,10 @@ def mha_to_plain(model, fp16):
         d = int(shape[3])
         drop.update([n.name, ro.name, to.name])
         p = f"{n.name}_plain"
-        scale = _init(g, f"{p}_scale", np.array(1.0 / np.sqrt(d), dtype=dt))
         q, k, v = src
+        # the scale in Q's type (mixed files: attention runs in fp16 whatever the file's input type)
+        dt = np.float16 if types.get(q, TensorProto.FLOAT16 if fp16 else TensorProto.FLOAT) == TensorProto.FLOAT16 else np.float32
+        scale = _init(g, f"{p}_scale", np.array(1.0 / np.sqrt(d), dtype=dt))
         nodes = [
             helper.make_node("Mul", [q, scale], [f"{p}_qs"], name=f"{p}_qs"),
             helper.make_node("Transpose", [k], [f"{p}_kt"], perm=[0, 1, 3, 2], name=f"{p}_kt"),
@@ -94,6 +96,8 @@ def mha_to_plain(model, fp16):
 
 def aa_resize_to_matmul(model, fp16):
     g = model.graph
+    types = elem_types(model)
+    file_fp16 = fp16
     count = 0
     new = []
     c = lambda name, arr: _init(g, name, arr)
@@ -104,6 +108,8 @@ def aa_resize_to_matmul(model, fp16):
             new.append(n)
             continue
         x, sizes = n.input[0], n.input[3]
+        # in x's type (mixed files: the original's policy runs this resize in fp32)
+        fp16 = types.get(x, TensorProto.FLOAT16 if file_fp16 else TensorProto.FLOAT) == TensorProto.FLOAT16
         assert sizes, "aa Resize with scales is not handled"
         p = f"{n.name}_mm"
         f32 = TensorProto.FLOAT
@@ -166,13 +172,45 @@ def aa_resize_to_matmul(model, fp16):
     return count
 
 
-def fp32_islands(model, ops, weights_only=False):
+def elem_types(model):
+    """Each tensor's element type (name -> TensorProto type), by ONNX shape inference on the graph's structure.
+
+    Mixed-precision files (2.0.0-onnx.4 on: the original's autocast policy) run some ops in fp16 and others in fp32,
+    so a file's input type no longer says what an op computes in. Large initializers become typed graph inputs for
+    the inference (their values aren't needed for types; this keeps the proto far under protobuf's 2 GB).
+    """
+    g = model.graph
+    # loop: NOT-WORTH — one pass over the initializers
+    small = [i for i in g.initializer if np.prod(i.dims, dtype=np.int64) <= 4096]
+    # loop: NOT-WORTH — one pass over the initializers (the weights' bytes are never copied)
+    typed = [helper.make_tensor_value_info(i.name, i.data_type, list(i.dims))
+             for i in g.initializer if np.prod(i.dims, dtype=np.int64) > 4096]
+    sg = helper.make_graph(list(g.node), g.name, list(g.input) + typed, list(g.output), initializer=small,
+                           value_info=list(g.value_info))
+    m = helper.make_model(sg, opset_imports=list(model.opset_import), ir_version=model.ir_version)
+    m.functions.extend(model.functions)
+    m = onnx.shape_inference.infer_shapes(m, strict_mode=False)
+    t = {}
+    # loop: NOT-WORTH — one pass over the graph's typed values
+    for v in list(m.graph.value_info) + list(m.graph.input) + list(m.graph.output):
+        if v.type.tensor_type.elem_type:
+            t[v.name] = v.type.tensor_type.elem_type
+    # loop: NOT-WORTH — one pass over the initializers
+    for i in model.graph.initializer:
+        t[i.name] = i.data_type
+    return t
+
+
+def fp32_islands(model, ops, weights_only=False, default_fp16=True):
     """fp16 graphs: run the listed op types in float32 (Cast in, float32 weights, Cast out).
 
     TensorRT's fp16 kernels for these ops lose more precision than ONNX Runtime's CUDA fp16 kernels (measured
     per layer type on stage 2: ConvTranspose, Conv and MatMul; docs/ONNX_EXPORT.md "TensorRT"). With
     weights_only, only MatMuls with a constant (weight) operand are moved (the linear layers, not attention).
+    Only ops that compute in fp16 are moved (their output's type; mixed files keep fp32 ops as they are); an op whose
+    type inference can't tell follows default_fp16 (the file's input type, as before mixed files).
     """
+    types = elem_types(model)
     g = model.graph
     inits = {i.name: i for i in g.initializer}
     consts = {n.output[0] for n in g.node if n.op_type == "Constant"}
@@ -194,7 +232,7 @@ def fp32_islands(model, ops, weights_only=False):
         return c, [helper.make_node("Cast", [name], [c], to=F32, name=c)]
 
     for n in g.node:
-        if n.op_type not in ops:
+        if n.op_type not in ops or types.get(n.output[0], F16 if default_fp16 else F32) != F16:
             new.append(n)
             continue
         if weights_only and n.op_type == "MatMul" and not any(i in inits or i in consts for i in n.input):
@@ -234,7 +272,8 @@ def main():
         fp16 = "fp16" in src.name
     n_mha = mha_to_plain(m, fp16)
     n_rs = aa_resize_to_matmul(m, fp16)
-    n_isl = fp32_islands(m, set(islands.split(",")), weights_only) if islands and fp16 else 0
+    # mixed files (fp32 input, fp16 inside) get islands too: only their fp16 ops move
+    n_isl = fp32_islands(m, set(islands.split(",")), weights_only, default_fp16=fp16) if islands else 0
     for f in (dst, dst.with_name(dst.name + ".data")):
         if f.exists():
             f.unlink()

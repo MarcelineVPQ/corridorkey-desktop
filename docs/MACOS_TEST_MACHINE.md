@@ -55,7 +55,10 @@ tools/mac_gate.sh --host <user>@<mac>.local                     # a CPU rehearsa
 Core ML (phase 1, BACKLOG row 24): Core ML compiles for fixed shapes, so the gate runs the **Core ML set** built
 offline for the HD size only (1280x1080 clips, padded 1152x1280; stage 1 at 4 or 8 frames per window, C-RADIO /
 MoGe at 4 per call in low-memory mode): `engine-rs/export/coreml/build_coreml_models.sh` → `OUT/set` (default
-`--coreml-set ~/.cache/claude-scratch/coreml-p1/set`; release assets later, never in git). The gate copies it next to
+`--coreml-set ~/.cache/claude-scratch/coreml-p4/set`, built from the shipped set `2.0.0-onnx.4` on 2026-10-25; the
+onnx.3 build in `coreml-p1` is refused by the version check; release assets later, never in git). The model set
+itself: the app's installed `2.0.0-onnx.4`, else the published set's local copy `~/.cache/claude-scratch/models/2.0.0-onnx.4`
+(`--models` to choose). The gate copies it next to
 the model set on the Mac (sha256 checked on both sides) and refuses a window the set wasn't built for. Its default
 clips are HD only, decode-stable first: an exact 1280x1080 crop of the 4K half-float EXR plate 04_5d (made here once,
 no decoder, no resampling; the row-31 study found 8-bit video decodes differ by CPU SIMD), then the three 12-bit

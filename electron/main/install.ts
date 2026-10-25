@@ -1,7 +1,7 @@
 // First-run install (BACKLOG row 2): the GPU runtime and the models, downloaded into the data folder
 // (engineFind.ts dataDir) where the Engine page's lists find them. Nothing is hosted for the runtime:
 // ONNX Runtime and NVIDIA's CUDA / cuDNN libraries come from PyPI as published wheels, pinned here by
-// URL, size and SHA-256. The models come from this repository's `models-2.0.0-onnx.3` release
+// URL, size and SHA-256. The models come from this repository's `models-2.0.0-onnx.4` release
 // (converted from Corridor Digital's checkpoint; CorridorKey licence). Every file is checked before use.
 // After a Stop or a failure, pressing the button again resumes: finished files are checked offline and kept,
 // a partial one continues where it stopped. A set only appears in the lists once all of it is in place
@@ -236,7 +236,7 @@ export function keepFromWheel(name: string): boolean {
 }
 
 // the model set, and this repository's release that holds it (models-<set>)
-const MODEL_SET = "2.0.0-onnx.3";
+const MODEL_SET = "2.0.0-onnx.4";
 const release = (set: string) => `https://github.com/${REPO}/releases/download/models-${set}`;
 const inRelease =
   (set: string) =>
@@ -247,15 +247,15 @@ export const MODELS = {
   files: [
     model("ck2-cradio-fp16.onnx", 789360, "25e8656dffc2c639f1557b092ea5d2738d7c4002b495195f93ba41a3610b0334"),
     model("ck2-cradio-fp16.onnx.data", 1724414688, "8f76c92ddf779b70745fc985820e7e312f7eb07ec82b4e20119062798f952b9f"),
-    model("ck2-moge-fp16.onnx", 848115, "7c6ebfee3e359ee40b8dfc5415735040813bcfec3715ad4b6f1fc822a45574a3"),
-    model("ck2-moge-fp16.onnx.data", 175527936, "00926e6df6998730443d8592bff4fafc182a3731f212b25c81c3bec0d14cd509"),
-    model("ck2-rvm-fp16.onnx", 1039306, "9c98927b5dfad26895031186e5aeeaf6370d8f1d4354381779c16e0840922259"),
-    model("ck2-rvm-fp16.onnx.data", 66509824, "65fed0108ad965067875b10b83110981a9768590492eb09046815b8e05ca0fe2"),
-    model("ck2-stage1-fp16.onnx", 4660818, "ef86e7418f2667171e0272880c70add78a1e722e063a74571897cf71eaf27e96"),
-    model("ck2-stage1-fp16.onnx.data", 924062976, "5c2fc34c4c13ca811e4ba8998ff97a04f9fca6b7518f57caa83531fd04e13e98"),
-    model("ck2-stage2-fp16.onnx", 2255708, "ebbab0f697738aeab07b3704d4f4ce335243102680805f465f4eac76abefd567"),
-    model("ck2-stage2-fp16.onnx.data", 404083200, "00fdee0b2ce58e824fe75e09c3c6cddb4b022a5c1e0b2f4789f1487873e6d890"),
-    model("manifest.json", 16110, "97340927f91072330fcfbac9d01c10a32c8db3f129881ffd57a3c62e0a0428ca"),
+    model("ck2-moge-fp16.onnx", 425920, "b035a6904fc72f91abae20f31de342cbb6bffc65ed75d33cc4d88d7008de8712"),
+    model("ck2-moge-fp16.onnx.data", 177747456, "fefb7ec179377603b5011202244c92176db42782d9281eef9f1ce2eee5294c45"),
+    model("ck2-rvm-fp16.onnx", 657354, "cfb8aa3c20ec5a63421cfe480d1792950adde598edcb12b33810827de871a809"),
+    model("ck2-rvm-fp16.onnx.data", 66827776, "988b0b97752df9c13c9e78ec7c844faecac35d7ae9eaede6a2c13609c79b9617"),
+    model("ck2-stage1-fp16.onnx", 2471932, "3c19272c263ec952bc16a02333c6fc3ee8acf71d75fd62fbebcc4e0280ccd10d"),
+    model("ck2-stage1-fp16.onnx.data", 924102400, "d354507432f0635409ea08ec2abdd10fb04539070ce8eac7b815f58ff5e32431"),
+    model("ck2-stage2-fp16.onnx", 1330091, "1c6a5ae09a752b738b9c75bee448b5ec4e82bd1b430192d72d167e5e5166bbfe"),
+    model("ck2-stage2-fp16.onnx.data", 403914240, "1e537c9b14bdf905d931338c5e2e8c83cfd03d5eb29bfeebdd73de51b3236530"),
+    model("manifest.json", 16779, "56d63e810ed798bbce5060bda555667abafbbdd4b6822ebb77ba94e509e7e7e9"),
     model("models.json", 395, "01f0d8e592d10a9459f72ce23ebfaded0b56168b6d838799a0dad8172fe9ebff"),
   ],
 };
@@ -386,7 +386,7 @@ export async function runInstall(data: string, deps: InstallDeps, c: Catalog = C
 //     TensorRT provider load, as <runtime>/tensorrt_libs (engine.ts rustEngineEnv puts it on LD_LIBRARY_PATH);
 //   provider: libonnxruntime_providers_tensorrt.so next to libonnxruntime (the runtime install keeps it since 1.0;
 //     a runtime installed before that gets it from the ONNX Runtime wheel again);
-//   models: the TensorRT-ready set (release models-2.0.0-onnx.3-trt) in the normal set's folder, its models.json keys
+//   models: the TensorRT-ready set (release models-2.0.0-onnx.4-trt) in the normal set's folder, its models.json keys
 //     merged into the set's: the engine finds TensorRT files only through its one --models folder's models.json
 //     (engine-rs runtime.rs ModelSet::trt_file / trt_stub). The set's own models.json stays as models-tensorrt.json:
 //     the list of what is TensorRT's (Storage removes exactly that) and the mark that the set is whole (written last).
@@ -395,7 +395,7 @@ export const TRT_LIBS_DIR = "tensorrt_libs";
 export const TRT_MODELS_LIST = "models-tensorrt.json";
 /** The wheel's licence folder, kept next to the libraries. */
 export const TRT_DIST_INFO = /^tensorrt_cu\d+_libs-[\d.]+\.dist-info$/;
-const TRT_MODEL_SET = "2.0.0-onnx.3-trt";
+const TRT_MODEL_SET = "2.0.0-onnx.4-trt";
 const trtModel = inRelease(TRT_MODEL_SET);
 export const TENSORRT = {
   libs: {
@@ -412,18 +412,18 @@ export const TENSORRT = {
       trtModel("ck2-cradio-trt-fp16.onnx", 742927, "1e6acbb7e9bd5f5fffe19fab97fbb5df3e9627b7082b4b7846b239f77ecfbe7a"),
       // the same bytes as the normal set's ck2-cradio-fp16.onnx.data: copied from it, not downloaded (localTwin)
       trtModel("ck2-cradio-trt-fp16.onnx.data", 1724414688, "8f76c92ddf779b70745fc985820e7e312f7eb07ec82b4e20119062798f952b9f"),
-      trtModel("ck2-moge-trt-fp16-ctx.onnx", 598, "66a27beb74a7141af4e847827df84aac8fe7ea0eee5d9a91e888dc89f4fb2325"),
-      trtModel("ck2-moge-trt-fp16.onnx", 758942, "f829f950d01b66a0f85bbe0b61eebfbd2785934cac1707ad383c39fc40057338"),
-      trtModel("ck2-moge-trt-fp16.onnx.data", 348664320, "594e001b6fedc6fde1f43f654c4f317f4f2392b59d65bb8be3593852d7a31450"),
-      trtModel("ck2-rvm-trt-fp16-ctx.onnx", 994, "754658db43823a5175cde0873bfcd2b249aec89c4918298fd26ab3a63c14852c"),
-      trtModel("ck2-rvm-trt-fp16.onnx", 844775, "b84a19f10febb5a8e84dc379a23b6749104b79fef0dda944cba625a72af18135"),
-      trtModel("ck2-rvm-trt-fp16.onnx.data", 132768256, "e03b51246f2ec801857f0611b6421da7a521b7a3bcc768a97e0c7388d2d1aa67"),
-      trtModel("ck2-stage1-trt-fp16-ctx.onnx", 1785, "5b27c10f7ae9493f228e40adeee57a83b21c5c40b4903dfe659f7130572848a9"),
-      trtModel("ck2-stage1-trt-fp16.onnx", 4140214, "530047e1e485b434317cdb1121b041df4ba886f68d63391225251dda8f5d9414"),
-      trtModel("ck2-stage1-trt-fp16.onnx.data", 1843256576, "9a7ec9640197594da2da1128bea93b1d0342bac47fc17db7d9485bf794d6205f"),
-      trtModel("ck2-stage2-trt-fp16-ctx.onnx", 843, "2eb0af9f07b7e7a380efcedc98cc314fa13162d51f3b9c17234c39ff9d9ac381"),
-      trtModel("ck2-stage2-trt-fp16.onnx", 1992893, "5f36395d344f88fa71d37afdd6445a9f7aa538ce8746b06b696b469578abab96"),
-      trtModel("ck2-stage2-trt-fp16.onnx.data", 804806144, "280baab4bf70bd4398b8f257c85ce0e8b85fbd21c22bdcfe4c29690d6378212b"),
+      trtModel("ck2-moge-trt-fp16-ctx.onnx", 598, "9de6063abe191b1ad7ddac7415a9207f4e95101efdb89e7c2be83a296b2ac313"),
+      trtModel("ck2-moge-trt-fp16.onnx", 425292, "0c94de749d02f1982c26f72f96c5392a0396b6b1c6a27ae2917ffc61776d4eff"),
+      trtModel("ck2-moge-trt-fp16.onnx.data", 181014528, "067bcdbfca7cf91d434dc9709451c264eaef747848ac63d5b043912315d59796"),
+      trtModel("ck2-rvm-trt-fp16-ctx.onnx", 994, "a98773246f4b9c031a483795248ff2f4cd1a1dace4b1be9ede490a2f9d9ae228"),
+      trtModel("ck2-rvm-trt-fp16.onnx", 611330, "845019115d9871e1101f6af1f4af5b6378fb3f9c043b453f4aa89369095c9be3"),
+      trtModel("ck2-rvm-trt-fp16.onnx.data", 67419136, "5ebbca207937d92ef6fab97f165db4f68a3d7363df4e11e3023e872c7d7fa6ab"),
+      trtModel("ck2-stage1-trt-fp16-ctx.onnx", 1785, "f37de06c507fcd59e28890e57a15fedc485a160be4735ae066c45c8983f463f8"),
+      trtModel("ck2-stage1-trt-fp16.onnx", 2406474, "b11fc352da8b5e5dcfb9cf96d5fe9884f15b1ffe96b176f045faecacc7a2bc4b"),
+      trtModel("ck2-stage1-trt-fp16.onnx.data", 1125709568, "c11bc52e05d75773900b80b5b5ee28b6ddab0bbe1062e3f8d9857dcf69cde815"),
+      trtModel("ck2-stage2-trt-fp16-ctx.onnx", 843, "dd4183754f269fe4999384baf1fc689e13e12e24062a40b6dd87806ba289990e"),
+      trtModel("ck2-stage2-trt-fp16.onnx", 1297232, "8222676536502527095915bcb9dd2df8ac7a3741344f7bf4825817e05b85b646"),
+      trtModel("ck2-stage2-trt-fp16.onnx.data", 425429504, "ab6eae0f8c68a5056514f1e4a542a0bdefacc58ba9ef9bd9727f9577e1e38668"),
       // last: it becomes models-tensorrt.json once every file is in place (TRT_MODELS_LIST)
       trtModel("models.json", 476, "c5d65827ad8043fd67915d9cc37ff2110c559ce60450da86742de8c81eb74643"),
     ],

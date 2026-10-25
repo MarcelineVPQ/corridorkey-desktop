@@ -400,7 +400,7 @@ describe("TensorRT catalogue and rules", () => {
     expect([TENSORRT.libs.size, TENSORRT.libs.sha256]).toEqual([3728705565, "91142c8ab3c58bed213cf1a563a6eb4e4f0ac529d05b5f909073acece0e3b712"]);
     expect(TENSORRT.models.files).toHaveLength(16);
     for (const f of TENSORRT.models.files) {
-      expect(f.url).toBe(`https://github.com/MarcelineVPQ/corridorkey-desktop/releases/download/models-2.0.0-onnx.3-trt/${f.file}`);
+      expect(f.url).toBe(`https://github.com/MarcelineVPQ/corridorkey-desktop/releases/download/models-2.0.0-onnx.4-trt/${f.file}`);
       expect(f.sha256).toMatch(/^[0-9a-f]{64}$/);
     }
     // the list goes last: its arrival is the mark that the set is whole
@@ -411,7 +411,7 @@ describe("TensorRT catalogue and rules", () => {
     // loop: NOT-WORTH — sixteen sizes
     const models = TENSORRT.models.files.reduce((n, f) => n + f.size, 0);
     expect(TRT_BYTES).toBe(TENSORRT.libs.size + models - cradio.size);
-    expect(TRT_BYTES).toBe(6866685908);
+    expect(TRT_BYTES).toBe(5533766852);
   });
 
   it("builds the shipped ck-trt-build against the same TensorRT wheel users download", () => {

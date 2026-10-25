@@ -45,7 +45,7 @@
 #   --budget-sweep L     budgets for the capability sweep (default 4,6,8; --quick 4,8)
 #   --queue N            jobs in the long-queue case (default 20; --quick 8)
 #   --engine BIN         our engine (default engine-rs/target/dist/corridorkey-engine)
-#   --models DIR         our model set (default ~/.local/share/corridorkey-desktop/models/2.0.0-onnx.3)
+#   --models DIR         our model set (default ~/.local/share/corridorkey-desktop/models/2.0.0-onnx.4)
 #   --runtime DIR        our ONNX Runtime folder (default ~/.local/share/corridorkey-desktop/runtime/ort-1.31.0-cuda13)
 #   --appimage FILE      the AppImage whose size is reported (default: the newest under ~/Applications)
 #   --mem-original GB    memory cap of the original's runs (default 24 with a 4K plate, else 16); ours 18 / 12
@@ -69,7 +69,7 @@ export CK_SLICE="${CK_SLICE:-claude-work.slice}"
 T="$HOME/Videos/corridorkey-tests"
 ORIG_ROOT="$HOME/projects/CorridorKey2.0" ORIG_PY="" OUT="" CLIPS="" FRAMES="" STEPS=all
 ENGINE="$REPO/engine-rs/target/dist/corridorkey-engine"
-MODELS="$HOME/.local/share/corridorkey-desktop/models/2.0.0-onnx.3"
+MODELS="$HOME/.local/share/corridorkey-desktop/models/2.0.0-onnx.4"
 RUNTIME="$HOME/.local/share/corridorkey-desktop/runtime/ort-1.31.0-cuda13"
 APPIMAGE="" QUICK=0 REHEARSE=0 BLIND=0 REPEATS="" BUDGET=12 FLOOR_4K=24 SWEEP="" QUEUE="" MEM_ORIG="" MEM_WAIT_MIN=60
 KEEP=0 FRESH=0 DRY=0
