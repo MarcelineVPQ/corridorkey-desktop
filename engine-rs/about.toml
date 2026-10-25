@@ -1,0 +1,12 @@
+# cargo-about's settings for THIRD_PARTY_NOTICES.md (tools/gen_notices.mjs runs it).
+# The licence texts the notices use, in order of preference for a crate that offers a choice (MIT OR Apache-2.0 gets
+# Apache-2.0's text). A crate offering none of them stops the generator, so a new licence is looked at before it ships.
+accepted = ["Apache-2.0", "BSD-3-Clause", "ISC", "MIT", "Unicode-3.0"]
+# the three release targets (tools/build_engine.sh): the crate list is their union
+targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-gnu", "aarch64-apple-darwin"]
+# build scripts' and tests' crates are not linked into the engine; proc-macro crates are still listed (they run at
+# build time only, listed to be safe)
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+# ck-core and ck-engine are this app's own (publish = false; the CorridorKey licence, LICENSE)
+private = { ignore = true }

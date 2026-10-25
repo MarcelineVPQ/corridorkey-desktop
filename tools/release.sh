@@ -4,7 +4,8 @@
 #   tools/release.sh            the version in package.json: X.Y.Z (Stable) or X.Y.Z-dev.N (Development)
 #
 # 1. checks: on main, clean, in step with origin; package.json and the lock carry the version; a CHANGELOG
-#    section for it; the signing key is there
+#    section for it; the signing key is there; THIRD_PARTY_NOTICES.md is current (tools/gen_notices.mjs --check,
+#    which needs cargo-about on PATH or CARGO_ABOUT=<path>)
 # 2. npm run check, then npm run dist:linux (the engine for glibc 2.28, then the AppImage) and npm run dist:win (the
 #    Windows engine cross-built here, then the NSIS installer through Wine), memory-capped
 # 3. SHA256SUMS / SHA512SUMS of both files and the notes (the CHANGELOG section)
@@ -35,6 +36,7 @@ git fetch -q origin main
 state="$(gh release view "v$v" --json isDraft -q .isDraft 2>/dev/null || echo none)"
 grep -q "^## $v\( \|$\)" CHANGELOG.md || { echo "release: CHANGELOG.md has no '## $v' section" >&2; exit 1; }
 [ -r "$KEY" ] || { echo "release: no signing key at $KEY" >&2; exit 1; }
+"${CAP[@]}" node tools/gen_notices.mjs --check
 
 if [ "$state" != false ]; then
 NODE_OPTIONS=--max-old-space-size=4096 "${CAP[@]}" npm run -s check
