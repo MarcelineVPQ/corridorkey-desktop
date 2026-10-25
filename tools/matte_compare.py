@@ -131,8 +131,10 @@ class Source:
         if path.endswith(".npz"):
             z = np.load(path)
             self.kind = "npz"
-            self._alpha = z["alpha"].astype(np.float32)
-            self._fg = z["fg"].astype(np.float32) if "fg" in z else None
+            # kept as stored (fg is float16) and widened one frame at a time: widening the whole clip
+            # up front doubled the peak (a 4K or 349-frame pair passed 7 GB)
+            self._alpha = z["alpha"]
+            self._fg = z["fg"] if "fg" in z else None
             return
         self.kind = "folder"
         self.a = self._find(path, "alpha")
@@ -151,12 +153,16 @@ class Source:
 
     def alpha(self):
         if self.kind == "npz":
-            return iter(self._alpha[: self.limit or None])
+            # loop: NOT-WORTH — a lazy per-frame view, one float32 frame alive at a time
+            return (a.astype(np.float32) for a in self._alpha[: self.limit or None])
         return exr_alpha(self.a, self.limit) if os.path.isdir(self.a) else video_alpha(self.a, self.limit)
 
     def fg(self):
         if self.kind == "npz":
-            return iter(self._fg[: self.limit or None]) if self._fg is not None else None
+            if self._fg is None:
+                return None
+            # loop: NOT-WORTH — a lazy per-frame view, one float32 frame alive at a time
+            return (f.astype(np.float32) for f in self._fg[: self.limit or None])
         if self.f is None:
             return None
         return exr_fg(self.f, self.limit) if os.path.isdir(self.f) else video_fg(self.f, self.limit)
