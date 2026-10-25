@@ -53,7 +53,7 @@ describe("TensorRT ranges as the engine has them", () => {
   it("weights the 4K progress by the measured build times, other sizes one share per network", () => {
     expect(buildFraction("cradio", true)).toBe(0);
     const total = Object.values(MEASURED_4K_BUILD_S).reduce((a, b) => a + b, 0);
-    expect(buildFraction("stage1", true)).toBeCloseTo((36.8 + 33.1 + 35.6) / total, 6);
+    expect(buildFraction("stage1", true)).toBeCloseTo((31.3 + 27.4 + 24.7) / total, 6);
     expect(buildFraction("stage1", false)).toBeCloseTo(3 / 5, 6);
   });
 });

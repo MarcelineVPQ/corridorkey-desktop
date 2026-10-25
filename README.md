@@ -356,6 +356,28 @@ The cost is real: 12-21 % more time, and at HD 0.9 GiB more graphics memory and 
 with how CorridorKey 2.0 itself computes, not a measured quality change (Quality, "What we got wrong" 1). The tables
 above stay as measured with onnx.3.
 
+### TensorRT on onnx.4 (2026-10-25)
+
+One run each on the RTX 5080, the shipping model set onnx.4 and the app's normal settings (automatic window, 12 GB
+budget, alpha + foreground video outputs). First a cold build into an empty TensorRT cache (the job builds its own
+range), then TensorRT with the range built and CUDA, back to back (`tools/engine_bench.mjs`):
+
+| Clip | TensorRT (built) | CUDA | TensorRT takes | Steady fps, TensorRT / CUDA | Graphics memory (GB), TensorRT / CUDA |
+| --- | --- | --- | --- | --- | --- |
+| locked_backdrop 1280×1080, 80 frames | 15.9 s | 25.4 s | 0.63× the time | 20.6 / 15.7 | 11.0 / 9.1 |
+| 04_5d 4096×2160 EXR, 120 frames | 143.7 s | 189.7 s | 0.76× the time | 2.20 / 1.63 | 10.8 / 9.3 |
+
+The one-time build per resolution range, seconds per network (the engine's own log), and its size on disk:
+
+| Range | C-RADIO | MoGe | RVM | Stage 1 | Stage 2 | Total | Disk |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| up to 1280×1280 (the 1280×1080 clip) | 34.7 | 23.2 | 25.0 | 137.5 | 42.4 | 4.4 min | 2.76 GB |
+| up to 4096×2176 (4K) | 31.3 | 27.4 | 24.7 | 145.1 | 59.3 | 4.8 min | 2.77 GB |
+
+From these: the build pays for itself after about 750 frames at 4K (about 30 s of 24 fps footage) and about 2,200
+frames at 1280×1080. Not measured: the HD 1920×1080 range and every other range, other cards, and the build as the
+very first on a card (the 4K build ran second, with the timing cache the first one wrote).
+
 ### TensorRT, first measurement (2026-10-21)
 
 TensorRT's first measurement in the engine, on 2026-10-21 (`onnx.2` models, the same HD bench), before it took

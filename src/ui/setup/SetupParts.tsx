@@ -15,9 +15,10 @@ import {
   sizeText,
   trtSizeKey,
   trtSizeRows,
-  TRT_BUILD_NOT_MEASURED,
+  TRT_BUILD_COST,
+  TRT_BUILD_TEXT,
   TRT_MAX_SIDE,
-  TRT_NOT_MEASURED,
+  TRT_SPEED,
   TRT_PIECES,
   type TrtSize,
 } from "../../shared/trt";
@@ -110,7 +111,7 @@ export function TrtBox({ trt, inst, platform }: { trt: TrtState; inst: InstallSt
         </label>
       </Row>
       <p className="hint-text">
-        Optimizes the CorridorKey networks for this graphics card, once per resolution range. An extra {gbBytes(trt.fullBytes)} download. {TRT_NOT_MEASURED}
+        Optimizes the CorridorKey networks for this graphics card, once per resolution range. An extra {gbBytes(trt.fullBytes)} download. {TRT_SPEED}
       </p>
       <More>
         <p className="hint-text">
@@ -176,7 +177,7 @@ function PrebuildBox({ trt }: { trt: TrtState }) {
     <>
       <p className="hint-text">The app builds the sizes ticked below in the background and pauses while you key. Until a size is built, its clips run on CUDA.</p>
       <More>
-        <p className="hint-text">Jobs never wait on a TensorRT build. It builds again only after a graphics driver, TensorRT or model update. {TRT_BUILD_NOT_MEASURED}</p>
+        <p className="hint-text">Jobs never wait on a TensorRT build. It builds again only after a graphics driver, TensorRT or model update. {TRT_BUILD_TEXT}</p>
       </More>
       <TrtSizes trt={trt} />
       {p.status === "running" && (
@@ -207,7 +208,7 @@ function PrebuildBox({ trt }: { trt: TrtState }) {
   );
 }
 
-/** A size range's state and costs, under its tick: what is built and what it took here, or "not measured yet". */
+/** A size range's state and costs, under its tick: what is built and what it took here, or the measured cost before. */
 function sizeNote(trt: TrtState, key: string): string {
   // loop: HOT-PATH-OK — a few built ranges, per row per render
   const onDisk = trt.onDisk.filter((d) => d.range.startsWith(`${key}_t`));
@@ -228,12 +229,12 @@ function sizeNote(trt: TrtState, key: string): string {
     const windows = onDisk.map((d) => rangeText(d.range).replace(/^up to \d+×\d+, /, "")).join("; ");
     return `${range} · built (${windows})${fell.length ? `, ${fell.join(", ")} on CUDA` : ""} · ${gbBytes(bytes)} on disk · ${secs.length ? `the build took ${duration(secs[0])} here` : "build time not recorded"}`;
   }
-  return `${range} · ${r ? "chosen, not built yet" : "not built"} · build time and disk size on this model set: not measured yet`;
+  return `${range} · ${r ? "chosen, not built yet" : "not built"} · ${TRT_BUILD_COST}`;
 }
 
 /**
  * Which sizes TensorRT builds for (backlog row 56): the engine's size ranges with common sizes named, each ticked when
- * it is built or chosen, with what it costs (measured here once built; "not measured yet" before). Tick: it is built
+ * it is built or chosen, with what it costs (measured here once built; the measured cost before). Tick: it is built
  * now in the background; untick: its engines are removed (asked first). Plus a size of your own, and the named sizes
  * past TensorRT's ranges (CUDA). The chosen sizes are the background build's list (prebuild.ranges).
  */

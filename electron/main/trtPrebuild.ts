@@ -104,7 +104,7 @@ export function recordBuild(root: string, range: string, seconds: number): void 
     // loop: NOT-WORTH — one small file per build
     writeFileSync(join(newest.dir, BUILD_RECORD), JSON.stringify({ seconds, at: new Date().toISOString() }));
   } catch {
-    // error: NOT-WORTH — the time isn't shown ("not measured yet"); the build itself is fine
+    // error: NOT-WORTH — the row then says "build time not recorded"; the build itself is fine
   }
 }
 

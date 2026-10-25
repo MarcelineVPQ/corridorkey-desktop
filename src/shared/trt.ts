@@ -25,15 +25,14 @@ export const PIECE_NAMES: Record<string, string> = { cradio: "C-RADIO", moge: "M
 // the engine's `fallback_reason` for a job whose range isn't built yet (pipeline/mod.rs TRT_NOT_BUILT)
 export const TRT_NOT_BUILT = "TensorRT for this resolution range isn't built yet";
 
-// README, Speed, 0.0.7-dev: the one-time builds at 4K, seconds per network (RTX 5080, cold timing cache), measured
-// on model set onnx.3. Used only to weight the background build's progress bar by network (buildFraction); never
-// shown as a time.
-export const MEASURED_4K_BUILD_S: Record<string, number> = { cradio: 36.8, moge: 33.1, rvm: 35.6, stage1: 139.2, stage2: 57.8 };
+// README, Speed, "TensorRT on onnx.4" (2026-10-25): the one-time build at 4K, seconds per network (RTX 5080, model
+// set onnx.4). Used only to weight the background build's progress bar by network (buildFraction); never shown as a time.
+export const MEASURED_4K_BUILD_S: Record<string, number> = { cradio: 31.3, moge: 27.4, rvm: 24.7, stage1: 145.1, stage2: 59.3 };
 
-// The app ships model set 2.0.0-onnx.4 (2026-10-25); TensorRT's speed and build time were measured only on onnx.3
-// (README, Speed, 0.0.6-dev and 0.0.7-dev), so the app says so instead of showing onnx.3's numbers (UI pass 2026-10-25).
-export const TRT_NOT_MEASURED = "Speed on this model set: not measured yet.";
-export const TRT_BUILD_NOT_MEASURED = "Build time on this model set: not measured yet.";
+// The same measurement, in words: one run each on an RTX 5080, model set onnx.4; other cards and sizes weren't measured.
+export const TRT_SPEED = "Measured on an RTX 5080: a clip takes 0.63× CUDA's time at 1280×1080 and 0.76× at 4K, with about 1.5-2 GB more graphics memory.";
+export const TRT_BUILD_COST = "about 4.4-4.8 minutes and 2.8 GB once (measured at 1280×1080 and 4K on an RTX 5080)";
+export const TRT_BUILD_TEXT = `The one-time build per resolution range: ${TRT_BUILD_COST}.`;
 
 // loop: NOT-WORTH — eight ranges, per lookup
 const rangeOf = (v: number) => TRT_DIM_RANGES.find(([lo, hi]) => v >= lo && v <= hi) ?? null;

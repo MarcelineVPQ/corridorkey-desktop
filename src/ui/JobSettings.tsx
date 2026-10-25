@@ -7,7 +7,7 @@ import type { EngineKind, HintFileKind, Job, JobOptions, MemoryChoice, MemoryEst
 import { LINEAR_RANGES, MANUAL_WINDOWS, OUTPUT_NAMES, VRAM_LIMIT_AUTO_HELP, scaledSize, videoCodecsFor, vramLimitChoices, withCutoutAlpha } from "../shared/types";
 import { gibBytes } from "../shared/units";
 import { AS_USED } from "../shared/texts";
-import { builtWindows, sizeRangeText, trtSizeKey, TRT_NOT_MEASURED, type TrtSize } from "../shared/trt";
+import { builtWindows, sizeRangeText, trtSizeKey, TRT_BUILD_COST, TRT_SPEED, type TrtSize } from "../shared/trt";
 import { Accordion, Row, Section, Segmented } from "./panel/Section";
 import { More } from "./More";
 import { PathText } from "./PathText";
@@ -355,12 +355,12 @@ export function JobSettings({
                   </button>
                   <p className="size-note">
                     {trtPlan.build.width}×{trtPlan.build.height}, range {sizeRangeText(trtSizeKey(trtPlan.build.width, trtPlan.build.height)!)}: built once in the background (it waits while the queue
-                    runs). Build time and disk size on this model set: not measured yet. Engine settings, TensorRT lists it.
+                    runs): {TRT_BUILD_COST}. Engine settings, TensorRT lists it.
                   </p>
                 </>
               )}
               <More>
-                <p className="hint-text">The choice is in Engine settings, TensorRT. What really ran shows on the clip&apos;s page once it starts. {TRT_NOT_MEASURED}</p>
+                <p className="hint-text">The choice is in Engine settings, TensorRT. What really ran shows on the clip&apos;s page once it starts. {TRT_SPEED}</p>
               </More>
             </>
           )}
