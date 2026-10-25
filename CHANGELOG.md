@@ -52,6 +52,14 @@ screen keyer, on its own Rust + ONNX Runtime engine, for Linux, Windows and macO
   from 1001), the alpha EXR's matte in channel `A` (Nuke and OpenImageIO read it as alpha), and the cutout
   premultiplied (RGB × alpha). On purpose this differs from the original CorridorKey's EXR writer
   (`alpha_000000.exr` from 0, the matte as `Y`, a straight cutout); the matte values themselves are unchanged.
+- Video outputs for film work (Rust engine): a Codec choice per clip. Lossless H.264 10-bit 4:4:4 (the default; only
+  the 10-bit rounding is lost, never more than 0.16/255 on the matte), DNxHR 444 10-bit in a .mov (Linux and Windows;
+  within 1.3/255), or H.264 CRF 12 (the original's small files; up to 21/255 on hair edges). Measured against EXR on an
+  HD clip and the 4K 04_5d plate (README, Quality, "Video outputs"). The Mac has lossless H.264 for now; Apple's ProRes
+  4444 XQ comes with the Mac work. ffmpeg's ProRes encoder is no longer used: the video cutout is premultiplied colour
+  with the Alpha output as its alpha (written with it); EXR keeps the premultiplied RGBA cutout. The ffmpeg check asks
+  for libx264 with 10-bit (and dnxhd on Linux and Windows) and says plainly when the system's libx264 is 8-bit only.
+  New protocol field `video_codec` (docs/ENGINE_PROTOCOL.md); the PyTorch reference engine still writes CRF 12.
 - Colour management, engine (Rust engine; the app's menus come next): OpenColorIO 2.5 built into the engine, so a
   clip can be given in its own colour space (ACEScg, ACES2065-1, the camera log spaces of OCIO's ACES studio config,
   or any space of a studio's own config, `$OCIO` honoured). The engine converts it exactly to what the model was

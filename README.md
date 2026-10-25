@@ -407,13 +407,59 @@ EXR outputs follow the studio convention, unlike the original's EXR writer: fram
 `04_5d_00184.exr` gives `04_5d_alpha.00065.exr` …; a video counts from 1001, the VFX convention), the matte-only EXR
 stores the matte as the alpha channel `A` (the original writes it as `Y`, which Nuke reads as grey colour), and the
 cutout is premultiplied (RGB × alpha, as EXR and Nuke expect; the original's is straight). `_settings.txt` records
-the numbering. The video cutout (ProRes 4444) stays straight, as that format carries it.
+the numbering. The video cutout is premultiplied too, without an alpha channel (see "Video outputs").
 
 Checked on 2026-10-24 (CPU, a 10-frame 04_5d sequence and a 12-frame 12-bit ProRes clip, against the engine before
 the change): OpenImageIO reports the matte file's single channel as its alpha channel; the matte values are
 bit-identical to the old `Y` channel; the float cutout's colour equals the old straight colour × alpha exactly (half
 float: within one or two half-float steps, the second rounding). OpenCV (4.11) and ffmpeg can't open an alpha-only
 EXR; `tools/side_by_side.py` reads it with the `OpenEXR` Python package (`pip install OpenEXR`).
+
+### Video outputs: lossless H.264, DNxHR 444 or H.264 CRF 12 (1.0)
+
+The video outputs are display-referred (sRGB / Rec.709), 10-bit 4:4:4, encoded straight from the engine's 16-bit
+render (no 8-bit step), in the codec chosen per clip: **lossless H.264** (libx264 at quantiser 0, High 4:4:4
+Predictive; the default), **DNxHR 444** 10-bit (ffmpeg's own DNxHR encoder, in a .mov), or **H.264 CRF 12** (the
+original's output, small files). On a Mac it is lossless H.264 for now; Apple's ProRes 4444 XQ comes with the Mac
+work. ffmpeg's unlicensed ProRes encoder is not used. EXR stays the exact, scene-linear deliverable.
+
+Measured on 2026-10-24 (RTX 5080, CUDA): each clip keyed once with EXR float output and once per codec, every video
+decoded by ffmpeg to 16-bit and compared exactly with the EXR (`tools/matte_compare.py`; EXR read by OpenCV /
+OpenEXR, its foreground display-encoded the same way). HD = walking_sitting, 1280×1080, 314 frames; 4K = the
+04_5d plate, 4096×2160 scene-linear EXR, its first 48 frames. "Hair edges" = pixels where the EXR matte is between
+0.02 and 0.98. Size per frame is the alpha + foreground files. Encode speed is ffmpeg alone with the engine's
+arguments (2 threads per output, as the engine runs them) on the same 16-bit frames (rebuilt from the EXR run; the
+DNxHR file it gave is identical to the engine's own: alpha difference 0).
+
+| Codec | Clip | Alpha MAE | Alpha max | Pixels > 1/255 | Hair edges: MAE · > 1/255 | Foreground PSNR | Size per frame (alpha + fg) | Encode speed (alpha · fg) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Lossless H.264 | HD | 5.0e-5 | 6.1e-4 (0.16/255) | 0 % | 2.9e-4 · 0 % | 71.5 dB | 0.04 + 0.28 MB | 109 · 45 fps |
+| Lossless H.264 | 4K | 3.0e-4 | 6.1e-4 (0.16/255) | 0 % | 2.9e-4 · 0 % | 66.1 dB | 0.27 + 12.3 MB | 16 · 1.5 fps |
+| DNxHR 444 10-bit | HD | 6.5e-5 | 5.0e-3 (1.3/255) | 0.0001 % | 6.5e-4 · 0.0003 % | 65.9 dB | 1.22 + 1.22 MB | 146 · 102 fps |
+| DNxHR 444 10-bit | 4K | 3.1e-4 | 4.9e-3 (1.3/255) | 0.00003 % | 5.6e-4 · 0.00002 % | 53.3 dB | 7.77 + 7.77 MB | 22 · 4.4 fps |
+| H.264 CRF 12 | HD | 2.1e-4 | 0.084 (21/255) | 1.5 % | 6.4e-3 · 57 % | 51.2 dB | 0.004 + 0.015 MB | 129 · 75 fps |
+| H.264 CRF 12 | 4K | 4.5e-4 | 0.070 (18/255) | 1.5 % | 3.9e-3 · 38 % | 42.3 dB | 0.03 + 1.80 MB | 14 · 2.1 fps |
+| EXR float (the reference) | HD · 4K | | | | | | 0.58 + 12.6 MB · 2.96 + 98.7 MB | |
+
+Lossless H.264 loses only the 10-bit rounding (YCbCr, video range): never more than 0.16/255 anywhere. DNxHR 444 stays
+within 1.3/255 on the matte, with a handful of pixels above 1/255; its foreground loses more on the grainy 4K plate
+(DNxHR has a fixed data rate per frame). CRF 12 puts more than half of the HD hair-edge pixels off by more than
+1/255, up to 21/255. Lossless H.264 is the slowest to encode at 4K (1.5 frames/s for the foreground, against about one
+4K frame per second for keying: 111-152 s per 120-frame plate, Speed); DNxHR encodes fastest. The whole jobs, one run each on a shared machine:
+HD 56.4 s (EXR), 56.0 s (lossless), 55.7 s (DNxHR), 60.0 s (CRF 12); 4K 48 frames 60.1 s, 70.6 s, 60.0 s, 82.0 s.
+
+DNxHR's pixel format: the encoder also takes RGB (gbrp10le). Encoded from the same frames, RGB had a lower matte MAE
+(4.0e-5 HD, 4.2e-5 4K) with the same maximum (4.9e-3), and a better HD foreground (69.9 dB) but a worse 4K one
+(49.2 against 53.3 dB). The engine keeps YCbCr 4:4:4 (yuv444p10le), the common DNxHR 444 flavour, which did better
+on the harder film plate. The container is .mov: ffmpeg's MXF muxer refuses frame rates outside the broadcast set
+(12.5 and 29.97 fps wrote nothing), and Resolve and Nuke read DNxHR in a .mov.
+
+**The cutout:** none of these codecs carries an alpha channel (ffmpeg's DNxHR encoder has none and stops at 10 bits),
+so the video cutout is the despilled colour premultiplied by the matte, in the file's own coding (sRGB, or linear with
+the scene-linear option), and its alpha is the Alpha output, which a video job with a cutout always writes (the app
+keeps it on; the engine adds it if asked without it and says so in the job's log). A compositor reads the pair as a
+premultiplied image plus its matte. For an RGBA cutout in one file, use EXR (premultiplied RGBA). The original's
+cutout was straight colour with alpha in ProRes 4444 from ffmpeg's ProRes encoder, which is no longer used.
 
 ### Colour management (OCIO) (1.0, engine)
 
@@ -567,7 +613,7 @@ against this app's own engine. As of the evening of 2026-10-24:
   NVIDIA library packages directly, pinned by size and SHA-256, so nothing third-party is re-hosted; the converted
   models are published here under the CorridorKey licence. Every file is checked before it is used.
 - **ffmpeg from the system, not bundled:** every Linux distribution ships it; the app checks it has the encoders it
-  needs (H.264 and ProRes 4444) and offers the install where it can.
+  needs (libx264 with 10-bit, and DNxHR on Linux and Windows) and offers the install where it can.
 - **The original kept as the reference:** the PyTorch engine stays in the app (Engine page), so every speed and
   quality claim here can be checked against it on the same machine.
 

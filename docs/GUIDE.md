@@ -31,7 +31,13 @@ A matte named like the clip (`shot01FrameHint.png`, `shot01_AlphaHint.mp4`) is f
 
 ## Outputs
 
-**Video** writes 10-bit previews (alpha, foreground, checker) and a ProRes 4444 cutout. **EXR sequence** writes scene-linear, unclamped HDR frames for compositing, named the studio way
+**Video** writes display-referred (sRGB / Rec.709) 10-bit 4:4:4 files in the codec you pick under **Codec**:
+**Lossless H.264** (the default; only the 10-bit rounding is lost, large `.mp4` files), **DNxHR 444** (Avid's 10-bit
+edit and finishing codec, `.mov`, the matte within 1.3/255) or **H.264 CRF 12** (the original's small files; hair edges off by up to
+21/255). README, Quality, "Video outputs" has the measurements. On a Mac it is lossless H.264 for now; Apple's
+ProRes 4444 XQ comes with the Mac release. None of these carries an alpha channel, so a video **cutout** is the
+despilled colour premultiplied by the matte, and its alpha is the **Alpha** output, which stays on while Cutout is
+on. For an RGBA cutout in one file, choose EXR. **EXR sequence** is the exact deliverable: scene-linear, unclamped HDR frames for compositing, named the studio way
 (`shot_alpha.1001.exr`; a numbered frame folder keeps its own frame numbers), with the matte in the alpha channel
 and the cutout premultiplied, as Nuke expects. Despill applies to the checker and cutout.
 
