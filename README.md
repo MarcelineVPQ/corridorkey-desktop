@@ -328,6 +328,39 @@ bit-identical to the old `Y` channel; the float cutout's colour equals the old s
 float: within one or two half-float steps, the second rounding). OpenCV (4.11) and ffmpeg can't open an alpha-only
 EXR; `tools/side_by_side.py` reads it with the `OpenEXR` Python package (`pip install OpenEXR`).
 
+### Colour management (OCIO) (1.0, engine)
+
+CorridorKey's networks were trained on scene-linear Rec.709. A studio's plate is often in ACEScg, ACES2065-1 or a
+camera's log space. The engine now has the real OpenColorIO library built in (2.5.2, the VFX Reference Platform's
+2026 version), so a clip can be given in its own colour space: the engine converts it exactly to linear Rec.709
+before the model sees it (negative values kept) and writes the EXR outputs back in that space. The alpha is data and
+is never converted. The config is the job's own, else `$OCIO` (a studio's show config), else OCIO's built-in ACES
+studio config, and `_settings.txt` records which one (its versioned name and cache id). The app's menus for it come
+next; this version takes EXR and image sequences (colour-managed video comes after).
+
+Measured on 2026-10-24 (docs/ENGINE_RUST.md "Colour" has the commands):
+
+| Check | Result |
+| --- | --- |
+| Every colour space of the ACES studio config to linear Rec.709 and back (`ocio_roundtrip` test) | scene-linear spaces (18): within 3.3 float32 steps of the pixel's largest channel; log spaces (18): within 3.1e-4 of a 10-bit code |
+| The engine's processors against PyOpenColorIO 2.5.2 (`tools/ocio_compare.py`, 1.8 M values each) | 110 of 110 bit-identical (55 spaces, both directions) |
+| A studio config through `$OCIO`: a show LUT picked by `$SHOT`, a CDL | 6 of 6 bit-identical |
+| Jobs without a colour space, against the engine before this change (EXR sequence, video) | every output byte-identical |
+| 04_5d (8 frames) converted to ACEScg / ACES2065-1, keyed with that input space | 85.4 % of matte pixels identical; the rest differ by at most 1/256 (alpha MAE 2.4e-6, PSNR 90.9 dB) |
+| The same, written back in ACEScg | foreground bit-identical to `ocioconvert` applied to the linear-Rec.709 key |
+| Alpha with the output in linear Rec.709, ACEScg or ACEScct | byte-identical |
+| The Windows engine's processors against Linux's (Wine, the same inputs) | 25 spaces byte-identical (every scene-linear one); 30 with a log or power curve within 7.5e-7 of the pixel's largest channel (the platforms' maths libraries round a few values differently) |
+
+The keyed difference has one cause: converting a plate to ACEScg and back in float32 moves a few values across a
+bfloat16 rounding step before the model (192 of 13.3 million input values here); the network spreads those tiny
+changes over the frame. For scale, the original's own GPU mode differs from its full-precision mode by alpha MAE
+5.0e-4, 200 times more.
+
+Cost: converting a 4K frame (4096×2160) takes 10-12 ms on the way in and 3-6 ms per EXR colour output on the way out,
+spread over this PC's 32 threads (Ryzen 9 9950X3D; 51-119 ms and 18-70 ms on one thread, depending on the colour
+space), on the decoding and rendering threads that run beside the graphics card. On the 8-frame CPU test the job took
+the same time with and without it (20.6-21.6 s against 21.5 s).
+
 ### Test it yourself
 
 The clips are free to download (their owners don't allow re-hosting, so they aren't in this repository):

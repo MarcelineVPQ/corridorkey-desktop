@@ -52,8 +52,13 @@ gets the same signal.
 → {"cmd":"run","id":"j1","input":"/clips/shot.mp4","output_dir":"/clips/out_shot",
    "temp_dir":"/home/u/.cache/corridorkey-desktop/jobs/j1","options":{...}}
 → {"cmd":"cancel","id":"j2"}
+→ {"cmd":"colorspaces","id":"c1","config":"ocio://studio-config-latest"}
 → {"cmd":"quit"}
 ```
+
+`colorspaces` (Rust engine, additive): the colour spaces an OpenColorIO config offers, for the app's menus. `config`
+as `color_config` (absent = `$OCIO`, else the built-in ACES studio config); `id` optional, echoed. Answered at once
+between jobs. Reply below; an unreadable config is a `bad-request` carrying OCIO's message.
 
 The app gives `output_dir` as a staging folder inside the clip's output folder (`out_shot/.corridorkey-partial`,
 electron/main/partial.ts): it moves the results into place after `result`, and removes the folder after an `error`,
@@ -81,6 +86,9 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
 | `frame_dir_linear` | bool | false |
 | `num_frames` | int | −1 (whole clip) |
 | `crf`, `preset`, `pix_fmt` | | ffmpeg settings for the video path (12, medium, yuv444p10le) |
+| `color_config` | path \| `ocio://` name | Rust engine: the OpenColorIO config for `input_colorspace` / `output_colorspace`. Absent = `$OCIO` as the engine sees it, else OCIO's built-in ACES studio config (`ocio://studio-config-latest`, recorded by its versioned name) |
+| `input_colorspace` | string | Rust engine: the clip's colour space, a name (or alias, or role) in that config. Absent = today's behaviour exactly (display-coded sRGB, or scene-linear Rec.709 EXR with `frame_dir_linear`). EXR and 16/8-bit image sequences only: on a video input it is a `bad-request` (colour-managed video comes in the next version) |
+| `output_colorspace` | string | Rust engine: the EXR outputs' colour space. Absent = the input's own space when `input_colorspace` is given (ACEScg in, ACEScg out), else linear Rec.709 as today. Video outputs stay display sRGB / Rec.709 whatever it says (a `log` line says so) |
 
 ## Replies
 
@@ -105,6 +113,11 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
 ← {"type":"result","id":"j1","outputs":["/clips/out_shot/shot_alpha.mp4",...],
    "settings_file":"/clips/out_shot/shot_settings.txt","seconds":312.4}
 ← {"type":"error","id":"j1","code":"oom|input|assets|no-gpu|cancelled|output|engine|bad-request","message":"..."}
+← {"type":"colorspaces","id":"c1","config":{"name":"ocio://studio-config-v4.0.0_aces-v2.0_ocio-v2.5","source":"request",
+   "cache_id":"...","ocio":"2.5.2"},"model_space":"Linear Rec.709 (sRGB)",
+   "roles":{"aces_interchange":"ACES2065-1","scene_linear":"ACEScg","data":"Raw",...},
+   "colorspaces":[{"name":"ACEScg","family":"ACES","encoding":"scene-linear","isdata":false,"linear":true,
+   "aliases":["ACES - ACEScg","lin_ap1","lin_ap1_scene"]},...]}
 ```
 
 - `progress.p` is the stage's own fraction when the stage reports one (stage-1
@@ -130,6 +143,17 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
   the one OpenCV uses, or the image crate's, which differs by a few levels) and the ffmpeg and
   ffprobe versions. A job writes the same three at the end of its `_settings.txt`
   (`JPEG Decoder:`, `FFmpeg:`, `FFprobe:`) and in a `log` line.
+- `ocio` (Rust engine pong, additive): the version of the OpenColorIO library linked into the engine ("2.5.2"). An
+  engine built without it (a stub) refuses to start.
+- Colour management (Rust engine, backlog row 29; docs/ENGINE_RUST.md "Colour"): with `input_colorspace` the clip's
+  values are converted by OCIO (LOSSLESS, float32) to the model's linear Rec.709 before the model sees them,
+  negatives kept; the foreground is despilled there and converted to `output_colorspace` for the EXR outputs. The
+  alpha is never converted (byte-identical whatever the output space); the EXR cutout is premultiplied in a linear
+  output space and straight (colour + alpha) in a log or display one; the checker stays as it is. The job's
+  `_settings.txt` adds `OCIO:`, `OCIO Config:` (the versioned name or path, and where it came from), `OCIO Config
+  Cache ID:`, `Input Colorspace:`, `Output Colorspace:` and `OCIO Optimization: LOSSLESS`, and a `log` line names
+  them. Without `input_colorspace` and `output_colorspace` the job reads no config and runs as before. An unknown
+  config or colour space is a `bad-request` with OCIO's message, before anything loads.
 - `config` (Rust engine pong, additive): the settings the engine runs with, read once at
   startup from its command line and `CK_ENGINE_*` variables (docs/ENGINE_RUST.md "Knobs").
 - `provider` (Rust engine, additive) says what really runs the job: the

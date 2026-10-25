@@ -13,6 +13,7 @@ engine-rs/
     clip.rs            probe: ffprobe read like cv2.VideoCapture, frame folders, 128 px padding
     decode.rs          ffmpeg decode with cv2's colour conversion, PNG/JPEG/EXR stills, hints, prefetch thread
     color.rs           sRGB <-> linear, signed asinh, despill, bf16/f16 rounding (color_utils.py)
+    ocio.rs            colour management: OCIO configs, input/output processors, the colorspaces reply ("Colour")
     image.rs           reflect-101 pad/crop, area / bilinear (torch) and Lanczos-4 (cv2) resamplers
     hann.rs            window_starts, taper_weights, the baton blend
     vram.rs            select_vram_profile / estimate_peak_vram_gb (same table and margins)
@@ -28,6 +29,7 @@ engine-rs/
   tools/gen_fixtures.py   parity fixtures from the upstream Python functions
   tools/e2e_cpu.sh        CPU end-to-end parity check
   tools/trt-build/        ck-trt-build: strongly typed TensorRT engine builder (C++), build.sh
+  vendor/ocio-sys/        OpenColorIO's Rust FFI crate with its C++ sources, patched for MinGW (vendor/README.md)
 ```
 
 One job, as in `runtime.run_inference`: probe → window (automatic or the job's) → RVM prepass (one
@@ -391,6 +393,76 @@ godiva_close (24/12) 9.82e-4, 1.1e-1, 7.92 %. For scale: CUDA fp16 vs PyTorch at
 3.08 %. At the automatic windows the window dominates: TensorRT (16/8, 24/12) vs CUDA fp16 (48/24, 80/40) alpha
 MAE 3.39e-4 (with_motion_blur) to 2.06e-2 (godiva_close), vs PyTorch 4.12e-4 to 2.10e-2 — the same size as
 PyTorch against itself at 80/40 vs 20/10 (2.15e-2, above).
+
+## Colour (OpenColorIO, 1.0)
+
+Backlog row 29, phase 1 (the engine core; the study: docs/OCIO_STUDY_2026-10.md, Marcy's decisions in the row).
+
+- **Library.** The real OpenColorIO C++ library, 2.5.2, built from source by CMake and linked in statically through
+  `ocio-rs` 0.3.0 with `bundled` (feature `ocio`, on in every build the app ships). Its FFI crate `ocio-sys` is
+  vendored with five MinGW cross-build fixes (`engine-rs/vendor/README.md`). Without `bundled`, `ocio-rs` is a stub
+  that does no colour work: the engine refuses to start (`ocio::require_real_ocio`, and the unit test
+  `ocio_is_the_real_library` fails on a stub). The pong says `"ocio": "2.5.2"`.
+- **Configs.** The job's `color_config` (a path or an `ocio://` name), else `$OCIO`, else `ocio://studio-config-latest`
+  resolved to its versioned name (`studio-config-v4.0.0_aces-v2.0_ocio-v2.5`). No config files ship.
+- **Processors.** Input: the job's space → "Linear Rec.709 (sRGB)" of the built-in studio config, with
+  `GetProcessorFromConfigs` (the two configs joined through `aces_interchange`, so a studio config needs no Rec.709
+  space of its own); output: back the same way to the output space. OCIO's LOSSLESS optimisation (its default adds a
+  15-bit fast pow/log), float32, on the CPU, rows in parallel (`ocio.rs`).
+- **Where.** Decode → (colour-managed clips) finite → input processor → finite → the scene-linear path: the model view
+  is bf16 of signed asinh, negatives kept (decision 3); the display view clips as before (`decode.rs`). After the
+  networks: alpha as it is (data); the foreground decoded to linear Rec.709, despilled there (as trained), then the
+  output processor; the EXR cutout premultiplied only in a linear output space (straight colour + alpha in a log or
+  display one); the checker unchanged (`render.rs`). Video outputs stay display sRGB / Rec.709 (decision 2): the
+  output space applies to EXR outputs; with video outputs a `log` line says so.
+- **Today's behaviour kept.** No `input_colorspace` and no `output_colorspace`: no config is read and every output is
+  byte-identical to the engine before (the CorridorKey 2.0 path keeps its own IEC sRGB; OCIO's sRGB curve differs in
+  the toe by up to 2.5e-4, the study §2).
+- **Phase 1 inputs.** EXR and 16/8-bit image sequences. A colour space on a video input is a `bad-request`: camera-log
+  video must first be decoded with its tagged YCbCr matrix and range (phase 2; today's video decode copies OpenCV's
+  BT.601).
+- **Recorded.** `_settings.txt`: `OCIO`, `OCIO Config` (name and source), `OCIO Config Cache ID`, `Input Colorspace`,
+  `Output Colorspace`, `OCIO Optimization: LOSSLESS`.
+
+**Measured (2026-10-24).** Results in the README, Quality, "Colour management (OCIO)". How to repeat them:
+
+```
+cd engine-rs
+cargo test -p ck-core --test ocio_roundtrip -- --nocapture       # test 1: every studio-config space, round trip
+cargo test -p ck-core ocio render::tests                          # guard (10), output spaces never touch alpha (6)
+cargo build --release -p ck-core --example ocio_apply             # the engine's processors on a float32 file
+python3 -m venv V && V/bin/pip install opencolorio==2.5.2 numpy   # PyOpenColorIO at the same OCIO version
+V/bin/python ../tools/ocio_compare.py --bin target/release/examples/ocio_apply --work /tmp/x --studio   # tests 2, 7
+```
+
+**Builds (2026-10-24).** Linux (`tools/build_engine.sh`, cargo-zigbuild, OCIO's CMake with Zig's C/C++): needs
+GLIBC 2.28 at most, links only libc / libm / libpthread / libdl (Zig's libc++ is linked in) and exports no symbols
+at all; 3.76 → 9.64 MB. Windows (`--windows`, MinGW, the vendored fixes): imports only Windows' own DLLs (kernel32,
+ntdll, msvcrt, bcryptprimitives, an api-ms-win-core set, and now user32 / gdi32, used by OCIO's monitor-profile
+code); 3.88 → 11.72 MB. The macOS build of OCIO is not verified (it is built only on a Mac); `npm run
+check:targets` lints macOS with `ocio-rs`'s stub (the same Rust API; its C++ bridge compiled by Zig) and Windows
+with the real library.
+
+**Speed (2026-10-24, Ryzen 9 9950X3D, 32 threads; `ocio_apply` on 4096×2160 = 8.85 M pixels, the processor alone,
+3 runs).** Input processor (the decoder's planar path, blocks of 16 384 pixels in parallel): ACEScg 10-11 ms, ARRI
+LogC4 11 ms, S-Log3 S-Gamut3.Cine 11-12 ms; one thread 51 / 90 / 119 ms. Output processor (rows in parallel, as the
+renderer): 3-4 / 6 / 6 ms; one thread 18 / 69 / 70 ms; it runs once per colour output (fg, cutout). A CPU job
+(8 frames, 1024×540): 20.6 and 21.6 s with ACEScg in, 21.5 s without; decode + prep 0.1 s either way. A studio
+colour space that inverts a 3D LUT is far slower: the E4 config's "Show Plate (graded LogC4)" took 1.8 s per
+1.8 M pixels on the way in (LOSSLESS leaves out OCIO's fast approximate LUT inverse, LUT_INV_FAST, and evaluates the
+exact inverse).
+
+**Windows against Linux (Wine, test 8).** The Windows build's processors, on the test-2 inputs, both directions:
+byte-identical for 25 spaces (all 18 scene-linear ones, Raw, and ACEScc, Apple Log, Canon Log 2 / 3 and the two PQ
+spaces), and within 7.5e-7 of the pixel's largest channel for the other 30, all with a log or power curve (99.5-99.99 %
+of their values identical). The differences sit in those curves, which with LOSSLESS call the platform's C library's
+log / pow / exp (msvcrt against glibc); the study's harness used OCIO's default optimisation, whose
+fast pow is OCIO's own code, and was byte-identical (this is the likely cause, not separately measured). For scale,
+one bfloat16 step at the model's input is 3.9e-3. Real Windows (not Wine) is unmeasured.
+
+The keying checks (tests 3, 4, 6) ran the engine on the CPU (`--device cpu`, fp16 models) on 8 frames of 04_5d
+box-downscaled to 1024×540 in float32, converted to ACEScg and ACES2065-1 with PyOpenColorIO (as `ocioconvert`
+does), EXR float outputs, compared with `tools/matte_compare.py` and bit for bit.
 
 ## What's left
 

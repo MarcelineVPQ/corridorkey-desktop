@@ -50,3 +50,12 @@ screen keyer, on its own Rust + ONNX Runtime engine, for Linux, Windows and macO
   from 1001), the alpha EXR's matte in channel `A` (Nuke and OpenImageIO read it as alpha), and the cutout
   premultiplied (RGB × alpha). On purpose this differs from the original CorridorKey's EXR writer
   (`alpha_000000.exr` from 0, the matte as `Y`, a straight cutout); the matte values themselves are unchanged.
+- Colour management, engine (Rust engine; the app's menus come next): OpenColorIO 2.5 built into the engine, so a
+  clip can be given in its own colour space (ACEScg, ACES2065-1, the camera log spaces of OCIO's ACES studio config,
+  or any space of a studio's own config, `$OCIO` honoured). The engine converts it exactly to what the model was
+  trained on (linear Rec.709) and writes the EXR outputs back in the clip's space (or another chosen one); the
+  alpha is never converted. Bit-identical to PyOpenColorIO on every colour space of the studio config and on a
+  studio config with a show LUT, `$SHOT` and a CDL; a plate keyed in ACEScg or ACES2065-1 gives today's matte to
+  within 1/256 (README, Quality). Jobs without a colour space run exactly as before (bit-identical). EXR and image
+  sequences in this version; colour-managed video input comes next. New protocol fields and a `colorspaces` command
+  (docs/ENGINE_PROTOCOL.md).
