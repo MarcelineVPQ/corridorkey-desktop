@@ -67,8 +67,9 @@ run's window: chunk and stride at least 1, the stride not past the chunk); optio
 and `vram_budget_gb` (as the run option; absent = the engine's `CK_ENGINE_VRAM_BUDGET_GB`). The engine probes the clip
 for its size and frame count only (ffprobe, or a frame folder's first header: nothing decoded, no model loaded, no
 CUDA context) and answers at once between jobs. Each window's `peak_bytes` is the estimate the automatic window and
-the `memory` reply use (the upstream runtime's PyTorch table over the padded size, the window capped at the clip's
-frames: `estimate_peak_vram_gb`, no second formula); `needs_bytes` is what the automatic window requires of the
+the `memory` reply use (this engine's measured ONNX Runtime CUDA peaks over the padded size, an upper bound at every
+measured point, docs/BACKLOG.md row 41; the window capped at the clip's frames: `estimate_peak_vram_gb`, no second
+formula); `needs_bytes` is what the automatic window requires of the
 budget for it (the estimate × `margin_scale` + `margin_gb`), and `fits` is that check against `budget_bytes` (free
 memory plus what the engine holds, capped by `vram_budget_gb`; NVML on a card, the host's available memory on the
 CPU provider; null and no verdict where there is no reading, as on Core ML). A missing or unreadable clip is an
@@ -125,7 +126,7 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
    "budget_gb":13.1,"estimate_gb":9.8}
 ← {"type":"estimate","id":"e1","width":4096,"height":2160,"shape_w":4096,"shape_h":2176,"frames":120,
    "total_bytes":17094934528,"free_bytes":14717222912,"budget_bytes":14717222912,"budget_source":"gpu","budget_cap_gb":null,
-   "provider":"cuda","estimate_basis":"pytorch-bf16-table","margin_scale":1.1,"margin_gb":0.3,
+   "provider":"cuda","estimate_basis":"onnxruntime-cuda-measured","margin_scale":1.1,"margin_gb":0.3,
    "windows":[{"hann_chunk":8,"hann_stride":4,"low_vram":true,"frames":8,"peak_bytes":9438851806,"needs_bytes":10704859534,"fits":true},
    {"hann_chunk":16,"hann_stride":8,"low_vram":true,"frames":16,"peak_bytes":16591890837,"needs_bytes":18573202468,"fits":false}]}
 ← {"type":"frames","id":"j1","done":120,"total":240}
@@ -162,8 +163,9 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
 - `memory` is the window this job really uses, sent before stage 1 starts. The
   Rust engine adds `provider`, `free_gb` (what it saw), `budget_cap_gb` (the
   job's `vram_budget_gb`), `budget_source` (`gpu`, or `host` on the CPU
-  provider) and `estimate_basis` (`pytorch-bf16-table`: the estimate is the
-  upstream runtime's PyTorch table, not an ONNX Runtime measurement).
+  provider) and `estimate_basis` (`onnxruntime-cuda-measured` since 2026-10-24: the
+  estimate is this engine's measured peaks on ONNX Runtime CUDA plus 6 %, an upper bound at every measured point,
+  docs/BACKLOG.md row 41; before, `pytorch-bf16-table`, the upstream runtime's PyTorch table).
 - `decoders` (Rust engine pong, additive): the JPEG decoder frame folders get (libjpeg-turbo,
   the one OpenCV uses, or the image crate's, which differs by a few levels) and the ffmpeg and
   ffprobe versions. A job writes the same three at the end of its `_settings.txt`
@@ -190,7 +192,7 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
   `provider` reply gives each build's seconds.
 - A TensorRT job with an automatic window gets the longest window its range was
   built for: the `memory` reply then has `estimate_basis: "tensorrt-range"` and
-  `range` instead of the PyTorch table's estimate.
+  `range` instead of the measured table's estimate.
 - A request the engine can't read is answered with
   `{"type":"error","code":"bad-request","message":"..."}` and the engine keeps
   running. After a job's `error` the engine also keeps running and takes the

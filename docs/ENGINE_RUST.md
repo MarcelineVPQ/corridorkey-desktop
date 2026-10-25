@@ -16,7 +16,8 @@ engine-rs/
     ocio.rs            colour management: OCIO configs, input/output processors, the colorspaces reply ("Colour")
     image.rs           reflect-101 pad/crop, area / bilinear (torch) and Lanczos-4 (cv2) resamplers
     hann.rs            window_starts, taper_weights, the baton blend
-    vram.rs            select_vram_profile / estimate_peak_vram_gb (same table and margins)
+    vram.rs            select_vram_profile / estimate_peak_vram_gb (the upstream search and margins; the table is
+                       this engine's measured ONNX Runtime peaks, BACKLOG row 41)
     runtime.rs         ORT environment, CUDA / TensorRT / CPU providers, model files, sessions
     tensorrt.rs        TensorRT shape ranges, profiles, cache folders, ck-trt-build runs
     pipeline.rs        run_inference + hann_stage1_stream (normal and staged low-VRAM paths)
@@ -144,7 +145,8 @@ models stage 2 took 159 ms per call that way, and without shrinking its ConvTran
 failed `oom`; the onnx.2 ConvTranspose rewrite removed that request). The window table below was measured
 with onnx.1 and every arena shrinking.
 
-The automatic window still comes from the upstream PyTorch table, as ported. ONNX Runtime needs more:
+The automatic window came from the upstream PyTorch table, as ported, until 2026-10-24; since then from this
+engine's measured ONNX Runtime CUDA peaks, an upper bound at every measured point (BACKLOG row 41). With the old table:
 on CUDA fp16 at 1280×1152 a 16-frame window doesn't fit 12 GB, where the table picks 48/24 low-VRAM. So an
 automatic window that runs out of memory before any frame reached the writers is halved and the job
 restarted; a second `memory` reply says so (`retry_after_oom`). Measured peaks (nvidia-smi every 250 ms, the
@@ -170,7 +172,7 @@ Ported math against the Python functions' own outputs (`cargo test -p ck-core --
 | area resize (C-RADIO 1/4, MoGe 7/32) / bilinear down, up | 1.8e-7 / 6.0e-8, 1.2e-7 |
 | cv2 Lanczos-4 up, down | 4.2e-7, 3.6e-7 |
 | hint frame (gray, Lanczos, pad, bfloat16) | 1 bfloat16 step (3.9e-3) in places |
-| taper weights / window starts / VRAM table (360 cases) | 3.0e-8 / identical / identical |
+| taper weights / window starts / VRAM table (360 cases) | 3.0e-8 / identical / identical (the VRAM table compared until 2026-10-24; since then it is this engine's measured table, BACKLOG row 41) |
 | render: video uint16 alpha, fg, checker, cutout, cutout linear | 0 |
 | render: EXR float (relative) | ≤ 7.5e-9 |
 | stills: 8- and 16-bit PNG, JPEG (libjpeg-turbo), 16-bit hint | 0 |
@@ -189,6 +191,110 @@ End to end, tiny clip (320×200, 8 frames, window 4/2), against PyTorch fp32 on 
 Low-VRAM staging gives identical output (max 0). On a real plate (locked_backdrop, 1280×1080, 80 frames,
 window 4/2 low-VRAM, both encoded by x264 CRF 12), against the Rust engine's CUDA fp32 run: Rust fp16 alpha
 MAE 3.41e-4, max 6.25e-2, 3.08 % > 1/255; PyTorch bf16 5.00e-4, 2.23e-1, 3.57 %.
+
+## Graphics memory: the measured table (BACKLOG row 41, 2026-10-24)
+
+The peak estimate (`vram.rs`, one function for the automatic window, the `memory` reply and the `estimate` command)
+is this engine's own measurement: peak graphics memory of the engine's process tree (nvidia-smi every 250 ms,
+`tools/engine_bench.mjs`), RTX 5080 16 GB, ONNX Runtime 1.31 CUDA, a 14 GiB budget, the engine built from main that
+evening; 76 short runs (enough frames for two or three windows; a 48-frame check matched the full-clip sweep within
+0.5 %) plus row 37's 16 full-clip sweep runs and the README's four 4K 8/4 runs: 96 points, 81 that ran and 15 out of
+memory, at six padded sizes (960×720, 1280×1080, 1920×1080 and 2560×1440 and 3200×1800 scaled from walking_sitting,
+4096×2160). The table holds the highest peak per size and window, rounded up to 0.01 GiB and made monotone; an
+unmeasured window takes the next measured one's peak, one past the largest that ran is proportional to the window
+(at least 14 GiB where the card ran out of memory). It is read upward (the next table window and size at or above;
+proportional past the largest) and gets **+6 %** on top: the largest spread between clips and runs at one point was
+5.3 % (1280×1080 24/12 low: 7.04-7.38 GiB over five runs; 4096×2160 8/4 low: 9.13-9.42 GiB over six). Result: at
+every measured point the estimate is at or above the real peak, by at least 0.12 GiB (`measured_peaks_are_bounded`
+in vram.rs holds all 96 points); 56 of 81 are 6-7 % over, 75 within 15 %, the rest up to 70 % (small windows at
+sizes where a smaller size peaks higher). Between measured sizes the bound assumes the peak grows with the size;
+the measurements break that at single points (cuDNN chooses algorithms per shape: 1920×1080 at 2/1 and 4/2 low
+peaks above 2560×1440), so an unmeasured size can exceed it. Linear interpolation between sizes was tried and
+rejected: leaving out one size at a time, it fell up to 26 % under. TensorRT's peaks, other cards and drivers are
+not in the table. The automatic window keeps the upstream margin (× 1.1 + 0.3 GiB) because a TensorRT job takes the
+same window.
+
+What it changes in the automatic window: at a 12 GiB budget the README's six HD clips and four 4K plates keep
+their windows; godiva_close (960×720) keeps 80/40 but now in the normal mode (the old table put the normal mode at
+12.9 GiB, measured 8.0). At a 16 GB card's ~14.5 GiB free, the 1280×1080 clips go from 48/24 low to 48/24 normal
+and the 4K plates from 8/4 low to 8/4 normal (measured 10.5 and 11.0 GiB): the same windows, and low-VRAM staging
+gives identical output, but TensorRT builds its engines per mode (a new one-time build, its peaks unmeasured).
+
+| Size (padded MP) | Mode | Window | Runs | Measured peak (highest) | Old estimate (PyTorch table) | New estimate | New − measured |
+|---|---|---|---|---|---|---|---|
+| 960×720 (0.79) | low | 1/1 | 1 | 1.90 | 2.71 (+42 %) | 2.02 | +0.12 (+6 %) |
+| 960×720 (0.79) | low | 4/2 | 1 | 2.61 | 2.94 (+13 %) | 2.77 | +0.16 (+6 %) |
+| 960×720 (0.79) | low | 8/4 | 1 | 2.72 | 3.25 (+19 %) | 2.89 | +0.17 (+6 %) |
+| 960×720 (0.79) | low | 16/8 | 1 | 3.29 | 3.90 (+18 %) | 3.50 | +0.21 (+6 %) |
+| 960×720 (0.79) | low | 24/12 | 1 | 4.38 | 4.54 (+4 %) | 4.64 | +0.26 (+6 %) |
+| 960×720 (0.79) | low | 48/24 | 1 | 6.80 | 6.57 (-3 %) | 7.21 | +0.41 (+6 %) |
+| 960×720 (0.79) | low | 80/40 | 1 | 9.20 | 9.50 (+3 %) | 9.75 | +0.55 (+6 %) |
+| 1280×1080 (1.47) | low | 1/1 | 1 | 1.70 | 2.75 (+62 %) | 2.02 | +0.33 (+19 %) |
+| 1280×1080 (1.47) | low | 2/1 | 1 | 3.37 | 2.86 (-15 %) | 3.57 | +0.21 (+6 %) |
+| 1280×1080 (1.47) | low | 4/2 | 1 | 3.58 | 3.10 (-13 %) | 3.79 | +0.22 (+6 %) |
+| 1280×1080 (1.47) | low | 8/4 | 4 | 3.99 | 3.60 (-10 %) | 4.24 | +0.25 (+6 %) |
+| 1280×1080 (1.47) | low | 16/8 | 4 | 4.95 | 4.70 (-5 %) | 5.26 | +0.30 (+6 %) |
+| 1280×1080 (1.47) | low | 24/12 | 5 | 7.38 | 5.81 (-21 %) | 7.82 | +0.44 (+6 %) |
+| 1280×1080 (1.47) | low | 48/24 | 4 | 8.47 | 9.24 (+9 %) | 8.98 | +0.51 (+6 %) |
+| 1280×1080 (1.47) | low | 80/40, 50-frame clip | 1 | 9.44 | 9.53 (+1 %) | 10.56 | +1.12 (+12 %) |
+| 1280×1080 (1.47) | low | 56/28 | 1 | 9.96 | 10.41 (+5 %) | 10.56 | +0.60 (+6 %) |
+| 1280×1080 (1.47) | low | 64/32 | 1 | 10.64 | 11.59 (+9 %) | 11.29 | +0.65 (+6 %) |
+| 1280×1080 (1.47) | low | 80/40 | 1 | out of memory (14 GiB budget) | 13.95 | 14.84 | doesn't fit, as measured |
+| 1920×1080 (2.21) | low | 1/1 | 1 | 1.82 | 2.80 (+54 %) | 2.02 | +0.20 (+11 %) |
+| 1920×1080 (2.21) | low | 2/1 | 1 | 4.26 | 2.97 (-30 %) | 4.52 | +0.26 (+6 %) |
+| 1920×1080 (2.21) | low | 4/2 | 1 | 4.50 | 3.35 (-26 %) | 4.78 | +0.28 (+6 %) |
+| 1920×1080 (2.21) | low | 8/4 | 1 | 5.19 | 4.12 (-21 %) | 5.50 | +0.32 (+6 %) |
+| 1920×1080 (2.21) | low | 16/8 | 1 | 6.97 | 5.91 (-15 %) | 7.40 | +0.43 (+6 %) |
+| 1920×1080 (2.21) | low | 24/12 | 1 | 9.83 | 7.69 (-22 %) | 10.42 | +0.59 (+6 %) |
+| 1920×1080 (2.21) | low | 48/24 | 1 | 11.35 | 13.20 (+16 %) | 12.03 | +0.68 (+6 %) |
+| 1920×1080 (2.21) | low | 80/40 | 1 | out of memory (14 GiB budget) | 20.57 | 20.06 | doesn't fit, as measured |
+| 2560×1440 (3.93) | low | 1/1 | 1 | 2.21 | 2.92 (+32 %) | 2.34 | +0.13 (+6 %) |
+| 2560×1440 (3.93) | low | 2/1 | 1 | 2.65 | 3.23 (+22 %) | 4.52 | +1.86 (+70 %) |
+| 2560×1440 (3.93) | low | 4/2 | 1 | 3.53 | 3.85 (+9 %) | 4.78 | +1.25 (+35 %) |
+| 2560×1440 (3.93) | low | 8/4 | 1 | 5.44 | 5.09 (-6 %) | 5.78 | +0.34 (+6 %) |
+| 2560×1440 (3.93) | low | 16/8 | 1 | 8.67 | 7.59 (-12 %) | 9.20 | +0.53 (+6 %) |
+| 2560×1440 (3.93) | low | 24/12 | 1 | 8.61 | 10.10 (+17 %) | 10.42 | +1.81 (+21 %) |
+| 2560×1440 (3.93) | low | 48/24 | 1 | out of memory (14 GiB budget) | 17.58 | 18.25 | doesn't fit, as measured |
+| 3200×1800 (6.14) | low | 1/1 | 1 | 3.15 | 3.08 (-2 %) | 3.35 | +0.20 (+6 %) |
+| 3200×1800 (6.14) | low | 2/1 | 1 | 3.72 | 3.57 (-4 %) | 4.52 | +0.79 (+21 %) |
+| 3200×1800 (6.14) | low | 4/2 | 1 | 5.92 | 4.56 (-23 %) | 6.28 | +0.36 (+6 %) |
+| 3200×1800 (6.14) | low | 8/4 | 1 | 9.86 | 6.73 (-32 %) | 10.46 | +0.60 (+6 %) |
+| 3200×1800 (6.14) | low | 16/8 | 1 | out of memory (14 GiB budget) | 11.08 | 20.91 | doesn't fit, as measured |
+| 3200×1800 (6.14) | low | 24/12 | 1 | out of memory (14 GiB budget) | 15.43 | 31.37 | doesn't fit, as measured |
+| 3200×1800 (6.14) | low | 48/24 | 1 | out of memory (14 GiB budget) | 28.61 | 62.73 | doesn't fit, as measured |
+| 4096×2160 (8.91) | low | 1/1 | 1 | 4.10 | 3.29 (-20 %) | 4.35 | +0.25 (+6 %) |
+| 4096×2160 (8.91) | low | 2/1 | 1 | 4.44 | 4.01 (-10 %) | 4.72 | +0.27 (+6 %) |
+| 4096×2160 (8.91) | low | 4/2 | 2 | 7.77 | 5.46 (-30 %) | 8.25 | +0.47 (+6 %) |
+| 4096×2160 (8.91) | low | 8/4 | 6 | 9.42 | 8.79 (-7 %) | 10.46 | +1.04 (+11 %) |
+| 4096×2160 (8.91) | low | 16/8 | 1 | out of memory (14 GiB budget) | 15.45 | 20.91 | doesn't fit, as measured |
+| 960×720 (0.79) | normal | 4/2 | 1 | 4.17 | 6.19 (+48 %) | 4.63 | +0.46 (+11 %) |
+| 960×720 (0.79) | normal | 8/4 | 1 | 4.37 | 6.19 (+42 %) | 4.63 | +0.27 (+6 %) |
+| 960×720 (0.79) | normal | 16/8 | 1 | 4.75 | 6.86 (+44 %) | 5.04 | +0.29 (+6 %) |
+| 960×720 (0.79) | normal | 24/12 | 1 | 5.54 | 7.52 (+36 %) | 5.88 | +0.34 (+6 %) |
+| 960×720 (0.79) | normal | 48/24 | 1 | 7.10 | 9.77 (+38 %) | 7.54 | +0.44 (+6 %) |
+| 960×720 (0.79) | normal | 80/40 | 1 | 7.99 | 12.89 (+61 %) | 8.48 | +0.49 (+6 %) |
+| 1280×1080 (1.47) | normal | 1/1 | 1 | 3.88 | 6.72 (+73 %) | 5.44 | +1.55 (+40 %) |
+| 1280×1080 (1.47) | normal | 4/2 | 1 | 4.75 | 6.72 (+42 %) | 5.44 | +0.69 (+15 %) |
+| 1280×1080 (1.47) | normal | 8/4 | 2 | 5.13 | 6.72 (+31 %) | 5.44 | +0.31 (+6 %) |
+| 1280×1080 (1.47) | normal | 16/8 | 1 | 5.89 | 7.88 (+34 %) | 6.25 | +0.36 (+6 %) |
+| 1280×1080 (1.47) | normal | 24/12 | 2 | 7.45 | 9.05 (+21 %) | 7.91 | +0.46 (+6 %) |
+| 1280×1080 (1.47) | normal | 48/24 | 2 | 10.54 | 13.34 (+27 %) | 11.17 | +0.63 (+6 %) |
+| 1280×1080 (1.47) | normal | 80/40 | 1 | out of memory (14 GiB budget) | 17.71 | 18.62 | doesn't fit, as measured |
+| 1920×1080 (2.21) | normal | 8/4 | 1 | 5.90 | 7.50 (+27 %) | 6.25 | +0.36 (+6 %) |
+| 1920×1080 (2.21) | normal | 16/8 | 1 | 7.00 | 9.42 (+35 %) | 7.42 | +0.42 (+6 %) |
+| 1920×1080 (2.21) | normal | 24/12 | 1 | 9.30 | 11.33 (+22 %) | 9.87 | +0.57 (+6 %) |
+| 1920×1080 (2.21) | normal | 48/24 | 1 | out of memory (14 GiB budget) | 18.67 | 19.73 | doesn't fit, as measured |
+| 1920×1080 (2.21) | normal | 80/40 | 1 | out of memory (14 GiB budget) | 24.90 | 32.87 | doesn't fit, as measured |
+| 2560×1440 (3.93) | normal | 8/4 | 1 | 6.02 | 9.06 (+51 %) | 6.38 | +0.37 (+6 %) |
+| 2560×1440 (3.93) | normal | 16/8 | 1 | 7.90 | 11.92 (+51 %) | 8.38 | +0.48 (+6 %) |
+| 2560×1440 (3.93) | normal | 24/12 | 1 | 10.14 | 14.79 (+46 %) | 10.75 | +0.61 (+6 %) |
+| 2560×1440 (3.93) | normal | 48/24 | 1 | out of memory (14 GiB budget) | 23.93 | 21.50 | doesn't fit, as measured |
+| 3200×1800 (6.14) | normal | 8/4 | 1 | 9.35 | 11.50 (+23 %) | 9.91 | +0.56 (+6 %) |
+| 3200×1800 (6.14) | normal | 16/8 | 1 | out of memory (14 GiB budget) | 15.93 | 19.82 | doesn't fit, as measured |
+| 3200×1800 (6.14) | normal | 24/12 | 1 | out of memory (14 GiB budget) | 20.37 | 29.73 | doesn't fit, as measured |
+| 3200×1800 (6.14) | normal | 48/24 | 1 | out of memory (14 GiB budget) | 34.53 | 59.46 | doesn't fit, as measured |
+| 4096×2160 (8.91) | normal | 8/4 | 2 | 11.01 | 14.55 (+32 %) | 11.68 | +0.67 (+6 %) |
+| 4096×2160 (8.91) | normal | 16/8 | 1 | out of memory (14 GiB budget) | 20.95 | 23.35 | doesn't fit, as measured |
 
 ## Against the PyTorch engine (`tools/engine_bench.mjs`, 12 GB budget, alpha+fg, auto, no hint)
 
@@ -493,8 +599,9 @@ does), EXR float outputs, compared with `tools/matte_compare.py` and bit for bit
    efficiency pass (docs/EFFICIENCY_PASS_2026-10.md) removed the host-side copies and conversions around the
    networks and loads each low-VRAM phase's networks ahead; stage 2's host↔device copies measured at most
    1.1 ms of wall time per call (run 54.5 ms vs 53.4 ms of kernels), so pinned buffers / IOBinding are not worth it.
-2. **An ONNX Runtime VRAM table** for the automatic window (the measured points above, more sizes, peaks
-   read inside the engine rather than sampled), replacing halve-on-oom as the normal path.
+2. **An ONNX Runtime VRAM table** for the automatic window: DONE 2026-10-24 (BACKLOG row 41: 96 measured points,
+   six sizes, an upper bound at each). Left: peaks read inside the engine rather than sampled, TensorRT's own peaks,
+   other cards; halve-on-oom stays as the safety net.
 3. **TensorRT**: (a) DONE 2026-10-24 (step 2): TensorRT takes CUDA's window. Before: the measured memory cap gave TensorRT 12-24-frame windows where CUDA's
    automatic window is 48 or 80, which changes the matte more than precision does; a low-VRAM-style staging for
    TensorRT, or stage 1 split per window half, would allow longer ones. (b) UHD (outside every range today).
