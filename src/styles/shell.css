@@ -160,7 +160,7 @@
 }
 .rail-status.ok .rail-dot {
   background: var(--status-ok);
-  color: var(--bg-0);
+  color: var(--accent-text);
 }
 .rail-status.warn .rail-dot {
   background: var(--status-warn);
@@ -434,6 +434,7 @@
 .step-n.done {
   background: var(--accent);
   color: var(--accent-text);
+  box-shadow: 0 0 0 1px var(--mark-edge);
 }
 
 /* ---- Glass (App settings → Appearance; Liquid Glass from the DS5 app) ----

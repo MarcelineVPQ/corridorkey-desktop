@@ -72,7 +72,15 @@ select {
   padding: 2px 0;
 }
 .check-line.ok {
-  color: var(--status-ok);
+  color: var(--accent-ink);
+}
+/* the ✓: green in dark; in light a green disc with a dark ✓ and a dark edge (the mark, >= 3:1) */
+.check-line.ok svg {
+  flex: none;
+  color: var(--mark-ink);
+  background: var(--mark-fill);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--mark-edge);
 }
 .check-line.error {
   color: var(--status-error);
@@ -87,6 +95,11 @@ select {
   background: transparent;
   padding: 4px 0;
   color: var(--accent-ink);
+  /* light: the green as an underline band with dark edges (dark theme: none, the words are green) */
+  box-shadow:
+    inset 0 -2px 0 var(--link-mark),
+    inset 0 -3px 0 var(--mark-edge),
+    0 1px 0 var(--mark-edge);
   cursor: pointer;
   text-align: left;
 }
@@ -107,6 +120,11 @@ select {
 }
 .doc a {
   color: var(--accent-ink);
+  text-decoration-color: var(--link-deco);
+  box-shadow:
+    inset 0 -2px 0 var(--link-mark),
+    inset 0 -3px 0 var(--mark-edge),
+    0 1px 0 var(--mark-edge);
 }
 .doc code {
   font-family: var(--font-mono);
@@ -129,13 +147,28 @@ select {
   white-space: nowrap;
 }
 .chip.ok {
-  color: var(--status-ok);
+  color: var(--accent-ink);
 }
 .chip.warn {
   color: var(--status-warn);
 }
 .chip.error {
   color: var(--status-error);
+}
+/* the green dot beside words that were green (light theme; --mark-dot is 0 in dark, where the words are green) */
+.chip.ok::before,
+.job-status.done::before,
+.stage.now::before,
+.drop-overlay::before {
+  content: "";
+  display: inline-block;
+  width: var(--mark-dot);
+  height: var(--mark-dot);
+  margin-right: calc(var(--mark-dot) * 0.85);
+  border-radius: 50%;
+  background: var(--status-ok);
+  box-shadow: 0 0 0 1px var(--mark-edge);
+  vertical-align: 0.05em;
 }
 .dot {
   width: 8px;
@@ -167,8 +200,12 @@ select {
   color: var(--accent-text);
   font-weight: 600;
 }
+/* hover/pressed: the same green, with a dark inner ring (no second green) */
 .btn.primary:hover:not(:disabled) {
-  background: var(--accent-strong);
+  box-shadow: inset 0 0 0 2px var(--accent-text);
+}
+.btn.primary:active:not(:disabled) {
+  box-shadow: inset 0 0 0 3px var(--accent-text);
 }
 .btn.danger {
   color: var(--status-error);
@@ -282,7 +319,7 @@ select {
   color: var(--text-2);
 }
 .job-status.done {
-  color: var(--status-ok);
+  color: var(--accent-ink);
 }
 .job-status.failed {
   color: var(--status-error);
@@ -590,6 +627,7 @@ select {
   inset: 0;
   background: var(--overlay);
   border: 3px dashed var(--accent);
+  box-shadow: inset 0 0 0 1px var(--mark-edge);
   display: flex;
   align-items: center;
   justify-content: center;

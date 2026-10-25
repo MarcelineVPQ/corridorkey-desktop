@@ -15,12 +15,25 @@
   --text-1: #e8eaef;
   --text-2: #c3c8d2;
   --text-3: #9ea5b2;
-  --accent: #3ddc84;
-  --accent-strong: #2fbf70;
+  /* The one green: the app icon's green (build/icon.png), #00b140, in both themes (Marcy 2026-10-25: "the green should
+     only be this green"). Every accent use is this exact value; hover/pressed keep it and add a dark inner ring
+     (--accent-text), never a second green. tests/unit/tokens.test.ts fails on any other green. */
+  --accent: #00b140;
+  --accent-strong: #00b140;
+  /* text on a green fill: dark (6.04:1; white is 2.85:1) */
   --accent-text: #0b1f13;
-  --accent-soft: rgba(61, 220, 132, 0.14);
-  --accent-ink: #3ddc84;
-  --status-ok: #3ddc84;
+  --accent-soft: rgba(0, 177, 64, 0.14);
+  /* green as words: dark theme only on bg-0..bg-2 and the tint (>= 4.7:1; 4.37 on bg-3, so never there) */
+  --accent-ink: #00b140;
+  --status-ok: #00b140;
+  /* the green mark beside words that were green (light theme only; here the words themselves are green):
+     the ✓ icon's fill/ink/edge, the dot's size, and the link underline band */
+  --mark-fill: rgba(0, 0, 0, 0);
+  --mark-ink: #00b140;
+  --mark-edge: rgba(0, 0, 0, 0);
+  --mark-dot: 0px;
+  --link-mark: rgba(0, 0, 0, 0);
+  --link-deco: currentColor;
   --status-warn: #f2b84b;
   --status-error: #ff8080;
   --status-info: #6cb4ff;
@@ -52,12 +65,20 @@
     --text-1: #1a1d24;
     --text-2: #3d4350;
     --text-3: #575e6c;
-    --accent: #0f7d43;
-    --accent-strong: #0b6837;
-    --accent-text: #ffffff;
-    --accent-soft: rgba(15, 125, 67, 0.12);
-    --accent-ink: #0d6b39;
-    --status-ok: #0d6b39;
+    --accent: #00b140;
+    --accent-strong: #00b140;
+    --accent-text: #0b1f13;
+    --accent-soft: rgba(0, 177, 64, 0.12);
+    /* green words fail on light grounds (2.85:1 on white): words take the normal text color, the green moves to a
+       mark beside them, edged in dark so the mark reaches 3:1 */
+    --accent-ink: var(--text-1);
+    --status-ok: #00b140;
+    --mark-fill: #00b140;
+    --mark-ink: #0b1f13;
+    --mark-edge: #0b1f13;
+    --mark-dot: 7px;
+    --link-mark: #00b140;
+    --link-deco: rgba(0, 0, 0, 0);
     --status-warn: #835300;
     --status-error: #b01f1f;
     --status-info: #1960b5;
