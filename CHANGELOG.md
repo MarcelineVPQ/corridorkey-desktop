@@ -61,3 +61,5 @@ screen keyer, on its own Rust + ONNX Runtime engine, for Linux, Windows and macO
   within 1/256 (README, Quality). Jobs without a colour space run exactly as before (bit-identical). EXR and image
   sequences in this version; colour-managed video input comes next. New protocol fields and a `colorspaces` command
   (docs/ENGINE_PROTOCOL.md).
+- Graphics memory → Manual shows the engine's own estimate next to each window and the Low-memory switch, before the
+  job ("about X GiB of Y GiB free: fits"), from a new `estimate` engine command (docs/ENGINE_PROTOCOL.md; backlog row 41).

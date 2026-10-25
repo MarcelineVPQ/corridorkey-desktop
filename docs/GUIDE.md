@@ -27,6 +27,8 @@ A matte named like the clip (`shot01FrameHint.png`, `shot01_AlphaHint.mp4`) is f
 
 **Automatic** picks the largest temporal window that fits the graphics memory free when the job starts. Bigger windows give steadier mattes over time. While a job runs, the Queue page shows the window it really used and the free memory it saw. If another program uses the card, the page names it.
 
+**Manual** lets you pick the window yourself (Window / stride) and Low-memory mode. Each choice shows the engine's estimate of the graphics memory it will take for the selected clip ("24 / 12 · about 11.3 GiB" for an HD clip), the Low-memory checkbox shows both modes for the window picked, and a Graphics memory line says "About X GiB of Y GiB free on this card: fits" or "doesn't fit". The number is the engine's own (the same estimate its Automatic choice uses), not the app's: opening the section starts the engine for a moment (about 0.15 s; it loads no model and takes no graphics memory) to read the clip's size and the card's free memory, then it quits. While the queue runs the engine is busy, so the line shows the last reading, marked as read before the queue started. "Doesn't fit" means the engine's safety margin isn't met: the job may still run, or may stop out of memory. The estimate is the upstream runtime's table, not a guarantee: measured on an RTX 5080 it came within −21 % to +19 % of the real peak (docs/BACKLOG.md row 41), so leave some room.
+
 ## Outputs
 
 **Video** writes 10-bit previews (alpha, foreground, checker) and a ProRes 4444 cutout. **EXR sequence** writes scene-linear, unclamped HDR frames for compositing, named the studio way

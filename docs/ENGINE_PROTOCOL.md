@@ -53,12 +53,26 @@ gets the same signal.
    "temp_dir":"/home/u/.cache/corridorkey-desktop/jobs/j1","options":{...}}
 → {"cmd":"cancel","id":"j2"}
 → {"cmd":"colorspaces","id":"c1","config":"ocio://studio-config-latest"}
+→ {"cmd":"estimate","id":"e1","input":"/clips/04_5h","windows":[[8,4,true],[16,8,true]]}
 → {"cmd":"quit"}
 ```
 
 `colorspaces` (Rust engine, additive): the colour spaces an OpenColorIO config offers, for the app's menus. `config`
 as `color_config` (absent = `$OCIO`, else the built-in ACES studio config); `id` optional, echoed. Answered at once
 between jobs. Reply below; an unreadable config is a `bad-request` carrying OCIO's message.
+
+`estimate` (Rust engine, additive; backlog row 41): the peak graphics memory a run would take, per window, before
+any job. `input` as a run's; `windows` a list of `[hann_chunk, hann_stride, low_vram]` (1 to 64 of them, checked as a
+run's window: chunk and stride at least 1, the stride not past the chunk); optional `num_frames` (as the run option)
+and `vram_budget_gb` (as the run option; absent = the engine's `CK_ENGINE_VRAM_BUDGET_GB`). The engine probes the clip
+for its size and frame count only (ffprobe, or a frame folder's first header: nothing decoded, no model loaded, no
+CUDA context) and answers at once between jobs. Each window's `peak_bytes` is the estimate the automatic window and
+the `memory` reply use (the upstream runtime's PyTorch table over the padded size, the window capped at the clip's
+frames: `estimate_peak_vram_gb`, no second formula); `needs_bytes` is what the automatic window requires of the
+budget for it (the estimate × `margin_scale` + `margin_gb`), and `fits` is that check against `budget_bytes` (free
+memory plus what the engine holds, capped by `vram_budget_gb`; NVML on a card, the host's available memory on the
+CPU provider; null and no verdict where there is no reading, as on Core ML). A missing or unreadable clip is an
+`input` error with the id; bad windows are a `bad-request`. The PyTorch engine answers `unknown cmd`.
 
 The app gives `output_dir` as a staging folder inside the clip's output folder (`out_shot/.corridorkey-partial`,
 electron/main/partial.ts): it moves the results into place after `result`, and removes the folder after an `error`,
@@ -108,6 +122,11 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
 ← {"type":"clip","id":"j1","width":1920,"height":1080,"fps":23.976,"frames":240}
 ← {"type":"memory","id":"j1","hann_chunk":24,"hann_stride":12,"low_vram":false,"auto":true,
    "budget_gb":13.1,"estimate_gb":9.8}
+← {"type":"estimate","id":"e1","width":4096,"height":2160,"shape_w":4096,"shape_h":2176,"frames":120,
+   "total_bytes":17094934528,"free_bytes":14717222912,"budget_bytes":14717222912,"budget_source":"gpu","budget_cap_gb":null,
+   "provider":"cuda","estimate_basis":"pytorch-bf16-table","margin_scale":1.1,"margin_gb":0.3,
+   "windows":[{"hann_chunk":8,"hann_stride":4,"low_vram":true,"frames":8,"peak_bytes":9438851806,"needs_bytes":10704859534,"fits":true},
+   {"hann_chunk":16,"hann_stride":8,"low_vram":true,"frames":16,"peak_bytes":16591890837,"needs_bytes":18573202468,"fits":false}]}
 ← {"type":"frames","id":"j1","done":120,"total":240}
 ← {"type":"log","id":"j1","text":"    Hann stage1: chunk=24, stride=12, ..."}
 ← {"type":"result","id":"j1","outputs":["/clips/out_shot/shot_alpha.mp4",...],
