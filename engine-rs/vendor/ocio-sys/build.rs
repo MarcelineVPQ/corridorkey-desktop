@@ -20,6 +20,17 @@ const OPENCOLORIO_DEPENDENCY_NAME: &str = "opencolorio";
 const OPENCOLORIO_LIB_NAME: &str = "OpenColorIO";
 const OPENCOLORIO_PKG_CONFIG_FILES: [&str; 2] = ["OpenColorIO.pc", "opencolorio.pc"];
 
+// CorridorKey patch (engine-rs/vendor/README.md): the TARGET's OS and environment. `cfg!(target_os)` in a build
+// script is the HOST's, so cross-builds (the Windows engine from Linux with MinGW) took Linux's link flags and
+// library names. Cargo gives build scripts the target in these variables.
+fn target_os() -> String {
+    env::var("CARGO_CFG_TARGET_OS").unwrap_or_default()
+}
+
+fn target_env() -> String {
+    env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default()
+}
+
 fn main() {
     let link_mode = LinkMode::from_env();
 
@@ -121,7 +132,7 @@ fn main() {
         .flag_if_supported("/std:c++17")
         .flag_if_supported("-std=c++17");
 
-    if cfg!(target_os = "windows") {
+    if target_os() == "windows" {
         if link_mode.is_static() {
             build.define("OpenColorIO_SKIP_IMPORTS", None);
         }
@@ -138,6 +149,10 @@ fn main() {
         println!("cargo:rustc-link-lib=comdlg32");
         println!("cargo:rustc-link-lib=advapi32");
         println!("cargo:rustc-link-lib=winspool");
+        // CorridorKey patch: minizip-ng's random source (BCryptGenRandom); MSVC builds get it from a #pragma
+        if target_env() == "gnu" {
+            println!("cargo:rustc-link-lib=bcrypt");
+        }
     }
 
     // Stub mode is a compile-time property of the build, so expose it as a cfg
@@ -178,14 +193,24 @@ fn main() {
     build.compile("ocio_sys_bridge");
 
     if has_real_ocio {
-        if cfg!(target_os = "linux") {
+        let os = target_os();
+        if os == "linux" {
             println!("cargo:rustc-link-lib=stdc++");
             println!("cargo:rustc-link-lib=dl");
             println!("cargo:rustc-link-lib=pthread");
         }
 
-        if cfg!(target_os = "macos") {
+        if os == "macos" {
             println!("cargo:rustc-link-lib=c++");
+        }
+
+        // CorridorKey patch: MinGW's C++ library, linked in (Rust's windows-gnu target links none, and a
+        // libstdc++-6.dll beside the program would be missing on users' PCs). Found where the compiler keeps it.
+        if os == "windows" && target_env() == "gnu" {
+            if let Some(dir) = compiler_lib_dir(&build, "libstdc++.a") {
+                println!("cargo:rustc-link-search=native={}", dir.display());
+            }
+            println!("cargo:rustc-link-lib=static=stdc++");
         }
     }
 
@@ -438,6 +463,12 @@ fn build_ocio_from_source(
 
         #[cfg(not(target_os = "windows"))]
         bundled_out_dir.push(link_mode.cmake_out_dir_tag("cmake"));
+
+        // CorridorKey patch: a cross-build needs a CMake toolchain file, or OCIO's bundled dependencies (built as
+        // ExternalProjects, which inherit only CMAKE_TOOLCHAIN_FILE) are built for the host and fail to link.
+        if let Some(file) = cross_toolchain_file() {
+            config.define("CMAKE_TOOLCHAIN_FILE", file);
+        }
 
         config.out_dir(&bundled_out_dir);
         config.build()
@@ -734,19 +765,20 @@ fn resolved_static_opencolorio(lib: &system_deps::Library, link_paths: &[PathBuf
 }
 
 fn emit_transitive_static_deps(link_paths: &[PathBuf]) {
-    for candidates in SYSTEM_TRANSITIVE_STATIC_LIBRARIES {
+    for candidates in system_transitive_static_libraries() {
         let selected = select_static_lib(link_paths, candidates);
         println!("cargo:rustc-link-lib=static={selected}");
     }
 
-    #[cfg(target_os = "macos")]
-    for framework in MACOS_STATIC_FRAMEWORKS {
-        println!("cargo:rustc-link-lib=framework={framework}");
+    if target_os() == "macos" {
+        for framework in MACOS_STATIC_FRAMEWORKS {
+            println!("cargo:rustc-link-lib=framework={framework}");
+        }
     }
 }
 
-#[cfg(target_os = "windows")]
-const SYSTEM_TRANSITIVE_STATIC_LIBRARIES: &[&[&str]] = &[
+// CorridorKey patch: chosen by the target (not the host) through `system_transitive_static_libraries()`.
+const WINDOWS_TRANSITIVE_STATIC_LIBRARIES: &[&[&str]] = &[
     &["libexpatMD", "expat", "libexpatdMD"],
     &["yaml-cpp", "yaml-cppd"],
     &["Imath-3_2", "Imath-3_2_d", "Imath-3_1", "Imath-3_1_d"],
@@ -755,8 +787,7 @@ const SYSTEM_TRANSITIVE_STATIC_LIBRARIES: &[&[&str]] = &[
     &["zlibstatic", "zlib", "zlibstaticd", "zlibd"],
 ];
 
-#[cfg(not(target_os = "windows"))]
-const SYSTEM_TRANSITIVE_STATIC_LIBRARIES: &[&[&str]] = &[
+const UNIX_TRANSITIVE_STATIC_LIBRARIES: &[&[&str]] = &[
     &["expat"],
     &["yaml-cpp"],
     &["Imath-3_2", "Imath-3_1"],
@@ -765,7 +796,14 @@ const SYSTEM_TRANSITIVE_STATIC_LIBRARIES: &[&[&str]] = &[
     &["z"],
 ];
 
-#[cfg(target_os = "macos")]
+fn system_transitive_static_libraries() -> &'static [&'static [&'static str]] {
+    if target_os() == "windows" {
+        WINDOWS_TRANSITIVE_STATIC_LIBRARIES
+    } else {
+        UNIX_TRANSITIVE_STATIC_LIBRARIES
+    }
+}
+
 const MACOS_STATIC_FRAMEWORKS: [&str; 4] = ["ColorSync", "CoreFoundation", "CoreGraphics", "IOKit"];
 
 fn select_static_lib<'a>(link_paths: &[PathBuf], candidates: &'a [&str]) -> &'a str {
@@ -780,14 +818,84 @@ fn select_static_lib<'a>(link_paths: &[PathBuf], candidates: &'a [&str]) -> &'a 
         .expect("every static dependency has at least one candidate")
 }
 
-#[cfg(target_os = "windows")]
+// CorridorKey patch: MSVC archives are NAME.lib; MinGW's (and every Unix's) libNAME.a.
 fn static_library_file_name(name: &str) -> String {
-    format!("{name}.lib")
+    if target_env() == "msvc" {
+        format!("{name}.lib")
+    } else {
+        format!("lib{name}.a")
+    }
 }
 
-#[cfg(not(target_os = "windows"))]
-fn static_library_file_name(name: &str) -> String {
-    format!("lib{name}.a")
+/// CorridorKey patch: the folder where the C++ compiler keeps `file` (`-print-file-name`), None when it doesn't say.
+fn compiler_lib_dir(build: &cc::Build, file: &str) -> Option<PathBuf> {
+    let out = std::process::Command::new(build.get_compiler().path())
+        .arg(format!("-print-file-name={file}"))
+        .output()
+        .ok()?;
+    let path = PathBuf::from(String::from_utf8(out.stdout).ok()?.trim());
+    // an unknown file comes back as its bare name
+    if path.is_absolute() {
+        path.parent().map(PathBuf::from)
+    } else {
+        None
+    }
+}
+
+/// CorridorKey patch: a CMake toolchain file for a cross-build (target != host) that has none (CMAKE_TOOLCHAIN_FILE,
+/// CMAKE_TOOLCHAIN_FILE_<target>, TARGET_CMAKE_TOOLCHAIN_FILE; cargo-zigbuild sets one), written to OUT_DIR from the
+/// compilers the `cc` crate picks for the target. None for a native build or when one is set.
+#[cfg(feature = "bundled")]
+fn cross_toolchain_file() -> Option<PathBuf> {
+    let target = env::var("TARGET").ok()?;
+    let host = env::var("HOST").ok()?;
+    if target == host {
+        return None;
+    }
+    let target_var = target.replace('-', "_");
+    let names = [
+        format!("CMAKE_TOOLCHAIN_FILE_{target}"),
+        format!("CMAKE_TOOLCHAIN_FILE_{target_var}"),
+        "TARGET_CMAKE_TOOLCHAIN_FILE".to_string(),
+        "CMAKE_TOOLCHAIN_FILE".to_string(),
+    ];
+    if names.iter().any(|n| env::var_os(n).is_some()) {
+        return None;
+    }
+    let path = |t: &cc::Tool| t.path().display().to_string().replace('\\', "/");
+    let c = path(&cc::Build::new().cargo_metadata(false).get_compiler());
+    let cxx = path(&cc::Build::new().cpp(true).cargo_metadata(false).get_compiler());
+    let os = target_os();
+    let system = match os.as_str() {
+        "windows" => "Windows",
+        "linux" => "Linux",
+        "macos" => "Darwin",
+        other => other,
+    };
+    let arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    let mut text = format!(
+        "set(CMAKE_SYSTEM_NAME {system})\nset(CMAKE_SYSTEM_PROCESSOR {arch})\nset(CMAKE_C_COMPILER \"{c}\")\nset(CMAKE_CXX_COMPILER \"{cxx}\")\n"
+    );
+    // a GNU cross compiler's own prefix (x86_64-w64-mingw32-gcc): its resource compiler and its sysroot
+    if let Some(prefix) = c.strip_suffix("-gcc") {
+        if os == "windows" {
+            text.push_str(&format!("set(CMAKE_RC_COMPILER \"{prefix}-windres\")\n"));
+        }
+        let triple = std::path::Path::new(prefix)
+            .file_name()
+            .map(|f| f.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let root = PathBuf::from("/usr").join(&triple);
+        if !triple.is_empty() && root.is_dir() {
+            text.push_str(&format!("set(CMAKE_FIND_ROOT_PATH \"{}\")\n", root.display()));
+        }
+    }
+    text.push_str(
+        "set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)\nset(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)\nset(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)\nset(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)\n",
+    );
+    let file = PathBuf::from(env::var_os("OUT_DIR")?).join("ocio-cross-toolchain.cmake");
+    std::fs::write(&file, text).ok()?;
+    Some(file)
 }
 
 // See the call site's comment: OpenColorIO's own .pc file doesn't declare these,
@@ -795,7 +903,7 @@ fn static_library_file_name(name: &str) -> String {
 #[cfg(feature = "bundled")]
 fn add_transitive_static_libs(lib: &mut system_deps::Library) {
     let link_paths = lib.link_paths.clone();
-    for candidates in SYSTEM_TRANSITIVE_STATIC_LIBRARIES {
+    for candidates in system_transitive_static_libraries() {
         add_static_lib(lib, &link_paths, candidates);
     }
 
@@ -803,9 +911,10 @@ fn add_transitive_static_libs(lib: &mut system_deps::Library) {
     // support links them privately on Apple platforms (src/OpenColorIO/
     // CMakeLists.txt's `if(APPLE)` block), so the final binary must link them
     // when the archive is consumed directly.
-    #[cfg(target_os = "macos")]
-    lib.frameworks
-        .extend(MACOS_STATIC_FRAMEWORKS.map(String::from));
+    if target_os() == "macos" {
+        lib.frameworks
+            .extend(MACOS_STATIC_FRAMEWORKS.map(String::from));
+    }
 }
 
 // Called by add_transitive_static_libs above: picks whichever candidate archive

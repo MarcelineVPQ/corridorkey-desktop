@@ -5,3 +5,4 @@ package-lock.json
 release
 engine-rs/crates/*/tests/fixtures
 engine-rs/target
+engine-rs/vendor

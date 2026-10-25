@@ -218,7 +218,7 @@ std::unique_ptr<std::istream> getLutData(
 
     // Default behavior. Return file stream.
     return std::unique_ptr<std::istream>(new std::ifstream(
-        Platform::filenameToUTF(filepath), mode));
+        Platform::filenameToUTF(filepath).c_str(), mode));
 }
 
 bool CollectContextVariables(const Config &, 
