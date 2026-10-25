@@ -79,6 +79,9 @@ pub(crate) struct FakeCfg {
     pub(crate) shape: (usize, usize),
     /// the fp16 models: float16 inputs and outputs (else float32, the CPU models)
     pub(crate) half: bool,
+    /// the mixed-precision fp16 set (2.0.0-onnx.4 on, the original's autocast types): float16 only for
+    /// `MIXED_F16` (overrides `half`)
+    pub(crate) mixed: bool,
     /// stage 1's baton: base_term x (a function of the window's inputs) + window_term x (the window's number)
     pub(crate) base_term: f32,
     pub(crate) window_term: f32,
@@ -88,7 +91,7 @@ pub(crate) struct FakeCfg {
 
 impl FakeCfg {
     pub(crate) fn new(shape: (usize, usize)) -> FakeCfg {
-        FakeCfg { shape, half: true, base_term: 1.0, window_term: 0.125, fail_run: None, fail_load: None }
+        FakeCfg { shape, half: true, mixed: false, base_term: 1.0, window_term: 0.125, fail_run: None, fail_load: None }
     }
 }
 
@@ -156,9 +159,21 @@ fn mean(v: &[f32]) -> f32 {
     v.iter().sum::<f32>() / v.len().max(1) as f32
 }
 
+/// The 2.0.0-onnx.4 fp16 set's float16 inputs and outputs (manifest.json): (network, tensor). Every other
+/// tensor is float32: the features, RVM's frame and state, C-RADIO and MoGe, stage 1's baton.
+pub(crate) const MIXED_F16: [(&str, &str); 6] =
+    [("stage1", "rgb"), ("stage1", "hint"), ("stage1", "hint_quality"), ("stage1", "aux"), ("stage2", "rgb"), ("stage2", "logits")];
+
 impl FakeNet {
-    fn out(&self, shape: Vec<usize>, v: Vec<f32>) -> Output {
-        if self.cfg.half {
+    fn is_f16(&self, tensor: &str) -> bool {
+        if self.cfg.mixed {
+            MIXED_F16.contains(&(self.piece, tensor))
+        } else {
+            self.cfg.half
+        }
+    }
+    fn out(&self, name: &str, shape: Vec<usize>, v: Vec<f32>) -> Output {
+        if self.is_f16(name) {
             (shape, Data::F16(Data::F32(v).into_f16()))
         } else {
             (shape, Data::F32(v))
@@ -211,7 +226,7 @@ impl Network for FakeNet {
                 let feat = (0..RVM_CH * h64 * w64).map(|k| m + state[0] * 0.5 + (k % 5) as f32 * 0.01).collect();
                 // loop: HOT-PATH-OK — test tensors
                 let next = state.iter().map(|s| s * 0.5 + m).collect();
-                vec![self.out(vec![1, RVM_CH, h64, w64], feat), self.out(shapes[1].1.clone(), next)]
+                vec![self.out("feat", vec![1, RVM_CH, h64, w64], feat), self.out("new_state", shapes[1].1.clone(), next)]
             }
             "cradio" | "moge" => {
                 let ch = if self.piece == "cradio" { CRADIO_CH } else { MOGE_CH };
@@ -225,7 +240,7 @@ impl Network for FakeNet {
                     // loop: HOT-PATH-OK — test tensors
                     v.extend((0..ch * h64 * w64).map(|k| m * (1.0 + (k % 3) as f32 * 0.5)));
                 }
-                vec![self.out(vec![n, ch, h64, w64], v)]
+                vec![self.out("feat", vec![n, ch, h64, w64], v)]
             }
             "stage1" => {
                 let tc = shapes[0].1[1];
@@ -247,7 +262,7 @@ impl Network for FakeNet {
                     // loop: HOT-PATH-OK — test tensors
                     aux.extend((0..4 * h16 * w16).map(|k| (a + (k % 7) as f32 * 0.05).min(1.0)));
                 }
-                vec![self.out(vec![1, tc, BATON_CH, h16, w16], baton), self.out(vec![1, tc, 4, h16, w16], aux)]
+                vec![self.out("baton", vec![1, tc, BATON_CH, h16, w16], baton), self.out("aux", vec![1, tc, 4, h16, w16], aux)]
             }
             "stage2" => {
                 let (rgb, baton) = (input("rgb"), input("baton"));
@@ -255,13 +270,13 @@ impl Network for FakeNet {
                 // loop: HOT-PATH-OK — test tensors
                 let logits =
                     (0..4 * plane).map(|k| (baton[0] - 0.5) * 4.0 + rgb[((k / plane) % 3) * plane + k % plane] - 0.5 + (k / plane) as f32 * 0.1).collect();
-                vec![self.out(vec![1, 4, sh, sw], logits)]
+                vec![self.out("logits", vec![1, 4, sh, sw], logits)]
             }
             other => panic!("fake network {other}"),
         })
     }
-    fn wants_f16(&self, _name: &str) -> bool {
-        self.cfg.half
+    fn wants_f16(&self, name: &str) -> bool {
+        self.is_f16(name)
     }
     fn provider(&self) -> Provider {
         self.provider

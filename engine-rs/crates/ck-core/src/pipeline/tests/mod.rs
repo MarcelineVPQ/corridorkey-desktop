@@ -227,11 +227,12 @@ fn a_fake_job_is_pinned_in_both_modes_and_precisions() {
 
 #[test]
 fn low_vram_gives_the_same_stage_inputs_and_outputs_as_all_loaded() {
-    // loop: NOT-WORTH — both precisions
-    for half in [true, false] {
+    // loop: NOT-WORTH — both precisions and the mixed set
+    for (half, mixed) in [(true, false), (false, false), (true, true)] {
         let run = |low_vram: bool| {
             let mut cfg = FakeCfg::new(SHAPE);
             cfg.half = half;
+            cfg.mixed = mixed;
             let mut h = Harness::new(cfg, 9, options(json!({"hann_chunk": 4, "hann_stride": 2})));
             let out = h.keying(&key(Provider::Cpu), None, 4, 2, low_vram);
             out.res.as_ref().unwrap();
@@ -240,10 +241,40 @@ fn low_vram_gives_the_same_stage_inputs_and_outputs_as_all_loaded() {
             (hashes("rvm"), hashes("stage1"), hashes("stage2"), out.written)
         };
         let (all, low) = (run(false), run(true));
-        assert_eq!(all.0, low.0, "RVM inputs (half {half})");
-        assert_eq!(all.1, low.1, "stage 1 inputs (half {half})");
-        assert_eq!(all.2, low.2, "stage 2 inputs (half {half})");
-        assert_eq!(all.3, low.3, "the writers' frames (half {half})");
+        assert_eq!(all.0, low.0, "RVM inputs (half {half}, mixed {mixed})");
+        assert_eq!(all.1, low.1, "stage 1 inputs (half {half}, mixed {mixed})");
+        assert_eq!(all.2, low.2, "stage 2 inputs (half {half}, mixed {mixed})");
+        assert_eq!(all.3, low.3, "the writers' frames (half {half}, mixed {mixed})");
         assert_eq!(all.2.len(), 9);
     }
+}
+
+/// The mixed-precision set (2.0.0-onnx.4: MoGe, RVM and the features float32, stage 1's frames and hints and
+/// stage 2's frame float16, outputs in either type): every network gets its inputs in the type it takes. RVM and
+/// the foundations take and make float32 exactly as in the float32 set, so their runs are the float32 job's.
+#[test]
+fn a_mixed_precision_set_feeds_each_input_in_its_own_type() {
+    let run = |half: bool, mixed: bool| {
+        let mut cfg = FakeCfg::new(SHAPE);
+        cfg.half = half;
+        cfg.mixed = mixed;
+        let mut h = Harness::new(cfg, 9, options(json!({"hann_chunk": 4, "hann_stride": 2})));
+        let out = h.keying(&key(Provider::Cuda), None, 4, 2, true);
+        out.res.as_ref().unwrap();
+        assert_eq!(out.frames(), vec![9, 9]);
+        let runs = h.loader.runs();
+        (runs, out.written)
+    };
+    let (mixed, _) = run(true, true);
+    let (f32s, _) = run(false, false);
+    let (f16s, _) = run(true, false);
+    // loop: NOT-WORTH — a test job's runs
+    let hashes = |r: &[Run], p: &str| r.iter().filter(|x| x.piece == p).map(|x| x.hash).collect::<Vec<_>>();
+    // loop: NOT-WORTH — three networks
+    for p in ["rvm", "cradio", "moge"] {
+        assert_eq!(hashes(&mixed, p), hashes(&f32s, p), "{p}: float32 inputs as in the float32 set");
+        assert_ne!(hashes(&mixed, p), hashes(&f16s, p), "{p}: not rounded to float16");
+    }
+    assert_eq!(hashes(&mixed, "stage1").len(), hashes(&f16s, "stage1").len());
+    assert_eq!(hashes(&mixed, "stage2").len(), 9);
 }
