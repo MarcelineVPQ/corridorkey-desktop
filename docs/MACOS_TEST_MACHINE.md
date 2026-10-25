@@ -87,3 +87,13 @@ everything else; note the size in every result (16 GB: HD and correctness first,
   run on demand.
 - **Signing and notarization locally** with Apple's own `codesign` / `notarytool`, so the signing secrets
   could leave GitHub if that's ever preferred.
+
+## After the gate: the plugin parity checklist
+
+With Corridor's own CorridorKey 2.0 plugin installed in DaVinci Resolve on the Mac (Marcy's licence), go through every
+control it offers (the alpha hint, marking the subject on one frame, despill, the temporal frames with their memory
+readout, the quick single-frame preview, the outputs) and mark each one against CorridorKey Desktop: matched,
+different by design, or a gap. Each gap becomes a backlog row (38, 39 and 41 came from the launch video). The list
+feeds the scorecard's capability axis (row 36). It's a check of what users will expect, not a copy of Corridor's
+paid plugin.
+
