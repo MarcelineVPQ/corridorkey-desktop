@@ -742,9 +742,9 @@ function registerIpc(): void {
       settings = { ...settings, trtSizes: [...others, size] };
       persist();
       prebuild.refresh();
-      // the user asked: it builds now (also while another program uses the card), or after the queue
+      // it builds now, or after the queue; while another program uses the card (Sonata) it waits for it (Marcy 2026-10-25)
       if (queue.running) prebuild.waitForQueue();
-      else void prebuild.start(true);
+      else void prebuild.start(false);
       return scheduleSend();
     }
     if (actionIn !== "remove" || !mainWindow || cacheMoving) return;
@@ -776,7 +776,7 @@ function registerIpc(): void {
     persist();
     removeSize(root, key);
     refreshTrtBuilt();
-    if (wasRunning) void prebuild.start(true);
+    if (wasRunning) void prebuild.start(false);
     scheduleSend();
   });
   ipcMain.handle(IPC.stopInstall, () => installAbort?.abort());

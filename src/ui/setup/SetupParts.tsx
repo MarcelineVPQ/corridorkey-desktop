@@ -188,7 +188,7 @@ function PrebuildBox({ trt }: { trt: TrtState }) {
         </>
       )}
       {p.status === "paused" && <p className="hint-text">Paused while the queue runs; it goes on by itself when the queue stops.</p>}
-      {p.status === "blocked" && <p className="hint-text">Not started: {p.note}. It doesn&apos;t take the card from another program by itself; Build now starts it anyway.</p>}
+      {p.status === "blocked" && <p className="hint-text">Not started: {p.note}. It starts by itself once the card is free; Build now starts it anyway.</p>}
       {p.status === "stopped" && <p className="hint-text">Stopped. What was built is kept; Build now goes on from there.</p>}
       {p.status === "error" && <p className="notice error">The background build stopped: {p.note}</p>}
       <div className="file-pick">

@@ -131,6 +131,8 @@ export interface PrebuildDeps {
   // a range the app just built, and the seconds its networks took (the engine's built_s): its build time on screen
   recordBuild?(range: string, seconds: number): void;
   now?: () => number;
+  // how often a build held back by another program on the card looks again (default a minute)
+  recheckMs?: number;
 }
 
 /** A range's id in the engine messages: its size range ("trt-h1024-1280_w1792-2176"), one per chosen size. */
@@ -160,6 +162,8 @@ export class Prebuilder {
   private proc: EngineHandle | null = null;
   // an automatic start reading the graphics card (othersOnGpu)
   private checking = false;
+  // the next look at the card while another program uses it (blocked)
+  private recheck: ReturnType<typeof setTimeout> | null = null;
   private now: () => number;
 
   constructor(private readonly deps: PrebuildDeps) {
@@ -194,9 +198,11 @@ export class Prebuilder {
 
   /**
    * Build what isn't built. `asked`: the user pressed Build now (it then starts while other programs use the card);
-   * otherwise (the switch, the download's end, the queue's end) it waits for a free card.
+   * otherwise (the switch, the download's end, the queue's end, a size ticked) it waits for a free card and looks
+   * again every minute, so it starts by itself once Sonata (or another program) lets go of the card.
    */
   async start(asked: boolean): Promise<void> {
+    this.clearRecheck();
     if (this.proc || this.checking || !this.deps.allowed()) return;
     this.refresh();
     // loop: NOT-WORTH — the few chosen sizes
@@ -205,7 +211,14 @@ export class Prebuilder {
       // one check at a time: the queue's changes call this often while a build is paused
       this.checking = true;
       const others = await this.deps.othersOnGpu().finally(() => (this.checking = false));
-      if (others.length > 0) return this.set({ status: "blocked", note: `${others.join(", ")} ${others.length > 1 ? "are" : "is"} using the graphics card` });
+      if (others.length > 0) {
+        // loop: NOT-WORTH — one look a minute while blocked, one timer at a time (cleared by start, pause and stop)
+        this.recheck = setTimeout(() => {
+          this.recheck = null;
+          if (this.state.status === "blocked") void this.start(false);
+        }, this.deps.recheckMs ?? 60_000);
+        return this.set({ status: "blocked", note: `${others.join(", ")} ${others.length > 1 ? "are" : "is"} using the graphics card` });
+      }
       if (this.proc || !this.deps.allowed()) return;
     }
     // loop: NOT-WORTH — the few chosen sizes
@@ -229,6 +242,7 @@ export class Prebuilder {
 
   /** The queue starts: the build gives way (the engine is killed; it goes on when the queue stops). */
   pause(): void {
+    this.clearRecheck();
     if (!this.kill()) return;
     this.set({ status: "paused", startedAt: null, note: null });
   }
@@ -236,6 +250,7 @@ export class Prebuilder {
   /** The user's Stop (or TensorRT switched off): the build ends; Build now goes on where it stopped. */
   stop(): void {
     const was = this.state.status;
+    this.clearRecheck();
     this.kill();
     if (was === "running" || was === "paused" || was === "blocked") this.set({ status: "stopped", startedAt: null, note: null });
   }
@@ -249,6 +264,11 @@ export class Prebuilder {
   /** The queue stopped: a paused build goes on. */
   queueStopped(): void {
     if (this.state.status === "paused") void this.start(false);
+  }
+
+  private clearRecheck(): void {
+    if (this.recheck) clearTimeout(this.recheck);
+    this.recheck = null;
   }
 
   private kill(): boolean {

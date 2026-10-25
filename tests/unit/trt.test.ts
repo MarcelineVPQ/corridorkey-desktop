@@ -91,7 +91,7 @@ describe("the background TensorRT build", () => {
     expect(trtRangeDirs(join(ROOT, "missing"))).toEqual([]);
   });
 
-  function rig(opts: { others?: string[]; built?: string[]; sizes?: TrtSize[] } = {}) {
+  function rig(opts: { others?: string[] | (() => string[]); built?: string[]; sizes?: TrtSize[] } = {}) {
     const sent: Record<string, unknown>[] = [];
     const sizes: TrtSize[] = opts.sizes ?? DEFAULT_TRT_SIZES.map((x) => ({ ...x }));
     const records: [string, number][] = [];
@@ -113,7 +113,8 @@ describe("the background TensorRT build", () => {
       },
       changed: () => {},
       allowed: () => allowed,
-      othersOnGpu: () => Promise.resolve(opts.others ?? []),
+      othersOnGpu: () => Promise.resolve(typeof opts.others === "function" ? opts.others() : (opts.others ?? [])),
+      recheckMs: 5,
       built: () => opts.built ?? [],
       sizes: () => sizes,
       recordBuild: (range, secs) => records.push([range, secs]),
@@ -162,6 +163,24 @@ describe("the background TensorRT build", () => {
     // Build now: the user's choice
     await s.b.start(true);
     expect(s.sent).toHaveLength(1);
+  });
+
+  it("held back by another program on the card (Sonata), it looks again and starts by itself once the card is free", async () => {
+    let others = ["Sonata"];
+    const r = rig({ others: () => others });
+    await r.b.start(false);
+    expect(r.b.state.status).toBe("blocked");
+    await new Promise((res) => setTimeout(res, 20));
+    expect(r.sent).toEqual([]);
+    others = [];
+    await new Promise((res) => setTimeout(res, 20));
+    expect(r.sent).toEqual([{ cmd: "trt_build", id: K4, width: 4096, height: 2160 }]);
+    // stopped while blocked: no more looks
+    const s = rig({ others: ["Sonata"] });
+    await s.b.start(false);
+    s.b.stop();
+    await new Promise((res) => setTimeout(res, 20));
+    expect(s.b.state.status).toBe("stopped");
   });
 
   it("builds the chosen sizes, takes a size chosen while it builds after the others, and waits for a running queue", async () => {
