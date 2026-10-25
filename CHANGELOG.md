@@ -44,7 +44,7 @@ screen keyer, on its own Rust + ONNX Runtime engine, for Linux, Windows and macO
 - Deep input: 10/12-bit video (ProRes 4444, HEVC/DNxHR 4:4:4…) is decoded to 16-bit RGB and 16-bit PNG is read at
   full depth, so film plates reach the model without rounding to 8 bits. Measured on a 4K plate: the matte is
   identical to keying the same plate as 16-bit frames; the old 8-bit read put one hair-edge pixel in twelve off by
-  up to 15/255 (README, Quality). About 2 % more time; 8-bit sources are unchanged.
+  up to 15/255 (README, Quality). No measurable time cost (within run-to-run spread); 8-bit sources are unchanged.
 - EXR outputs to the studio convention (Rust engine): frames named `<clip>_<output>.<number>.exr` with the source's
   own frame numbers and padding (a frame folder's `04_5d_00065.exr` gives `04_5d_alpha.00065.exr`; video counts
   from 1001), the alpha EXR's matte in channel `A` (Nuke and OpenImageIO read it as alpha), and the cutout

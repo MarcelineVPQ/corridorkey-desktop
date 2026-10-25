@@ -295,16 +295,20 @@ Measured on 2026-10-24 on the 4K plate 04_5d (120 frames), encoded as 10-bit Pro
 4:4:4. The reference is the same plate decoded to 16-bit PNG frames (exactly the values the video holds), keyed by
 the same engine; outputs as EXR, compared exactly (OpenCV float, every frame):
 
-| Plate | Decode | Alpha MAE | Alpha max | Hair edges (alpha 0.02-0.98) off by > 1/255 | Foreground max | Time (4K, 120 frames) |
+| Plate | Decode | Alpha MAE | Alpha max | Hair edges (alpha 0.02-0.98) off by > 1/255 | Foreground max | Total time (4K, 120 frames) |
 | --- | --- | --- | --- | --- | --- | --- |
-| ProRes 4444 XQ, 10-bit | 8-bit (before) | 6.5e-5 | 0.058 | 8.4 % | 0.214 | 86.6 s |
-| ProRes 4444 XQ, 10-bit | **16-bit (now)** | **0** | **0** | **0 %** | **0** | 88.2 s |
-| HEVC 4:4:4, 12-bit | 8-bit (before) | 6.3e-5 | 0.062 | 7.5 % | 0.278 | 89.3 s |
-| HEVC 4:4:4, 12-bit | **16-bit (now)** | **0** | **0** | **0 %** | **0** | 90.1 s |
+| ProRes 4444 XQ, 10-bit | 8-bit (before) | 6.5e-5 | 0.058 | 8.4 % | 0.214 | 148.6 s |
+| ProRes 4444 XQ, 10-bit | **16-bit (now)** | **0** | **0** | **0 %** | **0** | 150.8 s |
+| HEVC 4:4:4, 12-bit | 8-bit (before) | 6.3e-5 | 0.062 | 7.5 % | 0.278 | 150.9 s |
+| HEVC 4:4:4, 12-bit | **16-bit (now)** | **0** | **0** | **0 %** | **0** | 152.2 s |
 
 The 16-bit path gives exactly the matte of the 16-bit image sequence. The 8-bit read cost the most where keying is
-hardest: about one hair-edge pixel in twelve was off, by up to 15 levels of 255. The deep decode costs about 2 % more
-time.
+hardest: about one hair-edge pixel in twelve was off, by up to 15 levels of 255. The deep decode costs no measurable
+time: +1.5 % and +0.9 % in this run, −2.0 % and −1.4 % in a repeat run, so within run-to-run spread.
+
+Reproduce it with `tools/bit_depth_bench.sh --old-engine <engine before 5a89777> --new-engine <engine>` (it makes the
+plates, keys all six runs and compares them exactly; its header says how to build the old engine). Its repeat run gave
+the same quality numbers to the last digit (8.42 % / 7.53 % of hair-edge pixels, 0 for both 16-bit decodes).
 
 ### EXR outputs a compositor can read as they are (1.0)
 
@@ -361,7 +365,7 @@ Every result in this README is reproducible with the tools in this repository. T
 
 | Test | What it checks | Result |
 | --- | --- | --- |
-| `npm run check` | TypeScript types, formatting, the theme gate (colours only from one place), the loop gate (every loop, timer and wait in the app and engine carries a written verdict: 788 rows listed, 718 with a required verdict; plain Rust loops over small collections are exempt), 172 unit tests, the PyTorch engine's own tests | pass |
+| `npm run check` | TypeScript types, formatting, the theme gate (colours only from one place), the loop gate (every loop, timer and wait in the app and engine carries a written verdict: 793 rows listed, 723 with a required verdict; plain Rust loops over small collections are exempt), 172 unit tests, the PyTorch engine's own tests | pass |
 | `npm run check:engine` | Rust formatting, clippy with every warning an error, 119 engine tests | pass |
 | CPU end to end (`e2e_cpu.sh`) | the Rust engine against PyTorch, both fp32: frame folder, H.264 and hint inputs, EXR and video outputs, low-memory mode | pass: alpha MAE 1.7e-7, low-memory mode identical |
 | GPU speed and quality, HD and 4K | `engine_bench.mjs` + `matte_compare.py`, ten clips, both engines | pass (the tables above) |
