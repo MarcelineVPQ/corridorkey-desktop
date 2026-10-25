@@ -1,5 +1,8 @@
 # Credits & licence
 
+> **A community project, not made or endorsed by Corridor Digital.** The CorridorKey model is theirs; their official
+> app and plugins are at [corridorkey.com](https://corridorkey.com).
+
 ## CorridorKey
 
 CorridorKey 2.0 is by Corridor Digital. The model was designed and trained by Zachary Harris in collaboration with Niko Pueringer and Corridor Digital. Source and weights: [github.com/nikopueringer/CorridorKey2.0](https://github.com/nikopueringer/CorridorKey2.0). The official plugins for editing and compositing software are at [corridorkey.com](https://corridorkey.com).

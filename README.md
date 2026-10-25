@@ -1,5 +1,8 @@
 # CorridorKey Desktop
 
+> **A community project, not made or endorsed by Corridor Digital.** The CorridorKey model is theirs; their official
+> app and plugins are at [corridorkey.com](https://corridorkey.com).
+
 ## Why this exists
 
 On 21 October 2026 Corridor Crew released [CorridorKey 2.0](https://github.com/nikopueringer/CorridorKey2.0)

@@ -1,5 +1,8 @@
 # Guide
 
+> **A community project, not made or endorsed by Corridor Digital.** The CorridorKey model is theirs; their official
+> app and plugins are at [corridorkey.com](https://corridorkey.com).
+
 CorridorKey Desktop keys green and blue screen footage with CorridorKey 2.0, Corridor Digital's AI keyer, on your own graphics card.
 
 ## Getting started
