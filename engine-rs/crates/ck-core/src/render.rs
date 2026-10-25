@@ -40,7 +40,8 @@ pub fn make_checker(h: usize, w: usize) -> Vec<f32> {
 
 /// Render one frame. `logits`: (4, H, W) for the padded shape; crop (t, l) and the native (h, w).
 /// Returns (output name, one-frame batch) for each selected output, NHWC in BGR(A) / 1-channel order:
-/// video: uint16 (alpha as 3 equal channels), the cutout straight (unpremultiplied) as ProRes 4444 carries it;
+/// video: uint16 BGR (alpha as 3 equal channels), the cutout premultiplied in its own coding (sRGB-coded colour, or
+/// linear with `cutout_linear`, × alpha): no video codec here carries alpha, its alpha is the matte output (row 26);
 /// EXR: float32, scene-linear, unclamped colour, the cutout premultiplied (RGB x alpha) as EXR and Nuke expect.
 /// Rows render in parallel, each straight into its place in the outputs (no per-row buffers, no join copy).
 /// `logits` are read in stage 2's own type (float16 or float32), each value converted as it is used (exact).
@@ -61,7 +62,7 @@ pub fn render<L: ToF32>(
         // loop: NOT-WORTH — four outputs per frame
         OUTPUTS.iter().zip(bufs).zip(on).filter(|(_, on)| *on).map(|((n, b), _)| (*n, Batch::F32(b))).collect()
     } else {
-        let ch = [3, 3, 3, 4];
+        let ch = [3, 3, 3, 3];
         let mut bufs: [Vec<u16>; 4] = std::array::from_fn(|i| if on[i] { vec![0u16; h * w * ch[i]] } else { Vec::new() });
         rows_parallel(&mut bufs, ch, h, w, |y, r| render_row_video(o, logits, shape, crop, w, y, checker_srgb, r));
         // loop: NOT-WORTH — four outputs per frame
@@ -205,7 +206,11 @@ fn render_row_video<L: ToF32>(
         }
         if let Some(c) = cu.as_deref_mut() {
             let d = if o.cutout_linear { despill(pos, o.despill).map(|v| v.clamp(0.0, 1.0)) } else { despill(pf, o.despill) };
-            c[4 * x..4 * x + 4].copy_from_slice(&[to_u16(d[2]), to_u16(d[1]), to_u16(d[0]), to_u16(pa)]);
+            // premultiplied in the file's own coding, which is what Nuke's and Resolve's "premultiplied" reads undo;
+            // the colour clamped to the file's range first (despill can push it past 1), so unpremultiplying gives
+            // the straight colour a file can hold
+            let p = d.map(|v| v.clamp(0.0, 1.0) * pa);
+            c[3 * x..3 * x + 3].copy_from_slice(&[to_u16(p[2]), to_u16(p[1]), to_u16(p[0])]);
         }
         if let Some(k) = ck.as_deref_mut() {
             let bl = srgb_to_linear(checker_srgb[y * w + x]);
@@ -252,12 +257,19 @@ mod tests {
         // straight colour (fg, despill 0) x alpha, exactly; alpha itself unchanged
         assert_eq!(cu.as_slice(), &[fg[0] * 0.25, fg[1] * 0.25, fg[2] * 0.25, 0.25]);
         assert!(fg[0] > 0.0 && cu[0] < fg[0]);
-        // the video cutout stays straight: its colour is the foreground's, not scaled by alpha
+        // the video cutout: three channels, the sRGB-coded foreground (despill 0) x alpha (no alpha channel: the
+        // matte output is its alpha)
         let mut v = opts(false);
         v.despill = 0.0;
         let vid = render(&v, &lg, (1, 1), (0, 0), (1, 1), &[0.75]);
         let (Batch::U16(vf), Batch::U16(vc)) = (&vid[1].1, &vid[3].1) else { panic!() };
-        assert_eq!(&vc[..3], &vf[..3]);
+        assert_eq!(vc.len(), 3);
+        // loop: NOT-WORTH — three channels
+        for c in 0..3 {
+            let want = (vf[c] as f64 * 0.25).round() as i64;
+            assert!((vc[c] as i64 - want).abs() <= 1, "c {c}: {} vs {want}", vc[c]);
+        }
+        assert!(vc[0] > 0 && vc[0] < vf[0]);
     }
 
     /// Test 6 (the study's plan): alpha is data, byte-identical for every output colour space; the foreground and the

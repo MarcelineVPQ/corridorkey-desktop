@@ -23,7 +23,7 @@ engine-rs/
     ahead.rs           work done ahead on its own thread (network inputs while the card runs)
     outputs.rs         the render thread: render + hand-off to the writers, frame counts back
     render.rs          alpha / fg / checker / cutout, video (uint16) and EXR (float) paths
-    writers.rs         ffmpeg writers (x264 yuv444p10le CRF 12; ProRes 4444 cutout) and EXR sequences
+    writers.rs         ffmpeg writers (lossless H.264 / DNxHR 444 / x264 CRF 12, 10-bit 4:4:4; the cutout premultiplied, no alpha) and EXR sequences
     job.rs, settings.rs  run options (ck_engine.py's defaults), <clip>_settings.txt
   crates/ck-engine/    the corridorkey-engine binary: the protocol loop (lib.rs) and main.rs
   tools/gen_fixtures.py   parity fixtures from the upstream Python functions

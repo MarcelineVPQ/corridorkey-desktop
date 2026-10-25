@@ -723,12 +723,19 @@ impl Pipeline<OrtLoader> {
                 let numbers = exr_numbers.clone().ok_or_else(|| Error::engine("EXR frame numbers missing".into()))?;
                 Box::new(ExrWriter::new(&job.output_dir.join(format!("{clip}_{sfx}_exr")), w, h, ch, ty, &format!("{clip}_{sfx}"), numbers)?)
             } else {
-                let ext = if name == "cutout" { "mov" } else { "mp4" };
-                let ch = if name == "cutout" { 4 } else { 3 };
+                let ext = job.writer.codec.ext();
                 let trc = if name == "cutout" && job.cutout_linear { "linear" } else { "iec61966-2-1" };
-                Box::new(VideoWriter::new(&job.output_dir.join(format!("{clip}_{sfx}.{ext}")), fps, w, h, &job.writer, ch, trc)?)
+                Box::new(VideoWriter::new(&job.output_dir.join(format!("{clip}_{sfx}.{ext}")), fps, w, h, &job.writer, trc)?)
             };
             writers.push((name.clone(), wr));
+        }
+        if !job.exr {
+            sink.log(&format!("  Video codec: {}", job.writer.codec.name()));
+            // loop: NOT-WORTH — at most four outputs, once per job
+            if job.outputs.iter().any(|x| x == "cutout") {
+                let added = if job.alpha_for_cutout { " (added for the cutout)" } else { "" };
+                sink.log(&format!("  Video cutout: premultiplied colour, no alpha channel; its alpha is the alpha output{added}"));
+            }
         }
         let settings_path = job.output_dir.join(format!("{clip}_settings.txt"));
         let write_settings = |chunk: usize, stride: usize, low_vram: bool, sink: &mut dyn Sink| {
@@ -741,6 +748,7 @@ impl Pipeline<OrtLoader> {
                 outputs: &job.outputs,
                 output_format: if job.exr { "exr" } else { "video" },
                 exr_dtype: if job.exr_float { "float" } else { "half" },
+                video_codec: (!job.exr).then(|| job.writer.codec.name()),
                 hint_first_frame: job.hint_first_frame.as_deref(),
                 hint_video: job.hint_video.as_deref(),
                 hint_quality: job.hint_quality,

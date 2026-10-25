@@ -1,6 +1,6 @@
 //! A `run` request's options (docs/ENGINE_PROTOCOL.md), read with the defaults and checks of
 //! engine/ck_engine.py's `configs` (= infer.py's defaults). A bad option is an `input` error.
-use crate::writers::WriterConfig;
+use crate::writers::{VideoCodec, WriterConfig};
 use crate::Error;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -23,6 +23,8 @@ pub struct JobConfig {
     pub low_vram: bool,
     /// sorted, as the runtime iterates sorted(cfg.outputs)
     pub outputs: Vec<String>,
+    /// a video cutout without the alpha output asked for: the engine added it (the cutout's alpha; backlog row 26)
+    pub alpha_for_cutout: bool,
     pub exr: bool,
     pub exr_float: bool,
     pub despill_strength: f64,
@@ -189,15 +191,26 @@ pub fn parse(req: &Value) -> Result<JobConfig, Error> {
     if exr_dtype != "half" && exr_dtype != "float" {
         return Err(Error::input(format!("exr dtype must be 'half' or 'float', got {exr_dtype:?}")));
     }
-    let writer = WriterConfig {
+    let codec_name = string(o, "video_codec");
+    let codec = codec_name.as_deref().map(|n| VideoCodec::parse(n).ok_or(n)).unwrap_or(Ok(VideoCodec::H264Crf12));
+    let mut writer = WriterConfig {
         crf: int(o, "crf")?.unwrap_or(12),
         preset: string(o, "preset").unwrap_or_else(|| "medium".into()),
         pix_fmt: string(o, "pix_fmt").unwrap_or_else(|| "yuv444p10le".into()),
         ..WriterConfig::default()
     };
     // (EXR jobs don't use the video writer's settings)
+    let mut alpha_for_cutout = false;
     if output_format == "video" {
+        writer.codec = codec.map_err(|n| Error::bad_request(format!("video_codec {n:?} isn't one of: {}", VideoCodec::NAMES.join(", "))))?;
         check_writer(&writer)?;
+        // no video codec here carries alpha: the video cutout is premultiplied colour and its alpha is the matte
+        // output, written with it (backlog row 26)
+        if outputs.iter().any(|x| x == "cutout") && !outputs.iter().any(|x| x == "alpha") {
+            outputs.push("alpha".into());
+            outputs.sort();
+            alpha_for_cutout = true;
+        }
     }
     Ok(JobConfig {
         id,
@@ -214,6 +227,7 @@ pub fn parse(req: &Value) -> Result<JobConfig, Error> {
         manual,
         low_vram: boolean(o, "low_vram", false),
         outputs,
+        alpha_for_cutout,
         exr: output_format == "exr",
         exr_float: exr_dtype == "float",
         despill_strength: unit(o, "despill_strength", 0.5)?,
@@ -324,6 +338,25 @@ mod tests {
         }
         // an EXR job doesn't use them
         assert!(parse(&req(json!({"output_format": "exr", "preset": "warp"}))).is_ok());
+    }
+
+    #[test]
+    fn video_codec_and_the_cutouts_alpha() {
+        // absent: today's H.264 CRF 12 (the PyTorch engine's and infer.py's output)
+        assert_eq!(parse(&req(json!({}))).unwrap().writer.codec, VideoCodec::H264Crf12);
+        assert_eq!(parse(&req(json!({"video_codec": "h264-lossless"}))).unwrap().writer.codec, VideoCodec::H264Lossless);
+        assert_eq!(parse(&req(json!({"video_codec": "dnxhr444"}))).unwrap().writer.codec, VideoCodec::Dnxhr444);
+        let e = parse(&req(json!({"video_codec": "prores"}))).unwrap_err();
+        assert_eq!(e.code.as_str(), "bad-request");
+        assert!(e.message.contains("h264-lossless, dnxhr444, h264-crf12"), "{}", e.message);
+        assert!(parse(&req(json!({"output_format": "exr", "video_codec": "prores"}))).is_ok());
+        // a video cutout brings its alpha (the matte output); EXR cutouts carry their own
+        let c = parse(&req(json!({"outputs": ["cutout"], "video_codec": "dnxhr444"}))).unwrap();
+        assert_eq!((c.outputs.join(","), c.alpha_for_cutout), ("alpha,cutout".to_string(), true));
+        let c = parse(&req(json!({"outputs": ["cutout", "alpha"]}))).unwrap();
+        assert_eq!((c.outputs.join(","), c.alpha_for_cutout), ("alpha,cutout".to_string(), false));
+        let c = parse(&req(json!({"outputs": ["cutout"], "output_format": "exr"}))).unwrap();
+        assert_eq!((c.outputs.join(","), c.alpha_for_cutout), ("cutout".to_string(), false));
     }
 
     #[test]

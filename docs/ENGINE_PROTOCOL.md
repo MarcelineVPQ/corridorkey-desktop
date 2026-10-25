@@ -99,7 +99,8 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
 | `frame_dir_fps` | number | 24 |
 | `frame_dir_linear` | bool | false |
 | `num_frames` | int | −1 (whole clip) |
-| `crf`, `preset`, `pix_fmt` | | ffmpeg settings for the video path (12, medium, yuv444p10le) |
+| `video_codec` | `h264-lossless` \| `dnxhr444` \| `h264-crf12` | Rust engine, video outputs (backlog row 26): `h264-lossless` = libx264 `-qp 0`, High 4:4:4 Predictive, yuv444p10le, `.mp4`; `dnxhr444` = ffmpeg's `dnxhd` encoder, profile `dnxhr_444`, yuv444p10le, `.mov`; `h264-crf12` = the original's libx264 CRF 12, `.mp4`. Absent = `h264-crf12` (the original's output; the app sends `h264-lossless` for new jobs). Any other name is a `bad-request`; EXR jobs ignore it. None carries alpha: see the cutout below |
+| `crf`, `preset`, `pix_fmt` | | ffmpeg settings for the video path (12, medium, yuv444p10le). `crf` and `pix_fmt` apply to `h264-crf12` only, `preset` to both H.264 codecs |
 | `color_config` | path \| `ocio://` name | Rust engine: the OpenColorIO config for `input_colorspace` / `output_colorspace`. Absent = `$OCIO` as the engine sees it, else OCIO's built-in ACES studio config (`ocio://studio-config-latest`, recorded by its versioned name) |
 | `input_colorspace` | string | Rust engine: the clip's colour space, a name (or alias, or role) in that config. Absent = today's behaviour exactly (display-coded sRGB, or scene-linear Rec.709 EXR with `frame_dir_linear`). EXR and 16/8-bit image sequences only: on a video input it is a `bad-request` (colour-managed video comes in the next version) |
 | `output_colorspace` | string | Rust engine: the EXR outputs' colour space. Absent = the input's own space when `input_colorspace` is given (ACEScg in, ACEScg out), else linear Rec.709 as today. Video outputs stay display sRGB / Rec.709 whatever it says (a `log` line says so) |
@@ -141,7 +142,12 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
 
 - `progress.p` is the stage's own fraction when the stage reports one (stage-1
   windows), otherwise absent. The app never invents a fraction.
-- `result.outputs` lists one path per output: a file (`<clip>_alpha.mp4`, `<clip>_cutout.mov`) or, for EXR, a
+- Video cutout (Rust engine, backlog row 26): no `video_codec` carries alpha, so the video cutout is three channels,
+  despilled colour premultiplied in the file's own coding (sRGB-coded, or linear with `cutout_linear`, × alpha), and
+  its alpha is the `alpha` output: a video job with `cutout` always writes `alpha` too (added when not asked for, a
+  `log` line says so, and `result.outputs` lists it). The EXR cutout stays premultiplied RGBA. The PyTorch engine
+  writes the original's straight ProRes 4444 cutout with alpha (upstream's writer, unchanged).
+- `result.outputs` lists one path per output: a file (`<clip>_alpha.mp4`; `.mov` with `dnxhr444`) or, for EXR, a
   folder `<clip>_<output>_exr/` (the checker's output name is `checker_comp_despill050`, by its despill). Rust engine
   (backlog row 30): its frames are `<clip>_<output>.<number>.exr`. A frame folder's frames keep their own numbers
   (the trailing digits of each input name) and padding (at least 4); a video, or a folder where a frame has no
@@ -194,7 +200,7 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
   message says which). Before, these were `engine`.
 - Rust engine: a request line that isn't UTF-8 text, a `cancel` without an `id`, a
   `run` option outside its documented range (`hint_quality`, `carry_hint_quality`,
-  `despill_strength`: 0–1; for video output a `preset` or `pix_fmt` libx264 doesn't take, a
+  `despill_strength`: 0–1; for video output a `video_codec` it doesn't know, a `preset` or `pix_fmt` libx264 doesn't take, a
   `crf` outside 0–51, or 0–63 for 10-bit formats) or a number that isn't finite (`"nan"`, `"inf"`) is a
   `bad-request` (for a `run`, with its id, before anything loads); the engine keeps
   reading. An option that isn't a number at all stays an `input` error.

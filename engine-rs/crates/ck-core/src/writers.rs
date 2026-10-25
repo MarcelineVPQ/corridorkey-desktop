@@ -1,5 +1,5 @@
 //! The output writers (video_io.ThreadedVideoWriter, ExrSequenceWriter): each encodes on its own thread with
-//! a queue of at most 2 batches. Same ffmpeg commands, codecs, pixel formats and file names as the runtime.
+//! a queue of at most 2 batches. The runtime's ffmpeg command and file names; the codec is the job's (VideoCodec).
 use crate::clip::FrameNumbers;
 use crate::Error;
 use std::io::Write;
@@ -9,10 +9,59 @@ use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-/// ffmpeg settings for the video path (video_io.WriterConfig; the desktop engine's threads=2).
+/// The video codec of a job's video outputs (backlog row 26; the protocol's `video_codec`). None of them carries an
+/// alpha channel (ffmpeg's DNxHR encoder has none and stops at 10 bits): a video cutout is premultiplied colour and
+/// its alpha is the matte output, which a video job with a cutout always writes (render.rs, job.rs).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VideoCodec {
+    /// libx264 `-qp 0`, High 4:4:4 Predictive, yuv444p10le: only the 10-bit YCbCr rounding is lost
+    H264Lossless,
+    /// ffmpeg's dnxhd encoder, profile dnxhr_444, 10-bit 4:4:4, in a .mov
+    Dnxhr444,
+    /// libx264 CRF 12 (the job's `crf` / `pix_fmt`): the original's output, small files
+    H264Crf12,
+}
+
+impl VideoCodec {
+    /// the protocol's names, in the order the app offers them
+    pub const NAMES: [&'static str; 3] = ["h264-lossless", "dnxhr444", "h264-crf12"];
+
+    pub fn parse(s: &str) -> Option<VideoCodec> {
+        match s {
+            "h264-lossless" => Some(VideoCodec::H264Lossless),
+            "dnxhr444" => Some(VideoCodec::Dnxhr444),
+            "h264-crf12" => Some(VideoCodec::H264Crf12),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            VideoCodec::H264Lossless => "h264-lossless",
+            VideoCodec::Dnxhr444 => "dnxhr444",
+            VideoCodec::H264Crf12 => "h264-crf12",
+        }
+    }
+
+    /// The container: MP4 for H.264; MOV for DNxHR. ffmpeg's MXF muxer refuses frame rates outside the broadcast
+    /// set (measured with ffmpeg 8.0.1: 12.5 and 29.97 fps wrote nothing) and a frame folder can have any rate; MOV
+    /// takes any rate and size, carries the colour tags, and Resolve and Nuke read DNxHR in it.
+    pub fn ext(self) -> &'static str {
+        match self {
+            VideoCodec::Dnxhr444 => "mov",
+            _ => "mp4",
+        }
+    }
+}
+
+/// DNxHR 444's pixel format (README, Quality, "Video outputs": measured against the other one the encoder takes).
+const DNXHR_PIX_FMT: &str = "yuv444p10le";
+
+/// ffmpeg settings for the video path (video_io.WriterConfig; the desktop engine's threads=2). `crf`, `pix_fmt` and
+/// `bitrate` apply to `H264Crf12` only, `preset` to both H.264 codecs.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WriterConfig {
-    pub codec: String,
+    pub codec: VideoCodec,
     pub crf: i64,
     pub preset: String,
     pub pix_fmt: String,
@@ -22,29 +71,33 @@ pub struct WriterConfig {
 
 impl Default for WriterConfig {
     fn default() -> Self {
-        WriterConfig { codec: "libx264".into(), crf: 12, preset: "medium".into(), pix_fmt: "yuv444p10le".into(), bitrate: None, threads: 2 }
+        WriterConfig { codec: VideoCodec::H264Crf12, crf: 12, preset: "medium".into(), pix_fmt: "yuv444p10le".into(), bitrate: None, threads: 2 }
     }
 }
 
-/// The ffmpeg arguments ThreadedVideoWriter builds (after the binary name).
-pub(crate) fn ffmpeg_args(path: &Path, fps: f64, w: usize, h: usize, cfg: &WriterConfig, channels: usize, color_trc: &str) -> Vec<String> {
+/// The ffmpeg arguments ThreadedVideoWriter builds (after the binary name): the render's 16-bit BGR frames in
+/// (bgr48le: no 8-bit step), the job's codec out.
+pub(crate) fn ffmpeg_args(path: &Path, fps: f64, w: usize, h: usize, cfg: &WriterConfig, color_trc: &str) -> Vec<String> {
     // loop: NOT-WORTH — ffmpeg arguments, once per writer
-    let mut a: Vec<String> = ["-y", "-hide_banner", "-loglevel", "error", "-nostats", "-f", "rawvideo", "-pix_fmt"].iter().map(|s| s.to_string()).collect();
-    a.push(if channels == 4 { "bgra64le" } else { "bgr48le" }.into());
+    let s = |v: &[&str]| -> Vec<String> { v.iter().map(|x| x.to_string()).collect() };
+    let mut a = s(&["-y", "-hide_banner", "-loglevel", "error", "-nostats", "-f", "rawvideo", "-pix_fmt", "bgr48le"]);
     a.extend(["-s:v".into(), format!("{w}x{h}"), "-r".into(), format!("{fps:.8}")]);
     // The colour tags on the input too: ffmpeg 8 keeps a raw input's (unset) primaries and transfer and drops the
     // output-side ones below (measured: every output read color_transfer=unknown, color_primaries=unknown; a linear
     // cutout wasn't tagged linear). Tagged here, they reach the file; the pixels are the same (frame md5 equal).
     a.extend(["-colorspace".into(), "bt709".into(), "-color_primaries".into(), "bt709".into(), "-color_trc".into(), color_trc.into()]);
     a.extend(["-i".into(), "pipe:0".into(), "-an".into()]);
-    if channels == 4 {
-        // loop: NOT-WORTH — ffmpeg arguments, once per writer
-        a.extend(["-c:v", "prores_ks", "-profile:v", "4", "-pix_fmt", "yuva444p10le"].iter().map(|s| s.to_string()));
-    } else {
-        a.extend(["-c:v".into(), cfg.codec.clone(), "-preset".into(), cfg.preset.clone(), "-pix_fmt".into(), cfg.pix_fmt.clone()]);
-        match &cfg.bitrate {
-            Some(b) => a.extend(["-b:v".into(), b.clone()]),
-            None => a.extend(["-crf".into(), cfg.crf.to_string()]),
+    match cfg.codec {
+        // x264 is lossless at quantiser 0 (CRF 0 is lossless only at 8 bits); High 4:4:4 Predictive is the profile
+        // that allows it
+        VideoCodec::H264Lossless => a.extend(s(&["-c:v", "libx264", "-preset", &cfg.preset, "-profile:v", "high444", "-pix_fmt", "yuv444p10le", "-qp", "0"])),
+        VideoCodec::Dnxhr444 => a.extend(s(&["-c:v", "dnxhd", "-profile:v", "dnxhr_444", "-pix_fmt", DNXHR_PIX_FMT])),
+        VideoCodec::H264Crf12 => {
+            a.extend(s(&["-c:v", "libx264", "-preset", &cfg.preset, "-pix_fmt", &cfg.pix_fmt]));
+            match &cfg.bitrate {
+                Some(b) => a.extend(["-b:v".into(), b.clone()]),
+                None => a.extend(["-crf".into(), cfg.crf.to_string()]),
+            }
         }
     }
     a.extend([
@@ -157,9 +210,11 @@ pub(crate) fn with_ffmpeg_tail(base: Error, path: &Path, tail: &[String]) -> Err
 }
 
 impl VideoWriter {
-    pub(crate) fn new(path: &Path, fps: f64, w: usize, h: usize, cfg: &WriterConfig, channels: usize, color_trc: &str) -> Result<VideoWriter, Error> {
+    pub(crate) fn new(path: &Path, fps: f64, w: usize, h: usize, cfg: &WriterConfig, color_trc: &str) -> Result<VideoWriter, Error> {
+        // every video output is 3-channel BGR (the alpha as three equal channels; the cutout premultiplied, render.rs)
+        let channels = 3;
         let mut child = Command::new("ffmpeg")
-            .args(ffmpeg_args(path, fps, w, h, cfg, channels, color_trc))
+            .args(ffmpeg_args(path, fps, w, h, cfg, color_trc))
             .stdin(Stdio::piped())
             .stdout(Stdio::null()) // stdout is the engine's protocol channel
             .stderr(Stdio::piped())
@@ -178,7 +233,7 @@ impl VideoWriter {
         let thread = crate::ahead::spawn_named("ffmpeg-feed", move || {
             // loop: SERIAL-REQUIRED — frames go to ffmpeg in order; ends when the sender is dropped
             for buf in rx {
-                // the samples' own bytes: little-endian on the hosts this runs on (bgr48le / bgra64le)
+                // the samples' own bytes: little-endian on the hosts this runs on (bgr48le)
                 if let Err(e) = stdin.write_all(bytemuck::cast_slice(&buf)) {
                     *e2.lock().unwrap() = Some(Error::engine(format!("ffmpeg writer: {e}")));
                     return;
@@ -431,16 +486,28 @@ mod tests {
 
     #[test]
     fn ffmpeg_command_matches_the_runtime() {
-        let a = ffmpeg_args(Path::new("/o/shot_alpha.mp4"), 23.976023976023978, 1920, 1080, &WriterConfig::default(), 3, "iec61966-2-1");
+        let a = ffmpeg_args(Path::new("/o/shot_alpha.mp4"), 23.976023976023978, 1920, 1080, &WriterConfig::default(), "iec61966-2-1");
         let want = "-y -hide_banner -loglevel error -nostats -f rawvideo -pix_fmt bgr48le -s:v 1920x1080 -r 23.97602398 \
                     -colorspace bt709 -color_primaries bt709 -color_trc iec61966-2-1 -i pipe:0 -an \
                     -c:v libx264 -preset medium -pix_fmt yuv444p10le -crf 12 -threads 2 -colorspace bt709 -color_primaries bt709 \
                     -color_trc iec61966-2-1 -movflags +write_colr /o/shot_alpha.mp4";
         assert_eq!(a.join(" "), want.split_whitespace().collect::<Vec<_>>().join(" "));
-        let c = ffmpeg_args(Path::new("/o/c.mov"), 24.0, 8, 8, &WriterConfig::default(), 4, "linear").join(" ");
-        assert!(
-            c.contains("-pix_fmt bgra64le") && c.contains("-c:v prores_ks -profile:v 4 -pix_fmt yuva444p10le -threads 2") && c.contains("-color_trc linear")
-        );
+        let with = |codec| WriterConfig { codec, ..WriterConfig::default() };
+        let l = ffmpeg_args(Path::new("/o/c.mp4"), 24.0, 8, 8, &with(VideoCodec::H264Lossless), "linear").join(" ");
+        assert!(l.contains("-pix_fmt bgr48le") && l.contains("-c:v libx264 -preset medium -profile:v high444 -pix_fmt yuv444p10le -qp 0 -threads 2"), "{l}");
+        assert!(!l.contains("-crf") && l.contains("-color_trc linear"), "{l}");
+        let d = ffmpeg_args(Path::new("/o/c.mov"), 24.0, 8, 8, &with(VideoCodec::Dnxhr444), "iec61966-2-1").join(" ");
+        assert!(d.contains("-c:v dnxhd -profile:v dnxhr_444 -pix_fmt yuv444p10le -threads 2") && !d.contains("-crf") && !d.contains("-preset"), "{d}");
+    }
+
+    #[test]
+    fn codec_names_round_trip() {
+        // loop: NOT-WORTH — three names
+        for n in VideoCodec::NAMES {
+            assert_eq!(VideoCodec::parse(n).unwrap().name(), n);
+        }
+        assert_eq!(VideoCodec::parse("prores"), None);
+        assert_eq!((VideoCodec::H264Lossless.ext(), VideoCodec::Dnxhr444.ext(), VideoCodec::H264Crf12.ext()), ("mp4", "mov", "mp4"));
     }
 
     #[test]
@@ -468,7 +535,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("file"), b"").unwrap();
         let p = dir.join("file").join("a.mp4");
-        let mut wr = VideoWriter::new(&p, 24.0, 16, 8, &WriterConfig::default(), 3, "iec61966-2-1").unwrap();
+        let mut wr = VideoWriter::new(&p, 24.0, 16, 8, &WriterConfig::default(), "iec61966-2-1").unwrap();
         let mut err = None;
         // loop: NOT-WORTH — up to 50 tiny frames, until ffmpeg's pipe closes
         for _ in 0..50 {
@@ -498,21 +565,39 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ck-colr-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut tags = Vec::new();
-        // loop: NOT-WORTH — two test files
-        for (name, ch, trc) in [("a.mp4", 3, "iec61966-2-1"), ("c.mov", 4, "linear")] {
-            let p = dir.join(name);
-            let mut wr = VideoWriter::new(&p, 24.0, 16, 8, &WriterConfig::default(), ch, trc).unwrap();
-            wr.write_many(Batch::U16(vec![30000; 16 * 8 * ch * 2]), 2).unwrap();
+        // loop: NOT-WORTH — three test files
+        for (codec, trc) in [(VideoCodec::H264Crf12, "iec61966-2-1"), (VideoCodec::H264Lossless, "linear"), (VideoCodec::Dnxhr444, "iec61966-2-1")] {
+            let p = dir.join(format!("{}.{}", codec.name(), codec.ext()));
+            // DNxHR 444 needs a frame of at least 256 x 120 (its macroblock layout)
+            let (w, h) = if codec == VideoCodec::Dnxhr444 { (256, 128) } else { (16, 8) };
+            let mut wr = VideoWriter::new(&p, 24.0, w, h, &WriterConfig { codec, ..WriterConfig::default() }, trc).unwrap();
+            wr.write_many(Batch::U16(vec![30000; w * h * 3 * 2]), 2).unwrap();
             wr.release().unwrap();
             let out = Command::new("ffprobe")
-                .args(["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=color_transfer,color_primaries,color_space", "-of", "csv=p=0"])
+                .args([
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=codec_name,profile,pix_fmt,color_transfer,color_primaries,color_space",
+                    "-of",
+                    "csv=p=0",
+                ])
                 .arg(&p)
                 .output()
                 .unwrap();
             tags.push(String::from_utf8_lossy(&out.stdout).trim().to_string());
         }
         std::fs::remove_dir_all(&dir).unwrap();
-        assert_eq!(tags, vec!["bt709,iec61966-2-1,bt709", "bt709,linear,bt709"]);
+        assert_eq!(
+            tags,
+            vec![
+                "h264,High 4:4:4 Predictive,yuv444p10le,bt709,iec61966-2-1,bt709",
+                "h264,High 4:4:4 Predictive,yuv444p10le,bt709,linear,bt709",
+                "dnxhd,DNXHR 444,yuv444p10le,bt709,iec61966-2-1,bt709"
+            ]
+        );
     }
 
     #[test]

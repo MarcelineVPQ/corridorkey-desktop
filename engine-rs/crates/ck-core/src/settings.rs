@@ -64,6 +64,8 @@ pub(crate) struct SettingsLog<'a> {
     pub(crate) exr_frames: Option<String>,
     /// colour-managed jobs: the OCIO lines (ocio::ColorJob::settings_lines; additive lines at the end)
     pub(crate) color: Option<String>,
+    /// video jobs: the codec's protocol name (backlog row 26; an additive line at the end)
+    pub(crate) video_codec: Option<&'a str>,
 }
 
 pub(crate) fn settings_text(s: &SettingsLog) -> String {
@@ -110,6 +112,9 @@ pub(crate) fn settings_text(s: &SettingsLog) -> String {
     if let Some(c) = &s.color {
         t.push_str(c);
     }
+    if let Some(v) = s.video_codec {
+        t.push_str(&format!("Video Codec: {v}\n"));
+    }
     t
 }
 
@@ -143,12 +148,13 @@ mod tests {
                 low_vram: false,
                 num_frames: -1,
                 decoders: &d,
+                video_codec: exr_frames.is_none().then_some("h264-lossless"),
                 exr_frames,
                 color: None,
             })
         };
         assert!(log(Some("source (65-184)".into())).ends_with("FFprobe: 8.0\nEXR Frame Numbers: source (65-184)\n"));
-        assert!(log(None).ends_with("FFprobe: 8.0\n"));
+        assert!(log(None).ends_with("FFprobe: 8.0\nVideo Codec: h264-lossless\n"));
     }
 
     #[test]

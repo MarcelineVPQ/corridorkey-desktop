@@ -224,6 +224,15 @@ fn render_paths() {
                     }
                 }
             }
+            let mut tol = tol;
+            if !exr && *name == "cutout" {
+                // the original's video cutout is straight BGRA (ProRes 4444); ours is three channels premultiplied in
+                // the file's coding, its alpha the matte output (backlog row 26): the reference's BGR x its own
+                // alpha, both 16-bit, so one more rounding step
+                // loop: HOT-PATH-OK — a 30x44 fixture, once
+                want = want.chunks(4).flat_map(|px| [px[0] * px[3] / 65535.0, px[1] * px[3] / 65535.0, px[2] * px[3] / 65535.0]).collect();
+                tol = 2.0;
+            }
             if exr {
                 let rel: Vec<f32> = got.iter().zip(&want).map(|(a, w)| (a - w) / w.abs().max(1.0)).collect();
                 diff(&format!("{fname} (relative)"), &rel, &vec![0.0; rel.len()], tol);
