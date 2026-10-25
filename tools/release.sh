@@ -36,6 +36,8 @@ git fetch -q origin main
 state="$(gh release view "v$v" --json isDraft -q .isDraft 2>/dev/null || echo none)"
 grep -q "^## $v\( \|$\)" CHANGELOG.md || { echo "release: CHANGELOG.md has no '## $v' section" >&2; exit 1; }
 [ -r "$KEY" ] || { echo "release: no signing key at $KEY" >&2; exit 1; }
+# cargo-about 0.9.2 lives with the other release tools (cargo install --locked --features cli cargo-about --root …)
+export CARGO_ABOUT="${CARGO_ABOUT:-$HOME/.local/share/corridorkey-release/cargo-about/bin/cargo-about}"
 "${CAP[@]}" node tools/gen_notices.mjs --check
 
 if [ "$state" != false ]; then
