@@ -12,6 +12,10 @@ CorridorKey Desktop is free and stays free. It is released under the CorridorKey
 
 CorridorKey builds on three foundation models: [C-RADIO](https://github.com/NVlabs/RADIO) by NVIDIA (NVIDIA Open Model License), [MoGe](https://github.com/microsoft/MoGe) by Microsoft (MIT) and [RVM](https://github.com/google-deepmind/representations4d) by Google DeepMind (code Apache 2.0, weights CC-BY 4.0).
 
+## Third-party licences
+
+Every third-party component the app ships or downloads, with its licence and the full licence texts: Third-party notices (in this list), also a file in the app's resources folder (THIRD_PARTY_NOTICES.md).
+
 ## This app
 
 The app icon is CorridorKey's own, from [corridorkey.com](https://corridorkey.com), © Corridor Digital. Built by Marcy ([MarcelineVPQ](https://github.com/MarcelineVPQ)) at 42 Pixel Studios. Liquid Glass technique credits Shu Ding's liquid-glass and Max Rovensky's liquid-glass-react (MIT). Icons: Lucide (ISC).
