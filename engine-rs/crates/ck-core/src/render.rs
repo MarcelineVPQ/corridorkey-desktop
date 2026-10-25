@@ -2,6 +2,7 @@
 //! _render_predictions_exr_torch for EXR): crop the padding, alpha clamped, fg decoded from asinh to linear,
 //! despill, the checker composite, the cutout.
 use crate::color::{asinh_to_linear, despill, linear_to_srgb, srgb_to_linear, to_u16, LinearAdjust, ToF32};
+use crate::image::{resize_lanczos4, Planar};
 use crate::writers::Batch;
 
 pub(crate) const OUTPUTS: [&str; 4] = ["alpha", "fg", "checker", "cutout"];
@@ -53,20 +54,194 @@ pub fn render<L: ToF32>(
     hw: (usize, usize),
     checker_srgb: &[f32],
 ) -> Vec<(&'static str, Batch)> {
+    render_scaled(o, logits, shape, crop, hw, hw, checker_srgb)
+}
+
+/// `render` for a job at a model scale (backlog row 42): the networks' crop is `model_hw`, the outputs `hw`. At a
+/// scale, the planes the original resizes are made at the model size and Lanczos-4 resized to the native size at the
+/// points where runtime._render_predictions_(exr_)torch calls `_resize_output_torch` (upstream stops there with
+/// "non-native scaling would need explicit Lanczos output rendering"; the resize is upstream's own
+/// video_io.resize_chw_lanczos): the clamped alpha; for EXR the inverse-adjusted linear foreground; for video the
+/// sRGB-encoded foreground and, with `cutout_linear`, the despilled linear colour. The rest runs at the native size.
+pub fn render_scaled<L: ToF32>(
+    o: &RenderOpts,
+    logits: &[L],
+    shape: (usize, usize),
+    crop: (usize, usize),
+    model_hw: (usize, usize),
+    hw: (usize, usize),
+    checker_srgb: &[f32],
+) -> Vec<(&'static str, Batch)> {
+    if model_hw == hw {
+        let src =
+            Native { logits, shape, crop, adjust: o.adjust, despill: o.despill, want_lin_d: o.cutout && o.cutout_linear, denom: crate::color::asinh_denom() };
+        return render_from(o, &src, hw, checker_srgb);
+    }
+    let src = Resized::make(o, logits, shape, crop, model_hw, hw);
+    render_from(o, &src, hw, checker_srgb)
+}
+
+fn render_from<P: Px>(o: &RenderOpts, src: &P, hw: (usize, usize), checker_srgb: &[f32]) -> Vec<(&'static str, Batch)> {
     let (h, w) = hw;
     let on = [o.alpha, o.fg, o.checker, o.cutout];
     if o.exr {
         let ch = [1, 3, 3, 4];
         let mut bufs: [Vec<f32>; 4] = std::array::from_fn(|i| if on[i] { vec![0f32; h * w * ch[i]] } else { Vec::new() });
-        rows_parallel(&mut bufs, ch, h, w, |y, r| render_row_exr(o, logits, shape, crop, w, y, checker_srgb, r));
+        rows_parallel(&mut bufs, ch, h, w, |y, r| render_row_exr(o, src, w, y, checker_srgb, r));
         // loop: NOT-WORTH — four outputs per frame
         OUTPUTS.iter().zip(bufs).zip(on).filter(|(_, on)| *on).map(|((n, b), _)| (*n, Batch::F32(b))).collect()
     } else {
         let ch = [3, 3, 3, 3];
         let mut bufs: [Vec<u16>; 4] = std::array::from_fn(|i| if on[i] { vec![0u16; h * w * ch[i]] } else { Vec::new() });
-        rows_parallel(&mut bufs, ch, h, w, |y, r| render_row_video(o, logits, shape, crop, w, y, checker_srgb, r));
+        rows_parallel(&mut bufs, ch, h, w, |y, r| render_row_video(o, src, w, y, checker_srgb, r));
         // loop: NOT-WORTH — four outputs per frame
         OUTPUTS.iter().zip(bufs).zip(on).filter(|(_, on)| *on).map(|((n, b), _)| (*n, Batch::U16(b))).collect()
+    }
+}
+
+/// A frame's pixels at the output size, as the render needs them.
+trait Px: Sync {
+    /// the matte, clamped to [0, 1]
+    fn alpha(&self, y: usize, x: usize) -> f32;
+    /// EXR: the decoded, inverse-adjusted scene-linear foreground
+    fn lin(&self, y: usize, x: usize) -> [f32; 3];
+    /// video: the foreground encoded to sRGB and clamped (pf), and with `cutout_linear` the despilled linear colour
+    /// clamped to [0, 1] (zeros otherwise)
+    fn video(&self, y: usize, x: usize) -> ([f32; 3], [f32; 3]);
+}
+
+/// Native size: straight from the logits.
+struct Native<'a, L> {
+    logits: &'a [L],
+    shape: (usize, usize),
+    crop: (usize, usize),
+    adjust: LinearAdjust,
+    despill: f32,
+    denom: f32,
+    want_lin_d: bool,
+}
+
+impl<L: ToF32> Native<'_, L> {
+    #[inline]
+    fn at(&self, c: usize, y: usize, x: usize) -> f32 {
+        let (sh, sw) = self.shape;
+        let (t, l) = self.crop;
+        self.logits[c * sh * sw + (t + y) * sw + (l + x)].to_f32()
+    }
+}
+
+impl<L: ToF32> Px for Native<'_, L> {
+    #[inline]
+    fn alpha(&self, y: usize, x: usize) -> f32 {
+        self.at(0, y, x).clamp(0.0, 1.0)
+    }
+    #[inline]
+    fn lin(&self, y: usize, x: usize) -> [f32; 3] {
+        [0, 1, 2].map(|c| self.adjust.invert(asinh_to_linear(self.at(1 + c, y, x), self.denom)))
+    }
+    #[inline]
+    fn video(&self, y: usize, x: usize) -> ([f32; 3], [f32; 3]) {
+        let pos = self.lin(y, x).map(|v| v.max(0.0));
+        let pf = pos.map(|v| linear_to_srgb(v).clamp(0.0, 1.0));
+        let lin_d = if self.want_lin_d { despill(pos, self.despill).map(|v| v.clamp(0.0, 1.0)) } else { [0.0; 3] };
+        (pf, lin_d)
+    }
+}
+
+/// At a model scale: the planes upstream resizes, made at the model size and resized to the output size.
+struct Resized {
+    w: usize,
+    /// clamp(resize(clamp(alpha)))
+    alpha: Vec<f32>,
+    /// EXR: resize(linear); video: clamp(resize(srgb(max(linear, 0))))
+    color: Option<Planar>,
+    /// video with cutout_linear: clamp(resize(despill(max(linear, 0))))
+    lin_d: Option<Planar>,
+}
+
+impl Resized {
+    fn make<L: ToF32>(o: &RenderOpts, logits: &[L], shape: (usize, usize), crop: (usize, usize), model_hw: (usize, usize), hw: (usize, usize)) -> Resized {
+        use rayon::prelude::*;
+        let (mh, mw) = model_hw;
+        let (h, w) = hw;
+        let n = mh * mw;
+        let src = Native { logits, shape, crop, adjust: o.adjust, despill: o.despill, want_lin_d: false, denom: crate::color::asinh_denom() };
+        let mut a = Planar::new(1, mh, mw);
+        // loop: HOT-PATH-OK — one pass over the model-size matte per frame, rows in parallel
+        a.data.par_chunks_mut(mw).enumerate().for_each(|(y, row)| row.iter_mut().enumerate().for_each(|(x, v)| *v = src.alpha(y, x)));
+        let mut alpha = resize_lanczos4(&a, h, w).data;
+        // loop: HOT-PATH-OK — one pass over the output matte per frame
+        alpha.par_iter_mut().for_each(|v| *v = v.clamp(0.0, 1.0));
+        let (mut color, mut lin_d) = (None, None);
+        if o.fg || o.checker || o.cutout {
+            let want_d = !o.exr && o.cutout && o.cutout_linear;
+            let mut c = Planar::new(3, mh, mw);
+            let mut d = if want_d { Planar::new(3, mh, mw) } else { Planar::new(0, mh, mw) };
+            {
+                let (c0, c12) = c.data.split_at_mut(n);
+                let (c1, c2) = c12.split_at_mut(n);
+                // loop: HOT-PATH-OK — one pass over the model-size foreground per frame, rows in parallel
+                c0.par_chunks_mut(mw).zip(c1.par_chunks_mut(mw)).zip(c2.par_chunks_mut(mw)).enumerate().for_each(|(y, ((r0, r1), r2))| {
+                    // loop: HOT-PATH-OK — one row
+                    for x in 0..mw {
+                        let lin = src.lin(y, x);
+                        let v = if o.exr { lin } else { lin.map(|v| linear_to_srgb(v.max(0.0))) };
+                        (r0[x], r1[x], r2[x]) = (v[0], v[1], v[2]);
+                    }
+                });
+            }
+            if want_d {
+                let (d0, d12) = d.data.split_at_mut(n);
+                let (d1, d2) = d12.split_at_mut(n);
+                // loop: HOT-PATH-OK — one pass over the model-size foreground per frame (linear cutouts only)
+                d0.par_chunks_mut(mw).zip(d1.par_chunks_mut(mw)).zip(d2.par_chunks_mut(mw)).enumerate().for_each(|(y, ((r0, r1), r2))| {
+                    // loop: HOT-PATH-OK — one row
+                    for x in 0..mw {
+                        let v = despill(src.lin(y, x).map(|v| v.max(0.0)), o.despill);
+                        (r0[x], r1[x], r2[x]) = (v[0], v[1], v[2]);
+                    }
+                });
+            }
+            let mut rc = resize_lanczos4(&c, h, w);
+            if !o.exr {
+                // loop: HOT-PATH-OK — one pass over the output foreground per frame
+                rc.data.par_iter_mut().for_each(|v| *v = v.clamp(0.0, 1.0));
+            }
+            color = Some(rc);
+            if want_d {
+                let mut rd = resize_lanczos4(&d, h, w);
+                // loop: HOT-PATH-OK — one pass per frame (linear cutouts only)
+                rd.data.par_iter_mut().for_each(|v| *v = v.clamp(0.0, 1.0));
+                lin_d = Some(rd);
+            }
+        }
+        Resized { w, alpha, color, lin_d }
+    }
+    #[inline]
+    fn rgb(p: &Option<Planar>, i: usize) -> [f32; 3] {
+        match p {
+            Some(p) => {
+                let n = p.h * p.w;
+                [p.data[i], p.data[n + i], p.data[2 * n + i]]
+            }
+            None => [0.0; 3],
+        }
+    }
+}
+
+impl Px for Resized {
+    #[inline]
+    fn alpha(&self, y: usize, x: usize) -> f32 {
+        self.alpha[y * self.w + x]
+    }
+    #[inline]
+    fn lin(&self, y: usize, x: usize) -> [f32; 3] {
+        Resized::rgb(&self.color, y * self.w + x)
+    }
+    #[inline]
+    fn video(&self, y: usize, x: usize) -> ([f32; 3], [f32; 3]) {
+        let i = y * self.w + x;
+        (Resized::rgb(&self.color, i), Resized::rgb(&self.lin_d, i))
     }
 }
 
@@ -92,34 +267,19 @@ fn rows_parallel<T: Send>(bufs: &mut [Vec<T>; 4], ch: [usize; 4], h: usize, w: u
     rows.into_par_iter().enumerate().for_each(|(y, r)| f(y, r));
 }
 
-#[allow(clippy::too_many_arguments)]
-fn render_row_exr<L: ToF32>(
-    o: &RenderOpts,
-    logits: &[L],
-    shape: (usize, usize),
-    crop: (usize, usize),
-    w: usize,
-    y: usize,
-    checker_srgb: &[f32],
-    r: Row<'_, f32>,
-) {
-    let (sh, sw) = shape;
-    let (t, l) = crop;
-    let plane = sh * sw;
-    let denom = crate::color::asinh_denom();
-    let at = |c: usize, x: usize| logits[c * plane + (t + y) * sw + (l + x)].to_f32();
+fn render_row_exr<P: Px>(o: &RenderOpts, src: &P, w: usize, y: usize, checker_srgb: &[f32], r: Row<'_, f32>) {
     let want_color = o.fg || o.checker || o.cutout;
     let [mut alpha, mut fg, mut ck, mut cu] = r;
     // loop: HOT-PATH-OK — one output row
     for x in 0..w {
-        let pa = at(0, x).clamp(0.0, 1.0);
+        let pa = src.alpha(y, x);
         if let Some(a) = alpha.as_deref_mut() {
             a[x] = pa;
         }
         if !want_color {
             continue;
         }
-        let lin = [0, 1, 2].map(|c| o.adjust.invert(asinh_to_linear(at(1 + c, x), denom)));
+        let lin = src.lin(y, x);
         if let Some(f) = fg.as_deref_mut() {
             f[3 * x..3 * x + 3].copy_from_slice(&[lin[2], lin[1], lin[0]]);
         }
@@ -170,27 +330,12 @@ fn apply_bgr(xf: &crate::ocio::Xform, row: &mut [f32], stride: usize) {
     row.chunks_exact_mut(stride).for_each(|px| px.swap(0, 2));
 }
 
-#[allow(clippy::too_many_arguments)]
-fn render_row_video<L: ToF32>(
-    o: &RenderOpts,
-    logits: &[L],
-    shape: (usize, usize),
-    crop: (usize, usize),
-    w: usize,
-    y: usize,
-    checker_srgb: &[f32],
-    r: Row<'_, u16>,
-) {
-    let (sh, sw) = shape;
-    let (t, l) = crop;
-    let plane = sh * sw;
-    let denom = crate::color::asinh_denom();
-    let at = |c: usize, x: usize| logits[c * plane + (t + y) * sw + (l + x)].to_f32();
+fn render_row_video<P: Px>(o: &RenderOpts, src: &P, w: usize, y: usize, checker_srgb: &[f32], r: Row<'_, u16>) {
     let want_color = o.fg || o.checker || o.cutout;
     let [mut alpha, mut fg, mut ck, mut cu] = r;
     // loop: HOT-PATH-OK — one output row
     for x in 0..w {
-        let pa = at(0, x).clamp(0.0, 1.0);
+        let pa = src.alpha(y, x);
         if let Some(a) = alpha.as_deref_mut() {
             let v = to_u16(pa);
             a[3 * x..3 * x + 3].copy_from_slice(&[v, v, v]);
@@ -198,14 +343,12 @@ fn render_row_video<L: ToF32>(
         if !want_color {
             continue;
         }
-        let lin = [0, 1, 2].map(|c| o.adjust.invert(asinh_to_linear(at(1 + c, x), denom)));
-        let pos = lin.map(|v| v.max(0.0));
-        let pf = pos.map(|v| linear_to_srgb(v).clamp(0.0, 1.0));
+        let (pf, lin_d) = src.video(y, x);
         if let Some(f) = fg.as_deref_mut() {
             f[3 * x..3 * x + 3].copy_from_slice(&[to_u16(pf[2]), to_u16(pf[1]), to_u16(pf[0])]);
         }
         if let Some(c) = cu.as_deref_mut() {
-            let d = if o.cutout_linear { despill(pos, o.despill).map(|v| v.clamp(0.0, 1.0)) } else { despill(pf, o.despill) };
+            let d = if o.cutout_linear { lin_d } else { despill(pf, o.despill) };
             // premultiplied in the file's own coding, which is what Nuke's and Resolve's "premultiplied" reads undo;
             // the colour clamped to the file's range first (despill can push it past 1), so unpremultiplying gives
             // the straight colour a file can hold

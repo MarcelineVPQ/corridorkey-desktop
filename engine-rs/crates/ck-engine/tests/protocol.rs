@@ -181,6 +181,8 @@ fn estimate_answers_per_window_with_its_id_and_bad_ones_are_bad_requests() {
             json!({"cmd": "estimate", "id": "e3", "input": clip, "windows": [[4, 8, false]]}),
             json!({"cmd": "estimate", "id": "e4", "windows": [[8, 4, false]]}),
             json!({"cmd": "estimate", "id": "e5", "input": clip, "windows": [[8, 4, false]], "vram_budget_gb": "lots"}),
+            json!({"cmd": "estimate", "id": "e6", "input": clip, "windows": [[8, 4, false]], "model_scale": 0}),
+            json!({"cmd": "estimate", "id": "e7", "input": clip, "windows": [[8, 4, false]], "model_scale": 2}),
             json!({"cmd": "ping"}),
         ],
         &[],
@@ -196,11 +198,13 @@ fn estimate_answers_per_window_with_its_id_and_bad_ones_are_bad_requests() {
     assert!(w[0]["peak_bytes"].as_u64().unwrap() > w[1]["peak_bytes"].as_u64().unwrap(), "normal mode needs more than low-memory");
     assert_eq!(r[0]["free_bytes"], Value::Null);
     assert_eq!((r[1]["type"].as_str(), r[1]["id"].as_str(), r[1]["code"].as_str()), (Some("error"), Some("e2"), Some("input")));
-    // loop: NOT-WORTH — three replies
-    for (i, id) in [(2, "e3"), (3, "e4"), (4, "e5")] {
+    // loop: NOT-WORTH — four replies
+    for (i, id) in [(2, "e3"), (3, "e4"), (4, "e5"), (5, "e6")] {
         assert_eq!((r[i]["id"].as_str(), r[i]["code"].as_str()), (Some(id), Some("bad-request")), "{}", r[i]);
     }
-    assert_eq!(r[5]["type"], "pong", "the engine keeps running");
+    // model scale: the scaled size (1x1 at 2.0 -> 2x2)
+    assert_eq!((r[6]["id"].as_str(), r[6]["model_w"].as_u64(), r[6]["model_h"].as_u64(), r[6]["width"].as_u64()), (Some("e7"), Some(2), Some(2), Some(1)));
+    assert_eq!(r[7]["type"], "pong", "the engine keeps running");
 }
 
 #[test]

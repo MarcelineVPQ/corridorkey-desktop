@@ -63,7 +63,7 @@ between jobs. Reply below; an unreadable config is a `bad-request` carrying OCIO
 
 `estimate` (Rust engine, additive; backlog row 41): the peak graphics memory a run would take, per window, before
 any job. `input` as a run's; `windows` a list of `[hann_chunk, hann_stride, low_vram]` (1 to 64 of them, checked as a
-run's window: chunk and stride at least 1, the stride not past the chunk); optional `num_frames` (as the run option)
+run's window: chunk and stride at least 1, the stride not past the chunk); optional `num_frames` and `model_scale` (as the run options: the estimate is the scaled, padded size's; the reply adds `model_scale`, `model_w`, `model_h`)
 and `vram_budget_gb` (as the run option; absent = the engine's `CK_ENGINE_VRAM_BUDGET_GB`). The engine probes the clip
 for its size and frame count only (ffprobe, or a frame folder's first header: nothing decoded, no model loaded, no
 CUDA context) and answers at once between jobs. Each window's `peak_bytes` is the estimate the automatic window and
@@ -100,6 +100,9 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
 | `frame_dir_fps` | number | 24 |
 | `frame_dir_linear` | bool | false |
 | `num_frames` | int | −1 (whole clip) |
+| `model_scale` | number | Rust engine (backlog row 42; docs/PARITY.md): the internal resolution, the original's `--model_scale`. 1.0 (absent) = native; above 0, at most 2.0, else a `bad-request`. Frames (and hints) are resized with cv2's Lanczos-4 (ported bit for bit) to each side × the scale (Python's round, half to even), padded, keyed, and the outputs resized back to the native size at the points where the original calls its output resize (which upstream leaves unimplemented: its own runtime stops at any scale but 1.0; the PyTorch engine refuses one as an `input` error). A `log` line names the size the networks run at; `_settings.txt` writes the value |
+| `linear_brightness`, `linear_contrast`, `linear_contrast_pivot` | number | Rust engine and the PyTorch engine (backlog row 45): the original's scene-linear adjust, `gain * (pivot + contrast * (linear − pivot))` on the model's input and its inverse on the foreground. 1.0 / 1.0 / 0.18 (identity). **Video inputs only**, as in the original (a frame folder runs without it; a `log` line says so; `_settings.txt` adds `Linear Adjust Applied:`). Brightness and contrast at 0 or below are a `bad-request` |
+| `start_mode`, `seed` | `begin` \| `middle` \| `random_middle`, int ≥ 0 | Rust engine and the PyTorch engine (backlog row 45): which part of a **video** `num_frames` takes (the original's `--start_mode` / `--seed`; `random_middle` draws with NumPy's generator, ported bit for bit). Without `num_frames`, or on a frame folder, the start is frame 0. A hint video starts at the same frame. `_settings.txt` adds `Start Frame:` |
 | `video_codec` | `h264-lossless` \| `dnxhr444` \| `h264-crf12` | Rust engine, video outputs (backlog row 26): `h264-lossless` = libx264 `-qp 0`, High 4:4:4 Predictive, yuv444p10le, `.mp4`; `dnxhr444` = ffmpeg's `dnxhd` encoder, profile `dnxhr_444`, yuv444p10le, `.mov`; `h264-crf12` = the original's libx264 CRF 12, `.mp4`. Absent = `h264-crf12` (the original's output; the app sends `h264-lossless` for new jobs). Any other name is a `bad-request`; EXR jobs ignore it. None carries alpha: see the cutout below |
 | `crf`, `preset`, `pix_fmt` | | ffmpeg settings for the video path (12, medium, yuv444p10le). `crf` and `pix_fmt` apply to `h264-crf12` only, `preset` to both H.264 codecs |
 | `color_config` | path \| `ocio://` name | Rust engine: the OpenColorIO config for `input_colorspace` / `output_colorspace`. Absent = `$OCIO` as the engine sees it, else OCIO's built-in ACES studio config (`ocio://studio-config-latest`, recorded by its versioned name) |
@@ -205,7 +208,7 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
   message says which). Before, these were `engine`.
 - Rust engine: a request line that isn't UTF-8 text, a `cancel` without an `id`, a
   `run` option outside its documented range (`hint_quality`, `carry_hint_quality`,
-  `despill_strength`: 0–1; for video output a `video_codec` it doesn't know, a `preset` or `pix_fmt` libx264 doesn't take, a
+  `despill_strength`: 0–1; `model_scale` above 0 and at most 2; `linear_brightness` and `linear_contrast` above 0; `start_mode` one of its three; `seed` a whole number ≥ 0; for video output a `video_codec` it doesn't know, a `preset` or `pix_fmt` libx264 doesn't take, a
   `crf` outside 0–51, or 0–63 for 10-bit formats) or a number that isn't finite (`"nan"`, `"inf"`) is a
   `bad-request` (for a `run`, with its id, before anything loads); the engine keeps
   reading. An option that isn't a number at all stays an `input` error.

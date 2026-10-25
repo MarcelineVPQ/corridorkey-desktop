@@ -24,17 +24,19 @@ export interface EstimatorDeps {
 
 /**
  * The `estimate` request: every manual window, in normal and in low-memory mode. `limitGb`: the clip's graphics
- * memory limit (backlog row 43), sent as the run sends it, so the verdicts are weighed against the same budget.
+ * memory limit (backlog row 43), sent as the run sends it, so the verdicts are weighed against the same budget;
+ * `modelScale`: the clip's internal resolution (backlog row 42), sent only when it isn't full.
  */
-export function estimateRequest(id: string, input: string, limitGb: number | null = null): Record<string, unknown> {
+export function estimateRequest(id: string, input: string, limitGb: number | null = null, modelScale = 1): Record<string, unknown> {
   // loop: NOT-WORTH — six windows, once per estimate
   const req: Record<string, unknown> = { cmd: "estimate", id, input, windows: MANUAL_WINDOWS.flatMap(([c, s]) => [[c, s, false] as const, [c, s, true] as const]) };
   if (limitGb !== null) req.vram_budget_gb = limitGb;
+  if (modelScale !== 1) req.model_scale = modelScale;
   return req;
 }
 
-/** One reading per clip and limit. */
-const cacheKey = (input: string, limitGb: number | null) => `${limitGb ?? "auto"}|${input}`;
+/** One reading per clip, limit and internal resolution. */
+const cacheKey = (input: string, limitGb: number | null, modelScale: number) => `${limitGb ?? "auto"}|${modelScale}|${input}`;
 
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
@@ -93,12 +95,12 @@ export class Estimator {
    * The estimate for a clip under its graphics memory limit (null = Auto). `engineBusy`: the queue runs, so no
    * engine is started; the last reading (if any) comes back marked stale.
    */
-  ask(input: string, engineBusy: boolean, limitGb: number | null = null): Promise<MemoryEstimateResult> {
-    const key = cacheKey(input, limitGb);
+  ask(input: string, engineBusy: boolean, limitGb: number | null = null, modelScale = 1): Promise<MemoryEstimateResult> {
+    const key = cacheKey(input, limitGb, modelScale);
     const cached = this.cache.get(key);
     if (engineBusy) return Promise.resolve(cached ? { ok: true, estimate: cached, stale: true } : { ok: false, reason: "Shown when the queue isn't running (the engine is busy keying)." });
     if (cached && this.now() - cached.at < ESTIMATE_FRESH_MS) return Promise.resolve({ ok: true, estimate: cached, stale: false });
-    const next = this.chain.then(() => this.read(input, limitGb));
+    const next = this.chain.then(() => this.read(input, limitGb, modelScale));
     // error: NOT-WORTH — read() resolves with its failure; the chain only orders the asks
     this.chain = next.catch(() => {});
     return next;
@@ -110,8 +112,8 @@ export class Estimator {
     this.proc = null;
   }
 
-  private async read(input: string, limitGb: number | null): Promise<MemoryEstimateResult> {
-    const key = cacheKey(input, limitGb);
+  private async read(input: string, limitGb: number | null, modelScale: number): Promise<MemoryEstimateResult> {
+    const key = cacheKey(input, limitGb, modelScale);
     // a fresh reading may have come in while this ask waited its turn
     const cached = this.cache.get(key);
     if (cached && this.now() - cached.at < ESTIMATE_FRESH_MS) return { ok: true, estimate: cached, stale: false };
@@ -132,7 +134,7 @@ export class Estimator {
     }, ESTIMATE_TIMEOUT_MS);
     try {
       await proc.start();
-      proc.send(estimateRequest(id, input, limitGb));
+      proc.send(estimateRequest(id, input, limitGb, modelScale));
       // loop: SERIAL-REQUIRED — waits for the one reply [bounded: ESTIMATE_TIMEOUT_MS, or the engine's exit]
       const r = await answered;
       if (r instanceof Error) return { ok: false, reason: `No estimate: ${r.message}.` };

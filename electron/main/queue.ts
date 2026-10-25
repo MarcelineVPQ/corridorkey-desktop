@@ -62,6 +62,14 @@ export function engineOptions(o: JobOptions, kind: "video" | "frames", tensorrt 
     out.frame_dir_fps = o.frameDirFps;
     out.frame_dir_linear = o.frameDirLinear;
   }
+  // internal resolution (backlog row 42): sent only when not full, so a job at full sends what it always did
+  if (o.modelScale !== 1) out.model_scale = o.modelScale;
+  // the linear adjust (row 45): video clips only (the original's frame-folder probe ignores it), and only when set
+  if (kind === "video" && (o.linearBrightness !== 1 || o.linearContrast !== 1)) {
+    out.linear_brightness = o.linearBrightness;
+    out.linear_contrast = o.linearContrast;
+    out.linear_contrast_pivot = o.linearContrastPivot;
+  }
   if (tensorrt) out.tensorrt = true;
   if (rust && o.outputFormat === "video") out.video_codec = o.videoCodec;
   return out;

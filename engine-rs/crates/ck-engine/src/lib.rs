@@ -47,8 +47,13 @@ fn estimate_reply<B: Backend>(backend: &mut B, req: &Value) -> Value {
             None => return json!({"type": "error", "code": "bad-request", "message": format!("vram_budget_gb: a positive number, got {v}")}),
         },
     };
+    // the run option's checks (backlog row 42): the estimate is the scaled size's
+    let model_scale = match req.as_object().map(ck_core::job::model_scale).unwrap_or(Ok(1.0)) {
+        Ok(s) => s,
+        Err(e) => return json!({"type": "error", "code": e.code.as_str(), "message": e.message}),
+    };
     let mem = backend.card_memory();
-    match ck_core::vram::estimate(&input, num_frames, &windows, mem, cap) {
+    match ck_core::vram::estimate(&input, num_frames, model_scale, &windows, mem, cap) {
         Ok(v) => v,
         Err(e) => json!({"type": "error", "code": e.code.as_str(), "message": e.message}),
     }

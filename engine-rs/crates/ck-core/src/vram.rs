@@ -204,15 +204,22 @@ pub fn window_estimates(shape_hw: (usize, usize), num_frames: usize, windows: &[
 /// The `estimate` command (docs/ENGINE_PROTOCOL.md): the clip probed for its size and frame count only (no
 /// decoding, no model), then the peak estimate per window against the card's memory. `cap_gb`: the request's
 /// `vram_budget_gb`, else the engine's CK_ENGINE_VRAM_BUDGET_GB, capping the budget as it caps a run's.
-pub fn estimate(input: &str, num_frames: i64, windows: &[Window], mem: Option<CardMemory>, cap_gb: Option<f64>) -> Result<serde_json::Value, crate::Error> {
-    let meta = crate::clip::probe_size(std::path::Path::new(input), num_frames)?;
+pub fn estimate(
+    input: &str,
+    num_frames: i64,
+    model_scale: f64,
+    windows: &[Window],
+    mem: Option<CardMemory>,
+    cap_gb: Option<f64>,
+) -> Result<serde_json::Value, crate::Error> {
+    let meta = crate::clip::probe_size(std::path::Path::new(input), num_frames, model_scale)?;
     let budget = mem.map(|m| match cap_gb {
         Some(cap) if m.source == "gpu" => m.budget.min((cap * GIB) as u64),
         _ => m.budget,
     });
     Ok(serde_json::json!({
         "type": "estimate",
-        "width": meta.w, "height": meta.h, "shape_w": meta.shape_w, "shape_h": meta.shape_h, "frames": meta.num_frames,
+        "width": meta.w, "height": meta.h, "model_scale": meta.model_scale, "model_w": meta.model_w, "model_h": meta.model_h, "shape_w": meta.shape_w, "shape_h": meta.shape_h, "frames": meta.num_frames,
         "total_bytes": mem.and_then(|m| m.total), "free_bytes": mem.map(|m| m.free), "budget_bytes": budget,
         "budget_source": mem.map(|m| m.source), "budget_cap_gb": cap_gb, "provider": mem.map(|m| m.provider),
         "estimate_basis": "onnxruntime-cuda-measured", "margin_scale": MARGIN_SCALE, "margin_gb": MARGIN_GB,
@@ -492,15 +499,19 @@ mod tests {
             image::RgbImage::new(200, 130).save(dir.join(format!("f_{i:04}.png"))).unwrap();
         }
         let mem = CardMemory { total: Some(16 << 30), free: 12 << 30, budget: 12 << 30, source: "gpu", provider: "cuda" };
-        let r = estimate(dir.to_str().unwrap(), -1, &[(8, 4, false)], Some(mem), Some(10.0)).unwrap();
+        let r = estimate(dir.to_str().unwrap(), -1, 1.0, &[(8, 4, false)], Some(mem), Some(10.0)).unwrap();
         let size = (r["width"].as_u64(), r["height"].as_u64(), r["shape_w"].as_u64(), r["shape_h"].as_u64(), r["frames"].as_u64());
         assert_eq!(size, (Some(200), Some(130), Some(256), Some(256), Some(3)));
         assert_eq!(r["budget_bytes"].as_u64(), Some(10 << 30), "the cap wins over the free memory");
         assert_eq!((r["total_bytes"].as_u64(), r["free_bytes"].as_u64()), (Some(16 << 30), Some(12 << 30)));
         assert_eq!(r["windows"][0]["frames"], json!(3));
-        let r2 = estimate(dir.to_str().unwrap(), 2, &[(8, 4, false)], None, None).unwrap();
+        let r2 = estimate(dir.to_str().unwrap(), 2, 1.0, &[(8, 4, false)], None, None).unwrap();
         assert_eq!((r2["frames"].as_u64(), r2["total_bytes"].clone(), r2["windows"][0]["fits"].clone()), (Some(2), Value::Null, Value::Null));
+        // model scale (backlog row 42): the estimate is the scaled, padded size's (200x130 at 2.0 -> 400x260 -> 512x384)
+        let r3 = estimate(dir.to_str().unwrap(), -1, 2.0, &[(8, 4, false)], None, None).unwrap();
+        let s3 = (r3["width"].as_u64(), r3["model_w"].as_u64(), r3["model_h"].as_u64(), r3["shape_w"].as_u64(), r3["shape_h"].as_u64());
+        assert_eq!(s3, (Some(200), Some(400), Some(260), Some(512), Some(384)));
         let _ = std::fs::remove_dir_all(&dir);
-        assert_eq!(estimate("/no/such/clip.mov", -1, &[(8, 4, false)], None, None).unwrap_err().code.as_str(), "input");
+        assert_eq!(estimate("/no/such/clip.mov", -1, 1.0, &[(8, 4, false)], None, None).unwrap_err().code.as_str(), "input");
     }
 }

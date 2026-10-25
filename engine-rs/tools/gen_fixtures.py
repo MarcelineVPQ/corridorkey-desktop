@@ -5,6 +5,7 @@ Run with a CorridorKey2.0 checkout's venv (torch, cv2, numpy); the checkout is o
   <CorridorKey2.0>/venv/bin/python engine-rs/tools/gen_fixtures.py <CorridorKey2.0> engine-rs/crates/ck-core/tests/fixtures
 """
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -132,4 +133,111 @@ for name in ("rgb16.png", "rgb8.png", "q90.jpg"):
 gray16 = rng.integers(0, 65536, size=(24, 32), dtype=np.uint16)
 cv2.imwrite(str(stills / "hint16.png"), gray16)
 save("still_hint16", vio.read_hint_image(stills / "hint16.png"))
+
+# ===== backlog rows 42 and 45 (2026-10-25): model scale, linear adjust, start mode; their own generator so the
+# fixtures above stay byte-identical
+rng2 = np.random.default_rng(4242)
+
+# --- cv2 Lanczos-4, bit for bit: 1 and 3 channels (cv2's cn), up and down, widths whose w * cn is not a multiple of 4
+lz_cases = {}
+# loop: NOT-WORTH — six resize cases (fixture generation)
+for name, (h, w, c), (ho, wo) in [("c1_up", (23, 37, 1), (41, 59)), ("c1_down", (41, 59, 1), (23, 37)),
+                                   ("c3_up", (19, 29, 3), (37, 51)), ("c3_down", (37, 51, 3), (19, 29)),
+                                   ("c3_half", (40, 66, 3), (20, 33)), ("c1_x2", (20, 33, 1), (40, 66))]:
+    img = rng2.uniform(-0.3, 1.4, size=(h, w, c)).astype(np.float32)
+    res = cv2.resize(img if c > 1 else img[:, :, 0], (wo, ho), interpolation=cv2.INTER_LANCZOS4)
+    res = res if c > 1 else res[:, :, None]
+    save(f"lz_{name}_in", img.transpose(2, 0, 1))
+    save(f"lz_{name}_out", res.transpose(2, 0, 1))
+    lz_cases[name] = [ho, wo]
+
+
+def lanczos_out(x, meta):
+    """runtime._resize_output_torch completed with upstream's own video_io.resize_chw_lanczos (upstream raises here:
+    'non-native scaling would need explicit Lanczos output rendering')."""
+    if tuple(meta["model_native_hw"]) == tuple(meta["output_hw"]):
+        return x
+    oh, ow = meta["output_hw"]
+    # loop: NOT-WORTH — the frames of a fixture batch (one)
+    return torch.from_numpy(np.stack([vio.resize_chw_lanczos(f.numpy(), (oh, ow)) for f in x.cpu()]))
+
+
+rt._resize_output_torch = lanczos_out
+
+# --- linear adjust: apply (numpy, video_io) and its inverse (torch, runtime) on the colour sweep
+adj_cases = [(1.7, 1.3, 0.18), (0.6, 0.8, 0.25)]
+# loop: NOT-WORTH — two adjust settings (fixture generation)
+for i, (g, c, p) in enumerate(adj_cases):
+    m = {"linear_brightness": g, "linear_contrast": c, "linear_contrast_pivot": p}
+    save(f"adjust_apply_{i}", vio.apply_linear_adjust(x, m))
+    save(f"adjust_invert_{i}", rt._linear_adjust_inverse_torch(torch.from_numpy(x), m).numpy())
+
+# --- video frame at a model scale with the adjust: 37x53 -> 28x40 (pad to 128x128)
+frame2 = rng2.integers(0, 256, size=(37, 53, 3), dtype=np.uint8)
+save("scaled_frame_rgb", frame2)
+smeta = {"shape_hw": (128, 128), "model_native_hw": (28, 40), "linear_brightness": 1.5, "linear_contrast": 1.2,
+         "linear_contrast_pivot": 0.18}
+model_t, found_t, review_t = vio.preprocess_video_frame_views(frame2[:, :, ::-1].copy(), smeta, need_model=True)
+save("scaled_video_model", bf(model_t))
+save("scaled_video_display", bf(found_t))
+smeta_id = dict(smeta, linear_brightness=1.0, linear_contrast=1.0)
+model_t, found_t, review_t = vio.preprocess_video_frame_views(frame2[:, :, ::-1].copy(), smeta_id, need_model=True)
+save("scaled_video_model_id", bf(model_t))
+save("scaled_video_display_id", bf(found_t))
+# the same frame upscaled (scale 1.5: 37x53 -> 56x80) with the adjust at native size... and the adjust alone (scale 1)
+ameta = {"shape_hw": (128, 128), "model_native_hw": (37, 53), "linear_brightness": 0.7, "linear_contrast": 1.4,
+         "linear_contrast_pivot": 0.3}
+model_t, found_t, review_t = vio.preprocess_video_frame_views(frame2[:, :, ::-1].copy(), ameta, need_model=True)
+save("adjusted_video_model", bf(model_t))
+save("adjusted_video_display", bf(found_t))
+
+# --- frame folder at a model scale: display-coded PNG and scene-linear EXR, 24x32 -> 18x24 (pad to 128x128)
+fmeta = {"shape_hw": (128, 128), "model_native_hw": (18, 24), "exr_linear": False}
+m_t, d_t, _ = vio.preprocess_frame_dir_path(str(stills / "rgb8.png"), fmeta, need_model=True)
+save("scaled_dir_png_model", bf(m_t))
+save("scaled_dir_png_display", bf(d_t))
+os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
+lin_exr = rng2.uniform(-0.1, 3.0, size=(24, 32, 3)).astype(np.float32)
+cv2.imwrite(str(stills / "linear.exr"), lin_exr[:, :, ::-1].copy(), [cv2.IMWRITE_EXR_TYPE, cv2.IMWRITE_EXR_TYPE_FLOAT])
+m_t, d_t, _ = vio.preprocess_frame_dir_path(str(stills / "linear.exr"), dict(fmeta, exr_linear=True), need_model=True)
+save("scaled_dir_exr_model", bf(m_t))
+save("scaled_dir_exr_display", bf(d_t))
+
+# --- hints at a model scale: a video hint frame 30x40 -> 22x30; the first-frame hint at the clip's 24x32 -> 18x24
+hmeta = {"shape_hw": (128, 128), "model_native_hw": (22, 30), "native_hw": (30, 40)}
+save("scaled_hint_prep", bf(vio.preprocess_hint_frame(hint_rgb[:, :, ::-1].copy(), hmeta))[0])
+imeta = {"shape_hw": (128, 128), "model_native_hw": (18, 24), "native_hw": (24, 32),
+         "pad": vio.center_pad_to_shape(np.zeros((18, 24), np.float32), 128, 128)[1]}
+save("scaled_initial_hint", bf(vio.load_initial_hint_frame(str(stills / "hint16.png"), imeta))[0])
+
+# --- render at a model scale: logits (4, 40, 56), model crop 30x44 at pad (6, 6, 5, 5), outputs 45x66 (x1.5) and
+# 20x29 (down), with the linear adjust; upstream's render with its output resize completed as above
+srend = {}
+# loop: NOT-WORTH — two output sizes (fixture generation)
+for tag, ohw in [("up", (45, 66)), ("down", (20, 29))]:
+    rm = {"model_native_hw": (30, 44), "output_hw": ohw, "pad": (6, 6, 5, 5), "despill_strength": 0.5,
+          "linear_brightness": 1.3, "linear_contrast": 0.9, "linear_contrast_pivot": 0.18}
+    ck = torch.from_numpy(vio.make_checker(*ohw))
+    # loop: NOT-WORTH — two video render modes (fixture generation)
+    for lin in (False, True):
+        rm["cutout_linear"] = lin
+        r = rt._render_predictions_torch(rm, outs, ck, torch.from_numpy(logits)[None])
+        # loop: NOT-WORTH — four outputs (fixture generation)
+        for k, v in r.items():
+            if k == "cutout" or not lin:
+                save(f"srender_{tag}_video_{k}{'_lin' if lin and k == 'cutout' else ''}", v[0])
+    r = rt._render_predictions_exr_torch(rm, outs, ck, torch.from_numpy(logits)[None])
+    # loop: NOT-WORTH — four outputs (fixture generation)
+    for k, v in r.items():
+        save(f"srender_{tag}_exr_{k}", v[0])
+    srend[tag] = list(ohw)
+
+# --- start_mode random_middle: np.random.default_rng(seed).integers(lo, hi + 1)
+draws = []
+# loop: NOT-WORTH — a few hundred (seed, range) draws (fixture generation)
+for seed in list(range(40)) + [123456789, 2**32 - 1, 2**32, 2**32 + 5, 2**53 + 1, 2**63, 2**64 - 1]:
+    # loop: NOT-WORTH — eight ranges per seed
+    for lo, hi in [(0, 0), (0, 1), (22, 67), (5, 1000), (0, 2**31), (0, 2**32 - 2), (0, 2**32 - 1), (7, 2**40 + 3)]:
+        draws.append({"seed": str(seed), "lo": lo, "hi": hi, "v": int(np.random.default_rng(seed).integers(lo, hi + 1))})
+(out / "rows_42_45.json").write_text(json.dumps({"lanczos": lz_cases, "adjust": adj_cases, "srender": srend, "draws": draws}))
 print("fixtures written to", out)

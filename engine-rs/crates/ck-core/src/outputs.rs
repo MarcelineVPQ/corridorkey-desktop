@@ -5,7 +5,7 @@
 //! number of frames every writer has taken (the protocol's `frames`, counted when handed to the writers, as
 //! before). The writers go back to the caller's list when the worker is finished or dropped (also on an early
 //! error), so the caller can release them and check what was written.
-use crate::render::{render, RenderOpts};
+use crate::render::{render_scaled, RenderOpts};
 use crate::runtime::Data;
 use crate::writers::Writer;
 use crate::Error;
@@ -21,6 +21,8 @@ pub(crate) type Writers = Vec<(String, Box<dyn Writer>)>;
 pub(crate) struct Geometry {
     pub(crate) shape: (usize, usize),
     pub(crate) crop: (usize, usize),
+    /// the networks' (unpadded) size; = hw unless the job has a model scale (backlog row 42)
+    pub(crate) model: (usize, usize),
     pub(crate) hw: (usize, usize),
 }
 
@@ -55,8 +57,8 @@ impl<'a> RenderWorker<'a> {
                 let t = std::time::Instant::now();
                 // read in stage 2's own type (float16 values converted as they are used, off the card's thread)
                 let rendered = match &logits {
-                    Data::F16(v) => render(&ro, v, geo.shape, geo.crop, geo.hw, &checker),
-                    Data::F32(v) => render(&ro, v, geo.shape, geo.crop, geo.hw, &checker),
+                    Data::F16(v) => render_scaled(&ro, v, geo.shape, geo.crop, geo.model, geo.hw, &checker),
+                    Data::F32(v) => render_scaled(&ro, v, geo.shape, geo.crop, geo.model, geo.hw, &checker),
                     Data::Bf16(_) | Data::F16Ref(_) | Data::F32Ref(_) => {
                         res = Err(Error::engine("stage 2 logits as bfloat16".into()));
                         break;
@@ -181,7 +183,7 @@ mod tests {
     #[test]
     fn frame_counts_and_seconds_come_back() {
         let mut writers: Writers = vec![("alpha".into(), Box::new(Counting { frames: 0, fail_at: 0 }))];
-        let geo = Geometry { shape: (2, 2), crop: (0, 0), hw: (2, 2) };
+        let geo = Geometry { shape: (2, 2), crop: (0, 0), model: (2, 2), hw: (2, 2) };
         let mut w = RenderWorker::start(&mut writers, opts(), vec![0.5; 4], geo).unwrap();
         assert_eq!(w.done(), None);
         // loop: NOT-WORTH — three frames
@@ -196,7 +198,7 @@ mod tests {
     #[test]
     fn a_writer_failure_comes_back_with_the_writers() {
         let mut writers: Writers = vec![("alpha".into(), Box::new(Counting { frames: 0, fail_at: 2 }))];
-        let geo = Geometry { shape: (2, 2), crop: (0, 0), hw: (2, 2) };
+        let geo = Geometry { shape: (2, 2), crop: (0, 0), model: (2, 2), hw: (2, 2) };
         let e = {
             let mut w = RenderWorker::start(&mut writers, opts(), vec![0.5; 4], geo).unwrap();
             let mut err = None;

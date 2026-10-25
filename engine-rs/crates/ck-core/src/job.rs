@@ -32,6 +32,15 @@ pub struct JobConfig {
     pub frame_dir_fps: f64,
     pub frame_dir_linear: bool,
     pub num_frames: i64,
+    /// `--model_scale` (backlog row 42): > 0, 1.0 = native
+    pub model_scale: f64,
+    /// `--start_mode` / `--seed` (backlog row 45): which part of a video `num_frames` takes
+    pub start_mode: crate::clip::StartMode,
+    pub seed: u64,
+    /// `--linear_brightness` / `--linear_contrast` / `--linear_contrast_pivot` as given (backlog row 45; video inputs)
+    pub linear_brightness: f64,
+    pub linear_contrast: f64,
+    pub linear_contrast_pivot: f64,
     pub writer: WriterConfig,
     /// opt-in TensorRT (docs/BACKLOG.md row 12); off by default
     pub tensorrt: bool,
@@ -67,6 +76,16 @@ fn unit(o: &serde_json::Map<String, Value>, k: &str, default: f64) -> Result<f64
         None => Ok(default),
         Some(v) if (0.0..=1.0).contains(&v) => Ok(v),
         Some(v) => Err(Error::bad_request(format!("{k} must be between 0 and 1, got {v}"))),
+    }
+}
+
+/// The linear adjust's gain and contrast: `default` when absent, a bad request at 0 or below (upstream divides by
+/// both in its inverse: 0 gives infinite colour, a negative value turns the image inside out).
+fn positive(o: &serde_json::Map<String, Value>, k: &str, default: f64) -> Result<f64, Error> {
+    match num(o, k)? {
+        None => Ok(default),
+        Some(v) if v > 0.0 => Ok(v),
+        Some(v) => Err(Error::bad_request(format!("{k} must be above 0, got {v}"))),
     }
 }
 
@@ -138,6 +157,20 @@ fn check_writer(w: &WriterConfig) -> Result<(), Error> {
     }
     Ok(())
 }
+
+/// `model_scale` (a run option and an `estimate` field): absent = 1.0; any finite number above 0 (video_io.scaled_hw
+/// refuses 0 and below), at most MAX_MODEL_SCALE.
+pub fn model_scale(o: &serde_json::Map<String, Value>) -> Result<f64, Error> {
+    match num(o, "model_scale")? {
+        None => Ok(1.0),
+        Some(v) if v > 0.0 && v <= MAX_MODEL_SCALE => Ok(v),
+        Some(v) => Err(Error::bad_request(format!("model_scale must be above 0 and at most {MAX_MODEL_SCALE}, got {v}"))),
+    }
+}
+
+/// The largest model scale taken: the original has no ceiling; 2x the native size is already 4x the pixels (a 4K
+/// clip at 2.0 is 8K inside the networks), and a scale far past it only fails later, out of memory.
+pub const MAX_MODEL_SCALE: f64 = 2.0;
 
 /// Parse a run request (it already has id, input, output_dir and temp_dir: the engine checked them).
 pub fn parse(req: &Value) -> Result<JobConfig, Error> {
@@ -235,6 +268,22 @@ pub fn parse(req: &Value) -> Result<JobConfig, Error> {
         frame_dir_fps: num(o, "frame_dir_fps")?.unwrap_or(24.0),
         frame_dir_linear: boolean(o, "frame_dir_linear", false),
         num_frames: int(o, "num_frames")?.unwrap_or(-1),
+        model_scale: model_scale(o)?,
+        start_mode: match string(o, "start_mode") {
+            None => crate::clip::StartMode::Begin,
+            Some(s) => {
+                crate::clip::StartMode::parse(&s).ok_or_else(|| Error::bad_request(format!("start_mode must be begin, middle or random_middle, got {s:?}")))?
+            }
+        },
+        seed: match num(o, "seed")? {
+            None => 0,
+            // numpy's SeedSequence takes non-negative integers only
+            Some(v) if v >= 0.0 && v.fract() == 0.0 && v < 18446744073709551616.0 => v as u64,
+            Some(v) => return Err(Error::bad_request(format!("seed must be a whole number 0 or above, got {v}"))),
+        },
+        linear_brightness: positive(o, "linear_brightness", 1.0)?,
+        linear_contrast: positive(o, "linear_contrast", 1.0)?,
+        linear_contrast_pivot: num(o, "linear_contrast_pivot")?.unwrap_or(0.18),
         writer,
         tensorrt: boolean(o, "tensorrt", false),
         vram_budget_gb: match num(o, "vram_budget_gb")? {
@@ -248,6 +297,23 @@ pub fn parse(req: &Value) -> Result<JobConfig, Error> {
         input_colorspace: string(o, "input_colorspace").filter(|s| !s.trim().is_empty()),
         output_colorspace: string(o, "output_colorspace").filter(|s| !s.trim().is_empty()),
     })
+}
+
+impl JobConfig {
+    /// The linear adjust as the runtime applies it (identity at brightness = contrast = 1).
+    pub fn adjust(&self) -> crate::color::LinearAdjust {
+        crate::color::LinearAdjust::new(self.linear_brightness, self.linear_contrast, self.linear_contrast_pivot)
+    }
+    /// What the video probe takes from the job.
+    pub fn probe_opts(&self) -> crate::clip::ProbeOpts {
+        crate::clip::ProbeOpts {
+            num_frames: self.num_frames,
+            model_scale: self.model_scale,
+            start_mode: self.start_mode,
+            seed: self.seed,
+            adjust: self.adjust(),
+        }
+    }
 }
 
 /// The file-name suffix of an output (runtime.run_inference's `suffix`).
@@ -357,6 +423,33 @@ mod tests {
         assert_eq!((c.outputs.join(","), c.alpha_for_cutout), ("alpha,cutout".to_string(), false));
         let c = parse(&req(json!({"outputs": ["cutout"], "output_format": "exr"}))).unwrap();
         assert_eq!((c.outputs.join(","), c.alpha_for_cutout), ("cutout".to_string(), false));
+    }
+
+    #[test]
+    fn model_scale_start_mode_and_linear_adjust() {
+        let c = parse(&req(json!({}))).unwrap();
+        assert_eq!((c.model_scale, c.start_mode, c.seed), (1.0, crate::clip::StartMode::Begin, 0));
+        assert_eq!((c.linear_brightness, c.linear_contrast, c.linear_contrast_pivot), (1.0, 1.0, 0.18));
+        assert!(c.adjust().is_identity());
+        let c = parse(&req(json!({"model_scale": 0.5, "start_mode": "random_middle", "seed": 7, "linear_brightness": 2, "linear_contrast": "1.25", "linear_contrast_pivot": 0.1}))).unwrap();
+        assert_eq!((c.model_scale, c.start_mode, c.seed), (0.5, crate::clip::StartMode::RandomMiddle, 7));
+        assert_eq!((c.linear_brightness, c.linear_contrast, c.linear_contrast_pivot), (2.0, 1.25, 0.1));
+        assert!(!c.adjust().is_identity());
+        assert_eq!(c.probe_opts().model_scale, 0.5);
+        // loop: NOT-WORTH — a test's few options
+        for o in [
+            json!({"model_scale": 0}),
+            json!({"model_scale": -0.5}),
+            json!({"model_scale": 2.5}),
+            json!({"start_mode": "end"}),
+            json!({"seed": -1}),
+            json!({"seed": 1.5}),
+            json!({"linear_brightness": 0}),
+            json!({"linear_contrast": -1}),
+            json!({"linear_contrast_pivot": "inf"}),
+        ] {
+            assert_eq!(parse(&req(o.clone())).unwrap_err().code.as_str(), "bad-request", "{o}");
+        }
     }
 
     #[test]

@@ -13,7 +13,7 @@ use super::temps::{F16File, FeatFile, TempPaths};
 use super::{FrameReport, ModelKey, NetTotals, Pipeline, Sink};
 use crate::ahead::Ahead;
 use crate::clip::ClipMeta;
-use crate::color::{bf16_round, LinearAdjust};
+use crate::color::bf16_round;
 use crate::decode::{load_initial_hint, Prefetch, Prepped};
 use crate::hann::{taper_weights, window_starts, BatonBlend};
 use crate::image::{resize_area, resize_bilinear, Planar};
@@ -176,13 +176,13 @@ impl<L: Loader> Pipeline<L> {
             despill: job.despill_strength as f32,
             cutout_linear: job.cutout_linear,
             exr: job.exr,
-            adjust: LinearAdjust::default(),
+            adjust: meta.adjust,
             color_out: ctx.color_out.clone(),
             out_linear: ctx.out_linear,
         };
         let checker = make_checker(meta.h, meta.w);
         // render + hand-off to the writers on their own thread (the writers come back when `render` ends)
-        let geo = Geometry { shape: (sh, sw), crop: (meta.pad.t, meta.pad.l), hw: (meta.h, meta.w) };
+        let geo = Geometry { shape: (sh, sw), crop: (meta.pad.t, meta.pad.l), model: (meta.model_h, meta.model_w), hw: (meta.h, meta.w) };
         let worker_s = {
             let mut writing = Writing { render: RenderWorker::start(writers, ro, checker, geo)?, report: &mut *report };
             let states = self.stage1_windows(ctx, plan, WindowsIn { rvm, found, initial_hint, starts }, &mut writing, &mut times, sink)?;

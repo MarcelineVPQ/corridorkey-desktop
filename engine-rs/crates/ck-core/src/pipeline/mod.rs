@@ -579,9 +579,9 @@ impl Pipeline<OrtLoader> {
         std::fs::create_dir_all(&job.temp_dir).map_err(|e| Error::write("the temporary folder", &job.temp_dir, &e))?;
         std::fs::create_dir_all(&job.output_dir).map_err(|e| Error::write("the output folder", &job.output_dir, &e))?;
         let mut meta = if is_dir {
-            probe_frame_dir(Path::new(&job.input), job.num_frames, job.frame_dir_fps, job.frame_dir_linear)?
+            probe_frame_dir(Path::new(&job.input), job.num_frames, job.frame_dir_fps, job.frame_dir_linear, job.model_scale)?
         } else {
-            probe_video(Path::new(&job.input), job.num_frames)?
+            probe_video(Path::new(&job.input), &job.probe_opts())?
         };
         if is_dir {
             if let Source::Frames(p) = &meta.source {
@@ -609,9 +609,23 @@ impl Pipeline<OrtLoader> {
             }
         } else {
             sink.log(&format!(
-                "  probed {} frames @ {}x{} (native {}x{}, fps {:.2}, start=0, pad=({}, {}, {}, {}))",
-                meta.num_frames, meta.shape_w, meta.shape_h, meta.w, meta.h, meta.fps, meta.pad.l, meta.pad.r, meta.pad.t, meta.pad.b
+                "  probed {} frames @ {}x{} (native {}x{}, fps {:.2}, start={}, pad=({}, {}, {}, {}))",
+                meta.num_frames, meta.shape_w, meta.shape_h, meta.w, meta.h, meta.fps, meta.start_frame, meta.pad.l, meta.pad.r, meta.pad.t, meta.pad.b
             ));
+        }
+        if meta.scaled() {
+            sink.log(&format!(
+                "  model scale {}: the networks run at {}x{} (Lanczos-4 in from {}x{}, back out to it)",
+                crate::settings::py_float(job.model_scale),
+                meta.model_w,
+                meta.model_h,
+                meta.w,
+                meta.h
+            ));
+        }
+        // upstream's frame-folder probe fixes the linear adjust at the identity: the frames are read as they are
+        if is_dir && !job.adjust().is_identity() {
+            sink.log("  linear brightness / contrast: not applied (as in the original, only video inputs take them)");
         }
         meta.exr_linear = is_dir && job.frame_dir_linear;
         // a colour-managed clip goes through its input processor instead (decode.rs prep_frame_views)
@@ -621,7 +635,7 @@ impl Pipeline<OrtLoader> {
             sink.send(json!({"type": "memory", "hann_chunk": chunk, "hann_stride": stride, "low_vram": low_vram, "auto": false, "provider": provider.name()}));
         }
         sink.send(json!({"type": "clip", "width": meta.w, "height": meta.h, "fps": meta.fps, "frames": meta.num_frames}));
-        crate::clip::model_shape_supported(meta.shape_h, meta.shape_w, meta.w, meta.h, self.models.takes_portrait())?;
+        crate::clip::model_shape_supported(meta.shape_h, meta.shape_w, meta.model_w, meta.model_h, self.models.takes_portrait())?;
         let t_all = meta.num_frames;
         let (sh, sw) = (meta.shape_h, meta.shape_w);
         // TensorRT jobs take the same window as the CUDA path (the automatic one in low-VRAM mode, below), so the
@@ -764,6 +778,14 @@ impl Pipeline<OrtLoader> {
                 hann_stride: stride,
                 low_vram,
                 num_frames: job.num_frames,
+                model_scale: job.model_scale,
+                start_mode: job.start_mode.name(),
+                seed: job.seed,
+                linear_brightness: job.linear_brightness,
+                linear_contrast: job.linear_contrast,
+                linear_contrast_pivot: job.linear_contrast_pivot,
+                start_frame: meta.start_frame,
+                adjust_applied: !meta.adjust.is_identity(),
                 decoders: &decoders,
                 exr_frames: exr_numbers.as_ref().map(|n| n.describe()),
                 color: color.as_ref().map(|c| c.settings_lines()),

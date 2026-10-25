@@ -223,6 +223,11 @@ class Engine:
         manual = "hann_chunk" in o or "hann_stride" in o or bool(o.get("low_vram"))
         chunk = int(o.get("hann_chunk") or 80)
         stride = int(o.get("hann_stride") or max(1, chunk // 2))
+        # the original's runtime renders only at model_scale 1.0: any other scale stops in its render step
+        # ("non-native scaling would need explicit Lanczos output rendering"), after the RVM pass; refused up front
+        model_scale = float(o.get("model_scale", 1.0))
+        if model_scale != 1.0:
+            raise ValueError(f"model_scale {model_scale}: the original runtime renders only at 1.0 (the Rust engine runs other scales)")
         writer = rt.WriterConfig(
             ffmpeg_bin="ffmpeg", codec="libx264", crf=int(o.get("crf", 12)),
             preset=str(o.get("preset", "medium")), pix_fmt=str(o.get("pix_fmt", "yuv444p10le")),
@@ -233,6 +238,11 @@ class Engine:
             hint_quality=float(o.get("hint_quality", 0.95)),
             carry_hint_quality=float(o.get("carry_hint_quality", 0.95)),
             num_frames=int(o.get("num_frames", -1)),
+            start_mode=str(o.get("start_mode", "begin")),
+            seed=int(o.get("seed", 0)),
+            linear_brightness=float(o.get("linear_brightness", 1.0)),
+            linear_contrast=float(o.get("linear_contrast", 1.0)),
+            linear_contrast_pivot=float(o.get("linear_contrast_pivot", 0.18)),
             low_vram=bool(o.get("low_vram", False)),
             outputs=outputs, temp_dir=Path(req["temp_dir"]),
             frame_dir_fps=float(o.get("frame_dir_fps", 24.0)),

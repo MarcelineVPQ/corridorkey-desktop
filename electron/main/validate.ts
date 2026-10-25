@@ -7,6 +7,8 @@ import { isAbsolute } from "node:path";
 import {
   DEFAULT_APPEARANCE,
   DEFAULT_OPTIONS,
+  LINEAR_RANGES,
+  MODEL_SCALES,
   OUTPUT_NAMES,
   VRAM_LIMIT_MAX_GB,
   VRAM_LIMIT_MIN_GB,
@@ -15,6 +17,7 @@ import {
   type Appearance,
   type JobOptions,
   type MemoryChoice,
+  type ModelScale,
   type OutputName,
 } from "../../src/shared/types";
 
@@ -71,6 +74,10 @@ export function sanitizeOptions(v: unknown, platform: string = process.platform)
     frameDirFps: num(o.frameDirFps, 0.001, 1000, DEFAULT_OPTIONS.frameDirFps),
     frameDirLinear: bool(o.frameDirLinear, DEFAULT_OPTIONS.frameDirLinear),
     vramLimitGb: vramLimit(o.vramLimitGb),
+    modelScale: (MODEL_SCALES as readonly unknown[]).includes(o.modelScale) ? (o.modelScale as ModelScale) : DEFAULT_OPTIONS.modelScale,
+    linearBrightness: num(o.linearBrightness, LINEAR_RANGES.brightness[0], LINEAR_RANGES.brightness[1], DEFAULT_OPTIONS.linearBrightness),
+    linearContrast: num(o.linearContrast, LINEAR_RANGES.contrast[0], LINEAR_RANGES.contrast[1], DEFAULT_OPTIONS.linearContrast),
+    linearContrastPivot: num(o.linearContrastPivot, LINEAR_RANGES.pivot[0], LINEAR_RANGES.pivot[1], DEFAULT_OPTIONS.linearContrastPivot),
   });
 }
 

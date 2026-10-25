@@ -200,82 +200,109 @@ pub(crate) fn resize_bilinear_into(img: &Planar, ho: usize, wo: usize, dst_all: 
     }
 }
 
-/// OpenCV's Lanczos-4 coefficients for fractional offset `fx` (imgproc resize.cpp interpolateLanczos4).
-fn lanczos4_coeffs(fx: f32) -> [f32; 8] {
+/// OpenCV's Lanczos-4 coefficients for the fractional offset `x` (imgproc resize.cpp `interpolateLanczos4`), in its
+/// own arithmetic: `x + 3 - i` in float, sin/cos and the quotient in double, the sum and the normalisation in float.
+fn lanczos4_coeffs(x: f32) -> [f32; 8] {
     const S45: f64 = std::f64::consts::FRAC_1_SQRT_2; // 0.7071067811865476, the same double as OpenCV's literal
     const CS: [[f64; 2]; 8] = [[1.0, 0.0], [-S45, -S45], [0.0, 1.0], [S45, -S45], [-1.0, 0.0], [S45, S45], [0.0, -1.0], [-S45, S45]];
-    let mut c = [0f32; 8];
-    if fx < f32::EPSILON {
-        c[3] = 1.0;
-        return c;
-    }
-    let fx = fx as f64;
-    let y0 = -(fx + 3.0) * std::f64::consts::PI * 0.25;
+    let xp3 = x + 3.0;
+    let y0 = -(xp3 as f64) * std::f64::consts::PI * 0.25;
     let (s0, c0) = (y0.sin(), y0.cos());
-    let mut sum = 0.0f64;
+    let mut c = [0f32; 8];
+    let mut sum = 0f32;
+    // loop: NOT-WORTH — eight taps, once per output column / row of a resize
     for i in 0..8 {
-        let y = -(fx + 3.0 - i as f64) * std::f64::consts::PI * 0.25;
-        let v = (CS[i][0] * s0 + CS[i][1] * c0) / (y * y);
-        c[i] = v as f32;
-        sum += v;
+        let yi = xp3 - i as f32;
+        c[i] = if yi.abs() >= 1e-6 {
+            let y = -(yi as f64) * std::f64::consts::PI * 0.25;
+            ((CS[i][0] * s0 + CS[i][1] * c0) / (y * y)) as f32
+        } else {
+            1e30
+        };
+        sum += c[i];
     }
-    let inv = 1.0 / sum;
-    c.iter_mut().for_each(|v| *v = (*v as f64 * inv) as f32);
+    let inv = 1.0f32 / sum;
+    c.iter_mut().for_each(|v| *v *= inv);
     c
 }
 
-/// One axis of cv2's Lanczos-4: (first source index, 8 coefficients); taps outside clamp to the edge.
-fn lanczos4_axis(n_in: usize, n_out: usize) -> Vec<(isize, [f32; 8])> {
-    let scale = n_in as f64 / n_out as f64;
+/// One axis of cv2's Lanczos-4: (the first of the 8 source taps, their coefficients, the taps reach past an edge).
+/// The source position as cv::resize computes it: `scale = 1 / (n_out / n_in)` in double, `fx` rounded to float.
+fn lanczos4_axis(n_in: usize, n_out: usize) -> Vec<(isize, [f32; 8], bool)> {
+    let scale = 1.0 / (n_out as f64 / n_in as f64);
     (0..n_out)
         .map(|d| {
             let f = ((d as f64 + 0.5) * scale - 0.5) as f32;
             let s = f.floor();
-            (s as isize - 3, lanczos4_coeffs(f - s))
+            let sx = s as isize;
+            (sx - 3, lanczos4_coeffs(f - s), sx < 3 || sx + 4 >= n_in as isize)
         })
         .collect()
 }
 
-/// cv2.resize(..., interpolation=INTER_LANCZOS4) on float32 planes (separable: horizontal, then vertical).
+/// cv2.resize(..., interpolation=INTER_LANCZOS4) of a float32 image, bit for bit (measured against cv2 4.11 on
+/// x86-64: tests/parity.rs `lanczos4_*`). `img` is the image cv2 gets with its planes as interleaved channels
+/// (`img.c` = cv2's cn: the original resizes HWC frames, 3 channels, and 1-channel mattes). Separable: 8 taps
+/// across each row, then 8 rows; taps past an edge repeat the edge pixel. The order of the sums is cv2's: across,
+/// left to right; down, cv2's 4-wide SIMD order (tap 7 first, multiply then add, no fused multiply-add) for the
+/// interleaved row's first floor(w * cn / 4) * 4 values and left to right for the rest. Rows run in parallel.
 pub fn resize_lanczos4(img: &Planar, ho: usize, wo: usize) -> Planar {
+    use rayon::prelude::*;
     if img.h == ho && img.w == wo {
         return img.clone();
     }
-    let xs = lanczos4_axis(img.w, wo);
-    let ys = lanczos4_axis(img.h, ho);
+    let (c, h, w) = (img.c, img.h, img.w);
+    let xs = lanczos4_axis(w, wo);
+    let ys = lanczos4_axis(h, ho);
     let clampi = |p: isize, n: usize| p.clamp(0, n as isize - 1) as usize;
-    let mut out = Planar::new(img.c, ho, wo);
-    let mut tmp = vec![0f32; img.h * wo];
-    // loop: HOT-PATH-OK — per hint frame and plane
-    for c in 0..img.c {
-        let src = img.plane(c);
-        // loop: HOT-PATH-OK — horizontal pass over the source rows
-        for y in 0..img.h {
-            let row = &src[y * img.w..(y + 1) * img.w];
-            // loop: HOT-PATH-OK — output columns
-            for (ox, (s, k)) in xs.iter().enumerate() {
+    // across: (c, h, wo)
+    let mut tmp = vec![0f32; c * h * wo];
+    // loop: HOT-PATH-OK — every source row of every plane, in parallel (per resized frame)
+    tmp.par_chunks_mut(wo).with_min_len(ROWS_MIN).enumerate().for_each(|(r, drow)| {
+        let row = &img.data[r * w..(r + 1) * w];
+        // loop: HOT-PATH-OK — one row's output columns
+        for (d, (s, k, edge)) in drow.iter_mut().zip(&xs) {
+            *d = if *edge {
+                // cv2's border columns: v = 0, then each tap added
                 let mut v = 0.0f32;
                 // loop: NOT-WORTH — eight taps
                 for (j, kj) in k.iter().enumerate() {
-                    v += row[clampi(s + j as isize, img.w)] * kj;
+                    v += row[clampi(s + j as isize, w)] * kj;
                 }
-                tmp[y * wo + ox] = v;
-            }
+                v
+            } else {
+                let p = &row[*s as usize..*s as usize + 8];
+                p[0] * k[0] + p[1] * k[1] + p[2] * k[2] + p[3] * k[3] + p[4] * k[4] + p[5] * k[5] + p[6] * k[6] + p[7] * k[7]
+            };
         }
-        let dst = out.plane_mut(c);
-        // loop: HOT-PATH-OK — vertical pass, output rows
-        for (oy, (s, k)) in ys.iter().enumerate() {
-            // loop: HOT-PATH-OK — output columns
-            for ox in 0..wo {
-                let mut v = 0.0f32;
-                // loop: NOT-WORTH — eight taps
-                for (j, kj) in k.iter().enumerate() {
-                    v += tmp[clampi(s + j as isize, img.h) * wo + ox] * kj;
+    });
+    // down: (c, ho, wo)
+    let simd_end = (wo * c) / 4 * 4;
+    let mut out = Planar::new(c, ho, wo);
+    // loop: HOT-PATH-OK — every output row of every plane, in parallel (per resized frame)
+    out.data.par_chunks_mut(wo).with_min_len(ROWS_MIN).enumerate().for_each(|(r, drow)| {
+        let (ch, oy) = (r / ho, r % ho);
+        let (s, k, _) = &ys[oy];
+        let plane = &tmp[ch * h * wo..(ch + 1) * h * wo];
+        let rows: [&[f32]; 8] = std::array::from_fn(|j| {
+            let sy = clampi(s + j as isize, h);
+            &plane[sy * wo..(sy + 1) * wo]
+        });
+        // loop: HOT-PATH-OK — one output row's columns
+        for (ox, d) in drow.iter_mut().enumerate() {
+            let v = |j: usize| rows[j][ox] * k[j];
+            *d = if ox * c + ch < simd_end {
+                let mut a = v(7);
+                // loop: NOT-WORTH — seven taps, cv2's SIMD order (6 down to 0)
+                for j in (0..7).rev() {
+                    a += v(j);
                 }
-                dst[oy * wo + ox] = v;
-            }
+                a
+            } else {
+                v(0) + v(1) + v(2) + v(3) + v(4) + v(5) + v(6) + v(7)
+            };
         }
-    }
+    });
     out
 }
 

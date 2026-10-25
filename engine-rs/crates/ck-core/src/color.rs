@@ -61,27 +61,46 @@ pub fn asinh_to_linear(y: f32, denom: f32) -> f32 {
 }
 
 /// The scene-linear brightness/contrast adjust (video_io.apply_linear_adjust) and its inverse
-/// (runtime._linear_adjust_inverse_torch). Identity at gain = contrast = 1, the protocol's only setting.
+/// (runtime._linear_adjust_inverse_torch): `--linear_brightness` (gain), `--linear_contrast` and
+/// `--linear_contrast_pivot` (backlog row 45). Identity, as upstream decides it, when gain and contrast are both within
+/// 1e-6 of 1 (checked on the given doubles, as Python does); the math in float32, as numpy and torch run it on the
+/// runtime's float32 frames (the Python scalars taken as float32).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LinearAdjust {
     pub(crate) gain: f32,
     pub(crate) contrast: f32,
     pub(crate) pivot: f32,
+    identity: bool,
 }
 
 impl Default for LinearAdjust {
     fn default() -> Self {
-        LinearAdjust { gain: 1.0, contrast: 1.0, pivot: 0.18 }
+        LinearAdjust::new(1.0, 1.0, 0.18)
     }
 }
 
 impl LinearAdjust {
-    pub(crate) fn is_identity(&self) -> bool {
-        (self.gain - 1.0).abs() <= 1e-6 && (self.contrast - 1.0).abs() <= 1e-6
+    pub fn new(gain: f64, contrast: f64, pivot: f64) -> LinearAdjust {
+        let identity = (gain - 1.0).abs() <= 1e-6 && (contrast - 1.0).abs() <= 1e-6;
+        LinearAdjust { gain: gain as f32, contrast: contrast as f32, pivot: pivot as f32, identity }
     }
+    /// video_io.has_linear_adjust
+    pub fn is_identity(&self) -> bool {
+        self.identity
+    }
+    /// video_io.apply_linear_adjust: gain * (pivot + contrast * (x - pivot)), on the model's linear input
     #[inline]
-    pub(crate) fn invert(&self, x: f32) -> f32 {
-        if self.is_identity() {
+    pub fn apply(&self, x: f32) -> f32 {
+        if self.identity {
+            x
+        } else {
+            self.gain * (self.pivot + self.contrast * (x - self.pivot))
+        }
+    }
+    /// runtime._linear_adjust_inverse_torch: (x / gain - pivot) / contrast + pivot, on the decoded foreground
+    #[inline]
+    pub fn invert(&self, x: f32) -> f32 {
+        if self.identity {
             x
         } else {
             (x / self.gain - self.pivot) / self.contrast + self.pivot

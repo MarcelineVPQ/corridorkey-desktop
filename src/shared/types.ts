@@ -36,6 +36,12 @@ export interface JobOptions {
   frameDirLinear: boolean;
   // Graphics memory limit (backlog row 43): the engine's `vram_budget_gb` in GiB; null = Auto (VRAM_LIMIT_AUTO_HELP)
   vramLimitGb: number | null;
+  // the networks' internal resolution (the engine's `model_scale`, backlog row 42): 1 = full
+  modelScale: ModelScale;
+  // the scene-linear exposure adjust for video clips (`linear_brightness` / `linear_contrast` / `linear_contrast_pivot`, row 45)
+  linearBrightness: number;
+  linearContrast: number;
+  linearContrastPivot: number;
 }
 
 export const DEFAULT_OPTIONS: JobOptions = {
@@ -54,7 +60,26 @@ export const DEFAULT_OPTIONS: JobOptions = {
   frameDirFps: 24,
   frameDirLinear: false,
   vramLimitGb: null,
+  modelScale: 1,
+  linearBrightness: 1,
+  linearContrast: 1,
+  linearContrastPivot: 0.18,
 };
+
+// Internal resolution: the plugin's Full / ¾ / ½ / ¼ (the original's --model_scale takes any value above 0)
+export type ModelScale = 1 | 0.75 | 0.5 | 0.25;
+export const MODEL_SCALES: ModelScale[] = [1, 0.75, 0.5, 0.25];
+
+// the linear adjust's ranges in the app (the original has none; the engine refuses 0 and below for brightness and contrast)
+export const LINEAR_RANGES = { brightness: [0.25, 4], contrast: [0.5, 2], pivot: [0.01, 1] } as const;
+
+/** video_io.scaled_hw: each side × the scale, Python's round (half to even), at least 1. */
+export function scaledSize(n: number, scale: number): number {
+  const x = n * scale;
+  const f = Math.floor(x);
+  const r = x - f === 0.5 ? (f % 2 === 0 ? f : f + 1) : Math.round(x);
+  return Math.max(1, r);
+}
 
 // the graphics memory limit's range (GiB): whole numbers, as the menus offer them
 export const VRAM_LIMIT_MIN_GB = 2;

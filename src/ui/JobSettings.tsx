@@ -1,10 +1,10 @@
 // The Queue page's panel: the selected clip's settings, one Section each.
 // Every control maps to one engine option (docs/ENGINE_PROTOCOL.md) and
 // changes what the run does (rule 4). Locked once the clip has run.
-import { Clapperboard, Film, FolderOpen, MemoryStick, Wand2, X } from "lucide-react";
+import { Clapperboard, Film, FolderOpen, MemoryStick, Scaling, SunMedium, Wand2, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { EngineKind, HintFileKind, Job, JobOptions, MemoryChoice, MemoryEstimate, MemoryEstimateResult, OutputName, VideoCodec, WindowEstimate } from "../shared/types";
-import { MANUAL_WINDOWS, OUTPUT_NAMES, VRAM_LIMIT_AUTO_HELP, videoCodecsFor, vramLimitChoices, withCutoutAlpha } from "../shared/types";
+import type { EngineKind, HintFileKind, Job, JobOptions, MemoryChoice, MemoryEstimate, MemoryEstimateResult, ModelScale, OutputName, VideoCodec, WindowEstimate } from "../shared/types";
+import { LINEAR_RANGES, MANUAL_WINDOWS, OUTPUT_NAMES, VRAM_LIMIT_AUTO_HELP, scaledSize, videoCodecsFor, vramLimitChoices, withCutoutAlpha } from "../shared/types";
 import { gibBytes } from "../shared/units";
 import { AS_USED, lowerFirst } from "../shared/texts";
 import { Accordion, Row, Section, Segmented } from "./panel/Section";
@@ -28,6 +28,15 @@ const CODEC_TEXT: Record<VideoCodec, { label: string; short: string; hint: strin
 const MATTE_HELP = "White = subject, black = background"; // theme-exempt: prose about the matte's values, not a color
 
 const HINT_TEXT = { none: "No hint", "first-frame": "First-frame matte", video: "Hint video" } as const;
+
+// Internal resolution (backlog row 42): the plugin's names for the original's --model_scale
+const SCALE_TEXT: Record<ModelScale, string> = { 1: "Full", 0.75: "¾", 0.5: "½", 0.25: "¼" };
+const SCALE_OPTIONS: [string, string][] = [
+  ["1", SCALE_TEXT[1]],
+  ["0.75", SCALE_TEXT[0.75]],
+  ["0.5", SCALE_TEXT[0.5]],
+  ["0.25", SCALE_TEXT[0.25]],
+];
 
 export function JobSettings({
   job,
@@ -73,6 +82,21 @@ export function JobSettings({
   const memStatus = (o.memory.auto ? "Automatic · from free graphics memory" : `Manual · ${o.memory.hannChunk}/${o.memory.hannStride}${o.memory.lowVram ? " · low-memory" : ""}`) + memLimit;
   // loop: HOT-PATH-OK — ≤ four outputs per render
   const outStatus = `${o.outputs.map((x) => OUTPUT_TEXT[x].label).join(", ")} · ${video ? CODEC_TEXT[codec].short : `EXR ${o.exrDtype}`}`;
+  // the PyTorch reference engine runs the original's runtime, which stops at any scale but full (no output resize)
+  const scale: ModelScale = engineKind === "python" ? 1 : o.modelScale;
+  const { width: cw, height: ch } = job.clip;
+  const inside = cw && ch ? `${scaledSize(cw, scale)}×${scaledSize(ch, scale)}` : null;
+  const scaleStatus = scale === 1 ? `Full${cw && ch ? ` · ${cw}×${ch}` : ""}` : `${SCALE_TEXT[scale]}${inside ? ` · the networks run at ${inside}` : ""}`;
+  const scaleHint =
+    engineKind === "python"
+      ? "The PyTorch reference engine runs at full resolution only (the original stops at other scales)"
+      : scale === 1
+        ? "The networks run at the clip's own size"
+        : `Faster and lighter; the result is resized back to ${cw && ch ? `${cw}×${ch}` : "the clip's size"} (Lanczos, as the original), with less edge detail`;
+  const linearSet = o.linearBrightness !== 1 || o.linearContrast !== 1;
+  const linearStatus = linearSet
+    ? `Brightness ${o.linearBrightness.toFixed(2)} · contrast ${o.linearContrast.toFixed(2)}${o.linearContrast !== 1 ? ` around ${o.linearContrastPivot.toFixed(2)}` : ""}`
+    : "Off · as shot";
 
   return (
     <Accordion page="queue" focus={focus}>
@@ -211,6 +235,78 @@ export function JobSettings({
         </Section>
       )}
 
+      <Section id="resolution" icon={Scaling} title="Internal resolution" status={scaleStatus} disabled={locked}>
+        {() => (
+          <Row label="Resolution" hint={scaleHint}>
+            {engineKind === "python" ? (
+              <span>Full</span>
+            ) : (
+              <Segmented label="Internal resolution" value={String(o.modelScale)} options={SCALE_OPTIONS} onChange={(v) => set({ modelScale: Number(v) as ModelScale })} />
+            )}
+          </Row>
+        )}
+      </Section>
+
+      {job.clip.kind === "video" && (
+        <Section id="linear" icon={SunMedium} title="Linear exposure" status={linearStatus} disabled={locked}>
+          {() => (
+            <>
+              <Row label="Brightness" hint="Gain on the scene-linear frames the networks see; the foreground is turned back after" htmlFor="lb">
+                <div className="range">
+                  <input
+                    id="lb"
+                    type="range"
+                    min={LINEAR_RANGES.brightness[0]}
+                    max={LINEAR_RANGES.brightness[1]}
+                    step={0.05}
+                    value={o.linearBrightness}
+                    onChange={(e) => set({ linearBrightness: Number(e.target.value) })}
+                  />
+                  <output>{o.linearBrightness.toFixed(2)}</output>
+                </div>
+              </Row>
+              <Row label="Contrast" hint="Around the pivot, in linear light" htmlFor="lc">
+                <div className="range">
+                  <input
+                    id="lc"
+                    type="range"
+                    min={LINEAR_RANGES.contrast[0]}
+                    max={LINEAR_RANGES.contrast[1]}
+                    step={0.05}
+                    value={o.linearContrast}
+                    onChange={(e) => set({ linearContrast: Number(e.target.value) })}
+                  />
+                  <output>{o.linearContrast.toFixed(2)}</output>
+                </div>
+              </Row>
+              {o.linearContrast !== 1 && (
+                <Row label="Contrast pivot" hint="0.18 = mid grey" htmlFor="lp">
+                  <div className="range">
+                    <input
+                      id="lp"
+                      type="range"
+                      min={LINEAR_RANGES.pivot[0]}
+                      max={LINEAR_RANGES.pivot[1]}
+                      step={0.01}
+                      value={o.linearContrastPivot}
+                      onChange={(e) => set({ linearContrastPivot: Number(e.target.value) })}
+                    />
+                    <output>{o.linearContrastPivot.toFixed(2)}</output>
+                  </div>
+                </Row>
+              )}
+              {linearSet && (
+                <Row label="">
+                  <button type="button" className="btn small" onClick={() => set({ linearBrightness: 1, linearContrast: 1, linearContrastPivot: 0.18 })}>
+                    Reset to 1.00 / 1.00 / 0.18
+                  </button>
+                </Row>
+              )}
+            </>
+          )}
+        </Section>
+      )}
+
       <Section id="memory" icon={MemoryStick} title="Graphics memory" status={memStatus} disabled={locked}>
         {() => <MemorySection job={job} options={o} queueRunning={queueRunning} platform={platform} set={set} />}
       </Section>
@@ -238,7 +334,7 @@ function MemorySection({ job, options: o, queueRunning, platform, set }: { job: 
     return () => {
       live = false;
     };
-  }, [job.id, job.clip.path, queueRunning, waiting, o.vramLimitGb]);
+  }, [job.id, job.clip.path, queueRunning, waiting, o.vramLimitGb, o.modelScale]);
   const e = est?.ok ? est.estimate : null;
   return (
     <>

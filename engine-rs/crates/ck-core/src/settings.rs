@@ -58,6 +58,16 @@ pub(crate) struct SettingsLog<'a> {
     pub(crate) hann_stride: usize,
     pub(crate) low_vram: bool,
     pub(crate) num_frames: i64,
+    /// the run options as given (the original writes cfg's values: backlog rows 42 and 45)
+    pub(crate) model_scale: f64,
+    pub(crate) start_mode: &'a str,
+    pub(crate) seed: u64,
+    pub(crate) linear_brightness: f64,
+    pub(crate) linear_contrast: f64,
+    pub(crate) linear_contrast_pivot: f64,
+    /// additive lines: the first frame really read, and whether the linear adjust reached the frames (video only)
+    pub(crate) start_frame: usize,
+    pub(crate) adjust_applied: bool,
     /// the decoders the frames are read with (additive lines at the end)
     pub(crate) decoders: &'a crate::decode::Decoders,
     /// EXR jobs: how the frames are numbered (clip.rs FrameNumbers::describe; an additive line at the end)
@@ -96,16 +106,18 @@ pub(crate) fn settings_text(s: &SettingsLog) -> String {
     t.push_str(&format!("Hann Chunk: {}\n", s.hann_chunk));
     t.push_str(&format!("Hann Stride: {}\n", s.hann_stride));
     t.push_str(&format!("Low VRAM: {}\n", py_bool(s.low_vram)));
-    t.push_str("Model Scale: 1.0\n");
+    t.push_str(&format!("Model Scale: {}\n", py_float(s.model_scale)));
     t.push_str(&format!("Num Frames: {}\n", s.num_frames));
-    t.push_str("Start Mode: begin\n");
-    t.push_str("Seed: 0\n");
-    t.push_str("Linear Brightness: 1.0\n");
-    t.push_str("Linear Contrast: 1.0\n");
-    t.push_str("Linear Contrast Pivot: 0.18\n");
+    t.push_str(&format!("Start Mode: {}\n", s.start_mode));
+    t.push_str(&format!("Seed: {}\n", s.seed));
+    t.push_str(&format!("Linear Brightness: {}\n", py_float(s.linear_brightness)));
+    t.push_str(&format!("Linear Contrast: {}\n", py_float(s.linear_contrast)));
+    t.push_str(&format!("Linear Contrast Pivot: {}\n", py_float(s.linear_contrast_pivot)));
     t.push_str(&format!("JPEG Decoder: {}\n", s.decoders.jpeg));
     t.push_str(&format!("FFmpeg: {}\n", s.decoders.ffmpeg));
     t.push_str(&format!("FFprobe: {}\n", s.decoders.ffprobe));
+    t.push_str(&format!("Start Frame: {}\n", s.start_frame));
+    t.push_str(&format!("Linear Adjust Applied: {}\n", py_bool(s.adjust_applied)));
     if let Some(f) = &s.exr_frames {
         t.push_str(&format!("EXR Frame Numbers: {f}\n"));
     }
@@ -147,14 +159,29 @@ mod tests {
                 hann_stride: 2,
                 low_vram: false,
                 num_frames: -1,
+                model_scale: 0.5,
+                start_mode: "middle",
+                seed: 3,
+                linear_brightness: 2.0,
+                linear_contrast: 1.0,
+                linear_contrast_pivot: 0.18,
+                start_frame: 12,
+                adjust_applied: true,
                 decoders: &d,
                 video_codec: exr_frames.is_none().then_some("h264-lossless"),
                 exr_frames,
                 color: None,
             })
         };
-        assert!(log(Some("source (65-184)".into())).ends_with("FFprobe: 8.0\nEXR Frame Numbers: source (65-184)\n"));
-        assert!(log(None).ends_with("FFprobe: 8.0\nVideo Codec: h264-lossless\n"));
+        let t = log(Some("source (65-184)".into()));
+        assert!(t.ends_with("FFprobe: 8.0\nStart Frame: 12\nLinear Adjust Applied: True\nEXR Frame Numbers: source (65-184)\n"), "{t}");
+        assert!(
+            t.contains(
+                "Model Scale: 0.5\nNum Frames: -1\nStart Mode: middle\nSeed: 3\nLinear Brightness: 2.0\nLinear Contrast: 1.0\nLinear Contrast Pivot: 0.18\n"
+            ),
+            "{t}"
+        );
+        assert!(log(None).ends_with("Linear Adjust Applied: True\nVideo Codec: h264-lossless\n"));
     }
 
     #[test]

@@ -18,9 +18,20 @@ pub enum Source {
 pub struct ClipMeta {
     pub source: Source,
     pub fps: f64,
-    /// native (= output = model at model_scale 1.0) height, width
+    /// native height, width (the decoded frames and the outputs)
     pub h: usize,
     pub w: usize,
+    /// the size the networks see before padding: the native size at `model_scale` (video_io.scaled_hw; = h, w at 1.0)
+    pub model_h: usize,
+    pub model_w: usize,
+    /// `--model_scale` (backlog row 42): frames Lanczos-4 resized to model_h x model_w on the way in, the outputs
+    /// back to h x w on the way out
+    pub model_scale: f64,
+    /// a video's first frame (`--start_mode` / `--seed` with `num_frames`; 0 for frame folders, as upstream)
+    pub start_frame: usize,
+    /// `--linear_brightness` / `--linear_contrast` / `--linear_contrast_pivot` (backlog row 45): video inputs only;
+    /// a frame folder keeps the identity, as upstream's probe_frame_dir_meta does
+    pub adjust: crate::color::LinearAdjust,
     /// padded model shape
     pub shape_h: usize,
     pub shape_w: usize,
@@ -37,9 +48,79 @@ pub struct ClipMeta {
 }
 
 impl ClipMeta {
-    fn with_shape(source: Source, fps: f64, h: usize, w: usize, num_frames: usize, exr_linear: bool) -> ClipMeta {
-        let (shape_h, shape_w) = (ceil_to_multiple(h, SHAPE_QUANTUM), ceil_to_multiple(w, SHAPE_QUANTUM));
-        ClipMeta { source, fps, h, w, shape_h, shape_w, pad: center_pad(h, w, shape_h, shape_w), num_frames, exr_linear, video_bits: 8, color_in: None }
+    pub(crate) fn with_shape(source: Source, fps: f64, h: usize, w: usize, num_frames: usize, exr_linear: bool, model_scale: f64) -> ClipMeta {
+        let (model_h, model_w) = scaled_hw(h, w, model_scale);
+        let (shape_h, shape_w) = (ceil_to_multiple(model_h, SHAPE_QUANTUM), ceil_to_multiple(model_w, SHAPE_QUANTUM));
+        ClipMeta {
+            source,
+            fps,
+            h,
+            w,
+            model_h,
+            model_w,
+            model_scale,
+            start_frame: 0,
+            adjust: crate::color::LinearAdjust::default(),
+            shape_h,
+            shape_w,
+            pad: center_pad(model_h, model_w, shape_h, shape_w),
+            num_frames,
+            exr_linear,
+            video_bits: 8,
+            color_in: None,
+        }
+    }
+
+    /// The networks run below (or above) the native size: frames and outputs are resized.
+    pub fn scaled(&self) -> bool {
+        (self.model_h, self.model_w) != (self.h, self.w)
+    }
+}
+
+/// video_io.scaled_hw: max(1, int(round(h * scale))) for each side, Python's round (half to even) on the double
+/// product. `scale` > 0 (the job parser checks it).
+pub fn scaled_hw(h: usize, w: usize, scale: f64) -> (usize, usize) {
+    let s = |n: usize| ((n as f64 * scale).round_ties_even() as usize).max(1);
+    (s(h), s(w))
+}
+
+/// How a video's first frame is chosen when `num_frames` takes part of it (video_io.probe_video_meta).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StartMode {
+    Begin,
+    Middle,
+    RandomMiddle,
+}
+
+impl StartMode {
+    pub fn parse(s: &str) -> Option<StartMode> {
+        match s {
+            "begin" => Some(StartMode::Begin),
+            "middle" => Some(StartMode::Middle),
+            "random_middle" => Some(StartMode::RandomMiddle),
+            _ => None,
+        }
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            StartMode::Begin => "begin",
+            StartMode::Middle => "middle",
+            StartMode::RandomMiddle => "random_middle",
+        }
+    }
+}
+
+/// probe_video_meta's start frame: only when `num_frames` > 0 leaves frames over (max_start > 0); `middle` =
+/// max_start // 2; `random_middle` = default_rng(seed).integers(max_start // 4, 3 * max_start // 4 + 1).
+pub fn start_frame(n_total: usize, n_to_load: usize, num_frames: i64, mode: StartMode, seed: u64) -> usize {
+    let max_start = n_total.saturating_sub(n_to_load);
+    if max_start == 0 || num_frames <= 0 {
+        return 0;
+    }
+    match mode {
+        StartMode::Begin => 0,
+        StartMode::Middle => max_start / 2,
+        StartMode::RandomMiddle => crate::rng::numpy_integers(seed, (max_start / 4) as i64, (3 * max_start / 4) as i64) as usize,
     }
 }
 
@@ -326,20 +407,41 @@ fn count_packets(path: &Path) -> Result<Option<usize>, Error> {
     Ok(v["streams"][0]["nb_read_packets"].as_str().and_then(|s| s.parse::<usize>().ok()).filter(|n| *n > 0))
 }
 
-/// probe_video_meta at native resolution, start "begin": the first `num_frames` frames (all when <= 0).
-pub(crate) fn probe_video(path: &Path, num_frames: i64) -> Result<ClipMeta, Error> {
+/// What a video probe needs besides the input (the job's options).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ProbeOpts {
+    pub num_frames: i64,
+    pub model_scale: f64,
+    pub start_mode: StartMode,
+    pub seed: u64,
+    pub adjust: crate::color::LinearAdjust,
+}
+
+impl ProbeOpts {
+    /// infer.py's defaults with `num_frames`
+    pub fn frames(num_frames: i64) -> ProbeOpts {
+        ProbeOpts { num_frames, model_scale: 1.0, start_mode: StartMode::Begin, seed: 0, adjust: Default::default() }
+    }
+}
+
+/// probe_video_meta: `num_frames` frames (all when <= 0) from the start frame `start_mode` picks, at `model_scale`.
+pub(crate) fn probe_video(path: &Path, o: &ProbeOpts) -> Result<ClipMeta, Error> {
+    let num_frames = o.num_frames;
     let p = ffprobe(path)?;
     let n = if num_frames <= 0 { p.frames } else { (num_frames as usize).min(p.frames) };
     if n == 0 {
         return Err(Error::input(format!("{}: no frames", path.display())));
     }
-    let mut meta = ClipMeta::with_shape(Source::Video(path.to_path_buf()), p.fps, p.h, p.w, n, false);
+    let mut meta = ClipMeta::with_shape(Source::Video(path.to_path_buf()), p.fps, p.h, p.w, n, false, o.model_scale);
     meta.video_bits = p.bits;
+    meta.start_frame = start_frame(p.frames, n, num_frames, o.start_mode, o.seed);
+    meta.adjust = o.adjust;
     Ok(meta)
 }
 
-/// probe_frame_dir_meta: the folder's frames at `fps`; the size comes from the first frame.
-pub(crate) fn probe_frame_dir(dir: &Path, num_frames: i64, fps: f64, exr_linear: bool) -> Result<ClipMeta, Error> {
+/// probe_frame_dir_meta: the folder's frames at `fps`; the size comes from the first frame. No start mode and no
+/// linear adjust (upstream's frame-folder probe fixes both).
+pub(crate) fn probe_frame_dir(dir: &Path, num_frames: i64, fps: f64, exr_linear: bool, model_scale: f64) -> Result<ClipMeta, Error> {
     let mut paths = frame_paths(dir)?;
     if paths.is_empty() {
         return Err(Error::input(format!("No frames found under {}", dir.display())));
@@ -349,19 +451,19 @@ pub(crate) fn probe_frame_dir(dir: &Path, num_frames: i64, fps: f64, exr_linear:
     }
     let (h, w) = crate::decode::image_size(&paths[0])?;
     let n = paths.len();
-    Ok(ClipMeta::with_shape(Source::Frames(paths), fps, h, w, n, exr_linear))
+    Ok(ClipMeta::with_shape(Source::Frames(paths), fps, h, w, n, exr_linear, model_scale))
 }
 
 /// A clip's size and frame count as a job's probe reads them (the `estimate` command): ffprobe for a video, the first
 /// frame's header for a frame folder (its rate and colour don't change the size). Nothing is decoded.
-pub fn probe_size(input: &Path, num_frames: i64) -> Result<ClipMeta, Error> {
+pub fn probe_size(input: &Path, num_frames: i64, model_scale: f64) -> Result<ClipMeta, Error> {
     if !input.exists() {
         return Err(Error::input(format!("input not found: {}", input.display())));
     }
     if input.is_dir() {
-        probe_frame_dir(input, num_frames, 24.0, false)
+        probe_frame_dir(input, num_frames, 24.0, false, model_scale)
     } else {
-        probe_video(input, num_frames)
+        probe_video(input, &ProbeOpts { model_scale, ..ProbeOpts::frames(num_frames) })
     }
 }
 
@@ -555,7 +657,7 @@ mod tests {
             .status()
             .unwrap();
         assert!(st.success());
-        let n = probe_video(&f, -1).map(|m| m.num_frames);
+        let n = probe_video(&f, &ProbeOpts::frames(-1)).map(|m| m.num_frames);
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(n, Ok(8));
     }
@@ -583,8 +685,40 @@ mod tests {
 
     #[test]
     fn shape_and_pad() {
-        let m = ClipMeta::with_shape(Source::Frames(vec![]), 24.0, 200, 320, 8, false);
+        let m = ClipMeta::with_shape(Source::Frames(vec![]), 24.0, 200, 320, 8, false, 1.0);
         assert_eq!((m.shape_h, m.shape_w), (256, 384));
         assert_eq!(m.pad, Pad { l: 32, r: 32, t: 28, b: 28 });
+        assert!(!m.scaled());
+        // model scale: the pad is the scaled size's (1080p at 0.5 -> 540x960 -> 640x1024)
+        let m = ClipMeta::with_shape(Source::Frames(vec![]), 24.0, 1080, 1920, 8, false, 0.5);
+        assert_eq!((m.model_h, m.model_w, m.shape_h, m.shape_w, m.h, m.w), (540, 960, 640, 1024, 1080, 1920));
+        assert_eq!(m.pad, Pad { l: 32, r: 32, t: 50, b: 50 });
+        assert!(m.scaled());
+    }
+
+    #[test]
+    fn scaled_sizes_round_like_python() {
+        // Python: max(1, int(round(h * scale))), round half to even
+        assert_eq!(scaled_hw(1080, 1920, 0.75), (810, 1440));
+        assert_eq!(scaled_hw(1081, 1919, 0.5), (540, 960)); // 540.5 -> 540, 959.5 -> 960
+        assert_eq!(scaled_hw(2160, 4096, 0.25), (540, 1024));
+        assert_eq!(scaled_hw(3, 3, 0.1), (1, 1)); // 0.3 -> 0 -> at least 1
+        assert_eq!(scaled_hw(200, 320, 1.0), (200, 320));
+        assert_eq!(scaled_hw(5, 7, 0.5), (2, 4)); // 2.5 -> 2, 3.5 -> 4
+    }
+
+    #[test]
+    fn start_frames_like_probe_video_meta() {
+        // whole clip, or num_frames <= 0: always 0
+        assert_eq!(start_frame(100, 100, -1, StartMode::Middle, 0), 0);
+        assert_eq!(start_frame(100, 100, 100, StartMode::RandomMiddle, 3), 0);
+        assert_eq!(start_frame(100, 10, 10, StartMode::Begin, 0), 0);
+        assert_eq!(start_frame(100, 10, 10, StartMode::Middle, 0), 45);
+        assert_eq!(start_frame(101, 10, 10, StartMode::Middle, 0), 45);
+        // random_middle: within [max_start // 4, 3 * max_start // 4]
+        let s = start_frame(100, 10, 10, StartMode::RandomMiddle, 0);
+        assert!((22..=67).contains(&s), "{s}");
+        assert_eq!(StartMode::parse("random_middle").map(|m| m.name()), Some("random_middle"));
+        assert_eq!(StartMode::parse("end"), None);
     }
 }

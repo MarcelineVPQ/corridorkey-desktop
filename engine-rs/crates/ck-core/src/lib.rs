@@ -15,6 +15,7 @@ pub(crate) mod outputs;
 pub mod pipeline;
 pub mod proc;
 pub mod render;
+pub mod rng;
 pub mod runtime;
 pub(crate) mod settings;
 pub(crate) mod tensorrt;

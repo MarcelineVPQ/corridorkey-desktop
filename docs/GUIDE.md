@@ -23,6 +23,14 @@ The rail on the right takes you to the pages. Hover it for names, or press **Ctr
 
 A matte named like the clip (`shot01FrameHint.png`, `shot01_AlphaHint.mp4`) is found and selected when the clip is added. **Hint trust** tells the model how far to trust your matte: 0.95 for an artist's matte, 0.75 for a rough automatic one, 0.5 or less for a loose one.
 
+## Internal resolution
+
+**Full** runs the networks at the clip's own size. **¾**, **½** and **¼** run them smaller (the original CorridorKey's `--model_scale`, the plugin's Internal Resolution): faster and lighter on graphics memory, and the result is resized back to the clip's size with the same Lanczos filter the original uses, so the edges carry less detail. The section shows the size the networks run at, and the Manual memory estimate follows it. What each step costs in detail and gains in speed is measured in docs/BACKLOG.md row 42. With the PyTorch reference engine only Full is available (the original's own runtime stops at any other scale).
+
+## Linear exposure (video clips)
+
+**Brightness** and **Contrast** (around a **pivot**, 0.18 = mid grey) adjust the scene-linear frames the networks see, the original's `--linear_brightness`, `--linear_contrast` and `--linear_contrast_pivot`; the foreground is turned back by the exact inverse, so the outputs keep the clip's own exposure. Useful for an under- or over-exposed plate. As in the original, it applies to video clips only, so frame-folder clips don't show it.
+
 ## Graphics memory
 
 **Automatic** picks the largest temporal window that fits the graphics memory free when the job starts. Bigger windows give steadier mattes over time. While a job runs, the Queue page shows the window it really used and the free memory it saw. If another program uses the card, the page names it.

@@ -60,6 +60,14 @@ screen keyer, on its own Rust + ONNX Runtime engine, for Linux, Windows and macO
   with the Alpha output as its alpha (written with it); EXR keeps the premultiplied RGBA cutout. The ffmpeg check asks
   for libx264 with 10-bit (and dnxhd on Linux and Windows) and says plainly when the system's libx264 is 8-bit only.
   New protocol field `video_codec` (docs/ENGINE_PROTOCOL.md); the PyTorch reference engine still writes CRF 12.
+- Parity with every option of the original's command line (docs/PARITY.md, each option with its verdict). Internal
+  resolution (the original's `--model_scale`), per clip in Queue: Full / ¾ / ½ / ¼; the networks run at the scaled
+  size with cv2's Lanczos-4 ported bit for bit and the outputs come back at the clip's size; `_settings.txt` writes
+  the real scale and the memory estimate follows it (Rust engine; speed and matte per scale not measured yet). Linear
+  exposure (the original's `--linear_brightness` / `--linear_contrast` / `--linear_contrast_pivot`) for video clips,
+  Queue → Linear exposure. `start_mode` / `seed` in the engine protocol (NumPy's generator bit for bit). Checked end to
+  end on the CPU in float32 against the original's runtime (alpha MAE below 5e-7). New protocol fields `model_scale`,
+  `linear_brightness`, `linear_contrast`, `linear_contrast_pivot`, `start_mode`, `seed` (docs/ENGINE_PROTOCOL.md).
 - Colour management, engine (Rust engine; the app's menus come next): OpenColorIO 2.5 built into the engine, so a
   clip can be given in its own colour space (ACEScg, ACES2065-1, the camera log spaces of OCIO's ACES studio config,
   or any space of a studio's own config, `$OCIO` honoured). The engine converts it exactly to what the model was

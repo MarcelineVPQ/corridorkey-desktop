@@ -52,6 +52,9 @@ describe("memory estimate (backlog row 41)", () => {
     expect(r.cmd).toBe("estimate");
     expect(r.windows).toHaveLength(MANUAL_WINDOWS.length * 2);
     expect(r.windows).toContainEqual([24, 12, true]);
+    expect(r).not.toHaveProperty("model_scale");
+    // the internal resolution (backlog row 42): the estimate is the scaled size's
+    expect(estimateRequest("e2", "/c.mov", null, 0.5)).toMatchObject({ model_scale: 0.5 });
   });
 
   it("starts an engine, asks once, quits it, and gives the engine's numbers", async () => {

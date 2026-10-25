@@ -5,7 +5,7 @@ use ck_core::color::*;
 use ck_core::decode::{prep_frame, prep_hint, read_image_rgb, rgb8_to_planar, Still};
 use ck_core::hann::{taper_weights, window_starts};
 use ck_core::image::{center_pad, resize_area, resize_bilinear, resize_lanczos4, Planar};
-use ck_core::render::{make_checker, render, RenderOpts};
+use ck_core::render::{make_checker, render_scaled, RenderOpts};
 use ck_core::writers::Batch;
 use std::path::PathBuf;
 
@@ -76,6 +76,11 @@ fn meta(h: usize, w: usize, sh: usize, sw: usize) -> ClipMeta {
         fps: 24.0,
         h,
         w,
+        model_h: h,
+        model_w: w,
+        model_scale: 1.0,
+        start_frame: 0,
+        adjust: Default::default(),
         shape_h: sh,
         shape_w: sw,
         pad: center_pad(h, w, sh, sw),
@@ -115,8 +120,8 @@ fn resamplers() {
     diff("bilinear up 128x192", &resize_bilinear(&small, 128, 192).data, &load("bilinear_up_128x192").1, 1e-6);
     let (s, v) = load("lanczos_in");
     let lz = Planar::from_vec(1, s[0], s[1], v);
-    diff("lanczos4 up 64x96", &resize_lanczos4(&lz, 64, 96).data, &load("lanczos_64x96").1, 1e-5);
-    diff("lanczos4 down 37x53", &resize_lanczos4(&lz, 37, 53).data, &load("lanczos_37x53").1, 1e-5);
+    diff("lanczos4 up 64x96", &resize_lanczos4(&lz, 64, 96).data, &load("lanczos_64x96").1, 0.0);
+    diff("lanczos4 down 37x53", &resize_lanczos4(&lz, 37, 53).data, &load("lanczos_37x53").1, 0.0);
 }
 
 #[test]
@@ -161,33 +166,29 @@ fn batch_f32(b: &Batch) -> Vec<f32> {
 #[test]
 fn render_paths() {
     let (_, logits) = load("render_logits");
-    let checker = make_checker(30, 44);
+    check_render("render", &logits, (30, 44), LinearAdjust::default());
+}
+
+/// The three render modes against `{prefix}_video_*` / `{prefix}_exr_*`: logits (4, 40, 56), the model's crop 30x44 at
+/// (5, 6), the outputs `hw` (the crop's own size, or a model scale's native size).
+fn check_render(prefix: &str, logits: &[f32], hw: (usize, usize), adjust: LinearAdjust) {
+    let checker = make_checker(hw.0, hw.1);
     // loop: NOT-WORTH — three render modes
     for (exr, lin) in [(false, false), (false, true), (true, false)] {
-        let o = RenderOpts {
-            alpha: true,
-            fg: true,
-            checker: true,
-            cutout: true,
-            despill: 0.5,
-            cutout_linear: lin,
-            exr,
-            adjust: LinearAdjust::default(),
-            color_out: None,
-            out_linear: true,
-        };
-        let out = render(&o, &logits, (40, 56), (5, 6), (30, 44), &checker);
+        let o =
+            RenderOpts { alpha: true, fg: true, checker: true, cutout: true, despill: 0.5, cutout_linear: lin, exr, adjust, color_out: None, out_linear: true };
+        let out = render_scaled(&o, logits, (40, 56), (5, 6), (30, 44), hw, &checker);
         // loop: NOT-WORTH — four outputs
         for (name, b) in &out {
             if lin && *name != "cutout" {
                 continue;
             }
             let fname = if exr {
-                format!("render_exr_{name}")
+                format!("{prefix}_exr_{name}")
             } else if lin {
-                format!("render_video_{name}_lin")
+                format!("{prefix}_video_{name}_lin")
             } else {
-                format!("render_video_{name}")
+                format!("{prefix}_video_{name}")
             };
             // video: 16-bit samples, truncated: one step when a float32 product lands on the other side
             let tol = if exr { 2e-5 } else { 1.0 };
@@ -196,7 +197,7 @@ fn render_paths() {
             if exr && *name == "cutout" {
                 // the original writes the EXR cutout straight; ours is premultiplied on purpose (backlog row 30 c):
                 // the reference's BGR x its own alpha
-                // loop: HOT-PATH-OK — a 30x44 fixture, once
+                // loop: HOT-PATH-OK — a small fixture, once
                 for px in want.chunks_mut(4) {
                     let a = px[3];
                     // loop: NOT-WORTH — three channels
@@ -210,7 +211,7 @@ fn render_paths() {
                 // the original's video cutout is straight BGRA (ProRes 4444); ours is three channels premultiplied in
                 // the file's coding, its alpha the matte output (backlog row 26): the reference's BGR x its own
                 // alpha, both 16-bit, so one more rounding step
-                // loop: HOT-PATH-OK — a 30x44 fixture, once
+                // loop: HOT-PATH-OK — a small fixture, once
                 want = want.chunks(4).flat_map(|px| [px[0] * px[3] / 65535.0, px[1] * px[3] / 65535.0, px[2] * px[3] / 65535.0]).collect();
                 tol = 2.0;
             }
@@ -222,6 +223,147 @@ fn render_paths() {
             }
         }
     }
+}
+
+/// Backlog row 42: the render at a model scale (outputs 45x66 up and 20x29 down from the 30x44 crop), with the
+/// linear adjust (row 45), against upstream's render with its output resize completed by upstream's own Lanczos
+/// helper (tools/gen_fixtures.py `lanczos_out`).
+#[test]
+fn render_at_a_model_scale_with_the_linear_adjust() {
+    let (_, logits) = load("render_logits");
+    // loop: NOT-WORTH — two output sizes
+    for (tag, hw) in [("up", (45, 66)), ("down", (20, 29))] {
+        check_render(&format!("srender_{tag}"), &logits, hw, LinearAdjust::new(1.3, 0.9, 0.18));
+    }
+}
+
+fn rows_42_45() -> serde_json::Value {
+    serde_json::from_str(&std::fs::read_to_string(fx("rows_42_45.json")).unwrap()).unwrap()
+}
+
+/// cv2.resize(INTER_LANCZOS4) on float32: identical, every value (1 and 3 channels, up and down).
+#[test]
+fn lanczos4_bit_for_bit() {
+    let j = rows_42_45();
+    // loop: NOT-WORTH — six cases
+    for (name, hw) in j["lanczos"].as_object().unwrap() {
+        let (s, v) = load(&format!("lz_{name}_in"));
+        let img = Planar::from_vec(s[0], s[1], s[2], v);
+        let (ho, wo) = (hw[0].as_u64().unwrap() as usize, hw[1].as_u64().unwrap() as usize);
+        let got = resize_lanczos4(&img, ho, wo);
+        diff(&format!("lanczos4 {name}"), &got.data, &load(&format!("lz_{name}_out")).1, 0.0);
+        let bits = got.data.iter().zip(&load(&format!("lz_{name}_out")).1).filter(|(a, b)| a.to_bits() != b.to_bits()).count();
+        assert_eq!(bits, 0, "lanczos4 {name}: {bits} values differ in their bits");
+    }
+}
+
+/// video_io.apply_linear_adjust (numpy) and runtime._linear_adjust_inverse_torch (torch), float32.
+#[test]
+fn linear_adjust_both_ways() {
+    let (_, x) = load("color_x");
+    let j = rows_42_45();
+    // loop: NOT-WORTH — two settings
+    for (i, c) in j["adjust"].as_array().unwrap().iter().enumerate() {
+        let a = LinearAdjust::new(c[0].as_f64().unwrap(), c[1].as_f64().unwrap(), c[2].as_f64().unwrap());
+        diff(&format!("adjust apply {c}"), &x.iter().map(|&v| a.apply(v)).collect::<Vec<_>>(), &load(&format!("adjust_apply_{i}")).1, 0.0);
+        let inv: Vec<f32> = x.iter().map(|&v| a.invert(v)).collect();
+        let want = load(&format!("adjust_invert_{i}")).1;
+        let rel: Vec<f32> = inv.iter().zip(&want).map(|(p, q)| (p - q) / q.abs().max(1.0)).collect();
+        diff(&format!("adjust invert {c} (relative)"), &rel, &vec![0.0; rel.len()], 2e-7);
+    }
+    assert!(LinearAdjust::new(1.0000005, 1.0, 0.5).is_identity());
+    assert!(!LinearAdjust::new(1.00001, 1.0, 0.5).is_identity());
+}
+
+fn smeta(source: Source, hw: (usize, usize), model: (usize, usize), adjust: LinearAdjust) -> ClipMeta {
+    let mut m = meta(hw.0, hw.1, 128, 128);
+    m.source = source;
+    (m.model_h, m.model_w) = model;
+    m.model_scale = model.0 as f64 / hw.0 as f64;
+    m.pad = center_pad(model.0, model.1, 128, 128);
+    m.adjust = adjust;
+    m
+}
+
+/// bf16 views: the display view exact; the model view within one bf16 step where asinh lands on a rounding boundary.
+fn check_prep(name: &str, p: &ck_core::decode::Prepped) {
+    let model: Vec<f32> = p.model.iter().map(|v| v.to_f32()).collect();
+    let display: Vec<f32> = p.display.iter().map(|v| v.to_f32()).collect();
+    diff(&format!("{name} display (bf16)"), &display, &load(&format!("{name}_display")).1, 0.0);
+    let want = load(&format!("{name}_model")).1;
+    let steps = model.iter().zip(&want).filter(|(a, b)| a != b).count();
+    println!("{name} model (bf16): {steps} of {} values one bf16 step apart", model.len());
+    diff(&format!("{name} model (bf16)"), &model, &want, 1.0 / 128.0 * 1.1);
+    assert!(steps * 1000 < model.len(), "{name}: too many bf16 steps: {steps}");
+}
+
+/// preprocess_video_frame_views at a model scale (37x53 -> 28x40) with and without the adjust, and the adjust alone.
+#[test]
+fn video_frames_at_a_model_scale_and_adjusted() {
+    let (_, rgb) = load("scaled_frame_rgb");
+    let bytes: Vec<u8> = rgb.iter().map(|&v| v as u8).collect();
+    let video = || Source::Video(PathBuf::from("/c/clip.mp4"));
+    let d = asinh_denom();
+    let cases = [
+        ("scaled_video", (28, 40), LinearAdjust::new(1.5, 1.2, 0.18)),
+        ("scaled_video_id", (28, 40), LinearAdjust::default()),
+        ("adjusted_video", (37, 53), LinearAdjust::new(0.7, 1.4, 0.3)),
+    ];
+    // loop: NOT-WORTH — three cases
+    for (name, model, adj) in cases {
+        let m = smeta(video(), (37, 53), model, adj);
+        let p = prep_frame(rgb8_to_planar(&bytes, 37, 53), false, &m, d);
+        let fix = |v: &str| if name == "scaled_video_id" { format!("scaled_video_{v}_id") } else { format!("{name}_{v}") };
+        let model_v: Vec<f32> = p.model.iter().map(|v| v.to_f32()).collect();
+        let display: Vec<f32> = p.display.iter().map(|v| v.to_f32()).collect();
+        diff(&format!("{name} display (bf16)"), &display, &load(&fix("display")).1, 0.0);
+        let want = load(&fix("model")).1;
+        let steps = model_v.iter().zip(&want).filter(|(a, b)| a != b).count();
+        diff(&format!("{name} model (bf16)"), &model_v, &want, 1.0 / 128.0 * 1.1);
+        assert!(steps * 1000 < model_v.len(), "{name}: too many bf16 steps: {steps}");
+    }
+}
+
+/// preprocess_frame_dir_path at a model scale (24x32 -> 18x24): a display-coded PNG and a scene-linear EXR.
+#[test]
+fn folder_frames_at_a_model_scale() {
+    let s = |n: &str| fx("stills").join(n);
+    let d = asinh_denom();
+    // loop: NOT-WORTH — two files
+    for (name, file, linear) in [("scaled_dir_png", "rgb8.png", false), ("scaled_dir_exr", "linear.exr", true)] {
+        let mut m = smeta(Source::Frames(vec![]), (24, 32), (18, 24), LinearAdjust::default());
+        m.exr_linear = linear;
+        let p = prep_frame(read_image_rgb(&s(file)).unwrap(), linear, &m, d);
+        check_prep(name, &p);
+    }
+}
+
+/// preprocess_hint_frame (30x40 -> the model's 22x30) and load_initial_hint_frame (the clip's 24x32 -> 18x24).
+#[test]
+fn hints_at_a_model_scale() {
+    let (_, rgb) = load("hint_rgb");
+    let data: Vec<u8> = rgb.iter().map(|&v| v as u8).collect();
+    let m = smeta(Source::Frames(vec![]), (30, 40), (22, 30), LinearAdjust::default());
+    let got = prep_hint(Still::U8 { ch: 3, h: 30, w: 40, data }, &m);
+    diff("scaled hint prep", &got, &load("scaled_hint_prep").1, 1.0 / 256.0 + 1e-6);
+    let m = smeta(Source::Frames(vec![]), (24, 32), (18, 24), LinearAdjust::default());
+    let got = ck_core::decode::load_initial_hint(&fx("stills").join("hint16.png"), &m).unwrap();
+    diff("scaled initial hint", &got, &load("scaled_initial_hint").1, 0.0);
+}
+
+/// np.random.default_rng(seed).integers(lo, hi + 1), the draw `--start_mode random_middle` makes.
+#[test]
+fn numpy_integers() {
+    let j = rows_42_45();
+    let mut n = 0;
+    // loop: NOT-WORTH — a few hundred draws
+    for c in j["draws"].as_array().unwrap() {
+        let seed: u64 = c["seed"].as_str().unwrap().parse().unwrap();
+        let (lo, hi) = (c["lo"].as_i64().unwrap(), c["hi"].as_i64().unwrap());
+        assert_eq!(ck_core::rng::numpy_integers(seed, lo, hi), c["v"].as_i64().unwrap(), "{c}");
+        n += 1;
+    }
+    println!("numpy integers: {n} draws identical");
 }
 
 #[test]

@@ -34,13 +34,16 @@ pub(crate) struct VideoDecoder {
 
 impl VideoDecoder {
     /// `deep`: decode at 16 bits (a source above 8 bits, ClipMeta::video_bits); hint videos stay 8-bit masks.
-    pub(crate) fn open(path: &Path, w: usize, h: usize, max_frames: usize, deep: bool) -> Result<VideoDecoder, Error> {
+    /// `start`: the first frame (the job's start frame, `--start_mode`): the frames before it are decoded and
+    /// dropped by ffmpeg's `trim` filter, counted as decoded (cv2's CAP_PROP_POS_FRAMES seek lands on the same frame).
+    pub(crate) fn open(path: &Path, w: usize, h: usize, start: usize, max_frames: usize, deep: bool) -> Result<VideoDecoder, Error> {
+        let vf = if start > 0 { format!("trim=start_frame={start},{CV2_SCALE}") } else { CV2_SCALE.to_string() };
         let mut child = Command::new("ffmpeg")
             .args(["-v", "error", "-nostdin", "-i"])
             .arg(path)
             .args(["-map", "0:v:0", "-an", "-sn", "-dn", "-fps_mode", "passthrough", "-frames:v"])
             .arg(max_frames.to_string())
-            .args(["-vf", CV2_SCALE, "-f", "rawvideo", "-pix_fmt", if deep { "rgb48le" } else { "rgb24" }, "pipe:1"])
+            .args(["-vf", &vf, "-f", "rawvideo", "-pix_fmt", if deep { "rgb48le" } else { "rgb24" }, "pipe:1"])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -380,6 +383,9 @@ pub(crate) fn prep_frame_views(display_or_linear: Planar, exr_linear: bool, meta
         Some(x) => (to_model_space(display_or_linear, x), true),
         None => (display_or_linear, exr_linear),
     };
+    if meta.scaled() || !meta.adjust.is_identity() {
+        return prep_scaled_or_adjusted(display_or_linear, exr_linear, meta, denom, need_model);
+    }
     let padded = if meta.pad == (crate::image::Pad { l: 0, r: 0, t: 0, b: 0 }) { display_or_linear } else { pad_reflect101(&display_or_linear, meta.pad) };
     // EXR frames can hold NaN / infinity: made finite first (`finite_input`), a no-op for every finite value
     let display_of = |v: f32| {
@@ -407,6 +413,53 @@ pub(crate) fn prep_frame_views(display_or_linear: Planar, exr_linear: bool, meta
     } else {
         Vec::new()
     };
+    Prepped { model: std::sync::Arc::new(model), display: std::sync::Arc::new(display) }
+}
+
+/// `prep_frame_views` at a model scale (backlog row 42) or with the linear adjust (row 45), in the original's order:
+///  - video (preprocess_video_frame_views): the display-coded frame Lanczos-4 resized to the model size (values may
+///    ring past [0, 1] and are kept), padded; linear = srgb_to_linear of it, adjusted; the model view its asinh;
+///    the display view the resized frame itself, or with the adjust linear_to_vfm_sdr of the adjusted linear;
+///  - frame folders (preprocess_frame_dir_path, no adjust): display and linear made at the native size (EXR: from
+///    the linear values; else linear from the clipped display), each resized; display clipped again, both padded.
+fn prep_scaled_or_adjusted(img: Planar, exr_linear: bool, meta: &ClipMeta, denom: f32, need_model: bool) -> Prepped {
+    use rayon::prelude::*;
+    let to_model = |p: Planar| {
+        let p = if meta.scaled() { resize_lanczos4(&p, meta.model_h, meta.model_w) } else { p };
+        if meta.pad == (crate::image::Pad { l: 0, r: 0, t: 0, b: 0 }) {
+            p
+        } else {
+            pad_reflect101(&p, meta.pad)
+        }
+    };
+    let bf = |v: &[f32], f: &(dyn Fn(f32) -> f32 + Sync)| -> Vec<half::bf16> {
+        // loop: HOT-PATH-OK — one pass per frame view, parallel; the view (bf16) is the output
+        v.par_iter().with_min_len(1 << 14).map(|&x| half::bf16::from_f32(f(x))).collect()
+    };
+    if matches!(meta.source, crate::clip::Source::Video(_)) && !exr_linear {
+        let frame = to_model(img);
+        let adj = meta.adjust;
+        let lin_model = move |v: f32| adj.apply(srgb_to_linear(v));
+        let display = if adj.is_identity() { bf(&frame.data, &|v| v) } else { bf(&frame.data, &|v| linear_to_srgb(lin_model(v).max(0.0)).clamp(0.0, 1.0)) };
+        let model = if need_model { bf(&frame.data, &|v| linear_to_asinh(lin_model(v), denom)) } else { Vec::new() };
+        return Prepped { model: std::sync::Arc::new(model), display: std::sync::Arc::new(display) };
+    }
+    let mut disp = img.clone();
+    let mut lin = img;
+    // loop: HOT-PATH-OK — one pass per frame, parallel, in place
+    disp.data.par_iter_mut().zip(lin.data.par_iter_mut()).with_min_len(1 << 14).for_each(|(d, l)| {
+        let v = finite_input(*l);
+        if exr_linear {
+            *d = linear_to_srgb(v.max(0.0)).clamp(0.0, 1.0);
+            *l = v;
+        } else {
+            *d = v.clamp(0.0, 1.0);
+            *l = srgb_to_linear(*d);
+        }
+    });
+    let disp = to_model(disp);
+    let display = bf(&disp.data, &|v| v.clamp(0.0, 1.0));
+    let model = if need_model { bf(&to_model(lin).data, &|v| linear_to_asinh(v, denom)) } else { Vec::new() };
     Prepped { model: std::sync::Arc::new(model), display: std::sync::Arc::new(display) }
 }
 
@@ -461,7 +514,7 @@ const FOLDER_BATCH: usize = 4;
 impl FrameReader {
     pub(crate) fn open(meta: &ClipMeta) -> Result<FrameReader, Error> {
         let video = match &meta.source {
-            crate::clip::Source::Video(p) => Some(VideoDecoder::open(p, meta.w, meta.h, meta.num_frames, meta.video_bits > 8)?),
+            crate::clip::Source::Video(p) => Some(VideoDecoder::open(p, meta.w, meta.h, meta.start_frame, meta.num_frames, meta.video_bits > 8)?),
             crate::clip::Source::Frames(_) => None,
         };
         Ok(FrameReader { seconds: 0.0, meta: meta.clone(), video, next: 0, denom: crate::color::asinh_denom(), need_model: true, ready: Default::default() })
@@ -597,8 +650,8 @@ pub fn prep_hint(still: Still, meta: &ClipMeta) -> Vec<f32> {
         }
     };
     let mut p = Planar::from_vec(1, h, w, g);
-    if (h, w) != (meta.h, meta.w) {
-        p = resize_lanczos4(&p, meta.h, meta.w);
+    if (h, w) != (meta.model_h, meta.model_w) {
+        p = resize_lanczos4(&p, meta.model_h, meta.model_w);
     }
     p.map(|v| finite_input(v).clamp(0.0, 1.0));
     let mut out = pad_reflect101(&p, meta.pad);
@@ -608,7 +661,7 @@ pub fn prep_hint(still: Still, meta: &ClipMeta) -> Vec<f32> {
 
 /// video_io.read_hint_image + load_initial_hint_frame: the first-frame matte (a file, or the first frame of a
 /// folder). 4 channels: the alpha; 3: the first channel cv2 reads (blue); its size must be the clip's.
-pub(crate) fn load_initial_hint(path: &Path, meta: &ClipMeta) -> Result<Vec<f32>, Error> {
+pub fn load_initial_hint(path: &Path, meta: &ClipMeta) -> Result<Vec<f32>, Error> {
     let file = if path.is_dir() {
         crate::clip::frame_paths(path)?.into_iter().find(|p| p.is_file())
     } else if path.is_file() {
@@ -634,11 +687,17 @@ pub(crate) fn load_initial_hint(path: &Path, meta: &ClipMeta) -> Result<Vec<f32>
         // loop: NOT-WORTH — the first-frame hint: one image per job
         Still::F32 { ch, h, w, data } => (h, w, (0..h * w).map(|i| data[i * ch + pick(ch)]).collect()),
     };
-    if (h, w) != (meta.h, meta.w) {
+    // the clip's size (resized to the model's at a model scale), or already the model's (load_initial_hint_frame)
+    let model = (meta.model_h, meta.model_w);
+    if (h, w) != (meta.h, meta.w) && (h, w) != model {
         return Err(Error::input(format!("{}: hint shape ({h}, {w}) does not match the clip ({}, {})", file.display(), meta.h, meta.w)));
     }
     let mut p = Planar::from_vec(1, h, w, g);
+    // read_hint_image clips before the resize; nothing clips after it
     p.map(|v| finite_input(v).clamp(0.0, 1.0));
+    if (h, w) != model {
+        p = resize_lanczos4(&p, model.0, model.1);
+    }
     let mut out = pad_reflect101(&p, meta.pad);
     out.map(bf16_round);
     Ok(out.data)
@@ -662,15 +721,22 @@ impl HintReader {
             return Ok(HintReader { meta: meta.clone(), video: None, paths, next: 0 });
         }
         let p = crate::clip::ffprobe(path)?;
-        if p.frames > 0 && p.frames < meta.num_frames {
+        // the hint video starts at the clip's start frame (SequentialHintVideoWindowReader)
+        let required = meta.start_frame + meta.num_frames;
+        if p.frames > 0 && p.frames < required {
+            let start = if meta.start_frame > 0 { format!(" (start={}, num={})", meta.start_frame, meta.num_frames) } else { String::new() };
             return Err(Error::input(format!(
-                "Hint video {} has only {} frames, but the source video requires {} frames",
+                "Hint video {} has only {} frames, but the source video requires {required} frames{start}",
                 path.display(),
                 p.frames,
-                meta.num_frames
             )));
         }
-        Ok(HintReader { meta: meta.clone(), video: Some(VideoDecoder::open(path, p.w, p.h, meta.num_frames, false)?), paths: vec![], next: 0 })
+        Ok(HintReader {
+            meta: meta.clone(),
+            video: Some(VideoDecoder::open(path, p.w, p.h, meta.start_frame, meta.num_frames, false)?),
+            paths: vec![],
+            next: 0,
+        })
     }
 
     pub(crate) fn next_frame(&mut self) -> Result<Vec<f32>, Error> {
@@ -706,6 +772,11 @@ mod tests {
             fps: 24.0,
             h: 1,
             w: 4,
+            model_h: 1,
+            model_w: 4,
+            model_scale: 1.0,
+            start_frame: 0,
+            adjust: Default::default(),
             shape_h: 1,
             shape_w: 4,
             pad: crate::image::Pad { l: 0, r: 0, t: 0, b: 0 },

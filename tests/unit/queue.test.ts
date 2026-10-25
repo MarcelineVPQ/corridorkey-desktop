@@ -339,6 +339,17 @@ describe("engineOptions", () => {
     expect(engineOptions(DEFAULT_OPTIONS, "video", false, false)).not.toHaveProperty("video_codec");
     expect(engineOptions({ ...DEFAULT_OPTIONS, outputFormat: "exr" }, "video", false, true)).not.toHaveProperty("video_codec");
   });
+
+  it("sends the internal resolution when not full, and the linear adjust for video clips when set (backlog rows 42, 45)", () => {
+    const d = engineOptions(DEFAULT_OPTIONS, "video");
+    expect(d).not.toHaveProperty("model_scale");
+    expect(d).not.toHaveProperty("linear_brightness");
+    expect(engineOptions({ ...DEFAULT_OPTIONS, modelScale: 0.5 }, "frames")).toMatchObject({ model_scale: 0.5 });
+    const lin = { ...DEFAULT_OPTIONS, linearBrightness: 1.5, linearContrast: 1.2, linearContrastPivot: 0.25 };
+    expect(engineOptions(lin, "video")).toMatchObject({ linear_brightness: 1.5, linear_contrast: 1.2, linear_contrast_pivot: 0.25 });
+    // a frame folder: the original ignores the adjust there, so it is never sent
+    expect(engineOptions(lin, "frames")).not.toHaveProperty("linear_brightness");
+  });
 });
 
 describe("TensorRT in the queue", () => {

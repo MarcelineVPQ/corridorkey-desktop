@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadSettings } from "../../electron/main/settings";
 import { idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir, vramLimit } from "../../electron/main/validate";
-import { DEFAULT_APPEARANCE, DEFAULT_OPTIONS, vramLimitChoices } from "../../src/shared/types";
+import { DEFAULT_APPEARANCE, DEFAULT_OPTIONS, scaledSize, vramLimitChoices } from "../../src/shared/types";
 
 describe("IPC and settings validation", () => {
   it("keeps valid job options as they are", () => {
@@ -27,6 +27,17 @@ describe("IPC and settings validation", () => {
     expect([o.despillStrength, o.hintQuality, o.outputFormat, o.frameDirFps, o.hintMode]).toEqual([0.5, 0.95, "video", 24, "none"]);
     expect(sanitizeOptions(null)).toEqual(DEFAULT_OPTIONS);
     expect(sanitizeOptions({ outputs: [] }).outputs).toEqual(["alpha", "fg"]);
+  });
+
+  it("keeps the offered internal resolutions and the linear adjust within its ranges", () => {
+    const o = sanitizeOptions({ modelScale: 0.25, linearBrightness: 2, linearContrast: 0.5, linearContrastPivot: 0.3 });
+    expect([o.modelScale, o.linearBrightness, o.linearContrast, o.linearContrastPivot]).toEqual([0.25, 2, 0.5, 0.3]);
+    const bad = sanitizeOptions({ modelScale: 0.6, linearBrightness: 0, linearContrast: 9, linearContrastPivot: "x" });
+    expect([bad.modelScale, bad.linearBrightness, bad.linearContrast, bad.linearContrastPivot]).toEqual([1, 1, 1, 0.18]);
+  });
+
+  it("sizes the internal resolution as the engine does (Python round, half to even)", () => {
+    expect([scaledSize(1080, 0.75), scaledSize(1081, 0.5), scaledSize(1919, 0.5), scaledSize(5, 0.5), scaledSize(7, 0.5), scaledSize(3, 0.25)]).toEqual([810, 540, 960, 2, 4, 1]);
   });
 
   it("video codec: the platform's offer, default lossless H.264; a video cutout brings the Alpha output", () => {
