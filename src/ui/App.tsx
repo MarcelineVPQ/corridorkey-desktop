@@ -111,8 +111,8 @@ export function App() {
       <HomeContext.Provider value={state.system.home}>
         <main className="shell-page">
           {page === "queue" && <QueuePage state={state} selected={selected} onSelect={setSelected} panelShown={panelShown("queue")} sectionTasks={d.sections} {...common} />}
-          {page === "engine" && <EnginePage state={state} focus={common.focus} sectionTasks={d.sections} openSetup={() => setPage("setup")} />}
-          {page === "settings" && <SettingsPage state={state} focus={common.focus} />}
+          {page === "engine" && <EnginePage state={state} panelShown={panelShown("engine")} sectionTasks={d.sections} openSetup={() => setPage("setup")} {...common} />}
+          {page === "settings" && <SettingsPage state={state} panelShown={panelShown("settings")} {...common} />}
           {page === "about" && <AboutPage version={state.version} panelShown={panelShown("about")} {...common} />}
           {page === "setup" && <SetupPage state={state} openQueue={() => setPage("queue")} openGuide={() => setPage("about")} />}
         </main>

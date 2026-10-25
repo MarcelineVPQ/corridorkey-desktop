@@ -12,7 +12,7 @@ import { Accordion, Row, Section, Segmented } from "./panel/Section";
 import { More } from "./More";
 import { PathText } from "./PathText";
 
-export const OUTPUT_TEXT: Record<OutputName, { label: string; help: string }> = {
+const OUTPUT_TEXT: Record<OutputName, { label: string; help: string }> = {
   alpha: { label: "Alpha", help: "the matte" },
   fg: { label: "Foreground", help: "the predicted foreground color" },
   checker: { label: "Checker", help: "foreground over a checkerboard, despilled" },
@@ -22,7 +22,7 @@ export const OUTPUT_TEXT: Record<OutputName, { label: string; help: string }> = 
 const VIDEO_CUTOUT_HELP = "premultiplied color, despilled; its alpha is the Alpha output (video has no alpha channel)";
 
 // the codec menu's names and what each one is (README, Quality, "Video outputs" has the measurements)
-export const CODEC_TEXT: Record<VideoCodec, { label: string; short: string; hint: string }> = {
+const CODEC_TEXT: Record<VideoCodec, { label: string; short: string; hint: string }> = {
   "h264-lossless": { label: "Lossless H.264, 10-bit 4:4:4", short: "lossless H.264", hint: "Only the 10-bit rounding is lost (.mp4); large files" },
   dnxhr444: { label: "DNxHR 444, 10-bit", short: "DNxHR 444", hint: "Avid's edit and finishing codec (.mov): matte within 1.3/255" },
   "h264-crf12": { label: "H.264 CRF 12 (small files)", short: "H.264 CRF 12", hint: "The original's output: small files; hair edges off by up to 21/255" },
@@ -33,7 +33,7 @@ const MATTE_HELP = "White = subject, black = background"; // theme-exempt: prose
 const HINT_TEXT = { none: "No hint", "first-frame": "First-frame matte", video: "Hint video" } as const;
 
 // Internal resolution (backlog row 42): the plugin's names for the original's --model_scale
-export const SCALE_TEXT: Record<ModelScale, string> = { 1: "Full", 0.75: "¾", 0.5: "½", 0.25: "¼" };
+const SCALE_TEXT: Record<ModelScale, string> = { 1: "Full", 0.75: "¾", 0.5: "½", 0.25: "¼" };
 const SCALE_OPTIONS: [string, string][] = [
   ["1", SCALE_TEXT[1]],
   ["0.75", SCALE_TEXT[0.75]],
@@ -359,43 +359,33 @@ export function JobSettings({
   );
 }
 
-/** A waiting clip's TensorRT plan: what it runs on (short, for a tile), the section's status line, the reason. */
-export interface TrtPlan {
-  runsOn: "CUDA" | "TensorRT or CUDA";
-  status: string;
-  text: string;
-}
-
 /**
  * What a waiting clip will ask for and run on, before it runs: the setting, the parts, whether its size's TensorRT
  * range is built (the cache). Null where TensorRT doesn't exist (Windows, macOS).
  */
-export function trtPlanFor(job: Job, trt: TrtState, engineKind: EngineKind | null): TrtPlan | null {
+export function trtPlanFor(job: Job, trt: TrtState, engineKind: EngineKind | null): { status: string; text: string } | null {
   if (!trt.supported) return null;
   const { width, height } = job.clip;
   const key = width && height && job.options.modelScale === 1 ? trtSizeKey(width, height) : null;
-  if (engineKind !== "rust") return { runsOn: "CUDA", status: "Not with this engine · CUDA", text: "TensorRT runs on the ONNX Runtime engine only; this clip runs on the PyTorch engine." };
-  if (!trt.on) return { runsOn: "CUDA", status: "Off · runs on CUDA", text: "TensorRT is off, so this clip runs on CUDA." };
-  if (!trt.ready) return { runsOn: "CUDA", status: "On, not installed · runs on CUDA", text: "TensorRT's parts aren't installed, so this clip runs on CUDA." };
+  if (engineKind !== "rust") return { status: "Not with this engine · CUDA", text: "TensorRT runs on the ONNX Runtime engine only; this clip runs on the PyTorch engine." };
+  if (!trt.on) return { status: "Off · runs on CUDA", text: "TensorRT is off, so this clip runs on CUDA." };
+  if (!trt.ready) return { status: "On, not installed · runs on CUDA", text: "TensorRT's parts aren't installed, so this clip runs on CUDA." };
   if (job.options.modelScale !== 1)
     return {
-      runsOn: "TensorRT or CUDA",
       status: "On · depends on the internal resolution",
       text: "The internal resolution sets the size the networks run at, and so the TensorRT range; it runs on TensorRT where that range is built.",
     };
-  if (!width || !height) return { runsOn: "TensorRT or CUDA", status: "On", text: "Used where the clip's size has a built TensorRT range; the clip's size isn't known yet." };
-  if (!key) return { runsOn: "CUDA", status: "Outside TensorRT's ranges · CUDA", text: `${width}×${height} is outside the sizes TensorRT is built for (up to 4096×2176), so it runs on CUDA.` };
+  if (!width || !height) return { status: "On", text: "Used where the clip's size has a built TensorRT range; the clip's size isn't known yet." };
+  if (!key) return { status: "Outside TensorRT's ranges · CUDA", text: `${width}×${height} is outside the sizes TensorRT is built for (up to 4096×2176), so it runs on CUDA.` };
   const windows = builtWindows(key, trt.built);
   if (windows.length)
     return {
-      runsOn: "TensorRT or CUDA",
       status: "On · built for this size",
       text: `Built for ${width}×${height} with windows up to ${windows.join(" or ")} frames: it runs on TensorRT when the job's automatic window is one of those (at 4K on a 16 GB card it is 8).`,
     };
   // loop: NOT-WORTH — two ranges
   const building = trt.prebuild.status === "running" && trt.prebuild.ranges.some((r) => trtSizeKey(r.width, r.height) === key && r.state !== "done");
   return {
-    runsOn: "CUDA",
     status: building ? "On · building in the background · CUDA until then" : "On · not built for this size · runs on CUDA",
     text: building
       ? "TensorRT for this size is building in the background now (Engine settings, TensorRT); if this clip starts first, it runs on CUDA."
@@ -406,14 +396,14 @@ export function trtPlanFor(job: Job, trt: TrtState, engineKind: EngineKind | nul
 type ManualChoice = Extract<MemoryChoice, { auto: false }>;
 
 /**
- * The engine's `estimate` for a waiting clip under its limit and internal resolution (row 41: a short-lived engine,
- * no graphics memory held; the main process keeps one reading per clip for 15 s, so the clip's page and its Graphics
- * memory section share one ask). Null while asking; a clip that ran gets none (it shows the window it really used).
+ * The Graphics memory section: the temporal window (Automatic / Manual) and the graphics memory limit (backlog row
+ * 43). Rendered only while the section is open, so the engine's `estimate` (row 41: a short-lived engine, no
+ * graphics memory held) is asked only then, for this clip under its limit; the numbers are the engine's (rule 1).
  */
-export function useEstimate(job: Job, queueRunning: boolean): MemoryEstimateResult | null {
+function MemorySection({ job, options: o, queueRunning, platform, set }: { job: Job; options: JobOptions; queueRunning: boolean; platform: string; set: (patch: Partial<JobOptions>) => void }) {
   const [est, setEst] = useState<MemoryEstimateResult | null>(null);
+  // a clip that ran shows the window it really used (JobView); the estimate is for choosing one
   const waiting = job.status === "waiting";
-  const o = job.options;
   useEffect(() => {
     let live = true;
     setEst(null);
@@ -424,16 +414,6 @@ export function useEstimate(job: Job, queueRunning: boolean): MemoryEstimateResu
       live = false;
     };
   }, [job.id, job.clip.path, queueRunning, waiting, o.vramLimitGb, o.modelScale]);
-  return est;
-}
-
-/**
- * The Graphics memory section: the temporal window (Automatic / Manual) and the graphics memory limit (backlog row
- * 43), with the engine's estimate for this clip under its limit; the numbers are the engine's (rule 1).
- */
-function MemorySection({ job, options: o, queueRunning, platform, set }: { job: Job; options: JobOptions; queueRunning: boolean; platform: string; set: (patch: Partial<JobOptions>) => void }) {
-  const est = useEstimate(job, queueRunning);
-  const waiting = job.status === "waiting";
   const e = est?.ok ? est.estimate : null;
   return (
     <>
@@ -581,7 +561,7 @@ function ManualMemory({ est, waiting, memory, onChange }: { est: MemoryEstimateR
 }
 
 /** The estimate row's sentence: about X of Y free, and whether it fits (the engine's verdict, with its margin). */
-export function estimateText(est: MemoryEstimateResult | null, w: WindowEstimate | null, e: MemoryEstimate | null): string {
+function estimateText(est: MemoryEstimateResult | null, w: WindowEstimate | null, e: MemoryEstimate | null): string {
   if (!est) return "Asking the engine…";
   if (!est.ok) return est.reason;
   if (!w || !e) return "No estimate for this window.";

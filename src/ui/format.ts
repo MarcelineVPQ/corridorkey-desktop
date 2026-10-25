@@ -4,14 +4,13 @@ import type { ClipInfo, Job, JobTech, Stage } from "../shared/types";
 import { CANT_READ_CLIP } from "../shared/texts";
 import { PIECE_NAMES, rangeText } from "../shared/trt";
 
-/** A clip's facts, one part each ("1920×1080", "24 fps", "120 frames"): shown kept together, never split mid-part. */
-export function clipFactParts(c: ClipInfo): string[] {
+export function clipFacts(c: ClipInfo): string {
   const parts: string[] = [];
   if (c.width && c.height) parts.push(`${c.width}×${c.height}`);
   if (c.fps) parts.push(`${+c.fps.toFixed(3)} fps`);
   if (c.frames) parts.push(`${c.frames} frames`);
   if (c.kind === "frames") parts.push("frame folder");
-  return parts;
+  return parts.join(" · ");
 }
 
 export function duration(seconds: number): string {
@@ -66,33 +65,24 @@ export function providerName(p: string | null): string | null {
   return names[p] ?? p;
 }
 
-/**
- * A readout as a short value for its tile, and its reason, said on one line under the tiles (UI pass B: a tile
- * holds a value, never a sentence). `why` null: the value says it all.
- */
-export interface ValueWhy {
-  v: string;
-  why: string | null;
-}
-
-/** What ran a job, from the engine's provider replies: "TensorRT + CUDA · fp16", why "stage 1 on CUDA". */
-export function ranOnParts(t: JobTech): ValueWhy | null {
+/** What ran a job, from the engine's provider replies: "TensorRT + CUDA · fp16 (stage 1 on CUDA)". */
+export function ranOnText(t: JobTech): string | null {
   const name = providerName(t.provider);
   if (!name) return null;
   // loop: NOT-WORTH — at most five networks
   const onCuda = Object.keys(t.fallbacks).map((k) => PIECE_NAMES[k] ?? k);
-  const partly = t.provider === "tensorrt+cuda" && onCuda.length ? `${onCuda.join(", ")} on CUDA` : null;
-  return { v: `${name}${t.precision ? ` · ${t.precision}` : ""}`, why: partly };
+  const partly = t.provider === "tensorrt+cuda" && onCuda.length ? ` (${onCuda.join(", ")} on CUDA)` : "";
+  return `${name}${t.precision ? ` · ${t.precision}` : ""}${partly}`;
 }
 
-/** A job's TensorRT readout: not asked / not used and why (the engine's reason, or the app's), or the range it ran. */
-export function trtJobParts(t: JobTech): ValueWhy | null {
-  if (t.notAsked) return { v: "not asked", why: t.notAsked };
+/** The TensorRT line of a job: why it wasn't used (the engine's reason, or the app's), or the range it ran. */
+export function trtJobText(t: JobTech): string | null {
+  if (t.notAsked) return `not asked: ${t.notAsked}`;
   if (!t.tensorrtRequested) return null;
-  if (t.fallbackReason) return { v: "not used", why: t.fallbackReason };
+  if (t.fallbackReason) return `not used: ${t.fallbackReason}`;
   // loop: NOT-WORTH — at most five networks
   const fell = Object.entries(t.fallbacks).map(([k, why]) => `${PIECE_NAMES[k] ?? k} on CUDA (${why})`);
-  if (t.range) return { v: t.cache === "build" ? "built in this job" : "built before", why: `range ${rangeText(t.range)}${fell.length ? `; ${fell.join("; ")}` : ""}` };
+  if (t.range) return `range ${rangeText(t.range)}, ${t.cache === "build" ? "built in this job" : "built before"}${fell.length ? `; ${fell.join("; ")}` : ""}`;
   return null;
 }
 

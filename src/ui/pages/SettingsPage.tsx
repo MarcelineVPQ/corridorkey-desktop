@@ -1,5 +1,5 @@
 // App settings: this PC's choices, saved as you change them (no save bar).
-// In the page (SettingsLayout): what they add up to (readouts), and the settings: Appearance, Results,
+// Main view: what they add up to (readouts). Panel: Appearance, Results,
 // Updates, Storage (what the app keeps on disk, each folder removable). Every
 // control changes something you can see (rule 4).
 import { useEffect } from "react";
@@ -9,7 +9,7 @@ import { gibBytes, mbOrGbBytes } from "../../shared/units";
 import { VramLimitRow } from "../JobSettings";
 import { NOT_WHILE_BUSY } from "../../shared/texts";
 import { Accordion, Row, Section, Segmented } from "../panel/Section";
-import { MainBlock, SettingsLayout } from "../panel/SplitView";
+import { MainBlock, SplitView } from "../panel/SplitView";
 import { Stat } from "../JobView";
 import { gbBytes } from "../format";
 import { More } from "../More";
@@ -21,7 +21,7 @@ const NEXT_TO_CLIP = "Next to each clip";
 
 const THEME_TEXT = { system: "System", light: "Light", dark: "Dark", desktop: "Desktop" } as const;
 
-export function SettingsPage(props: { state: AppState; focus: string | null }) {
+export function SettingsPage(props: { state: AppState; panelShown: boolean; narrow: boolean; glass: boolean; focus: string | null; hidePanel: () => void }) {
   const { state } = props;
   const a = state.settings.appearance;
   const setA = (patch: Partial<Appearance>) => void window.ck.setAppearance({ ...a, ...patch });
@@ -52,20 +52,27 @@ export function SettingsPage(props: { state: AppState; focus: string | null }) {
       ? `This card: ${gibBytes(pongTotal * 1048576)}`
       : "Card size: read with a clip's memory estimate";
 
-  const readouts = (
-    <MainBlock title="This PC">
-      <div className="stats">
-        <Stat k="Theme" v={`${THEME_TEXT[a.theme]}${a.glass ? " · Glass" : ""}`} />
-        <Stat k="Accent" v={a.accent === "desktop" ? "Desktop's accent" : "CorridorKey green"} />
-        <Stat k="Results go" v={state.settings.outputRoot ? "Into one folder" : NEXT_TO_CLIP} />
-        <Stat k="Version" v={versionText(state.version)} />
+  const main = (
+    <div className="page-body">
+      <div className="page-bar">
+        <h1>App settings</h1>
       </div>
-      {desktopNote && <p className="hint-text">{desktopNote}</p>}
-      {state.settings.outputRoot && <PathText path={state.settings.outputRoot} />}
-    </MainBlock>
+      <div className="page-content">
+        <MainBlock title="This PC">
+          <div className="stats">
+            <Stat k="Theme" v={`${THEME_TEXT[a.theme]}${a.glass ? " · Glass" : ""}`} />
+            <Stat k="Accent" v={a.accent === "desktop" ? "Desktop's accent" : "CorridorKey green"} />
+            <Stat k="Results go" v={state.settings.outputRoot ? "Into one folder" : NEXT_TO_CLIP} />
+            <Stat k="Version" v={versionText(state.version)} />
+          </div>
+          {desktopNote && <p className="hint-text">{desktopNote}</p>}
+          {state.settings.outputRoot && <PathText path={state.settings.outputRoot} />}
+        </MainBlock>
+      </div>
+    </div>
   );
 
-  const settings = (
+  const panel = (
     <Accordion page="settings" focus={props.focus}>
       <Section id="appearance" icon={Palette} title="Appearance" status={`${THEME_TEXT[a.theme]} · ${a.accent === "desktop" ? "desktop accent" : "built-in accent"}${a.glass ? " · Glass" : ""}`}>
         {() => (
@@ -166,7 +173,18 @@ export function SettingsPage(props: { state: AppState; focus: string | null }) {
     </Accordion>
   );
 
-  return <SettingsLayout title="App settings" settingsTitle="Settings" settingsSub="This PC's settings, saved as you change them" settings={settings} readoutsTitle="Summary" readouts={readouts} />;
+  return (
+    <SplitView
+      main={main}
+      panel={panel}
+      panelTitle="App settings"
+      panelSub="This PC's settings, saved as you change them"
+      shown={props.panelShown}
+      narrow={props.narrow}
+      glass={props.glass}
+      onEscape={props.hidePanel}
+    />
+  );
 }
 
 export function versionText(v: string): string {

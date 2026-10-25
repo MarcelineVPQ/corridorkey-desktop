@@ -418,45 +418,6 @@
   font-weight: 600;
   color: var(--text-1);
 }
-/* ---- a page with its settings in the page (SettingsLayout: Engine, App settings) ----
-   Settings and readouts side by side when the page has room (settings the wider), one column below that. */
-.settings-page {
-  container-type: inline-size;
-}
-.settings-cols {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 20px;
-  max-width: 1480px;
-}
-@container (min-width: 960px) {
-  .settings-cols {
-    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
-    align-items: start;
-  }
-}
-.group-head {
-  margin: 0 0 10px;
-}
-.group-head h2 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-}
-.group-sub {
-  color: var(--text-3);
-  font-size: 13px;
-  margin-top: 2px;
-}
-/* in the page the sections sit on the page's own surface, a step up from the background (as the blocks) */
-.settings-group .sec {
-  background: var(--bg-1);
-}
-/* the readouts' tiles get room for their values (an engine's name and version, a card's name) */
-.settings-group .stats {
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-}
-
 /* the setup's step number (a real sequence) */
 .step-n {
   display: inline-grid;
