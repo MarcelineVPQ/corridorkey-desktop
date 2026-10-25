@@ -1,27 +1,61 @@
-//! Automatic Hann window from free graphics memory (runtime.select_vram_profile / estimate_peak_vram_gb):
-//! the same table and margins as the upstream runtime.
+//! Peak graphics memory per Hann window, measured for this engine on ONNX Runtime (CUDA), and the automatic window
+//! chosen from it (runtime.select_vram_profile's search with this engine's numbers).
 //!
-//! The table is PyTorch's measured peak (GiB) per megapixel of model input at each window length. It is used
-//! unchanged for ONNX Runtime until the GPU measurements say otherwise (docs/ENGINE_RUST.md, "What's left").
+//! The table is the measured peak (GiB: nvidia-smi over the engine's process tree, tools/engine_bench.mjs; RTX 5080,
+//! ONNX Runtime 1.31 CUDA, 2026-10-24, docs/BACKLOG.md row 41) per padded model-input size (megapixels: 960x720,
+//! 1280x1080, 1920x1080, 2560x1440, 3200x1800, 4096x2160) and window length, the highest of the clips and runs at
+//! each point, rounded up to 0.01 GiB, then made monotone (never lower for a longer window or a larger size). A
+//! window not measured at a size takes the next measured window's peak; past the largest one that ran, it is
+//! proportional to the window, and at least 14 GiB where the 16 GB card ran out of memory (those runs had a 14 GiB
+//! budget). It replaced the upstream runtime's PyTorch table, which was up to 32 % under real peaks and 73 % over.
+//!
+//! Read so that it stays an upper bound (estimate_peak_vram_gb):
+//! - window: the next table window at or above (the peak never falls as the window grows); past the largest,
+//!   proportional to the window;
+//! - size: the next measured size at or above; below the smallest, the smallest's; above the largest, proportional
+//!   to the megapixels;
+//! - then UPLIFT on top: the largest spread between clips and runs at one point (5.3 %), rounded up.
+//!
+//! Every measured peak is in the tests (`measured_peaks_are_bounded`). Between the measured sizes the bound rests on
+//! the peak growing with the size, which the measurements break at single points (cuDNN picks its algorithms per
+//! shape: 1920x1080 at window 2 or 4 peaks higher than 2560x1440): an unmeasured size can be over the estimate.
 
-/// (window lengths, rows of (megapixels, peaks per window length)) for low_vram false / true.
+/// (window lengths, rows of (megapixels, peak GiB per window length)) for low_vram false / true.
 type Table = (&'static [usize], &'static [(f64, &'static [f64])]);
 
 const NORMAL: Table = (
-    &[8, 24, 48, 80],
-    &[(0.98, &[6.19, 7.52, 9.77, 12.89]), (2.21, &[7.50, 11.33, 18.66, 24.89]), (3.93, &[9.06, 14.78, 23.92, 33.19]), (8.36, &[13.94, 25.96, 45.15, 70.45])],
-);
-const LOW: Table = (
-    &[1, 2, 4, 8, 24, 48, 80],
+    &[8, 16, 24, 48, 80],
     &[
-        (0.98, &[2.71, 2.78, 2.94, 3.25, 4.54, 6.57, 9.50]),
-        (2.21, &[2.80, 2.97, 3.35, 4.12, 7.69, 13.20, 20.56]),
-        (3.93, &[2.92, 3.23, 3.85, 5.09, 10.09, 17.57, 27.75]),
-        (8.36, &[3.25, 3.92, 5.28, 8.38, 20.78, 39.66, 64.65]),
+        (0.786432, &[4.37, 4.75, 5.55, 7.11, 8.00]),
+        (1.47456, &[5.13, 5.90, 7.46, 10.54, 17.57]),
+        (2.21184, &[5.90, 7.00, 9.31, 18.61, 31.01]),
+        (3.93216, &[6.02, 7.91, 10.14, 20.28, 33.80]),
+        (6.144, &[9.35, 18.70, 28.05, 56.09, 93.48]),
+        (8.912896, &[11.02, 22.03, 33.04, 66.08, 110.12]),
     ],
 );
+const LOW: Table = (
+    &[1, 2, 4, 8, 16, 24, 48, 56, 64, 80],
+    &[
+        (0.786432, &[1.91, 2.61, 2.61, 2.73, 3.30, 4.38, 6.80, 9.20, 9.20, 9.20]),
+        (1.47456, &[1.91, 3.37, 3.58, 4.00, 4.96, 7.38, 8.47, 9.96, 10.65, 14.00]),
+        (2.21184, &[1.91, 4.26, 4.51, 5.19, 6.98, 9.83, 11.35, 13.25, 15.14, 18.92]),
+        (3.93216, &[2.21, 4.26, 4.51, 5.45, 8.68, 9.83, 17.22, 20.09, 22.96, 28.70]),
+        (6.144, &[3.16, 4.26, 5.92, 9.87, 19.73, 29.59, 59.18, 69.05, 78.91, 98.64]),
+        (8.912896, &[4.10, 4.45, 7.78, 9.87, 19.73, 29.59, 59.18, 69.05, 78.91, 98.64]),
+    ],
+);
+/// On top of the table (the module header).
+pub(crate) const UPLIFT: f64 = 0.06;
+/// The automatic window's safety margin: the estimate x MARGIN_SCALE + MARGIN_GB must fit the budget
+/// (Profile::fits). Kept at the upstream runtime's although the table is now a measured bound: a TensorRT job takes
+/// the same window and its peaks are not in the table (row 41).
 pub(crate) const MARGIN_SCALE: f64 = 1.1;
 pub(crate) const MARGIN_GB: f64 = 0.3;
+/// The windows the automatic choice tries, longest first (the upstream runtime's set), the normal mode only at
+/// AUTO_NORMAL. The table has more windows (16, 56, 64) to bound manual windows and short clips.
+const AUTO_WINDOWS: [usize; 7] = [80, 48, 24, 8, 4, 2, 1];
+const AUTO_NORMAL: [usize; 4] = [8, 24, 48, 80];
 
 fn table(low_vram: bool) -> Table {
     if low_vram {
@@ -31,29 +65,32 @@ fn table(low_vram: bool) -> Table {
     }
 }
 
-/// runtime._interp: piecewise-linear through the points, extrapolating past both ends.
-fn interp(x: f64, points: &[(f64, f64)]) -> f64 {
-    for i in 0..points.len().saturating_sub(1) {
-        let ((x0, y0), (x1, y1)) = (points[i], points[i + 1]);
-        if x <= x1 || i + 2 == points.len() {
-            return y0 + (y1 - y0) * (x - x0) / (x1 - x0);
+/// Column `i`'s peak at `megapixels`: the next measured size at or above (the smallest's below them),
+/// proportional to the megapixels above the largest.
+fn at_size(rows: &[(f64, &[f64])], i: usize, megapixels: f64) -> f64 {
+    match rows.iter().find(|(mp, _)| megapixels <= *mp) {
+        Some((_, peaks)) => peaks[i],
+        None => {
+            let (mp, peaks) = rows[rows.len() - 1];
+            peaks[i] * megapixels / mp
         }
     }
-    points[0].1
 }
 
-/// runtime.estimate_peak_vram_gb.
+/// The peak graphics memory (GiB) of a job whose model input is `megapixels` (the padded size) with `frames` frames
+/// per window (the window, capped at the clip's frames): an upper bound (the module header). One function for the
+/// automatic window, the `memory` reply and the `estimate` command.
 pub fn estimate_peak_vram_gb(megapixels: f64, frames: usize, low_vram: bool) -> f64 {
-    let (chunks, rows) = table(low_vram);
-    let frames = frames.max(chunks[0]) as f64;
-    let per_chunk: Vec<(f64, f64)> = (0..chunks.len())
-        .map(|i| {
-            // loop: NOT-WORTH — the table's rows (≤ 10), once per job
-            let pts: Vec<(f64, f64)> = rows.iter().map(|(mp, peaks)| (*mp, peaks[i])).collect();
-            (chunks[i] as f64, interp(megapixels, &pts).max(rows[0].1[i]))
-        })
-        .collect();
-    interp(frames, &per_chunk)
+    let (windows, rows) = table(low_vram);
+    let frames = frames.max(1);
+    let peak = match windows.iter().position(|&w| frames <= w) {
+        Some(i) => at_size(rows, i, megapixels),
+        None => {
+            let last = windows.len() - 1;
+            at_size(rows, last, megapixels) * frames as f64 / windows[last] as f64
+        }
+    };
+    peak * (1.0 + UPLIFT)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -70,20 +107,21 @@ impl Profile {
     }
 }
 
-/// runtime.select_vram_profile: the largest window that fits `budget_gb` (a larger low-VRAM window beats a
-/// smaller normal one); a single-frame low-VRAM window when nothing fits.
+/// runtime.select_vram_profile's search: the largest window that fits `budget_gb` (a larger low-VRAM window beats a
+/// smaller normal one, the normal mode first at the same window); a single-frame low-VRAM window when nothing fits.
 pub fn select_vram_profile(shape_hw: (usize, usize), num_frames: usize, budget_gb: f64) -> Profile {
     let mp = (shape_hw.0 * shape_hw.1) as f64 / 1e6;
     let mut estimate = 0.0;
-    for &chunk in LOW.0.iter().rev() {
+    for chunk in AUTO_WINDOWS {
         // loop: NOT-WORTH — two modes
         for low in [false, true] {
-            if !table(low).0.contains(&chunk) {
+            if !low && !AUTO_NORMAL.contains(&chunk) {
                 continue;
             }
-            estimate = estimate_peak_vram_gb(mp, chunk.min(num_frames), low);
-            if estimate * MARGIN_SCALE + MARGIN_GB <= budget_gb {
-                return Profile { chunk, stride: (chunk / 2).max(1), low_vram: low, estimate_gb: estimate };
+            let p = Profile { chunk, stride: (chunk / 2).max(1), low_vram: low, estimate_gb: estimate_peak_vram_gb(mp, chunk.min(num_frames), low) };
+            estimate = p.estimate_gb;
+            if p.fits(budget_gb) {
+                return p;
             }
         }
     }
@@ -173,7 +211,7 @@ pub fn estimate(input: &str, num_frames: i64, windows: &[Window], mem: Option<Ca
         "width": meta.w, "height": meta.h, "shape_w": meta.shape_w, "shape_h": meta.shape_h, "frames": meta.num_frames,
         "total_bytes": mem.and_then(|m| m.total), "free_bytes": mem.map(|m| m.free), "budget_bytes": budget,
         "budget_source": mem.map(|m| m.source), "budget_cap_gb": cap_gb, "provider": mem.map(|m| m.provider),
-        "estimate_basis": "pytorch-bf16-table", "margin_scale": MARGIN_SCALE, "margin_gb": MARGIN_GB,
+        "estimate_basis": "onnxruntime-cuda-measured", "margin_scale": MARGIN_SCALE, "margin_gb": MARGIN_GB,
         "windows": window_estimates((meta.shape_h, meta.shape_w), meta.num_frames, windows, budget),
     }))
 }
@@ -184,11 +222,192 @@ mod tests {
     use serde_json::{json, Value};
 
     #[test]
-    fn table_points_are_exact() {
-        assert!((estimate_peak_vram_gb(0.98, 8, false) - 6.19).abs() < 1e-12);
-        assert!((estimate_peak_vram_gb(8.36, 80, true) - 64.65).abs() < 1e-12);
-        // below the smallest window: clamped to it
-        assert!((estimate_peak_vram_gb(0.98, 1, false) - 6.19).abs() < 1e-12);
+    fn table_points_and_reading() {
+        let up = 1.0 + UPLIFT;
+        // a measured size and window: the table's value plus the uplift
+        assert!((estimate_peak_vram_gb(1.47456, 48, true) - 8.47 * up).abs() < 1e-12);
+        assert!((estimate_peak_vram_gb(8.912896, 8, false) - 11.02 * up).abs() < 1e-12);
+        // a window between table windows: the next one up; a normal-mode window below 8: the 8-frame one
+        assert!((estimate_peak_vram_gb(1.47456, 50, true) - 9.96 * up).abs() < 1e-12);
+        assert!((estimate_peak_vram_gb(1.47456, 4, false) - 5.13 * up).abs() < 1e-12);
+        // a size between measured sizes: the next one up (2048x1152 -> 2560x1536); below the smallest: the smallest
+        assert!((estimate_peak_vram_gb(2.359296, 8, true) - 5.45 * up).abs() < 1e-12);
+        assert!((estimate_peak_vram_gb(0.1, 8, true) - 2.73 * up).abs() < 1e-12);
+        // past the largest size and window: proportional
+        assert!((estimate_peak_vram_gb(2.0 * 8.912896, 8, true) - 2.0 * 9.87 * up).abs() < 1e-9);
+        assert!((estimate_peak_vram_gb(0.786432, 160, true) - 2.0 * 9.20 * up).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_table_is_monotone() {
+        // loop: NOT-WORTH — two small tables
+        for (windows, rows) in [NORMAL, LOW] {
+            for r in rows {
+                assert_eq!(r.1.len(), windows.len());
+                assert!(r.1.windows(2).all(|p| p[0] <= p[1]), "longer window, lower peak at {} MP", r.0);
+            }
+            for pair in rows.windows(2) {
+                assert!(pair[0].0 < pair[1].0);
+                assert!(pair[0].1.iter().zip(pair[1].1).all(|(a, b)| a <= b), "larger size, lower peak at {} MP", pair[1].0);
+            }
+        }
+        // and so the estimate, over sizes and frame counts
+        // loop: NOT-WORTH — a test's grid
+        for low in [false, true] {
+            let mut last_size = 0.0;
+            for mp in [0.3, 0.786432, 1.0, 1.47456, 2.0, 2.21184, 3.0, 3.93216, 5.0, 6.144, 8.0, 8.912896, 12.0] {
+                let e = estimate_peak_vram_gb(mp, 24, low);
+                assert!(e >= last_size, "{mp} MP");
+                last_size = e;
+                let mut last = 0.0;
+                for f in 1..=200 {
+                    let e = estimate_peak_vram_gb(mp, f, low);
+                    assert!(e >= last, "{mp} MP, {f} frames");
+                    last = e;
+                }
+            }
+        }
+    }
+
+    /// Every measured peak (row 41): (padded h x w, frames per window, low_vram, GiB) — 81 points
+    const MEASURED: &[((usize, usize), usize, bool, f64)] = &[
+        ((768, 1024), 1, true, 1.9043),
+        ((768, 1024), 4, true, 2.6074),
+        ((768, 1024), 8, true, 2.7227),
+        ((768, 1024), 16, true, 3.2930),
+        ((768, 1024), 24, true, 4.3789),
+        ((768, 1024), 48, true, 6.7988),
+        ((768, 1024), 80, true, 9.1992),
+        ((1152, 1280), 1, true, 1.6992),
+        ((1152, 1280), 2, true, 3.3672),
+        ((1152, 1280), 4, true, 3.5762),
+        ((1152, 1280), 8, true, 3.9902),
+        ((1152, 1280), 8, true, 3.9902),
+        ((1152, 1280), 8, true, 3.9277),
+        ((1152, 1280), 8, true, 3.8672),
+        ((1152, 1280), 16, true, 4.9453),
+        ((1152, 1280), 16, true, 4.9453),
+        ((1152, 1280), 16, true, 4.9473),
+        ((1152, 1280), 16, true, 4.9531),
+        ((1152, 1280), 24, true, 7.0449),
+        ((1152, 1280), 24, true, 7.0449),
+        ((1152, 1280), 24, true, 7.3789),
+        ((1152, 1280), 24, true, 7.0781),
+        ((1152, 1280), 24, true, 7.0469),
+        ((1152, 1280), 48, true, 8.4668),
+        ((1152, 1280), 48, true, 8.3828),
+        ((1152, 1280), 48, true, 8.0723),
+        ((1152, 1280), 48, true, 8.4238),
+        ((1152, 1280), 50, true, 9.4375),
+        ((1152, 1280), 56, true, 9.9570),
+        ((1152, 1280), 64, true, 10.6426),
+        ((1152, 1920), 1, true, 1.8203),
+        ((1152, 1920), 2, true, 4.2559),
+        ((1152, 1920), 4, true, 4.5020),
+        ((1152, 1920), 8, true, 5.1855),
+        ((1152, 1920), 16, true, 6.9727),
+        ((1152, 1920), 24, true, 9.8262),
+        ((1152, 1920), 48, true, 11.3496),
+        ((1536, 2560), 1, true, 2.2090),
+        ((1536, 2560), 2, true, 2.6543),
+        ((1536, 2560), 4, true, 3.5332),
+        ((1536, 2560), 8, true, 5.4414),
+        ((1536, 2560), 16, true, 8.6719),
+        ((1536, 2560), 24, true, 8.6074),
+        ((1920, 3200), 1, true, 3.1543),
+        ((1920, 3200), 2, true, 3.7227),
+        ((1920, 3200), 4, true, 5.9180),
+        ((1920, 3200), 8, true, 9.8633),
+        ((2176, 4096), 1, true, 4.0996),
+        ((2176, 4096), 2, true, 4.4434),
+        ((2176, 4096), 4, true, 7.7734),
+        ((2176, 4096), 4, true, 7.3789),
+        ((2176, 4096), 8, true, 9.1500),
+        ((2176, 4096), 8, true, 9.1300),
+        ((2176, 4096), 8, true, 9.4180),
+        ((2176, 4096), 8, true, 9.2200),
+        ((2176, 4096), 8, true, 9.2129),
+        ((2176, 4096), 8, true, 9.2900),
+        ((768, 1024), 4, false, 4.1719),
+        ((768, 1024), 8, false, 4.3652),
+        ((768, 1024), 16, false, 4.7461),
+        ((768, 1024), 24, false, 5.5449),
+        ((768, 1024), 48, false, 7.1016),
+        ((768, 1024), 80, false, 7.9902),
+        ((1152, 1280), 1, false, 3.8848),
+        ((1152, 1280), 4, false, 4.7461),
+        ((1152, 1280), 8, false, 5.1270),
+        ((1152, 1280), 8, false, 5.1270),
+        ((1152, 1280), 16, false, 5.8945),
+        ((1152, 1280), 24, false, 7.4512),
+        ((1152, 1280), 24, false, 7.4512),
+        ((1152, 1280), 48, false, 10.5391),
+        ((1152, 1280), 48, false, 10.5391),
+        ((1152, 1920), 8, false, 5.8965),
+        ((1152, 1920), 16, false, 6.9980),
+        ((1152, 1920), 24, false, 9.3008),
+        ((1536, 2560), 8, false, 6.0156),
+        ((1536, 2560), 16, false, 7.9004),
+        ((1536, 2560), 24, false, 10.1387),
+        ((1920, 3200), 8, false, 9.3477),
+        ((2176, 4096), 8, false, 11.0117),
+        ((2176, 4096), 8, false, 11.0117),
+    ];
+    /// The windows that ran out of memory on the 16 GB card with a 14 GiB budget — 15 points
+    const OUT_OF_MEMORY: &[((usize, usize), usize, bool)] = &[
+        ((1152, 1280), 80, true),
+        ((1152, 1920), 80, true),
+        ((1536, 2560), 48, true),
+        ((1920, 3200), 16, true),
+        ((1920, 3200), 24, true),
+        ((1920, 3200), 48, true),
+        ((2176, 4096), 16, true),
+        ((1152, 1280), 80, false),
+        ((1152, 1920), 48, false),
+        ((1152, 1920), 80, false),
+        ((1536, 2560), 48, false),
+        ((1920, 3200), 16, false),
+        ((1920, 3200), 24, false),
+        ((1920, 3200), 48, false),
+        ((2176, 4096), 16, false),
+    ];
+
+    #[test]
+    fn measured_peaks_are_bounded() {
+        let mp = |(h, w): (usize, usize)| (h * w) as f64 / 1e6;
+        let mut worst = f64::MAX;
+        // loop: NOT-WORTH — the measured points
+        for &(shape, frames, low, peak) in MEASURED {
+            let e = estimate_peak_vram_gb(mp(shape), frames, low);
+            assert!(e >= peak, "{shape:?} {frames} frames low_vram={low}: estimate {e:.3} GiB under the measured {peak:.3}");
+            worst = worst.min(e - peak);
+        }
+        assert!(worst >= 0.1, "the closest point is {worst:.3} GiB over");
+        // loop: NOT-WORTH — the points that ran out of memory
+        for &(shape, frames, low) in OUT_OF_MEMORY {
+            let p = Profile { chunk: frames, stride: (frames / 2).max(1), low_vram: low, estimate_gb: estimate_peak_vram_gb(mp(shape), frames, low) };
+            assert!(!p.fits(14.0), "{shape:?} {frames} frames low_vram={low} ran out of memory at a 14 GiB budget");
+        }
+    }
+
+    #[test]
+    fn automatic_windows_for_the_readme_clips_at_12_gib() {
+        // the six HD clips and the four 4K plates (padded size, frames) at a 12 GiB budget, as before the measured
+        // table except godiva_close, which now gets the normal mode at the same 80/40 window (row 41)
+        let cases = [
+            ((768, 1024), 349, (80, 40, false)),
+            ((1152, 1280), 80, (48, 24, true)),
+            ((1152, 1280), 139, (48, 24, true)),
+            ((1152, 1280), 250, (48, 24, true)),
+            ((1152, 1280), 314, (48, 24, true)),
+            ((1152, 1280), 50, (80, 40, true)),
+            ((2176, 4096), 120, (8, 4, true)),
+        ];
+        // loop: NOT-WORTH — seven cases
+        for (shape, frames, want) in cases {
+            let p = select_vram_profile(shape, frames, 12.0);
+            assert_eq!((p.chunk, p.stride, p.low_vram), want, "{shape:?} {frames} frames");
+        }
     }
 
     #[test]

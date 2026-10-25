@@ -6,7 +6,6 @@ use ck_core::decode::{prep_frame, prep_hint, read_image_rgb, rgb8_to_planar, Sti
 use ck_core::hann::{taper_weights, window_starts};
 use ck_core::image::{center_pad, resize_area, resize_bilinear, resize_lanczos4, Planar};
 use ck_core::render::{make_checker, render, RenderOpts};
-use ck_core::vram::{estimate_peak_vram_gb, select_vram_profile};
 use ck_core::writers::Batch;
 use std::path::PathBuf;
 
@@ -129,7 +128,7 @@ fn hint_frame_preprocessing() {
 }
 
 #[test]
-fn windows_and_vram_table() {
+fn windows() {
     let j: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(fx("windows_vram.json")).unwrap()).unwrap();
     // loop: NOT-WORTH — eight cases
     for c in j["taper"].as_array().unwrap() {
@@ -148,26 +147,8 @@ fn windows_and_vram_table() {
         let want: Vec<usize> = c["starts"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap() as usize).collect();
         assert_eq!(got, want, "{c}");
     }
-    let mut n = 0;
-    // loop: NOT-WORTH — a few hundred table cases
-    for c in j["vram"].as_array().unwrap() {
-        let hw = (c["hw"][0].as_u64().unwrap() as usize, c["hw"][1].as_u64().unwrap() as usize);
-        let frames = c["frames"].as_u64().unwrap() as usize;
-        if let Some(b) = c["budget"].as_f64() {
-            let p = select_vram_profile(hw, frames, b);
-            assert_eq!(
-                (p.chunk, p.stride, p.low_vram),
-                (c["chunk"].as_u64().unwrap() as usize, c["stride"].as_u64().unwrap() as usize, c["low_vram"].as_bool().unwrap()),
-                "{c}"
-            );
-            assert!((p.estimate_gb - c["estimate"].as_f64().unwrap()).abs() < 1e-9, "{c}");
-        } else {
-            let e = estimate_peak_vram_gb((hw.0 * hw.1) as f64 / 1e6, frames, c["low_vram"].as_bool().unwrap());
-            assert!((e - c["peak"].as_f64().unwrap()).abs() < 1e-9, "{c}");
-        }
-        n += 1;
-    }
-    println!("vram table: {n} cases identical");
+    // the fixture's "vram" cases (the upstream PyTorch table) are no longer compared: the engine's table is its own
+    // measured ONNX Runtime peaks since 2026-10-24 (docs/BACKLOG.md row 41; regression tests in src/vram.rs)
 }
 
 fn batch_f32(b: &Batch) -> Vec<f32> {

@@ -670,7 +670,7 @@ impl Pipeline<OrtLoader> {
                 "type": "memory", "hann_chunk": chunk, "hann_stride": stride, "low_vram": low_vram, "auto": true,
                 "budget_gb": (budget * 100.0).round() / 100.0, "estimate_gb": (est * 100.0).round() / 100.0,
                 "budget_source": source, "free_gb": (seen * 100.0).round() / 100.0, "budget_cap_gb": job.vram_budget_gb,
-                "estimate_basis": "pytorch-bf16-table", "provider": provider.name()
+                "estimate_basis": "onnxruntime-cuda-measured", "provider": provider.name()
             }));
         }
         // which provider really runs this job
