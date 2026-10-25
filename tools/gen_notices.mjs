@@ -4,7 +4,9 @@
 //     the release features of tools/build_engine.sh, build and dev crates left out);
 //   the app's npm packages: package-lock.json's production packages (what electron-builder puts in app.asar) and the
 //     licence file each one ships in node_modules;
-//   the first-run downloads: the wheels and model sets electron/main/install.ts pins.
+//   the first-run downloads: the wheels and model sets electron/main/install.ts pins;
+//   OpenColorIO and the C++ libraries its bundled build links into the engine: OCIO_LIBS below (versions from the
+//     vendored sources, texts in licenses/ocio/).
 // Licences of the parts that are not code here (downloads, foundation models, build tools) are the table below, each
 // from its publisher's own statement; a download it doesn't know is written "licence not determined".
 //
@@ -20,7 +22,7 @@ import { fileURLToPath } from "node:url";
 
 const APP = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(APP, "THIRD_PARTY_NOTICES.md");
-const ENGINE_FEATURES = "ort-dynamic,cuda,tensorrt";
+const ENGINE_FEATURES = "ort-dynamic,cuda,tensorrt,ocio";
 const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 const byNameVersion = (a, b) => cmp(a.name, b.name) || cmp(a.version, b.version);
 
@@ -167,6 +169,31 @@ function downloads() {
   return { repo, set, trtSet, rows };
 }
 
+// --- OpenColorIO and the C++ libraries its bundled build links into the engine (ocio-sys 0.3.0, engine-rs/vendor) ---
+// Versions: OpenColorIO's CMakeLists.txt project() and each library's own source as vendored in
+// engine-rs/vendor/ocio-sys/vendor/OpenColorIO/ext (expat.h, yaml-cpp's and Imath's CMakeLists.txt, zlib.h, mz.h,
+// xxhash.h; pystring has no version in its source: OCIO's pin, Installpystring.cmake's recommended 1.1.4, and the
+// vendored pystring.cpp / .h are byte-identical to pystring's v1.1.4 tag). Each licence text is the library's own
+// file at that tag (licenses/ocio/); SampleICC's is its section of OpenColorIO 2.5.2's THIRD-PARTY.md.
+const OCIO_LIBS = [
+  ["OpenColorIO", "2.5.2", "Contributors to the OpenColorIO Project", "BSD-3-Clause", "https://github.com/AcademySoftwareFoundation/OpenColorIO/tree/v2.5.2", "OpenColorIO-2.5.2.txt"],
+  [
+    "SampleICC (stripped, inside OpenColorIO)",
+    "1.2.6",
+    "The International Color Consortium",
+    "ICC Software License 0.2",
+    "https://sourceforge.net/p/sampleicc/code/HEAD/tree/tags/1.2.6/",
+    "SampleICC-1.2.6.txt",
+  ],
+  ["xxHash (inside OpenColorIO)", "0.8.1", "Yann Collet", "BSD-2-Clause", "https://github.com/Cyan4973/xxHash/tree/v0.8.1", "xxHash-0.8.1.txt"],
+  ["expat", "2.7.2", "Thai Open Source Software Center Ltd, Clark Cooper, Expat maintainers", "MIT", "https://github.com/libexpat/libexpat/tree/R_2_7_2", "expat-2.7.2.txt"],
+  ["yaml-cpp", "0.8.0", "Jesse Beder", "MIT", "https://github.com/jbeder/yaml-cpp/tree/0.8.0", "yaml-cpp-0.8.0.txt"],
+  ["pystring", "1.1.4", "Contributors to the Pystring project", "BSD-3-Clause", "https://github.com/imageworks/pystring/tree/v1.1.4", "pystring-1.1.4.txt"],
+  ["Imath", "3.2.1", "Contributors to the OpenEXR Project", "BSD-3-Clause", "https://github.com/AcademySoftwareFoundation/Imath/tree/v3.2.1", "Imath-3.2.1.txt"],
+  ["zlib", "1.3.1", "Jean-loup Gailly and Mark Adler", "Zlib", "https://github.com/madler/zlib/tree/v1.3.1", "zlib-1.3.1.txt"],
+  ["minizip-ng", "4.0.10", "Nathan Moinvaziri", "Zlib", "https://github.com/zlib-ng/minizip-ng/tree/4.0.10", "minizip-ng-4.0.10.txt"],
+];
+
 // --- the file ---
 const fence = (text) => {
   // a fence longer than any backtick run in the text
@@ -215,6 +242,8 @@ function render() {
     "| --- | --- | --- | --- |",
     `| Engine (Rust crates) | yes | ${rust.crates.length} | ${countBy(rust.crates)} |`,
     `| Interface (npm packages) | yes | ${npm.packages.length} | ${countBy(npm.packages)} |`,
+    // loop: NOT-WORTH — nine libraries, once per run
+    `| OpenColorIO and its bundled C++ libraries (inside the engine) | yes | ${OCIO_LIBS.length} | ${countBy(OCIO_LIBS.map((l) => ({ license: l[3] })))} |`,
     `| Electron ${electron} with Chromium | yes | 1 | MIT (Electron); Chromium's own notices in LICENSES.chromium.html |`,
     "| TensorRT engine builder (ck-trt-build, Linux) | yes | 2 | Apache-2.0 (TensorRT headers); Apache-2.0 WITH LLVM-exception (LLVM libc++) |",
     `| GPU runtime, models | no: downloaded at first run from their publishers | ${dl.rows.length} wheels, 2 model sets | see below |`,
@@ -224,7 +253,7 @@ function render() {
     "### The engine (corridorkey-engine)",
     "",
     `The Rust crates linked into corridorkey-engine as the releases build it (tools/build_engine.sh: features`,
-    `\`${ENGINE_FEATURES}\` on Linux and Windows, \`ort-dynamic\` on macOS; the union of the three targets).`,
+    `\`${ENGINE_FEATURES}\` on Linux and Windows, \`ort-dynamic,ocio\` on macOS; the union of the three targets).`,
     "Build-script and test-only crates are not linked and not listed; proc-macro crates run only while building and are",
     "listed anyway. The engine also links the Rust standard library (MIT OR Apache-2.0).",
     "",
@@ -234,6 +263,24 @@ function render() {
   // loop: NOT-WORTH — ~60 crates
   for (const c of rust.crates) L.push(`| ${c.name} | ${c.version} | ${c.license} |`);
   L.push(
+    "",
+    "### OpenColorIO and its bundled libraries (inside the engine)",
+    "",
+    "The engine's colour management is the OpenColorIO C++ library, built from source with the C++ libraries below and",
+    "linked statically into corridorkey-engine on Linux and Windows (and on macOS once the engine is built there), through",
+    "the ocio-rs / ocio-sys crates above (ocio-sys vendored with MinGW build fixes, engine-rs/vendor/README.md). Full",
+    "licence texts under Licence texts.",
+    "",
+    "| Library | Version | Copyright | Licence | Source |",
+    "| --- | --- | --- | --- | --- |",
+    // loop: NOT-WORTH — nine libraries, once per run
+    ...OCIO_LIBS.map(([name, version, holder, lic, url]) => `| ${name} | ${version} | ${holder} | ${lic} | ${url} |`),
+    "",
+    "The engine also links a C++ runtime for this code: on Linux the LLVM libc++ / libc++abi bundled with Zig 0.15.2",
+    "(statically; Apache-2.0 WITH LLVM-exception, https://llvm.org/LICENSE.txt), on Windows MinGW-w64's GCC 13",
+    "libstdc++ (statically; GPL-3.0-or-later WITH GCC-exception-3.1, the GCC Runtime Library Exception,",
+    "https://www.gnu.org/licenses/gcc-exception-3.1.html), on macOS the system's libc++. The Windows engine also uses",
+    "user32.dll and gdi32.dll, which are part of Windows (nothing to list).",
     "",
     "### The TensorRT engine builder (ck-trt-build, Linux)",
     "",
@@ -320,6 +367,9 @@ function render() {
   );
   // loop: NOT-WORTH — ~40 texts
   for (const g of rust.texts) L.push(`#### ${g.id}: ${users(g)}`, "", fence(g.text), "");
+  L.push("### OpenColorIO and its bundled libraries", "");
+  // loop: NOT-WORTH — nine licence files, once per generation
+  for (const [name, version, , lic, , file] of OCIO_LIBS) L.push(`#### ${lic}: ${name} ${version}`, "", fence(readFileSync(join(APP, "licenses/ocio", file), "utf8").trimEnd()), "");
   L.push("### npm packages", "");
   // loop: NOT-WORTH — ~100 texts
   for (const g of npm.texts) L.push(`#### ${g.id}: ${users(g)}`, "", fence(g.text), "");
