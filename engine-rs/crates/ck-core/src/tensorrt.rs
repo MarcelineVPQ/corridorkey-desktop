@@ -23,7 +23,8 @@ pub(crate) const MAX_SIDE: usize = 4096;
 /// low-VRAM window, stage 1 in 139 s with a 7.2 GiB workspace, peak 12.8 GiB on the card). A range past it (open gate
 /// 4096x3072 pads into h2944-3456) runs on CUDA until measured.
 pub(crate) const MAX_AREA: usize = 2176 * 4096;
-/// Frames per call of the foundation models in low-VRAM mode (pipeline.rs, the foundations prepass).
+/// Frames per call of the foundation models (C-RADIO / MoGe) in low-VRAM mode: the low-memory foundations prepass
+/// (pipeline/keying.rs) feeds them this many frames, and a low-VRAM range's engines are built for it (bucket `f`).
 pub(crate) const FOUNDATION_CHUNK: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -257,8 +258,14 @@ impl BuildLock {
             // the app ends its background build by killing that engine: its lock then names a process that is gone
             let gone = std::fs::read_to_string(&path).is_ok_and(|t| lock_holder_gone(&t, pid_alive));
             if gone || age.is_some_and(|a| a > stale_after) || std::time::Instant::now() >= end {
-                // gone stale, or past the deadline: take it over (a removal that loses a race just loops again)
-                let _ = std::fs::remove_file(&path);
+                // gone stale, or past the deadline: take it over (a removal that loses a race just loops again); one
+                // that can't be removed (a read-only folder) fails the build and says why, instead of spinning
+                match std::fs::remove_file(&path) {
+                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+                    _ => {}
+                }
+                // loop: SERIAL-REQUIRED — a poll's sleep after a take-over too, so a lock that comes back isn't spun on
+                std::thread::sleep(LOCK_POLL);
                 continue;
             }
             if !waited {
@@ -586,6 +593,37 @@ mod tests {
         assert!(waited && t.elapsed() < Duration::from_secs(3));
         drop((l, l2));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_lock_that_cant_be_taken_over_is_an_error_not_a_spin() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::Duration;
+        let dir = std::env::temp_dir().join(format!("ck-trt-lock-ro-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("build.lock"), "999999\n").unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        // root ignores the folder's mode: nothing to test there
+        if std::fs::remove_file(dir.join("build.lock")).is_ok() {
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755));
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let d2 = dir.clone();
+        // loop: NOT-WORTH — one test thread; the old code spun in it forever, the recv below has a deadline
+        std::thread::spawn(move || {
+            let _ = tx.send(BuildLock::acquire(&d2, Duration::from_millis(10), Duration::from_secs(30), || {}).map(|_| ()));
+        });
+        // loop: NOT-WORTH — waits for that thread [bounded: 5 s]
+        let got = rx.recv_timeout(Duration::from_secs(5));
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755));
+        let _ = std::fs::remove_dir_all(&dir);
+        let err = got.expect("acquire returned").expect_err("a lock in a read-only folder can't be taken");
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
     }
 
     #[test]

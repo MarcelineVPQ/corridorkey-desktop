@@ -446,7 +446,7 @@ impl<L: Loader> Pipeline<L> {
         if base.precision != Precision::Fp16 {
             return Err(Error::input("--device coreml: the Core ML model set is fp16 (CK_ENGINE_PRECISION=fp32 can't run on it)".into()));
         }
-        let fb = if low_vram { keying::FOUNDATION_CHUNK } else { tc };
+        let fb = if low_vram { crate::tensorrt::FOUNDATION_CHUNK } else { tc };
         let mut files = BTreeMap::new();
         // loop: NOT-WORTH — five networks, once per job
         for (piece, t) in [("rvm", 1), ("cradio", fb), ("moge", fb), ("stage1", tc), ("stage2", 1)] {

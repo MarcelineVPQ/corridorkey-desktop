@@ -21,7 +21,7 @@ use crate::job::JobConfig;
 use crate::outputs::{Geometry, RenderWorker, Writers};
 use crate::render::{make_checker, RenderOpts};
 use crate::runtime::{Data, Provider, TrtSettings};
-use crate::tensorrt::{BATON_CH, CRADIO_CH, MOGE_CH, RVM_CH};
+use crate::tensorrt::{BATON_CH, CRADIO_CH, FOUNDATION_CHUNK, MOGE_CH, RVM_CH};
 use crate::Error;
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -730,9 +730,6 @@ fn foundation_inputs(frames: &[Prepped], sh: usize, sw: usize) -> (Vec<f32>, Vec
     }
     (radio, moge)
 }
-
-/// The low-memory foundations prepass's frames per C-RADIO / MoGe call.
-pub(crate) const FOUNDATION_CHUNK: usize = 4;
 
 /// Append `extra` copies of the last frame (`frame` values each) to `v` (a fixed-batch network's padding).
 fn pad_frames(v: &mut Vec<f32>, frame: usize, extra: usize) {
