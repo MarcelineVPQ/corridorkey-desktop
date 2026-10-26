@@ -42,6 +42,7 @@ capped() { # one capped, locked step
 # loop: NOT-WORTH — the pieces asked for (≤ 5 distinct)
 for pt in "$@"; do
   p=${pt%%:*}
+  # loop: NOT-WORTH — a piece's .onnx and its .data, one copy each
   for f in "ck2-$p-fp16.onnx" "ck2-$p-fp16.onnx.data"; do
     [ -f "$B/$f" ] || cp "$SET/$f" "$B/$f"
   done

@@ -20,8 +20,10 @@ import numpy as np
 
 def parse_shapes(s):
     out = {}
+    # loop: NOT-WORTH — the few name:shape parts of an argument
     for part in s.split(","):
         name, dims = part.split(":")
+        # loop: NOT-WORTH — one shape's few dims
         out[name] = [int(d) for d in dims.split("x")]
     return out
 
@@ -60,6 +62,7 @@ def main():
     }
     if a.bf16:
         opts["trt_bf16_enable"] = True
+    # loop: NOT-WORTH — the few extra options given
     for kv in filter(None, a.extra.split(";")):
         k, v = kv.split("=", 1)
         opts[k] = v
@@ -71,11 +74,13 @@ def main():
     s = ort.InferenceSession(a.file, so, providers=[("TensorrtExecutionProvider", opts),
                                                     ("CUDAExecutionProvider", {"device_id": 0}), "CPUExecutionProvider"])
     session_s = time.perf_counter() - t0
+    # loop: NOT-WORTH — one session's few inputs
     dt = {i.name: (np.float16 if i.type == "tensor(float16)" else np.float32) for i in s.get_inputs()}
     rng = np.random.default_rng(0)
 
     def feeds(shapes):
         f = {}
+        # loop: NOT-WORTH — a piece's few inputs, one random array each
         for k, shp in shapes.items():
             if k == "hint_quality":
                 f[k] = np.full(shp, 0.95, dt[k])
@@ -85,21 +90,28 @@ def main():
                 f[k] = rng.standard_normal(shp, dtype=np.float32).astype(dt[k])
         return f
 
+    # loop: NOT-WORTH — the few provider options
     res = {"piece": a.piece, "file": a.file, "session_s": round(session_s, 2), "opts": {k: v for k, v in opts.items() if "path" not in k}}
+    # loop: SERIAL-REQUIRED — two shapes timed one after the other on one GPU session
     for tag in ("opt", "min"):
         f = feeds(parse_shapes(getattr(a, tag)))
         t = time.perf_counter()
         outs = s.run(None, f)
         first = time.perf_counter() - t
         times = []
+        # loop: SERIAL-REQUIRED — the timed runs: each must finish before the next is timed
         for _ in range(a.runs):
             t = time.perf_counter()
             s.run(None, f)
             times.append(time.perf_counter() - t)
         res[tag] = {"first_run_s": round(first, 3), "run_ms": round(1000 * float(np.median(times)), 2),
+                    # loop: NOT-WORTH — one run's few outputs
                     "outputs": [list(o.shape) for o in outs],
+                    # loop: NOT-WORTH — one run's few outputs
                     "nonfinite": int(sum((~np.isfinite(o.astype(np.float32))).sum() for o in outs))}
+    # loop: NOT-WORTH — the cache folder's few engine files
     engines = [f for f in os.listdir(a.cache) if f.endswith(".engine")]
+    # loop: NOT-WORTH — the cache folder's few engine files
     res["engines"] = {f: os.path.getsize(os.path.join(a.cache, f)) for f in engines}
     print("TRT_BUILD " + json.dumps(res))
 

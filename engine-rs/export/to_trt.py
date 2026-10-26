@@ -34,19 +34,26 @@ def _init(g, name, arr):
 
 def mha_to_plain(model, fp16):
     g = model.graph
+    # loop: NOT-WORTH — one pass over the nodes' outputs, offline
     prod = {o: n for n in g.node for o in n.output}
     cons = {}
+    # loop: NOT-WORTH — one pass over the graph's nodes, offline (an export step)
     for n in g.node:
+        # loop: NOT-WORTH — one node's few inputs
         for i in n.input:
             cons.setdefault(i, []).append(n)
+    # loop: NOT-WORTH — one pass over the initializers, offline
     inits = {i.name: i for i in g.initializer}
     drop, add, count = set(), {}, 0
     types = elem_types(model)
+    # loop: NOT-WORTH — one pass over the graph's nodes, offline (an export step)
     for n in g.node:
         if not (n.op_type == "MultiHeadAttention" and n.domain == "com.microsoft"):
             continue
+        # loop: NOT-WORTH — one node's few attributes
         heads = [a.i for a in n.attribute if a.name == "num_heads"][0]
         src = []
+        # loop: NOT-WORTH — one MultiHeadAttention node's q, k, v
         for r in n.input[:3]:
             rn = prod[r]
             tn = prod[rn.input[0]]
@@ -76,6 +83,7 @@ def mha_to_plain(model, fp16):
         add[n.name] = nodes
         count += 1
     new = []
+    # loop: NOT-WORTH — one pass over the graph's nodes, offline (an export step)
     for n in g.node:
         if n.name in add:
             new.extend(add[n.name])
@@ -83,11 +91,15 @@ def mha_to_plain(model, fp16):
             new.append(n)
     del g.node[:]
     g.node.extend(new)
+    # loop: NOT-WORTH — one pass over the nodes' inputs, offline
     used = {i for n in g.node for i in n.input}
+    # loop: NOT-WORTH — one pass over the initializers, offline
     keep = [i for i in g.initializer if i.name in used or not i.name.startswith("mha_shape_")]
     del g.initializer[:]
     g.initializer.extend(keep)
+    # loop: NOT-WORTH — one pass over the graph's nodes, offline (an export step)
     if not any(n.domain == "com.microsoft" for n in g.node):
+        # loop: NOT-WORTH — the model's few opsets
         ops = [o for o in model.opset_import if o.domain != "com.microsoft"]
         del model.opset_import[:]
         model.opset_import.extend(ops)
@@ -101,7 +113,9 @@ def aa_resize_to_matmul(model, fp16):
     count = 0
     new = []
     c = lambda name, arr: _init(g, name, arr)
+    # loop: NOT-WORTH — one pass over the graph's nodes, offline (an export step)
     for n in g.node:
+        # loop: NOT-WORTH — one node's few attributes
         attrs = {a.name: helper.get_attribute_value(a) for a in n.attribute}
         if not (n.op_type == "Resize" and attrs.get("antialias", 0) == 1 and attrs.get("mode") == b"linear"
                 and attrs.get("coordinate_transformation_mode") == b"half_pixel"):
@@ -212,7 +226,9 @@ def fp32_islands(model, ops, weights_only=False, default_fp16=True):
     """
     types = elem_types(model)
     g = model.graph
+    # loop: NOT-WORTH — one pass over the initializers, offline
     inits = {i.name: i for i in g.initializer}
+    # loop: NOT-WORTH — one pass over the graph's nodes, offline (an export step)
     consts = {n.output[0] for n in g.node if n.op_type == "Constant"}
     # C-RADIO's fp16 file keeps fp32 weights and casts / transposes them (autocast): those are weights too
     # loop: NOT-WORTH — one pass over the nodes (topologically sorted)
@@ -231,14 +247,17 @@ def fp32_islands(model, ops, weights_only=False, default_fp16=True):
         c = f"{tag}_{len(new)}_c32"
         return c, [helper.make_node("Cast", [name], [c], to=F32, name=c)]
 
+    # loop: NOT-WORTH — one pass over the graph's nodes, offline (an export step)
     for n in g.node:
         if n.op_type not in ops or types.get(n.output[0], F16 if default_fp16 else F32) != F16:
             new.append(n)
             continue
+        # loop: NOT-WORTH — one MatMul's two inputs
         if weights_only and n.op_type == "MatMul" and not any(i in inits or i in consts for i in n.input):
             new.append(n)
             continue
         ins = []
+        # loop: NOT-WORTH — one node's few inputs
         for j, x in enumerate(n.input):
             if not x:
                 ins.append(x)
@@ -255,7 +274,9 @@ def fp32_islands(model, ops, weights_only=False, default_fp16=True):
         count += 1
     del g.node[:]
     g.node.extend(new)
+    # loop: NOT-WORTH — one pass over the nodes' inputs, offline
     used = {i for n in g.node for i in n.input}
+    # loop: NOT-WORTH — one pass over the initializers, offline
     keep = [i for i in g.initializer if i.name in used]
     del g.initializer[:]
     g.initializer.extend(keep)
@@ -264,6 +285,7 @@ def fp32_islands(model, ops, weights_only=False, default_fp16=True):
 
 def main():
     src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+    # loop: NOT-WORTH — the few command-line arguments
     islands = next((a.split("=", 1)[1] for a in sys.argv[3:] if a.startswith("--fp32-ops=")), "")
     weights_only = "--weights-only" in sys.argv
     m = onnx.load(str(src), load_external_data=True)
@@ -274,6 +296,7 @@ def main():
     n_rs = aa_resize_to_matmul(m, fp16)
     # mixed files (fp32 input, fp16 inside) get islands too: only their fp16 ops move
     n_isl = fp32_islands(m, set(islands.split(",")), weights_only, default_fp16=fp16) if islands else 0
+    # loop: NOT-WORTH — the output file and its .data, removed before saving
     for f in (dst, dst.with_name(dst.name + ".data")):
         if f.exists():
             f.unlink()

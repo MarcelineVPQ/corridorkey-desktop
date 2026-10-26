@@ -34,12 +34,16 @@ def main():
     piece, H, W, T, a, b = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]), sys.argv[5], sys.argv[6]
     feeds = inputs(piece, H, W, T, np.random.default_rng(0))
     res = []
+    # loop: SERIAL-REQUIRED — two models, one session at a time (the first is freed before the second)
     for f in (a, b):
         s = ort.InferenceSession(f, providers=["CPUExecutionProvider"])
+        # loop: NOT-WORTH — one session's few inputs
         dt = {i.name: (np.float16 if i.type == "tensor(float16)" else np.float32) for i in s.get_inputs()}
+        # loop: NOT-WORTH — a run's few outputs and feeds, one cast each
         res.append([o.astype(np.float32) for o in s.run(None, {k: v.astype(dt[k]) for k, v in feeds.items()})])
         del s
     out = {"piece": piece, "H": H, "W": W, "T": T, "outputs": []}
+    # loop: NOT-WORTH — one comparison per output (a few)
     for x, y in zip(*res):
         d = np.abs(x - y)
         out["outputs"].append({"shape": list(x.shape), "max_abs": float(d.max()), "mean_abs": float(d.mean()),

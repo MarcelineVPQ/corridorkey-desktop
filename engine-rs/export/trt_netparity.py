@@ -40,12 +40,14 @@ def session(models, prec, ep, p, bf16=False, cache=None, shape=None, extra=None)
         eng, stub = os.path.join(d, f"{p}.engine"), os.path.join(d, f"{p}_ctx.onnx")
         if not os.path.exists(eng):
             t = time.perf_counter()
+            # loop: SERIAL-REQUIRED — one ck-trt-build per network on one GPU [bounded: timeout=1800 s, the engine's own per-build deadline]
             r = subprocess.run([os.environ["CK_TRT_BUILD"], "--onnx", os.path.join(models, files[p]), "--engine", eng,
                                 "--min", shape, "--opt", shape, "--max", shape, "--workspace-mb", "4096"],
-                               capture_output=True, text=True)
+                               capture_output=True, text=True, timeout=1800)
             print(f"BUILD {p} rc={r.returncode} {time.perf_counter() - t:.1f}s {r.stdout.strip()} {r.stderr.strip()[-300:]}", flush=True)
+        # loop: SERIAL-REQUIRED — writes one EPContext stub [bounded: timeout=300 s]
         subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__), "trt_ctx.py"),
-                        os.path.join(models, files[p]), stub, f"{p}.engine"], check=True, capture_output=True)
+                        os.path.join(models, files[p]), stub, f"{p}.engine"], check=True, capture_output=True, timeout=300)
         return ort.InferenceSession(stub, so, providers=[("TensorrtExecutionProvider", {}), cuda, "CPUExecutionProvider"])
     else:
         o = {"trt_fp16_enable": prec.endswith("fp16") and not bf16, "trt_engine_cache_enable": True,
@@ -62,7 +64,9 @@ def session(models, prec, ep, p, bf16=False, cache=None, shape=None, extra=None)
 
 
 def run(s, feeds):
+    # loop: NOT-WORTH — one session's few inputs
     dt = {i.name: (np.float16 if i.type == "tensor(float16)" else np.float32) for i in s.get_inputs()}
+    # loop: NOT-WORTH — a run's few outputs and feeds, one cast each
     return [o.astype(np.float32) for o in s.run(None, {k: np.asarray(v).astype(dt[k]) for k, v in feeds.items()})]
 
 
@@ -87,6 +91,7 @@ def main():
         import torch
         import pipeline
         S = os.path.expanduser("~/.cache/claude-scratch/corridorkey-onnx/models")
+        # loop: NOT-WORTH — five paths, once
         be = pipeline.OrtBackend({p: os.path.join(S, f"ck2-{p}-fp32.onnx") for p in PIECES},
                                  [("CUDAExecutionProvider", {"use_tf32": 0}), "CPUExecutionProvider"], name="ref")
         rec, calls = {}, {}
@@ -97,32 +102,43 @@ def main():
             n = calls.get(k, 0)
             calls[k] = n + 1
             if n < 2 and not (n == 1 and k in ("cradio", "moge", "stage1")):
+                # loop: NOT-WORTH — one recorded call's few feeds (the first two calls per network)
                 for name, v in feeds.items():
                     rec[f"{k}{n}.in.{name}"] = np.asarray(v, np.float32)
+                # loop: NOT-WORTH — one recorded call's few outputs
                 for i, o in enumerate(outs):
                     rec[f"{k}{n}.out{i}"] = o
             return outs
         be._run = recording
         pipeline.run_clip(be, a.a, chunk=a.frames, stride=max(1, a.frames // 2), num_frames=a.frames, log=lambda *_: None)
         np.savez(a.b, **rec)
+        # loop: NOT-WORTH — the recorded keys, once
         print("REF saved", a.b, sorted({k.split(".")[0] for k in rec}))
         return
 
     ref = dict(np.load(a.a))
+    # loop: NOT-WORTH — the reference's keys, once
     keys = sorted({k.split(".")[0] for k in ref})
     shapes = {}
+    # loop: NOT-WORTH — the reference's few calls (two per network at most)
     for k in keys:
         p = k[:-1]  # "<piece><call index 0|1>"
         if p not in shapes:
+            # loop: NOT-WORTH — a network's few inputs and their dims
             shapes[p] = ",".join(f"{n}:{'x'.join(str(d) for d in ref[f'{k}.in.{n}'].shape)}" for n in INPUTS[p])
+    # loop: NOT-WORTH — the few extra options given
     extra = dict(kv.split("=", 1) for kv in a.extra.split(";") if kv)
     res = {}
+    # loop: SERIAL-REQUIRED — five networks, one session at a time on one GPU
     for p in PIECES:
         if a.only and p not in a.only.split(","):
             continue
         sess = session(a.models, a.prec, a.ep, p, a.bf16, a.cache, shapes.get(p), extra)
+        # loop: SERIAL-REQUIRED — a network's one or two recorded calls, one run each on the GPU
         for k in [k for k in keys if k[:-1] == p]:  # "<piece><call index 0|1>"
+            # loop: NOT-WORTH — a network's few inputs
             outs = run(sess, {n: ref[f"{k}.in.{n}"] for n in INPUTS[p]})
+            # loop: NOT-WORTH — one comparison per output (a few)
             for i, o in enumerate(outs):
                 r = ref[f"{k}.out{i}"]
                 d = np.abs(o - r)

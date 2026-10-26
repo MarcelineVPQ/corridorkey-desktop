@@ -55,6 +55,7 @@ path = (ONNX_DIR.parent / "models" / f"ck2-{piece}-{tag[5:]}.onnx" if tag.starts
         else ONNX_DIR / f"{piece}_{tag}.onnx")
 s = ort.InferenceSession(str(path), so, providers=["CPUExecutionProvider"])
 load_rss = cur_rss()
+# loop: NOT-WORTH — one session's few inputs
 in_dt = {i.name: (np.float16 if i.type == "tensor(float16)" else np.float32) for i in s.get_inputs()}
 r = np.random.default_rng(0)
 h64, w64 = H // 64, W // 64
@@ -82,6 +83,7 @@ elif piece == "stage2":
     feeds = {"rgb": rnd(1, 1, 3, H, W, scale=0.5), "baton": rnd(1, 1, 512, H // 16, W // 16)}
 else:
     raise SystemExit(f"unknown piece {piece}")
+# loop: NOT-WORTH — the few feeds, one cast each, once
 feeds = {k: v.astype(in_dt[k]) for k, v in feeds.items() if k in in_dt}
 
 
@@ -90,9 +92,12 @@ def run_sampled():
     stop = threading.Event()
 
     def loop():
+        # loop: SERIAL-REQUIRED — the RSS sampler while one run runs, a 0.5 ms sleep per sample (below); ends on stop
         while not stop.is_set():
             peak[0] = max(peak[0], cur_rss())
+            # loop: SERIAL-REQUIRED — the sampler's interval: fine enough to catch the run's peak, not a spin
             time.sleep(0.0005)
+    # loop: SERIAL-REQUIRED — one sampler thread beside the measured run
     th = threading.Thread(target=loop)
     pre = cur_rss()
     th.start()
@@ -100,6 +105,7 @@ def run_sampled():
     s.run(None, feeds)
     dt = time.time() - t
     stop.set()
+    # loop: SERIAL-REQUIRED — joins the sampler [bounded: stop is set just before; it ends at its next 0.5 ms check]
     th.join()
     return pre, max(peak[0], cur_rss()), dt
 

@@ -31,12 +31,15 @@ def uniq(g, base, _c=[0]):
 
 def rms_decompose(m):
     g = m.graph
+    # loop: NOT-WORTH — one pass over the initializers, offline
     inits = {i.name: i for i in g.initializer}
     new, n = [], 0
+    # loop: NOT-WORTH — one pass over the graph's nodes, offline (an export step)
     for nd in g.node:
         if nd.op_type != "RMSNormalization":
             new.append(nd)
             continue
+        # loop: NOT-WORTH — one node's few attributes
         a = {x.name: helper.get_attribute_value(x) for x in nd.attribute}
         assert a.get("stash_type", 1) == 1 and a.get("axis", -1) == -1, a
         eps = a.get("epsilon", 1e-5)
@@ -71,8 +74,10 @@ def rms_decompose(m):
 def expand_to_tile(m):
     g = m.graph
     shapes = static_shapes(m)
+    # loop: NOT-WORTH — one pass over the initializers, offline
     consts = {i.name: i for i in g.initializer}
     new, n = [], 0
+    # loop: NOT-WORTH — one pass over the graph's nodes, offline (an export step)
     for nd in g.node:
         if nd.op_type != "Expand" or nd.input[1] not in consts or nd.input[0] not in shapes:
             new.append(nd)
@@ -82,7 +87,9 @@ def expand_to_tile(m):
         r = max(len(tgt), len(src))
         s = [1] * (r - len(src)) + src
         t = [1] * (r - len(tgt)) + tgt
+        # loop: NOT-WORTH — the axes of one Expand (≤ 8)
         out = [max(a, b) if a != 1 else b for a, b in zip(s, t)]
+        # loop: NOT-WORTH — the axes of one Expand (≤ 8)
         reps = [o // a for o, a in zip(out, s)]
         p = uniq(g, "exp")
         x = nd.input[0]
@@ -104,7 +111,9 @@ def bias_add_to_sub(m):
     text, > 10 GB to load; found on an M6 2026-10-25). It doesn't fuse a Sub, so the weights stay in weight.bin as
     shipped. Exact: negating flips the sign bit. New data: the negated biases only (a few KB each)."""
     g = m.graph
+    # loop: NOT-WORTH — one pass over the initializers, offline
     inits = {i.name: i for i in g.initializer}
+    # loop: NOT-WORTH — one pass over the nodes' outputs, offline
     prod = {o: n for n in g.node for o in n.output}
     n = 0
     # loop: NOT-WORTH — one pass over the nodes, once per build
@@ -162,6 +171,7 @@ def main():
     n_aa = aa_resize_to_matmul(m, fp16)
     n_rms = rms_decompose(m)
     n_exp = expand_to_tile(m)
+    # loop: SERIAL-REQUIRED — folds until nothing is left to fold; each round depends on the last [bounded: every round that returns true removes at least one node]
     while fold_once(m):
         pass
     n_exp += expand_to_tile(m)  # shapes known only after folding

@@ -24,7 +24,9 @@ MOVE = {"Reshape", "Unsqueeze", "Squeeze", "Concat", "Transpose", "Identity"}
 
 def fold(m):
     g = m.graph
+    # loop: NOT-WORTH — one pass over the initializers, offline
     inits = {i.name: i for i in g.initializer}
+    # loop: NOT-WORTH — one pass over the nodes' outputs, offline
     prod = {o: n for n in g.node for o in n.output}
     f16_of, cloned, n_direct, n_chain = {}, {}, 0, 0
     new_nodes_before = {}  # cast node name -> nodes to insert in its place
@@ -37,9 +39,12 @@ def fold(m):
             return False
         # the first input carries data; shape / axes inputs must be integer initializers or Constants
         data = n.input if n.op_type == "Concat" else n.input[:1]
+        # loop: NOT-WORTH — one node's few inputs
         rest = [] if n.op_type == "Concat" else [i for i in n.input[1:] if i]
         ok_rest = all(i in inits and inits[i].data_type == TensorProto.INT64
+                      # loop: NOT-WORTH — one node's few inputs
                       or (prod.get(i) is not None and prod[i].op_type == "Constant") for i in rest)
+        # loop: NOT-WORTH — one node's data inputs, recursing up a short constant chain
         return ok_rest and all(is_const_chain(d, depth + 1) for d in data)
 
     def f16_init(name):
@@ -64,6 +69,7 @@ def fold(m):
         n = prod[name]
         ins = list(n.input)
         data_idx = range(len(ins)) if n.op_type == "Concat" else [0]
+        # loop: NOT-WORTH — one node's data inputs (one, or a Concat's few)
         for k in data_idx:
             ins[k] = clone(ins[k], out_nodes)
         out = name + "_f16"
@@ -75,7 +81,9 @@ def fold(m):
 
     rename = {}
     keep = []
+    # loop: NOT-WORTH — one pass over the graph's nodes, offline (an export step)
     for n in g.node:
+        # loop: NOT-WORTH — one node's few attributes
         to = [a.i for a in n.attribute if a.name == "to"] if n.op_type == "Cast" else []
         if to == [TensorProto.FLOAT16] and is_const_chain(n.input[0]):
             extra = []
@@ -88,23 +96,32 @@ def fold(m):
                 n_chain += 1
             continue
         keep.append(n)
+    # loop: NOT-WORTH — one pass over the kept nodes, offline
     for n in keep:
+        # loop: NOT-WORTH — one node's few inputs
         for k, i in enumerate(n.input):
             if i in rename:
                 n.input[k] = rename[i]
+    # loop: NOT-WORTH — the graph's few outputs
     for o in g.output:
         assert o.name not in rename, f"graph output {o.name} is a folded cast"
     del g.node[:]
     g.node.extend(keep)
     # drop what nothing reads any more (the fp32 originals of folded weights, their now-unused chains)
+    # loop: SERIAL-REQUIRED — drops dead nodes until none is left; each round exposes the next [bounded: every round that doesn't break removes at least one node]
     while True:
+        # loop: NOT-WORTH — one pass over the nodes' inputs per round, offline
         used = {i for n in g.node for i in n.input} | {o.name for o in g.output}
+        # loop: NOT-WORTH — one pass over the nodes per round, offline
         dead = [n for n in g.node if not any(o in used for o in n.output)]
         if not dead:
             break
+        # loop: NOT-WORTH — the dead nodes of one round (O(dead x nodes) removal; offline, a few rounds; loop pass 2026-10-26 'unsure')
         for d in dead:
             g.node.remove(d)
+    # loop: NOT-WORTH — one pass over the nodes' inputs, offline
     used = {i for n in g.node for i in n.input}
+    # loop: NOT-WORTH — one pass over the initializers, offline
     live = [i for i in g.initializer if i.name in used]
     n_dropped = len(g.initializer) - len(live)
     del g.initializer[:]
@@ -117,6 +134,7 @@ def main():
     m = onnx.load(str(src), load_external_data=True)
     n_direct, n_chain, n_dropped = fold(m)
     onnx.checker.check_model(m, full_check=False)
+    # loop: NOT-WORTH — the output file and its .data, removed before saving
     for f in (dst, dst.with_name(dst.name + ".data")):
         if f.exists():
             f.unlink()

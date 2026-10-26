@@ -115,6 +115,7 @@ def main():
                      for n, x in zip(names_in, args))
     elif a.half:
         mod = mod.half()
+        # loop: NOT-WORTH — a piece's few example inputs, once
         args = tuple(x.half() for x in args)
     tag = a.tag or ("fp16" if (a.half or a.autocast16 or a.amp) else f"{a.exporter}{'_static' if a.static else ''}")
     out = ONNX_DIR / f"{a.piece}_{tag}.onnx"
@@ -127,10 +128,13 @@ def main():
                 ds = None
                 if not a.static:
                     ds = {}
+                    # loop: NOT-WORTH — a piece's few inputs, once
                     for n in names_in:
+                        # loop: NOT-WORTH — one input's few dynamic axes
                         ds[n] = {k: torch.export.Dim.AUTO for k in dyn.get(n, {})}
                 prog = torch.onnx.export(
                     mod, args, input_names=names_in, output_names=names_out,
+                    # loop: NOT-WORTH — a piece's few inputs, once
                     dynamic_shapes=tuple(ds[n] for n in names_in) if ds else None,
                     opset_version=a.opset, dynamo=True, external_data=True,
                     optimize=True, verify=False)
@@ -147,18 +151,22 @@ def main():
         traceback.print_exc()
     rec["seconds"] = round(time.time() - t0, 1)
     if rec["ok"]:
+        # loop: NOT-WORTH — the export's file and its .data
         size = sum(p.stat().st_size for p in out.parent.glob(out.name + "*"))
         data = out.with_suffix(".onnx.data")
         rec["bytes"] = size
         import onnx
         m = onnx.load(str(out), load_external_data=False)
         ops = {}
+        # loop: NOT-WORTH — one pass over the graph's nodes, offline (an export step)
         for n in m.graph.node:
             k = (n.domain + "::" if n.domain else "") + n.op_type
             ops[k] = ops.get(k, 0) + 1
         rec["ops"] = dict(sorted(ops.items(), key=lambda kv: -kv[1]))
+        # loop: NOT-WORTH — the graph's few inputs and their dims, once
         rec["inputs"] = [(i.name, [d.dim_param or d.dim_value for d in i.type.tensor_type.shape.dim])
                          for i in m.graph.input]
+        # loop: NOT-WORTH — the graph's few outputs and their dims, once
         rec["outputs"] = [(i.name, [d.dim_param or d.dim_value for d in i.type.tensor_type.shape.dim])
                           for i in m.graph.output]
     print("EXPORT_RESULT " + json.dumps(rec))

@@ -28,11 +28,15 @@ class Bail(Exception):
 def shapes_of(m):
     mi = shape_inference.infer_shapes(m, strict_mode=False, data_prop=True)
     sh, ty = {}, {}
+    # loop: NOT-WORTH — one pass over the graph's typed values, offline
     for v in list(mi.graph.value_info) + list(mi.graph.input) + list(mi.graph.output):
         t = v.type.tensor_type
         ty[v.name] = t.elem_type
+        # loop: NOT-WORTH — one value's few dims
         if t.HasField("shape") and all(d.HasField("dim_value") for d in t.shape.dim):
+            # loop: NOT-WORTH — one value's few dims
             sh[v.name] = [d.dim_value for d in t.shape.dim]
+    # loop: NOT-WORTH — one pass over the initializers, offline
     for i in m.graph.initializer:
         sh[i.name] = list(i.dims)
         ty[i.name] = i.data_type
@@ -49,6 +53,7 @@ def canon(s):
 def merge_runs(sig):
     """sig: per-axis signature (None = size-1 axis, joins any group). -> list of contiguous axis groups."""
     groups, cur, cs, pending = [], [], None, []
+    # loop: NOT-WORTH — one tensor's axes (≤ 8)
     for i, s in enumerate(sig):
         if s is None:
             (cur if cur else pending).append(i)
@@ -71,6 +76,7 @@ class Rewriter:
         self.m = m
         self.g = m.graph
         self.sh, self.ty = shapes_of(m)
+        # loop: NOT-WORTH — one pass over the initializers, offline
         self.inits = {i.name: i for i in self.g.initializer}
         self.n = 0
         self.out = []
@@ -114,12 +120,16 @@ class Rewriter:
 
     # ---------------------------------------------------------------- per-op
     def high(self, nd):
+        # loop: NOT-WORTH — one node's few inputs and outputs
         ts = [t for t in list(nd.input) + list(nd.output) if t]
+        # loop: NOT-WORTH — one node's few inputs and outputs
         for t in ts:
             if t not in self.sh:
+                # loop: NOT-WORTH — one node's few inputs
                 if t in nd.output and all(i in self.sh and len(self.sh[i]) <= 5 for i in nd.input if i):
                     continue
                 raise Bail(f"no static shape for {t} ({nd.op_type} {nd.name})")
+        # loop: NOT-WORTH — one node's few inputs and outputs
         return any(len(self.sh[t]) > 5 for t in ts if t in self.sh)
 
     def do_unary(self, nd):
@@ -128,6 +138,7 @@ class Rewriter:
         xi = self.to_view(x, v)
         o = self.name("u")
         self.out.append(helper.make_node(nd.op_type, [xi] + list(nd.input[1:]), [o], name=nd.name, domain=nd.domain,
+                                         # loop: NOT-WORTH — one node's few attributes
                                          **{a.name: helper.get_attribute_value(a) for a in nd.attribute}))
         self.sh[o] = v
         self.from_view(o, v, y)
@@ -136,19 +147,25 @@ class Rewriter:
         y = nd.output[0]
         so = self.sh[y]
         r = len(so)
+        # loop: NOT-WORTH — one node's few inputs
         ins = [self.sh[i] for i in nd.input]
+        # loop: NOT-WORTH — one node's few inputs
         al = [[1] * (r - len(s)) + list(s) for s in ins]
         sig = []
+        # loop: NOT-WORTH — one tensor's axes (≤ 8)
         for a in range(r):
             if so[a] == 1:
                 sig.append(None)
             else:
+                # loop: NOT-WORTH — one node's few inputs, per axis
                 sig.append(tuple(s[a] == 1 for s in al))
         groups = merge_runs(sig)
         if len(groups) > 5:
             raise Bail(f"broadcast groups {len(groups)} > 5 at {nd.name}")
         new_in = []
+        # loop: NOT-WORTH — one node's few inputs
         for i, s in zip(nd.input, al):
+            # loop: NOT-WORTH — a few axis groups
             v = [int(np.prod([s[a] for a in g])) for g in groups]
             if i in self.inits and self.inits[i].data_location != TensorProto.EXTERNAL and np.prod(s) < 1 << 20:
                 arr = self.cval(i).reshape(v)
@@ -156,9 +173,11 @@ class Rewriter:
             else:
                 cur = self.sh[i]
                 new_in.append(self.reshape(i, canon(cur), v))
+        # loop: NOT-WORTH — a few axis groups
         vo = [int(np.prod([so[a] for a in g])) for g in groups]
         o = self.name("b")
         self.out.append(helper.make_node(nd.op_type, new_in, [o], name=nd.name,
+                                         # loop: NOT-WORTH — one node's few attributes
                                          **{a.name: helper.get_attribute_value(a) for a in nd.attribute}))
         self.sh[o] = vo
         self.from_view(o, vo, y)
@@ -178,15 +197,22 @@ class Rewriter:
         cur = list(range(k))
         size = dict(enumerate(dims))
         perm = list(perm)
+        # loop: SERIAL-REQUIRED — one block move per round, each from the last order [bounded: every round puts position j and the block after it in place; at most k (≤ 8) rounds]
         while cur != perm:
+            # loop: NOT-WORTH — the axes (≤ 8)
             j = next(i for i in range(k) if cur[i] != perm[i])
             m = cur.index(perm[j])
             L = 1
+            # loop: NOT-WORTH — grows a run of axes [bounded: L < k ≤ 8]
             while m + L < k and j + L < k and cur[m + L] == perm[j + L]:
                 L += 1
+            # loop: NOT-WORTH — the axes (≤ 8)
             pre = int(np.prod([size[a] for a in cur[:j]])) if j else 1
+            # loop: NOT-WORTH — the axes (≤ 8)
             mid = int(np.prod([size[a] for a in cur[j:m]]))
+            # loop: NOT-WORTH — the axes (≤ 8)
             blk = int(np.prod([size[a] for a in cur[m:m + L]]))
+            # loop: NOT-WORTH — the axes (≤ 8)
             rest = int(np.prod([size[a] for a in cur[m + L:]])) if m + L < k else 1
             v = [pre, mid, blk, rest]
             xr = self.reshape(x, [], v) if True else x
@@ -199,28 +225,39 @@ class Rewriter:
     def do_transpose(self, nd):
         x, y = nd.input[0], nd.output[0]
         s = self.sh[x]
+        # loop: NOT-WORTH — one node's few attributes
         perm = [a.ints for a in nd.attribute if a.name == "perm"][0]
+        # loop: NOT-WORTH — the axes (≤ 8)
         keep = [a for a in range(len(s)) if s[a] != 1]
+        # loop: NOT-WORTH — the axes (≤ 8)
         kidx = {a: n for n, a in enumerate(keep)}
+        # loop: NOT-WORTH — the axes (≤ 8)
         p2 = [kidx[a] for a in perm if s[a] != 1]
+        # loop: NOT-WORTH — the axes (≤ 8)
         s = [s[a] for a in keep]
         groups, i = [], 0
+        # loop: NOT-WORTH — groups the permutation's runs [bounded: i grows every round, ≤ 8 axes]
         while i < len(p2):
             gr = [p2[i]]
+            # loop: NOT-WORTH — extends one run [bounded: i grows every round, ≤ 8 axes]
             while i + 1 < len(p2) and p2[i + 1] == gr[-1] + 1:
                 i += 1
                 gr.append(p2[i])
             groups.append(gr)
             i += 1
         order_in = sorted(groups, key=lambda g: g[0])
+        # loop: NOT-WORTH — a few axis groups
         dims = [int(np.prod([s[a] for a in g])) for g in order_in]
+        # loop: NOT-WORTH — a few axis groups
         idx = {tuple(g): n for n, g in enumerate(order_in)}
+        # loop: NOT-WORTH — a few axis groups
         rp = [idx[tuple(g)] for g in groups]
         xv = self.to_view(x, dims if dims else [1])
         if len(dims) <= 1:
             o = xv
         else:
             o = self.transpose_chain(xv, dims, rp)
+        # loop: NOT-WORTH — a few axis groups
         vo = [dims[i] for i in rp] if dims else [1]
         self.from_view(o, vo, y)
 
@@ -229,9 +266,11 @@ class Rewriter:
         x = nd.input[0]
         s = self.sh[x]
         r = len(s)
+        # loop: NOT-WORTH — one node's few attributes
         a = {at.name: helper.get_attribute_value(at) for at in nd.attribute}
         if nd.op_type.startswith("Reduce"):
             axes = self.cval(nd.input[1]) if len(nd.input) > 1 else a.get("axes")
+            # loop: NOT-WORTH — one node's few axes
             axes = [int(v) % r for v in np.atleast_1d(axes)]
             if len(axes) != 1:
                 raise Bail(f"multi-axis reduce at {nd.name}")
@@ -258,6 +297,7 @@ class Rewriter:
             self.from_view(o, vo, nd.output[0])
             return
         ins = []
+        # loop: NOT-WORTH — one node's few inputs
         for t in nd.input:
             if not t:
                 ins.append(t)
@@ -272,9 +312,11 @@ class Rewriter:
             ins[1] = self.const(np.array([1], np.int64), "ax")
             attrs.pop("axes", None)
         outs = []
+        # loop: NOT-WORTH — one node's few outputs
         for y in nd.output:
             outs.append(self.name("a"))
         self.out.append(helper.make_node(nd.op_type, ins, outs, name=nd.name, **attrs))
+        # loop: NOT-WORTH — one node's few outputs
         for o, y in zip(outs, nd.output):
             sy = self.sh[y]
             vy = [pre, sy[ax] if len(sy) == r else 1, post] if len(sy) == r else None
@@ -295,28 +337,36 @@ class Rewriter:
             steps = self.cval(nd.input[4]) if len(nd.input) > 4 and nd.input[4] else np.ones(len(st), np.int64)
             if st is None or en is None or axes is None or steps is None:
                 raise Bail(f"non-constant slice at {nd.name}")
+            # loop: NOT-WORTH — one node's few axes
             axes = [int(a) % r for a in axes]
+            # loop: NOT-WORTH — one node's few axes
             cut = set(a for a, b, e, p in zip(axes, st, en, steps) if not (b == 0 and e >= s[a] and p == 1))
         else:
             pads = self.cval(nd.input[1])
             if pads is None or (len(nd.input) > 3 and nd.input[3]):
                 raise Bail(f"pad form at {nd.name}")
+            # loop: NOT-WORTH — the axes (≤ 8)
             cut = set(a for a in range(r) if pads[a] != 0 or pads[a + r] != 0)
         if not cut:  # no-op slice / pad: same elements, a view change only
             self.out.append(helper.make_node("Reshape", [x, self.const(np.array(self.phys(y), np.int64), "s")], [y],
                                              name=nd.name))
             return
+        # loop: NOT-WORTH — the axes (≤ 8)
         sig = [("cut", a) if a in cut else ("keep",) for a in range(r)]
         groups = merge_runs(sig)
         if len(groups) > 5:
             raise Bail(f"slice groups > 5 at {nd.name}")
+        # loop: NOT-WORTH — a few axis groups
         v = [int(np.prod([s[a] for a in g])) for g in groups]
+        # loop: NOT-WORTH — a few axis groups
         vo = [int(np.prod([so[a] for a in g])) for g in groups]
         xi = self.to_view(x, v)
         o = self.name("sl")
+        # loop: NOT-WORTH — a few axis groups
         gidx = {g[0]: n for n, g in enumerate(groups) if len(g) == 1}
         if nd.op_type == "Slice":
             ns, ne, na, npp = [], [], [], []
+            # loop: NOT-WORTH — one node's few sliced axes
             for a, b, e, p in zip(axes, st, en, steps):
                 if a in cut:
                     ns.append(int(b)); ne.append(int(e)); na.append(gidx[a]); npp.append(int(p))
@@ -326,10 +376,12 @@ class Rewriter:
         else:
             k = len(groups)
             npads = [0] * (2 * k)
+            # loop: NOT-WORTH — the cut axes (≤ 8)
             for a in cut:
                 npads[gidx[a]] = int(pads[a]); npads[gidx[a] + k] = int(pads[a + r])
             ins = [xi, self.const(np.array(npads, np.int64))] + list(nd.input[2:3])
             self.out.append(helper.make_node("Pad", ins, [o], name=nd.name,
+                                             # loop: NOT-WORTH — one node's few attributes
                                              **{at.name: helper.get_attribute_value(at) for at in nd.attribute}))
         self.sh[o] = vo
         self.from_view(o, vo, y)
@@ -337,6 +389,7 @@ class Rewriter:
     def do_gather_scalar(self, nd):
         (x, ind), y = nd.input, nd.output[0]
         s = self.sh[x]
+        # loop: NOT-WORTH — one node's few attributes
         ax = int(next((helper.get_attribute_value(a) for a in nd.attribute if a.name == "axis"), 0)) % len(s)
         i = int(self.cval(ind))
         i = i % s[ax]
@@ -348,12 +401,14 @@ class Rewriter:
     def wrap(self, nd):
         """keep a node as is: its high-rank inputs/outputs go back to their real shapes around it."""
         ins = []
+        # loop: NOT-WORTH — one node's few inputs
         for t in nd.input:
             if t and t in self.sh and len(self.sh[t]) > 5:
                 ins.append(self.reshape(t, self.phys(t), self.sh[t]))
             else:
                 ins.append(t)
         outs, fix = [], []
+        # loop: NOT-WORTH — one node's few outputs
         for y in nd.output:
             if y and y in self.sh and len(self.sh[y]) > 5:
                 o = self.name("w"); outs.append(o); fix.append((o, y))
@@ -362,31 +417,40 @@ class Rewriter:
         nd2 = onnx.NodeProto(); nd2.CopyFrom(nd)
         del nd2.input[:]; nd2.input.extend(ins); del nd2.output[:]; nd2.output.extend(outs)
         self.out.append(nd2)
+        # loop: NOT-WORTH — one node's few outputs
         for o, y in fix:
             self.from_view(o, self.sh[y], y)
 
     # ---------------------------------------------------------------- driver
     def empty_pass(self):
         g = self.g
+        # loop: NOT-WORTH — one pass over the known shapes, offline
         empty = {t for t, s in self.sh.items() if 0 in s}
         if not empty:
             return 0
         new, k = [], 0
+        # loop: NOT-WORTH — one pass over the graph's nodes, offline (an export step)
         for nd in g.node:
+            # loop: NOT-WORTH — one node's few outputs
             outs = [o for o in nd.output if o]
+            # loop: NOT-WORTH — one node's few outputs
             if outs and all(o in empty for o in outs):
                 k += 1
                 continue  # produces nothing
+            # loop: NOT-WORTH — one node's few inputs
             if nd.op_type == "Concat" and any(i in empty for i in nd.input):
+                # loop: NOT-WORTH — one node's few inputs
                 ins = [i for i in nd.input if i not in empty]
                 k += 1
                 if len(ins) == 1:
                     new.append(helper.make_node("Identity", ins, list(nd.output), name=nd.name))
                 else:
                     nd2 = helper.make_node("Concat", ins, list(nd.output), name=nd.name,
+                                           # loop: NOT-WORTH — one node's few attributes
                                            **{a.name: helper.get_attribute_value(a) for a in nd.attribute})
                     new.append(nd2)
                 continue
+            # loop: NOT-WORTH — one node's few inputs
             if any(i in empty for i in nd.input):
                 raise Bail(f"empty tensor feeds {nd.op_type} {nd.name} with a non-empty output")
             new.append(nd)
@@ -399,6 +463,7 @@ class Rewriter:
         only = set(filter(None, os.environ.get("RL_OPS", "").split(",")))
         k_empty = 0 if os.environ.get("RL_NOEMPTY") else self.empty_pass()
         self.out = []
+        # loop: SERIAL-REQUIRED — one pass over the nodes in graph order (the rewritten nodes keep the topological order)
         for nd in self.g.node:
             op = nd.op_type
             try:
@@ -422,6 +487,7 @@ class Rewriter:
                 elif op in ("Concat", "Split", "Softmax", "LogSoftmax", "Gather") or op.startswith("Reduce"):
                     self.do_axis_op(nd)
                 else:
+                    # loop: NOT-WORTH — one node's few inputs, in an error message
                     raise Bail(f"no rule for {op} {nd.name} {[self.sh.get(t) for t in nd.input]}")
                 self.changed += 1
             except Bail as e:

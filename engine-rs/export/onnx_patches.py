@@ -91,6 +91,7 @@ def region_sdpa(q, k, v, Bn, nH, nW, T, w, H, W, sh, sw):
     jh = _n_joined(nH, H, w, sh)
     jw = _n_joined(nW, W, w, sw)
     sh_n, sw_n = nH - jh, nW - jw
+    # loop: NOT-WORTH — q, k, v: three reshapes, unrolled into the graph at export
     grids = [t.reshape(Bn, nH, nW, heads, T, w, w, d) for t in (q, k, v)]
     # (rows, cols, split_h, split_w, slice) for the four groups
     groups = [
@@ -100,8 +101,11 @@ def region_sdpa(q, k, v, Bn, nH, nW, T, w, H, W, sh, sw):
         ("SS", sh_n, sw_n, True, True, (slice(jh, None), slice(jw, None))),
     ]
     regs = {}
+    # loop: NOT-WORTH — four region groups, unrolled into the graph at export
     for name, r, c, a, b, (rs, cs) in groups:
+        # loop: NOT-WORTH — q, k, v per group, unrolled into the graph at export
         regs[name] = [_regions(g[:, rs, cs], Bn, r, c, heads, T, w, d, a, b) for g in grids]
+    # loop: NOT-WORTH — four groups' attention, unrolled into the graph at export
     out = {name: _sdpa_padded(*regs[name]) for name in ("JJ", "JS", "SJ", "SS")}
     blk = {name: _unregions(out[name], Bn, r, c, heads, T, w, d, a, b)
            for name, r, c, a, b, _ in groups}

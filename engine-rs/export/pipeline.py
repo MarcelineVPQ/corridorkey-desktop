@@ -87,17 +87,21 @@ class OrtBackend:
                   for k, v in paths.items()}
         self.name = name
         self.in_dt = {k: {i.name: (np.float16 if i.type == "tensor(float16)" else np.float32)
+                          # loop: NOT-WORTH — five sessions' few inputs, once
                           for i in s.get_inputs()} for k, s in self.s.items()}
 
     def _run(self, k, feeds):
         dt = self.in_dt[k]
+        # loop: NOT-WORTH — one call's few feeds, one cast each
         outs = self.s[k].run(None, {n: np.asarray(v).astype(dt[n]) for n, v in feeds.items()})
+        # loop: NOT-WORTH — one call's few outputs
         return [o.astype(np.float32) for o in outs]
 
     def rvm(self, frames, state):
         n_tok = 1 + (frames.shape[-2] // 16) * (frames.shape[-1] // 16)
         st = np.zeros((1, n_tok, 384), np.float32) if state is None else state
         outs = []
+        # loop: SERIAL-REQUIRED — RVM is recurrent: each frame needs the last frame's state
         for t in range(frames.shape[0]):
             feat, st = self._run("rvm", {"frame": frames[t:t + 1].numpy(), "state": st})
             outs.append(feat[0])
@@ -137,6 +141,7 @@ def run_clip(backend, frame_dir, *, chunk=8, stride=4, num_frames=-1, quantum=12
     rvm_all = torch.empty(T_all, 384, H // 64, W // 64, dtype=torch.float16)
     state = None
     rc = max(1, min(chunk, 8))
+    # loop: SERIAL-REQUIRED — the RVM prepass in chunks, the state carried from chunk to chunk
     for t0 in range(0, T_all, rc):
         t1 = min(T_all, t0 + rc)
         _, disp, _ = reader.window(t0, t1)
@@ -156,15 +161,18 @@ def run_clip(backend, frame_dir, *, chunk=8, stride=4, num_frames=-1, quantum=12
     baton_all = torch.empty(T_all, 512, H // 16, W // 16, dtype=torch.float16)
     model_frames = {}
     carry = {}
+    # loop: SERIAL-REQUIRED — the Hann windows in order: each carries its hint into the next
     for i, t0 in enumerate(starts):
         t1 = min(t0 + chunk, T_all)
         Tc = t1 - t0
         model_chunk, disp, _ = reader.window(t0, t1)
+        # loop: NOT-WORTH — a window's frames, one reference each
         for j in range(Tc):
             model_frames[t0 + j] = model_chunk[j]
         hint = torch.zeros(1, Tc, 1, H, W, dtype=torch.bfloat16)
         hq = torch.zeros(1, Tc, dtype=torch.bfloat16)
         present = torch.zeros(1, Tc, dtype=torch.bool)
+        # loop: NOT-WORTH — a window's frames, one hint copy each
         for j, ta in enumerate(range(t0, t1)):
             if ta in carry:
                 hint[0, j] = carry[ta]
@@ -190,13 +198,16 @@ def run_clip(backend, frame_dir, *, chunk=8, stride=4, num_frames=-1, quantum=12
         if carry_hint:
             a = F.interpolate(aux[0, :, 0:1], size=(H, W), mode="bilinear",
                               align_corners=False).clamp(0, 1).to(torch.bfloat16)
+            # loop: NOT-WORTH — a window's frames, one carried hint each
             for j, ta in enumerate(range(t0, t1)):
                 carry[ta] = a[j].clone()
             nxt = starts[i + 1] if i + 1 < len(starts) else T_all
+            # loop: NOT-WORTH — the few carried frames before the next window
             for k in [k for k in carry if k < nxt]:
                 del carry[k]
         wts = taper_weights(Tc, overlap, is_first=(i == 0), is_last=(i == len(starts) - 1))
         weighted = baton[0] * wts.view(Tc, 1, 1, 1)
+        # loop: NOT-WORTH — a window's frames, one weighted add each
         for j, ta in enumerate(range(t0, t1)):
             if ta not in acc:
                 acc[ta], wsum[ta] = weighted[j].clone(), float(wts[j])
@@ -204,9 +215,11 @@ def run_clip(backend, frame_dir, *, chunk=8, stride=4, num_frames=-1, quantum=12
                 acc[ta] += weighted[j]
                 wsum[ta] += float(wts[j])
         nxt = starts[i + 1] if i + 1 < len(starts) else T_all
+        # loop: NOT-WORTH — the few finished frames before the next window
         for k in sorted(k for k in list(acc) if k < nxt):
             baton_all[k] = (acc.pop(k) / max(wsum.pop(k), 1e-6)).to(torch.float16)
         log(f"    [{backend.name}] window {i + 1}/{len(starts)} [{t0}:{t1}]")
+    # loop: NOT-WORTH — the last window's remaining frames
     for k in sorted(acc):
         baton_all[k] = (acc[k] / max(wsum[k], 1e-6)).to(torch.float16)
 
@@ -214,6 +227,7 @@ def run_clip(backend, frame_dir, *, chunk=8, stride=4, num_frames=-1, quantum=12
     alpha = np.empty((T_all, h, w), np.float32)
     fg = np.empty((T_all, 3, h, w), np.float32)
     raw_absmax = 0.0
+    # loop: SERIAL-REQUIRED — stage 2 per frame on one session (the reference path, timed per call)
     for ta in range(T_all):
         rgb = model_frames[ta].unsqueeze(0).unsqueeze(0).float()
         b = baton_all[ta].unsqueeze(0).unsqueeze(0).float()

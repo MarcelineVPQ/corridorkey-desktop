@@ -5,6 +5,7 @@ import gpu_guard
 gpu_guard.start()
 import numpy as np
 from common import ONNX_DIR
+# loop: NOT-WORTH — two tiny models, one smoke run each
 for tag in ("op23", "op23fp16"):
     s = ort.InferenceSession(str(ONNX_DIR / f"rvm_{tag}.onnx"),
                              providers=["CUDAExecutionProvider", "CPUExecutionProvider"])

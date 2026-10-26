@@ -55,10 +55,12 @@ def render(out, W, H, T, seed=0):
     s_alpha = rng.uniform(0.25, 0.9, n_strands)
     shirt_tex = (smooth_noise(rng, Hs, Ws, 24) > 0).astype(np.float32)
 
+    # loop: SERIAL-REQUIRED — one synthetic frame at a time (each written before the next is drawn; a test-clip generator)
     for t in range(T):
         ph = 2 * math.pi * t / max(T, 1)
         cx = 0.5 * Ws + 0.04 * Ws * math.sin(ph)           # subject drifts
         head_c = (cx, 0.36 * Hs + 0.01 * Hs * math.sin(2 * ph))
+        # loop: NOT-WORTH — four coverage layers per frame
         cov = {k: np.zeros((Hs, Ws), np.float32) for k in ("body", "skin", "hair", "scarf")}
 
         # Body / shirt.
@@ -71,11 +73,13 @@ def render(out, W, H, T, seed=0):
         # Strands (drawn into their own buffer with per-strand opacity).
         strands = np.zeros((Hs, Ws), np.float32)
         sway = 0.04 * math.sin(ph + 0.5)
+        # loop: NOT-WORTH — 260 strands per frame, each one cv2 polyline (a test-clip generator, run once)
         for i in range(n_strands):
             a0 = math.pi * (1.0 + 0.5 * (roots[i] + 1))  # top half arc
             x0 = head_c[0] + math.cos(a0) * u(0.095)
             y0 = head_c[1] - u(0.03) + math.sin(a0) * u(0.1)
             pts = []
+            # loop: NOT-WORTH — 12 points per strand
             for k in range(12):
                 f = k / 11
                 dx = (math.cos(a0) * 0.6 + curls[i] * math.sin(3 * f + i) + sway * f * 3) * lens[i] * f
@@ -88,6 +92,7 @@ def render(out, W, H, T, seed=0):
         cov["hair"] = 1 - (1 - cov["hair"]) * (1 - strands)
         # Waving arm with motion blur: accumulate 8 sub-frames.
         arm = np.zeros((Hs, Ws), np.float32)
+        # loop: NOT-WORTH — eight motion-blur sub-frames per frame
         for sub in range(8):
             ang = 0.9 * math.sin(ph * 2 + sub * 0.06) - 0.4
             sx, sy = cx + u(0.2), u(0.68)
@@ -106,6 +111,7 @@ def render(out, W, H, T, seed=0):
         cov["scarf"] = sc * 0.45
 
         # Down-sample coverage to output res (box filter = area coverage).
+        # loop: NOT-WORTH — four layers resized per frame
         cov = {k: cv2.resize(v, (W, H), interpolation=cv2.INTER_AREA) for k, v in cov.items()}
         tex = cv2.resize(shirt_tex, (W, H), interpolation=cv2.INTER_AREA)
 
@@ -118,6 +124,7 @@ def render(out, W, H, T, seed=0):
         # Layer order back→front: body, skin(neck/head/arm), hair, scarf.
         fg = np.zeros((H, W, 3), np.float32)
         a = np.zeros((H, W), np.float32)
+        # loop: NOT-WORTH — four layers composited per frame
         for k in ("body", "skin", "hair", "scarf"):
             c = np.broadcast_to(cols[k], (H, W, 3)).copy()
             if k == "body":

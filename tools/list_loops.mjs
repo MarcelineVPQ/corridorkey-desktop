@@ -5,7 +5,7 @@
 //
 // Listed mechanically, tests excluded (tests/, *.test.*, test_*.py, Rust `#[cfg(test)]` modules):
 //   electron/, src/, tools/, .hooks/ (.ts/.tsx/.mjs/.js, .sh), engine/ and the Python tools (.py),
-//   engine-rs/crates/*/src (.rs), engine-rs/tools (.sh, .py, the ck-trt-build C++).
+//   engine-rs/crates/*/src (.rs), engine-rs/export (model export: .py, .sh), engine-rs/tools (.sh, .py, the ck-trt-build C++).
 // Kinds (one row per line; a line with several gets them joined, e.g. loop+iter):
 //   loop    for / while / do / loop statements (sh: for / while / until)
 //   iter    iterator chains and array callbacks: Rust .iter() / .par_iter() / .into_iter() / .chunks*() /
@@ -41,7 +41,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 export const VERDICTS = ["PARALLELIZE", "BATCH", "SERIAL-REQUIRED", "HOT-PATH-OK", "FIX-HOT-PATH", "NOT-WORTH"];
-export const ROOTS = ["electron", "src", "engine", "engine-rs/crates", "engine-rs/tools", "tools", ".hooks"];
+export const ROOTS = ["electron", "src", "engine", "engine-rs/crates", "engine-rs/export", "engine-rs/tools", "tools", ".hooks"];
 const VERDICT = new RegExp(`(//|#|\\{/\\*)\\s*loop: (${VERDICTS.join("|")}) — (.*?)\\s*(\\*/\\})?$`);
 
 /** The language of a file, or null when it isn't listed. */
@@ -291,7 +291,7 @@ export function listFiles(root = ".") {
       } else if (langOf(p)) files.push(p);
     }
   };
-  // loop: NOT-WORTH — seven roots
+  // loop: NOT-WORTH — eight roots
   ROOTS.forEach(walk);
   // loop: NOT-WORTH — ~100 files
   return files.sort();

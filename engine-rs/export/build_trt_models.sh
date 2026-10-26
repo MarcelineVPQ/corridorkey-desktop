@@ -17,10 +17,12 @@ D=$(dirname "$0"); RUN="$D/run.sh"
 cap() { local v="CK_MEM_$1_$2"; echo "${!v:-${3:-16G}}"; }
 [ -e "$OUT" ] && { echo "$OUT exists: build into a new folder"; exit 1; }
 mkdir -p "$OUT"
+# loop: SERIAL-REQUIRED — three networks, one memory-capped to_trt.py at a time
 for p in cradio moge rvm; do
   ops="--fp32-ops=Conv,ConvTranspose,MatMul"; [ $p = moge ] || ops="$ops --weights-only"
   "$RUN" $(cap TRT $p) to_trt.py "$PROD/ck2-$p-fp16.onnx" "$OUT/ck2-$p-trt-fp16.onnx" $ops
 done
+# loop: SERIAL-REQUIRED — stage 1 then stage 2, one memory-capped step at a time
 for p in stage1 stage2; do
   "$RUN" $(cap EXPORT $p) export.py $p --opset 23 --patch --amp --tag trt_fp16 | grep -E "^EXPORT_RESULT" | cut -c1-200
   grep -q "\"file\": \"$S/onnx/${p}_trt_fp16.onnx\".*\"ok\": true" <(tail -1 $S/onnx/export_log.jsonl) || { echo "export failed"; exit 1; }
@@ -29,6 +31,7 @@ for p in stage1 stage2; do
   "$RUN" $(cap SPEED $p) speed_patches.py $S/onnx/${p}_trt_fp16_mha.onnx $S/onnx/${p}_trt_fp16_sp.onnx
   "$RUN" $(cap TRT $p) to_trt.py $S/onnx/${p}_trt_fp16_sp.onnx "$OUT/ck2-$p-trt-fp16.onnx" --fp32-ops=Conv,ConvTranspose,MatMul --weights-only
 done
+# loop: NOT-WORTH — five small stubs, one capped step each
 for p in cradio moge rvm stage1 stage2; do
   "$RUN" $(cap CTX $p 4G) trt_ctx.py "$OUT/ck2-$p-trt-fp16.onnx" "$OUT/ck2-$p-trt-fp16-ctx.onnx" $p.engine
 done

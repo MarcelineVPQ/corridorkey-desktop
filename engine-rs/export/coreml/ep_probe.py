@@ -9,6 +9,7 @@ os.makedirs(cache, exist_ok=True)
 so = ort.SessionOptions()
 so.log_severity_level = 0
 so.log_verbosity_level = 0
+# loop: NOT-WORTH — the few dimension overrides given
 for kv in os.environ.get("FREE_DIMS", "").split(","):
     if kv:
         k, v = kv.split("=")

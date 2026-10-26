@@ -38,7 +38,9 @@ class G:
         self.m = m
         self.g = m.graph
         self.k = 0
+        # loop: NOT-WORTH — one pass over the initializers, offline
         self.inits = {i.name: i for i in self.g.initializer}
+        # loop: NOT-WORTH — one pass over the nodes' outputs, offline
         self.prod = {o: n for n in self.g.node for o in n.output}
 
     def name(self, base):
@@ -70,6 +72,7 @@ class G:
 def window_pad_rank(G_, pad_node):
     """Rank of the padded tensor if this is the Swin window pad (constant mode, pads = Concat of 2r
     one-element pieces, all zero except the ends of H and W), else None."""
+    # loop: NOT-WORTH — one node's few attributes
     attrs = {a.name: helper.get_attribute_value(a) for a in pad_node.attribute}
     if attrs.get("mode", b"constant") != b"constant" or len(pad_node.input) < 2:
         return None
@@ -82,6 +85,7 @@ def window_pad_rank(G_, pad_node):
     if n % 2 or n < 8:
         return None
     r = n // 2
+    # loop: NOT-WORTH — one Concat's few inputs
     for idx, src in enumerate(cat.input):
         if idx in (2 * r - 3, 2 * r - 2):
             continue  # end of H, end of W: computed
@@ -124,6 +128,7 @@ def rewrite_pad(G_, pad_node, r):
 
 
 def rewrite_deconv(G_, node):
+    # loop: NOT-WORTH — one node's few attributes
     attrs = {a.name: helper.get_attribute_value(a) for a in node.attribute}
     k = list(attrs.get("kernel_shape", []))
     s = list(attrs.get("strides", [1, 1]))
@@ -164,6 +169,7 @@ def patch(m, do_pad=True, do_deconv=True, do_dw=True):
     G_ = G(m)
     new_nodes, n_pad, n_dc, dead = [], 0, 0, []
     n_dw = 0
+    # loop: NOT-WORTH — one pass over the graph's nodes, offline (an export step)
     for node in m.graph.node:
         if do_dw and node.op_type == "Conv":
             gm = grouped_multiplier(G_, node)
@@ -187,7 +193,9 @@ def patch(m, do_pad=True, do_deconv=True, do_dw=True):
         new_nodes.append(node)
     del m.graph.node[:]
     m.graph.node.extend(new_nodes)
+    # loop: NOT-WORTH — one pass over the nodes' inputs, offline
     used = {i for n in m.graph.node for i in n.input}
+    # loop: NOT-WORTH — one pass over the initializers, offline
     keep = [i for i in m.graph.initializer if not (i.name in dead and i.name not in used)]
     del m.graph.initializer[:]
     m.graph.initializer.extend(keep)
@@ -199,6 +207,7 @@ def patch(m, do_pad=True, do_deconv=True, do_dw=True):
 def grouped_multiplier(G_, node):
     """(g, m) if `node` is a grouped Conv with g groups of one input channel and m filters each, its weight built
     as Reshape(Concat(Unsqueeze(W_i, 1) for i < m)) from (g, 1, k, k) initializers (DepthwiseSwiGLU2D)."""
+    # loop: NOT-WORTH — one node's few attributes
     attrs = {a.name: helper.get_attribute_value(a) for a in node.attribute}
     g = attrs.get("group", 1)
     if g <= 1:
@@ -207,6 +216,7 @@ def grouped_multiplier(G_, node):
     cat = G_.prod.get(rs.input[0]) if rs is not None and rs.op_type == "Reshape" else None
     if cat is None or cat.op_type != "Concat":
         return None
+    # loop: NOT-WORTH — one Concat's few inputs
     for u in cat.input:
         un = G_.prod.get(u)
         if un is None or un.op_type != "Unsqueeze" or un.input[0] not in G_.inits:
@@ -235,6 +245,7 @@ def rewrite_grouped(G_, node, g, m):
     shp = add("Concat", [add("Slice", [S, i64([0]), i64([1])], "dw_n"), i64([g * m]),
                          add("Slice", [S, i64([2]), i64([4])], "dw_hw")], "dw_shp", axis=0)
     xr = add("Reshape", [xe, shp], "dw_rep")
+    # loop: NOT-WORTH — one node's few attributes
     attrs = {a.name: helper.get_attribute_value(a) for a in node.attribute if a.name != "group"}
     nodes.append(helper.make_node("Conv", [xr] + list(node.input[1:]), list(node.output), name=G_.name("dw_conv") + "_n",
                                   group=g * m, **attrs))
@@ -246,6 +257,7 @@ def main():
     do_pad, do_deconv = "--no-pad" not in sys.argv, "--no-deconv" not in sys.argv
     m = onnx.load(str(src), load_external_data=True)
     n_pad, n_dc = patch(m, do_pad, do_deconv, "--no-dw" not in sys.argv)
+    # loop: NOT-WORTH — the output file and its .data, removed before saving
     for f in (dst, dst.with_name(dst.name + ".data")):
         if f.exists():
             f.unlink()

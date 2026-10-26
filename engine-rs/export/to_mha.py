@@ -35,11 +35,13 @@ def _shape(vi, name):
     v = vi.get(name)
     if v is None:
         return None
+    # loop: NOT-WORTH — one value's few dims
     return [d.dim_param or d.dim_value for d in v.type.tensor_type.shape.dim]
 
 
 def convert(model):
     g = model.graph
+    # loop: NOT-WORTH — one pass over the graph's typed values, offline
     vi = {v.name: v for v in list(g.value_info) + list(g.input) + list(g.output)}
     new_nodes, n_conv, skipped = [], 0, []
     consts = {}
@@ -47,15 +49,20 @@ def convert(model):
     def const(vals):
         key = tuple(vals)
         if key not in consts:
+            # loop: NOT-WORTH — a shape's few values
             name = f"mha_shape_{'_'.join(str(v) for v in vals)}"
             g.initializer.append(numpy_helper.from_array(np.array(vals, np.int64), name))
             consts[key] = name
         return consts[key]
 
+    # loop: NOT-WORTH — one pass over the graph's nodes, offline (an export step)
     for n in g.node:
+        # loop: NOT-WORTH — one node's few attributes
         attrs = {a.name: helper.get_attribute_value(a) for a in n.attribute}
         ok = (n.op_type == "Attention" and n.domain in ("", "ai.onnx")
+              # loop: NOT-WORTH — one node's three inputs
               and len([i for i in n.input if i]) == 3 and len(n.input) == 3
+              # loop: NOT-WORTH — one node's few outputs
               and len([o for o in n.output if o]) == 1
               and attrs.get("is_causal", 0) == 0 and "scale" not in attrs
               and attrs.get("softcap", 0.0) == 0.0 and attrs.get("qk_matmul_output_mode", 0) == 0)
@@ -73,6 +80,7 @@ def convert(model):
         heads, d = sq[1], sq[3]
         p = f"{n.name or 'attn'}_mha{n_conv}"
         flat = []
+        # loop: NOT-WORTH — one Attention node's three inputs
         for j, x in enumerate(n.input):
             t, r = f"{p}_t{j}", f"{p}_r{j}"
             new_nodes.append(helper.make_node("Transpose", [x], [t], perm=[0, 2, 1, 3], name=t))
@@ -87,6 +95,7 @@ def convert(model):
         n_conv += 1
     del g.node[:]
     g.node.extend(new_nodes)
+    # loop: NOT-WORTH — the model's few opsets
     if not any(o.domain == "com.microsoft" for o in model.opset_import):
         model.opset_import.append(helper.make_opsetid("com.microsoft", 1))
     return n_conv, skipped
@@ -105,7 +114,9 @@ def rename_dims(model, piece):
     import re
     g = model.graph
     ren = {}
+    # loop: NOT-WORTH — the graph's few inputs
     for i in g.input:
+        # loop: NOT-WORTH — one input's few named axes
         for ax, name in DIM_NAMES.get(piece, {}).get(i.name, {}).items():
             d = i.type.tensor_type.shape.dim[ax]
             if re.fullmatch(r"s\d+", d.dim_param or "") and d.dim_param not in ren:
@@ -113,7 +124,9 @@ def rename_dims(model, piece):
     if not ren:
         return ren
     pat = re.compile(r"\b(" + "|".join(sorted(ren, key=len, reverse=True)) + r")\b")
+    # loop: NOT-WORTH — one pass over the graph's typed values, offline
     for v in list(g.input) + list(g.output) + list(g.value_info):
+        # loop: NOT-WORTH — one value's few dims
         for d in v.type.tensor_type.shape.dim:
             if d.dim_param:
                 d.dim_param = pat.sub(lambda mt: ren[mt.group(1)], d.dim_param)
@@ -134,6 +147,7 @@ def main():
     n_vi = len(m.graph.value_info)
     del m.graph.value_info[:]
     print(f"TO_MHA dropped value_info entries: {n_vi}")
+    # loop: NOT-WORTH — the output file and its .data, removed before saving
     for f in (dst, dst.with_name(dst.name + ".data")):
         if f.exists():
             f.unlink()

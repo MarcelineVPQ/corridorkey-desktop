@@ -17,6 +17,7 @@ def main():
     src, out, engine = sys.argv[1], sys.argv[2], sys.argv[3]
     m = onnx.load(src, load_external_data=False)
     g = m.graph
+    # loop: NOT-WORTH — a graph's few inputs and outputs, once
     node = helper.make_node("EPContext", [i.name for i in g.input], [o.name for o in g.output], name="EPContext",
                             domain="com.microsoft", embed_mode=0, ep_cache_context=engine, main_context=1,
                             source="TensorrtExecutionProvider")
@@ -25,6 +26,7 @@ def main():
                               producer_name="corridorkey trt_ctx.py")
     model.ir_version = m.ir_version
     onnx.save(model, out)
+    # loop: NOT-WORTH — one print of the few inputs and outputs
     print(f"TRT_CTX {out}: inputs {[i.name for i in g.input]} outputs {[o.name for o in g.output]} engine {engine}")
 
 

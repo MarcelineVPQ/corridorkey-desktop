@@ -33,13 +33,16 @@ def main():
 
     import onnxruntime as ort
     sessions = []
+    # loop: NOT-WORTH — one session per file given (a few), made once
     for f in a.onnx:
         so = ort.SessionOptions()
         sessions.append((f, ort.InferenceSession(f, so, providers=["CPUExecutionProvider"])))
 
     g = torch.Generator().manual_seed(0)
     rows = []
+    # loop: SERIAL-REQUIRED — one shape at a time, each a CPU forward plus every session (a test tool)
     for shp in a.shapes.split(","):
+        # loop: NOT-WORTH — the two numbers of a shape
         H, W = (int(v) for v in shp.split("x"))
         # Smooth random images (low-res noise upsampled), closer to real frames than white noise.
         x = torch.rand(a.N, 3, max(H // 64, 1), max(W // 64, 1), generator=g)
@@ -53,6 +56,7 @@ def main():
             pat = piece(x).numpy()
         rec = {"shape": [H, W], "feat": list(ref.shape), "ref_absmax": float(np.abs(ref).max()),
                "patched_torch_max": float(np.abs(pat - ref).max())}
+        # loop: SERIAL-REQUIRED — the sessions one after another on the CPU (they'd share its cores anyway)
         for f, s in sessions:
             try:
                 out = s.run(None, {"rgb": x.numpy()})[0]

@@ -44,6 +44,7 @@ def _up(a):
     if isinstance(a, torch.Tensor) and a.dtype in (torch.float16, torch.bfloat16):
         return a.float()
     if isinstance(a, (list, tuple)):
+        # loop: NOT-WORTH — the few args of one op call (export tracing only)
         return type(a)(_up(x) for x in a)
     return a
 
@@ -51,6 +52,7 @@ def _up(a):
 def _kernel(op):
     def k(*args, **kwargs):
         with torch._C._ExcludeDispatchKeyGuard(_AC):
+            # loop: NOT-WORTH — the few kwargs of one op call (export tracing only)
             return op(*_up(args), **{n: _up(v) for n, v in kwargs.items()})
     return k
 
@@ -62,6 +64,7 @@ def cuda_fp32_policy():
         return
     _lib = torch.library.Library("aten", "IMPL")
     done = []
+    # loop: NOT-WORTH — the op list, registered once per process
     for name in CUDA_FP32:
         base, _, ov = name.partition(".")
         packet = getattr(torch.ops.aten, base, None)

@@ -3,6 +3,7 @@
 set -e
 S=$HOME/.cache/claude-scratch/corridorkey-onnx
 D=$(dirname "$0"); RUN="$D/run.sh"
+# loop: SERIAL-REQUIRED — 5 networks x 2 precisions, one memory-capped to_mha.py at a time
 for p in cradio moge rvm stage1 stage2; do for prec in fp32 fp16; do
   "$RUN" 16G to_mha.py $S/onnx/${p}_prod_${prec}.onnx $S/models/ck2-${p}-${prec}.onnx $p | grep -E "^TO_MHA (dropped|${p})"
 done; done

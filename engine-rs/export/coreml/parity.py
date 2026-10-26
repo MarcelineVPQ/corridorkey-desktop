@@ -11,6 +11,7 @@ def sess(p):
     return ort.InferenceSession(p, so, providers=["CPUExecutionProvider"])
 A = sess(a)
 feeds = {}
+# loop: NOT-WORTH — one model's few inputs, once
 for i in A.get_inputs():
     dt = np.float16 if "float16" in i.type else np.float32
     if i.name in ("rgb", "frame", "hint"):
@@ -24,7 +25,9 @@ t = time.time(); ra = A.run(None, feeds); ta = time.time() - t
 del A
 B = sess(b)
 t = time.time(); rb = B.run(None, feeds); tb = time.time() - t
+# loop: NOT-WORTH — one model's few outputs
 names = [o.name for o in B.get_outputs()]
+# loop: NOT-WORTH — one comparison per output (a few)
 for n, x, y in zip(names, ra, rb):
     x32, y32 = x.astype(np.float64), y.astype(np.float64)
     d = np.abs(x32 - y32)

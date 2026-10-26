@@ -22,7 +22,9 @@ VERSION=${CK_ONNX_VERSION:-2.0.0-onnx.4}
 OUT=${CK_MODELS_DIR:-$S/models-$VERSION}
 mkdir -p "$OUT"
 cap() { local v="CK_MEM_$1_$2"; echo "${!v:-16G}"; }
+# loop: SERIAL-REQUIRED — five networks, one memory-capped step at a time (each export takes up to 16G)
 for p in cradio moge rvm stage1 stage2; do
+  # loop: SERIAL-REQUIRED — fp32 then fp16 of one network, one memory-capped step at a time
   for prec in fp32 fp16; do
     tag=prod_${prec}
     if [ -n "${CK_REUSE_FROM:-}" ] && { [ $prec = fp32 ] || [ $p = cradio ]; }; then

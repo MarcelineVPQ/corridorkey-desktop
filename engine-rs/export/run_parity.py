@@ -36,12 +36,18 @@ VRAM_LIMIT = 11 * 2**30
 VRAM_SPLIT_GIB = {"cradio": 2.25, "moge": 0.75, "rvm": 0.5, "stage1": 5.5, "stage2": 2.0}
 _PIECES = ("cradio", "moge", "rvm", "stage1", "stage2")
 ONNX_SETS = {
+    # loop: NOT-WORTH — five paths, once at import
     "fp32_op18": {k: ONNX_DIR / f"{k}_dynamo.onnx" for k in _PIECES},
+    # loop: NOT-WORTH — five paths, once at import
     "fp16_op18": {k: ONNX_DIR / f"{k}_fp16.onnx" for k in _PIECES},
+    # loop: NOT-WORTH — five paths, once at import
     "fp32": {k: ONNX_DIR / f"{k}_op23.onnx" for k in _PIECES},
+    # loop: NOT-WORTH — five paths, once at import
     "fp16": {k: ONNX_DIR / f"{k}_op23fp16.onnx" for k in _PIECES},
     # production set (build_models.sh): opset 23, mask-free Swin, MultiHeadAttention
+    # loop: NOT-WORTH — five paths, once at import
     "prod_fp32": {k: SCRATCH / "models" / f"ck2-{k}-fp32.onnx" for k in _PIECES},
+    # loop: NOT-WORTH — five paths, once at import
     "prod_fp16": {k: SCRATCH / "models" / f"ck2-{k}-fp16.onnx" for k in _PIECES},
 }
 
@@ -76,6 +82,7 @@ def main():
         if a.c:
             import cv2
             paths = sorted(Path(a.c).glob("*.png"))[:ref["alpha"].shape[0]]
+            # loop: NOT-WORTH — the clip's ground-truth PNGs, read once per comparison (a test tool)
             gt = np.stack([cv2.imread(str(p), cv2.IMREAD_UNCHANGED).astype(np.float32) / 65535 for p in paths])
             out["ref_vs_gt_alpha_mae"] = float(np.abs(ref["alpha"] - gt).mean())
             out["test_vs_gt_alpha_mae"] = float(np.abs(test["alpha"] - gt).mean())
@@ -116,6 +123,7 @@ def main():
                         "CUDAExecutionProvider", "CPUExecutionProvider"]}[a.ep]
         def per_piece(piece):
             out = []
+            # loop: NOT-WORTH — the two or three providers of a piece
             for p in prov:
                 name, opts = (p if isinstance(p, tuple) else (p, {}))
                 if name in ("CUDAExecutionProvider", "TensorrtExecutionProvider"):
@@ -146,6 +154,7 @@ def main():
                                "backend": be.name, "clip": a.a, "frames": r["T"], "chunk": a.chunk,
                                "stride": a.stride, "wall_s": round(r["wall"], 2),
                                "s_per_frame": round(r["wall"] / r["T"], 3),
+                               # loop: NOT-WORTH — the few timing keys of one report
                                "time": {k: round(v, 2) for k, v in r["time"].items()},
                                "nonfinite": r["nonfinite"],
                                "stage2_raw_absmax": r["stage2_raw_absmax"],

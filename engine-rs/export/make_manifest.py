@@ -29,6 +29,7 @@ ELEM = {1: "float32", 10: "float16", 7: "int64", 9: "bool", 6: "int32"}
 def sha256(path):
     h = hashlib.sha256()
     with open(path, "rb") as f:
+        # loop: NOT-WORTH — reads a file in 16 MiB blocks for its SHA-256, once per file
         for b in iter(lambda: f.read(1 << 24), b""):
             h.update(b)
     return h.hexdigest()
@@ -36,6 +37,7 @@ def sha256(path):
 
 def io(vs):
     return [{"name": v.name, "dtype": ELEM.get(v.type.tensor_type.elem_type, str(v.type.tensor_type.elem_type)),
+             # loop: NOT-WORTH — a graph's few inputs or outputs and their dims
              "dims": [d.dim_param or d.dim_value for d in v.type.tensor_type.shape.dim]} for v in vs]
 
 
@@ -49,7 +51,9 @@ def main():
     # MoGe, RVM, stage 1, stage 2 fp16 under the original's precision policy (export.py --amp), onnx.4 on
     amp = version not in ("2.0.0-onnx.1", "2.0.0-onnx.2", "2.0.0-onnx.3")
     entries = []
+    # loop: SERIAL-REQUIRED — five networks, one model load and hash at a time (memory)
     for piece in PIECES:
+        # loop: SERIAL-REQUIRED — two precisions, one model load and hash at a time (memory)
         for prec in ("fp32", "fp16"):
             f = MODELS / f"ck2-{piece}-{prec}.onnx"
             data = f.with_name(f.name + ".data")
@@ -63,6 +67,7 @@ def main():
                                    "mixed, the original's autocast policy: fp16 conv/matmul/attention and fp16 "
                                    "weights for them, fp32 where CUDA autocast keeps fp32 (export.py --amp, fold_casts.py)"
                                    if amp and prec == "fp16" else prec),
+                # loop: NOT-WORTH — the model's few opsets
                 "opset": {o.domain or "ai.onnx": o.version for o in m.opset_import},
                 "ir_version": m.ir_version, "attention_ops": ops,
                 "rewrites": (["speed_patches.py: window pads, depatchify ConvTranspose, grouped 7x7 convs"]
@@ -70,6 +75,7 @@ def main():
                 + (["onnx_patches.cradio_pos_embeddings: position grid follows the input's rows x cols (portrait)"]
                    if portrait and piece == "cradio" else []),
                 "inputs": io(m.graph.input), "outputs": io(m.graph.output),
+                # loop: NOT-WORTH — a model's file and its .data
                 "files": [{"file": p.name, "bytes": p.stat().st_size, "sha256": sha256(p)} for p in (f, data)],
             })
             print("MANIFEST", f.name, entries[-1]["files"][1]["bytes"])
@@ -90,6 +96,7 @@ def main():
     }
     (MODELS / "manifest.json").write_text(json.dumps(man, indent=2) + "\n")
     # Lookup table in the format the Rust engine's runtime.rs reads (models.json).
+    # loop: NOT-WORTH — the manifest's ten entries, per precision
     lookup = {prec: {e["piece"]: e["name"] for e in entries if e["precision"] == prec} for prec in ("fp16", "fp32")}
     (MODELS / "models.json").write_text(json.dumps(lookup, indent=2) + "\n")
     print("MANIFEST written", MODELS / "manifest.json", len(entries), "models")

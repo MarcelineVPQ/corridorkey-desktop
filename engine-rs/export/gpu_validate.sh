@@ -34,7 +34,9 @@ step() {  # name, args...
     echo "FAIL $name rc=$rc $(grep -v '^\s' $R/$name.log | grep -iE 'error|fail|out of memory' | tail -1 | cut -c1-300)" | tee -a $LOG
   fi
 }
+# loop: SERIAL-REQUIRED — the clips given, one GPU run at a time (gpu_guard: never two GPU jobs)
 for c in $clips; do
+  # loop: SERIAL-REQUIRED — two windows per clip, one GPU run at a time
   for w in "8 4" "24 12"; do
     set -- $w; ch=$1; st=$2; tag=${c}_${ch}x${st}
     common="--frames 48 --chunk $ch --stride $st"
@@ -46,6 +48,7 @@ for c in $clips; do
 done
 # Parity tables (CPU only) against the PyTorch fp32 reference of the same clip/window.
 export CK_GPU=""
+# loop: SERIAL-REQUIRED — one CPU comparison per result file, each under its 8G cap
 for f in $R/prod_*.npz $R/spike_*.npz; do
   [ -f "$f" ] || continue
   tag=$(basename $f .npz | grep -oE "gs[0-9]+_[0-9]+x[0-9]+")

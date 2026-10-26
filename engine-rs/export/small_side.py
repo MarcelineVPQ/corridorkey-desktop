@@ -12,7 +12,9 @@ import wrappers as wr
 models = sys.argv[1]
 model = load_cpu_model()
 g = torch.Generator().manual_seed(0)
+# loop: SERIAL-REQUIRED — one shape at a time (each runs the five pieces on the CPU)
 for shp in sys.argv[2:]:
+    # loop: NOT-WORTH — the two numbers of a shape
     H, W = (int(v) for v in shp.split("x"))
     T = 2
     ins = {
@@ -28,6 +30,7 @@ for shp in sys.argv[2:]:
         "stage2": (wr.Stage2Piece(model.stage2), [torch.randn(1, 1, 3, H, W, generator=g) * 0.5,
                                                   torch.randn(1, 1, 512, H // 16, W // 16, generator=g)], ["rgb", "baton"]),
     }
+    # loop: SERIAL-REQUIRED — five pieces, torch then ONNX on the CPU, one at a time (memory)
     for name, (mod, args, names) in ins.items():
         try:
             with torch.no_grad():
@@ -38,6 +41,7 @@ for shp in sys.argv[2:]:
             t = f"FAIL {type(e).__name__}: {str(e)[:160]}"
         try:
             s = ort.InferenceSession(f"{models}/ck2-{name}-fp32.onnx", providers=["CPUExecutionProvider"])
+            # loop: NOT-WORTH — a piece's few inputs
             o = s.run(None, {n: a.numpy() for n, a in zip(names, args)})[0]
             r = f"ok {o.shape}"
         except Exception as e:
