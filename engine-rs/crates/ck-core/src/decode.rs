@@ -395,6 +395,26 @@ pub(crate) fn image_size(p: &Path) -> Result<(usize, usize), Error> {
     Ok((h as usize, w as usize))
 }
 
+/// (h, w) of a still from its header, refused past `clip::MAX_SIDE` before any pixel is allocated: the decoders
+/// allocate what the header claims (senior Rust review 2026-10-26 M1: a frame claiming 100000x100000 aborted the engine).
+pub(crate) fn still_size(p: &Path) -> Result<(usize, usize), Error> {
+    let (h, w) = match image_size(p) {
+        Ok(s) => s,
+        // a matte stored as Y alone (a hint EXR) has no RGB layer: the first layer's size, the one read_hint_still reads
+        Err(_) if is_exr(p) => {
+            let meta = exr::meta::MetaData::read_from_file(p, false).map_err(|e| Error::input(format!("{}: {e}", p.display())))?;
+            let hd = meta.headers.first().ok_or_else(|| Error::input(format!("{}: no layer", p.display())))?;
+            (hd.layer_size.height(), hd.layer_size.width())
+        }
+        Err(e) => return Err(e),
+    };
+    let max = crate::clip::MAX_SIDE;
+    if h > max || w > max {
+        return Err(Error::input(format!("{}: {w}x{h} is larger than the engine takes ({max} pixels in each direction)", p.display())));
+    }
+    Ok((h, w))
+}
+
 /// video_io.read_image_rgb: cv2.imread(IMREAD_COLOR) / 255 for PNG/JPEG (gray replicated, alpha dropped,
 /// 16-bit reduced to its high byte), the float RGB of an EXR. `deep` (`input_bit_depth` 16): 16-bit PNG at full
 /// depth (/ 65535) instead.
@@ -616,16 +636,17 @@ impl FrameReader {
                 let done: Vec<Result<Prepped, Error>> = paths[self.next..end]
                     .par_iter()
                     .map(|p| {
+                        let differs = |h: usize, w: usize| {
+                            Error::input(format!("{}: frame size {w}x{h} differs from the first frame's {}x{}", p.display(), meta.w, meta.h))
+                        };
+                        // the header's size first: a frame is only decoded (allocated) at the clip's size
+                        let (h, w) = still_size(p)?;
+                        if (h, w) != (meta.h, meta.w) {
+                            return Err(differs(h, w));
+                        }
                         let img = read_image_rgb(p, meta.deep_input)?;
                         if (img.h, img.w) != (meta.h, meta.w) {
-                            return Err(Error::input(format!(
-                                "{}: frame size {}x{} differs from the first frame's {}x{}",
-                                p.display(),
-                                img.w,
-                                img.h,
-                                meta.w,
-                                meta.h
-                            )));
+                            return Err(differs(img.h, img.w));
                         }
                         Ok(prep_frame_views(img, meta.exr_linear, meta, denom, need_model))
                     })
@@ -752,6 +773,11 @@ pub fn load_initial_hint(path: &Path, meta: &ClipMeta) -> Result<Vec<f32>, Error
             0
         }
     }; // BGR(A) index 0 = blue = RGB index 2; grey + alpha: cv2 makes it BGRA, so the alpha
+       // the header's size first: only a hint of the clip's (or the model's) size is decoded
+    let (hh, hw) = still_size(&file)?;
+    if (hh, hw) != (meta.h, meta.w) && (hh, hw) != (meta.model_h, meta.model_w) {
+        return Err(Error::input(format!("{}: hint shape ({hh}, {hw}) does not match the clip ({}, {})", file.display(), meta.h, meta.w)));
+    }
     let (h, w, g): (usize, usize, Vec<f32>) = match read_hint_still(&file)? {
         // loop: NOT-WORTH — the first-frame hint: one image per job
         Still::U8 { ch, h, w, data } => (h, w, (0..h * w).map(|i| data[i * ch + pick(ch)] as f32 / 255.0).collect()),
@@ -794,6 +820,16 @@ impl HintReader {
             return Ok(HintReader { meta: meta.clone(), video: None, paths, next: 0 });
         }
         let p = crate::clip::ffprobe(path)?;
+        // decoded at its own size (resized to the model's after): refused past MAX_SIDE before ffmpeg's frames are allocated
+        if p.w > crate::clip::MAX_SIDE || p.h > crate::clip::MAX_SIDE {
+            return Err(Error::input(format!(
+                "Hint video {}: {}x{} is larger than the engine takes ({} pixels in each direction)",
+                path.display(),
+                p.w,
+                p.h,
+                crate::clip::MAX_SIDE
+            )));
+        }
         // the hint video starts at the clip's start frame (SequentialHintVideoWindowReader)
         let required = meta.start_frame + meta.num_frames;
         if p.frames > 0 && p.frames < required {
@@ -818,16 +854,78 @@ impl HintReader {
                 let (w, h) = (v.w, v.h);
                 Still::U8 { ch: 3, h, w, data: v.next_rgb()?.to_vec() }
             }
-            None => read_hint_still(&self.paths[self.next])?,
+            None => {
+                // the header's size first (MAX_SIDE), before the still's pixels are allocated
+                still_size(&self.paths[self.next])?;
+                read_hint_still(&self.paths[self.next])?
+            }
         };
         self.next += 1;
         Ok(prep_hint(still, &self.meta))
     }
 }
 
+/// A real w x h RGB EXR whose header then claims `claim_w` x `claim_h` (its data window patched, as in the senior Rust
+/// review's M1 reproduction): what the decoders would allocate from.
+#[cfg(test)]
+pub(crate) fn exr_claiming(path: &Path, w: usize, h: usize, claim_w: i32, claim_h: i32) {
+    crate::writers::write_exr(path, w, h, 3, &vec![0.5f32; w * h * 3], crate::writers::ExrType::Float).unwrap();
+    let lines = exr::meta::MetaData::read_from_file(path, false).unwrap().headers[0].compression.scan_lines_per_block() as i32;
+    let mut b = std::fs::read(path).unwrap();
+    // loop: NOT-WORTH — a test file's header bytes, twice
+    let value_at = |b: &[u8], key: &[u8]| b.windows(key.len()).position(|k| k == key).unwrap() + key.len() + 4;
+    let at = value_at(&b, b"dataWindow\0box2i\0");
+    b[at + 8..at + 12].copy_from_slice(&(claim_w - 1).to_le_bytes());
+    b[at + 12..at + 16].copy_from_slice(&(claim_h - 1).to_le_bytes());
+    // the chunk count the header states follows the claimed size, so a reader that checks it gets as far as allocating
+    let at = value_at(&b, b"chunkCount\0int\0");
+    b[at..at + 4].copy_from_slice(&((claim_h + lines - 1) / lines).to_le_bytes());
+    std::fs::write(path, b).unwrap();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// senior Rust review 2026-10-26 M1: a later frame of a folder whose header claims 100000x100000 is a clean error
+    /// before it is decoded (it was decoded first, and the 120 GB allocation aborted the engine); a hint the same
+    #[test]
+    fn a_frame_claiming_a_huge_size_is_an_error_before_it_is_decoded() {
+        let dir = std::env::temp_dir().join(format!("ck-huge-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        crate::writers::write_exr(&dir.join("f_0001.exr"), 16, 8, 3, &[0.5f32; 16 * 8 * 3], crate::writers::ExrType::Float).unwrap();
+        exr_claiming(&dir.join("f_0002.exr"), 16, 8, 100_000, 100_000);
+        let meta = crate::clip::probe_size(&dir, -1, 1.0).unwrap();
+        assert_eq!((meta.w, meta.h, meta.num_frames), (16, 8, 2));
+        let mut r = FrameReader::open(&meta).unwrap();
+        assert!(r.next_frame().unwrap().is_some());
+        let e = r.next_frame().err().expect("an error");
+        let hint = load_initial_hint(&dir.join("f_0002.exr"), &meta).unwrap_err();
+        let mut hints = HintReader::open(&dir, &meta).unwrap();
+        hints.next_frame().unwrap();
+        let later_hint = hints.next_frame().unwrap_err();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(e.code, crate::ErrorCode::Input);
+        assert!(e.message.contains("100000x100000 is larger than the engine takes (16384"), "{}", e.message);
+        assert!(hint.message.contains("100000x100000 is larger"), "{}", hint.message);
+        assert!(later_hint.message.contains("100000x100000 is larger"), "{}", later_hint.message);
+    }
+
+    /// A later frame of another (allowed) size is refused from its header, with the size it has.
+    #[test]
+    fn a_later_frame_of_another_size_is_refused_from_its_header() {
+        let dir = std::env::temp_dir().join(format!("ck-size2-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        crate::writers::write_exr(&dir.join("f_0001.exr"), 16, 8, 3, &[0.5f32; 16 * 8 * 3], crate::writers::ExrType::Float).unwrap();
+        // the pixels are 16x8, the header says 4000x3000: the header's size is the one reported (nothing decoded)
+        exr_claiming(&dir.join("f_0002.exr"), 16, 8, 4000, 3000);
+        let meta = crate::clip::probe_size(&dir, -1, 1.0).unwrap();
+        let mut r = FrameReader::open(&meta).unwrap();
+        r.next_frame().unwrap();
+        let e = r.next_frame().err().expect("an error");
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(e.message.ends_with("frame size 4000x3000 differs from the first frame's 16x8"), "{}", e.message);
+    }
 
     #[test]
     fn gray_matches_cv2_fixed_point() {

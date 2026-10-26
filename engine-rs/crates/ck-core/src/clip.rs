@@ -7,6 +7,28 @@ use std::process::Command;
 
 pub(crate) const SHAPE_QUANTUM: usize = 128;
 
+/// The largest frame side the engine takes, native and at the model scale: 16384 px, the cap `trt_build` and the app's
+/// size fields already have (ck-engine `trt_build_job`, src/shared/trt.ts). 8K and 12K plates (7680x4320, 12288x6480)
+/// and 4K DCI at model scale 2.0 (8192x4320) are inside it; the networks have no size limit of their own, host memory
+/// is the bound (each frame in flight is h x w x 3 floats: 3.2 GB at 16384 x 16384). Senior Rust review 2026-10-26 M1:
+/// with no cap, an EXR header claiming 100000x100000 passed the probe and the decoder's 120 GB allocation aborted the
+/// engine (exit 134, no error reply, the queued requests lost); now it is an `input` error at the probe.
+pub const MAX_SIDE: usize = 16384;
+
+/// Whether the engine takes a frame of `w` x `h` (native) that the networks see at `model_w` x `model_h`; an `input`
+/// error that says why when it doesn't (MAX_SIDE).
+pub(crate) fn size_supported(w: usize, h: usize, model_w: usize, model_h: usize) -> Result<(), Error> {
+    if w > MAX_SIDE || h > MAX_SIDE {
+        return Err(Error::input(format!("This clip is too large ({w}x{h}): the engine takes at most {MAX_SIDE} pixels in each direction.")));
+    }
+    if model_w > MAX_SIDE || model_h > MAX_SIDE {
+        return Err(Error::input(format!(
+            "At this model scale the networks would run at {model_w}x{model_h} (the clip is {w}x{h}): the engine takes at most {MAX_SIDE} pixels in each direction. Choose a smaller model scale."
+        )));
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Source {
     Video(PathBuf),
@@ -441,6 +463,7 @@ pub(crate) fn probe_video(path: &Path, o: &ProbeOpts) -> Result<ClipMeta, Error>
         return Err(Error::input(format!("{}: no frames", path.display())));
     }
     let mut meta = ClipMeta::with_shape(Source::Video(path.to_path_buf()), p.fps, p.h, p.w, n, false, o.model_scale);
+    size_supported(meta.w, meta.h, meta.model_w, meta.model_h)?;
     meta.video_bits = p.bits;
     meta.start_frame = start_frame(p.frames, n, num_frames, o.start_mode, o.seed);
     meta.adjust = o.adjust;
@@ -459,7 +482,9 @@ pub(crate) fn probe_frame_dir(dir: &Path, num_frames: i64, fps: f64, exr_linear:
     }
     let (h, w) = crate::decode::image_size(&paths[0])?;
     let n = paths.len();
-    Ok(ClipMeta::with_shape(Source::Frames(paths), fps, h, w, n, exr_linear, model_scale))
+    let meta = ClipMeta::with_shape(Source::Frames(paths), fps, h, w, n, exr_linear, model_scale);
+    size_supported(meta.w, meta.h, meta.model_w, meta.model_h)?;
+    Ok(meta)
 }
 
 /// A clip's size and frame count as a job's probe reads them (the `estimate` command): ffprobe for a video, the first
@@ -556,6 +581,27 @@ impl FrameNumbers {
 
 #[cfg(test)]
 mod tests {
+
+    /// senior Rust review 2026-10-26 M1: a clip past MAX_SIDE (here an EXR header claiming 100000x100000) is an
+    /// `input` error at the probe, for a run and for the `estimate` command (probe_size), before anything is decoded
+    #[test]
+    fn a_clip_past_the_largest_side_is_refused_at_the_probe() {
+        let dir = std::env::temp_dir().join(format!("ck-maxside-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        crate::decode::exr_claiming(&dir.join("f_0001.exr"), 16, 8, 100_000, 100_000);
+        let run = probe_frame_dir(&dir, -1, 24.0, false, 1.0).unwrap_err();
+        let estimate = probe_size(&dir, -1, 1.0).unwrap_err();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(run.code, crate::ErrorCode::Input);
+        assert!(run.message.starts_with("This clip is too large (100000x100000): the engine takes at most 16384"), "{}", run.message);
+        assert_eq!(estimate, run);
+        // the limit itself is taken; one pixel past it, natively or at the model scale, is not
+        assert_eq!(size_supported(MAX_SIDE, MAX_SIDE, MAX_SIDE, MAX_SIDE), Ok(()));
+        assert!(size_supported(MAX_SIDE + 1, 100, MAX_SIDE + 1, 100).unwrap_err().message.contains("too large"));
+        let scaled = size_supported(8192, 4320, 16384 + 2, 8640).unwrap_err();
+        assert_eq!(scaled.code, crate::ErrorCode::Input);
+        assert!(scaled.message.contains("model scale"), "{}", scaled.message);
+    }
 
     #[test]
     fn exr_frame_numbers() {
