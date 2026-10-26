@@ -282,6 +282,26 @@ describe("runInstall", () => {
     rmSync(data, { recursive: true, force: true });
   });
 
+  // bug hunt 2026-10-26 I1: the room check asked for the whole download again on a resume, so a stopped install on a disk
+  // with little to spare couldn't go on ("not enough free disk space") although the bytes it still needs fit
+  it("on a resume, asks for room only for what is still to download", async () => {
+    const data = mkdtempSync(join(tmpdir(), "ck-run-"));
+    mkdirSync(join(data, "runtime", "rt"), { recursive: true });
+    mkdirSync(join(data, "models", ".partial-m1"), { recursive: true });
+    // a.onnx (300 bytes) finished before the stop; b.onnx (500) is still to come: 600 free is enough
+    writeFileSync(join(data, "models", ".partial-m1", "a.onnx"), files["a.onnx"]);
+    await runInstall(data, deps(600), catalog());
+    expect(existsSync(join(data, "models", "m1", "b.onnx"))).toBe(true);
+    // and still refused when even the rest doesn't fit
+    const tight = mkdtempSync(join(tmpdir(), "ck-run-"));
+    mkdirSync(join(tight, "runtime", "rt"), { recursive: true });
+    mkdirSync(join(tight, "models", ".partial-m1"), { recursive: true });
+    writeFileSync(join(tight, "models", ".partial-m1", "a.onnx"), files["a.onnx"]);
+    await expect(runInstall(tight, deps(400), catalog())).rejects.toThrow("not enough free disk space");
+    rmSync(data, { recursive: true, force: true });
+    rmSync(tight, { recursive: true, force: true });
+  });
+
   // TensorRT on top of an installed runtime ("rt") and model set ("m1", whose a.onnx doubles as a TensorRT file)
   const trtCatalog = (): TrtCatalog => {
     const serve = (name: string, body: Buffer) => {
@@ -384,6 +404,18 @@ describe("runInstall", () => {
     await runTrtInstall(data, deps(), c);
     expect(asked).toEqual(["models.json"]);
     expect(JSON.parse(readFileSync(join(m1, "models.json"), "utf8"))).toHaveProperty("tensorrt-fp16");
+    rmSync(data, { recursive: true, force: true });
+  });
+
+  it("on a TensorRT resume, asks for room only for what is still to download", async () => {
+    const c = trtCatalog();
+    const data = installedBase();
+    // NVIDIA's wheel arrived whole before a stop: it needs no room again (only its unpacked libraries do)
+    mkdirSync(join(data, "downloads"), { recursive: true });
+    writeFileSync(join(data, "downloads", c.libs.file), files[c.libs.file]);
+    const full = c.libs.size * 1.8 + c.runtime.wheels[0].size + c.trtModels.files.reduce((n, f) => n + f.size, 0);
+    await runTrtInstall(data, deps(Math.ceil(full - c.libs.size)), c);
+    expect(existsSync(join(data, "models", "m1", "models-tensorrt.json"))).toBe(true);
     rmSync(data, { recursive: true, force: true });
   });
 

@@ -11,7 +11,7 @@ import { gbBytes } from "../../src/shared/units";
 import { lowerFirst, INSTALL_FIRST } from "../../src/shared/texts";
 import { DOWNLOADS_DIR, LIBRARY_FILE, MODELS_DIR, PLATFORM, RUNTIME_DIR } from "./platform";
 import { REPO } from "./updateFeed";
-import { constants, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statfsSync, writeFileSync } from "node:fs";
+import { constants, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { downloadVerified, type FetchFn } from "./download";
 import { unzip } from "./unzip";
@@ -265,6 +265,9 @@ const total = (d: Download[]) => d.reduce((n, x) => n + x.size, 0);
 // the install's refusals, the same for the runtime and models and for TensorRT's parts
 const noRoom = (need: number, dir: string, free: number) => new Error(`not enough free disk space: it needs ${gbBytes(need)} in ${dir}, ${gbBytes(free)} is free`);
 const noLibraries = (file: string) => new Error(`${file} had none of the expected libraries`);
+/** The bytes of a download a stopped install already has at `path` (they need no room again; resume keeps them). */
+// loop: NOT-WORTH — one stat per planned file, once per install start
+const already = (path: string, size: number) => Math.min(size, statSync(path, { throwIfNoEntry: false })?.size ?? 0);
 export const RUNTIME_BYTES = total(runtimeFor(PLATFORM).wheels);
 export const MODELS_BYTES = total(MODELS.files);
 
@@ -336,9 +339,15 @@ export async function runInstall(data: string, deps: InstallDeps, c: Catalog = C
   // loop: NOT-WORTH — one mkdir per install (the disk check needs the folder)
   mkdirSync(data, { recursive: true });
   const room = deps.freeBytes(data);
-  const needRoom = (need.runtime ? total(RUNTIME.wheels) * 2.5 : 0) + (need.models ? total(MODELS.files) : 0);
-  if (room !== null && room < needRoom) throw noRoom(needRoom, data, room);
   const downloads = join(data, DOWNLOADS_DIR);
+  // what a stopped install already downloaded is on the disk: only the rest needs room (a resume on a full-ish disk)
+  // loop: NOT-WORTH — a dozen planned files, once per install start
+  const have =
+    (need.runtime ? RUNTIME.wheels.reduce((n, w) => n + already(join(downloads, w.file), w.size), 0) : 0) +
+    // loop: NOT-WORTH — as above
+    (need.models ? MODELS.files.reduce((n, f) => n + already(join(data, MODELS_DIR, `.partial-${MODELS.name}`, f.file), f.size), 0) : 0);
+  const needRoom = (need.runtime ? total(RUNTIME.wheels) * 2.5 : 0) + (need.models ? total(MODELS.files) : 0) - have;
+  if (room !== null && room < needRoom) throw noRoom(needRoom, data, room);
   // loop: NOT-WORTH — one mkdir per install
   mkdirSync(downloads, { recursive: true });
   // a model file downloads straight into the set's .partial folder, so a stopped install keeps the checked ones
@@ -547,9 +556,17 @@ export async function runTrtInstall(data: string, deps: InstallDeps, c: TrtCatal
   const need = trtNeeds(data, existsSync, c);
   // room: the wheel and its kept libraries side by side (2.6 of 3.7 GB), the ONNX Runtime wheel, the models (copies included)
   const room = deps.freeBytes(data);
-  const needRoom = (need.libs ? c.libs.size * 1.8 : 0) + (need.provider ? ortWheel(c).size : 0) + (need.models ? total(c.trtModels.files) : 0);
-  if (room !== null && room < needRoom) throw noRoom(needRoom, data, room);
   const downloads = join(data, DOWNLOADS_DIR);
+  // what a stopped install already has on the disk (the wheels, the model files in the partial folder or moved into the
+  // set): only the rest needs room
+  const trtPartial = join(data, MODELS_DIR, `.partial-${c.trtModels.name}`);
+  const have =
+    (need.libs ? already(join(downloads, c.libs.file), c.libs.size) : 0) +
+    (need.provider ? already(join(downloads, ortWheel(c).file), ortWheel(c).size) : 0) +
+    // loop: NOT-WORTH — sixteen planned files, once per install start
+    (need.models ? c.trtModels.files.reduce((n, f) => n + Math.max(already(join(trtPartial, f.file), f.size), f.file === "models.json" ? 0 : already(join(p.models, f.file), f.size)), 0) : 0);
+  const needRoom = (need.libs ? c.libs.size * 1.8 : 0) + (need.provider ? ortWheel(c).size : 0) + (need.models ? total(c.trtModels.files) : 0) - have;
+  if (room !== null && room < needRoom) throw noRoom(needRoom, data, room);
   // loop: NOT-WORTH — one mkdir per install
   mkdirSync(downloads, { recursive: true });
   const { fetchOne, done } = fetcher(deps, need.bytes, downloads);
