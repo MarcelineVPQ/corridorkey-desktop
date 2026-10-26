@@ -465,6 +465,9 @@ pub struct Net {
     pub(crate) session: Session,
     pub(crate) provider: Provider,
     f16_inputs: Vec<String>,
+    /// inputs the file renamed: (the engine's name, the file's `ck_<name>`), for names Core ML reserves (`state`;
+    /// export/coreml/coreml_rewrites.py `RESERVED_INPUTS`)
+    renamed: Vec<(String, String)>,
     /// run options that give the arena's working memory back after the run (GPU only)
     shrink_options: Option<ort::session::RunOptions>,
     /// whether runs use `shrink_options` (the pipeline sets it from `shrinks` for what is loaded)
@@ -605,6 +608,10 @@ impl Net {
         let f16_inputs =
             // loop: NOT-WORTH — ≤ six inputs, once per session load
             session.inputs().iter().filter(|i| i.dtype().tensor_type() == Some(ort::value::TensorElementType::Float16)).map(|i| i.name().to_string()).collect();
+        // loop: NOT-WORTH — ≤ six inputs, once per session load
+        let names: Vec<String> = session.inputs().iter().map(|i| i.name().to_string()).collect();
+        // loop: NOT-WORTH — ≤ six inputs, once per session load
+        let renamed = names.iter().filter_map(|n| n.strip_prefix("ck_").filter(|b| !names.iter().any(|m| m == b)).map(|b| (b.to_string(), n.clone()))).collect();
         // on the GPU a run can give its arena's working memory back (the five sessions have one arena each, so
         // without this their peaks would add up); the pipeline decides per phase, see `shrinks`
         let shrink_options = if matches!(prov, Provider::Cuda | Provider::TensorRt) {
@@ -619,6 +626,7 @@ impl Net {
             session,
             provider: prov,
             f16_inputs,
+            renamed,
             shrink_options,
             shrink: false,
             counters: NetCounters::default(),
@@ -626,8 +634,15 @@ impl Net {
         })
     }
 
+    /// The file's name for the engine's input `name` (a Core ML file may rename it, see `renamed`).
+    fn file_name<'n>(&'n self, name: &'n str) -> &'n str {
+        // loop: NOT-WORTH — at most one renamed input
+        self.renamed.iter().find(|(b, _)| b == name).map_or(name, |(_, f)| f.as_str())
+    }
+
     /// Whether the graph takes input `name` as float16.
     pub(crate) fn wants_f16(&self, name: &str) -> bool {
+        let name = self.file_name(name);
         self.f16_inputs.iter().any(|n| n == name)
     }
 
@@ -645,7 +660,7 @@ impl Net {
                 (true, data) => Tensor::from_array((shape, data.into_f16())).map_err(|e| Error::ort(self.piece, e))?.into(),
                 (false, data) => Tensor::from_array((shape, data.into_f32())).map_err(|e| Error::ort(self.piece, e))?.into(),
             };
-            feed.push((std::borrow::Cow::Borrowed(name), v));
+            feed.push((std::borrow::Cow::Owned(self.file_name(name).to_string()), v));
         }
         let piece = self.piece;
         let t1 = std::time::Instant::now();

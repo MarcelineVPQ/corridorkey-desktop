@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(HERE))  # engine-rs/export: to_trt.py
 from to_trt import mha_to_plain, aa_resize_to_matmul  # noqa: E402  (read-only import; the repo is not changed)
 
 sys.path.insert(0, HERE)
+import fold  # noqa: E402
 from fold import static_shapes, fold_once, prune  # noqa: E402
 
 
@@ -97,6 +98,58 @@ def expand_to_tile(m):
     return n
 
 
+def bias_add_to_sub(m):
+    """MatMul -> Add(constant bias) becomes MatMul -> Sub(-bias). Core ML's compiler fuses matmul + add-const into
+    `linear`, transposes the weights for it and writes the transposed copy into model.mil as text (C-RADIO: 5 GB of
+    text, > 10 GB to load; found on an M6 2026-10-25). It doesn't fuse a Sub, so the weights stay in weight.bin as
+    shipped. Exact: negating flips the sign bit. New data: the negated biases only (a few KB each)."""
+    g = m.graph
+    inits = {i.name: i for i in g.initializer}
+    prod = {o: n for n in g.node for o in n.output}
+    n = 0
+    # loop: NOT-WORTH — one pass over the nodes, once per build
+    for node in g.node:
+        if node.op_type != "Add":
+            continue
+        a, b = node.input
+        if b in inits and a in prod and prod[a].op_type == "MatMul":
+            mm, bias = a, b
+        elif a in inits and b in prod and prod[b].op_type == "MatMul":
+            mm, bias = b, a
+        else:
+            continue
+        neg = uniq(g, "negbias")
+        g.initializer.append(numpy_helper.from_array(-numpy_helper.to_array(inits[bias], fold.BASE), neg))
+        node.op_type = "Sub"
+        del node.input[:]
+        node.input.extend([mm, neg])
+        n += 1
+    return n
+
+
+# graph input names Core ML's ML Program parser takes as keywords: the compile on a Mac fails with "Invalid
+# operation parameter name: got 'state'" (RVM's recurrent input, found on an M6 2026-10-25; a Linux probe can't see
+# it). Renamed to ck_<name>; the engine maps its own name to the file's (runtime.rs Net `renamed`).
+RESERVED_INPUTS = {"state"}
+
+
+def rename_reserved_inputs(m):
+    g, n = m.graph, 0
+    # loop: NOT-WORTH — ≤ six graph inputs
+    for gi in g.input:
+        if gi.name in RESERVED_INPUTS:
+            old, new = gi.name, "ck_" + gi.name
+            gi.name = new
+            # loop: NOT-WORTH — one pass over the nodes per renamed input, once per build
+            for node in g.node:
+                # loop: NOT-WORTH — a node's few inputs
+                for i, x in enumerate(node.input):
+                    if x == old:
+                        node.input[i] = new
+            n += 1
+    return n
+
+
 def main():
     src, dst = sys.argv[1], sys.argv[2]
     import fold, os
@@ -116,9 +169,12 @@ def main():
     if "--no-rank" not in sys.argv:
         from rank_lower import lower
         n_rank = lower(m)
+    n_sub = bias_add_to_sub(m)
     prune(m)
+    n_ren = rename_reserved_inputs(m)
     onnx.save(m, dst)
     print(f"REWRITE {src} -> {dst}: mha {n_mha}, aa-resize {n_aa}, rms {n_rms}, expand {n_exp}, rank-lowered nodes {n_rank}, "
+          f"bias add -> sub {n_sub}, renamed inputs {n_ren}, "
           f"{len(m.graph.node)} nodes")
 
 
