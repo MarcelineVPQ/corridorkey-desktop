@@ -11,7 +11,8 @@ import { gbBytes } from "../../src/shared/units";
 import { lowerFirst, INSTALL_FIRST } from "../../src/shared/texts";
 import { DOWNLOADS_DIR, LIBRARY_FILE, MODELS_DIR, PLATFORM, RUNTIME_DIR } from "./platform";
 import { REPO } from "./updateFeed";
-import { constants, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
+import { constants, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
+import { copyFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { downloadVerified, type FetchFn } from "./download";
 import { unzip } from "./unzip";
@@ -634,8 +635,10 @@ export async function runTrtInstall(data: string, deps: InstallDeps, c: TrtCatal
         if (f.file !== "models.json" && existsSync(join(p.models, f.file))) renameSync(join(p.models, f.file), target);
         else if (fromTwin) {
           deps.progress(done(), need.bytes, `Copying ${f.file} from the CorridorKey models`);
-          // loop: NOT-WORTH — one local copy (a reflink where the file system has them) [bounded: 1.7 GB]
-          copyFileSync(twinPath!, target, constants.COPYFILE_FICLONE);
+          // off the main thread: on a file system without reflinks (ext4, NTFS) it is a real 1.7 GB copy, which as a sync
+          // call froze the window for its length (measured 1.0 s on an NVMe SSD, bug hunt 2026-10-26 I2)
+          // loop: SERIAL-REQUIRED — one local copy (a reflink where the file system has them) [bounded: 1.7 GB]
+          await copyFile(twinPath!, target, constants.COPYFILE_FICLONE);
         }
       }
       await fetchOne(f, fromTwin ? `Checking ${f.file}` : `Downloading the TensorRT models (${f.file})`, target, !fromTwin);
