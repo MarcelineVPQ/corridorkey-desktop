@@ -3,17 +3,17 @@
 ## 1.0.0-dev.1
 
 The first development build of 1.0: a free desktop app for CorridorKey 2.0, Corridor Digital's AI green and blue
-screen keyer, on its own Rust + ONNX Runtime engine, for Linux, Windows and macOS (Apple Silicon).
+screen keyer, on its own Rust + ONNX Runtime engine, for Linux and Windows (macOS on Apple Silicon follows).
 
 **Platforms in this build:**
 
-- **Linux and Windows need an NVIDIA graphics card** (RTX 30-series or newer). The engine keys only on CUDA: AMD and
+- **Linux and Windows need an NVIDIA graphics card** (RTX 20-series or newer, 8 GB or more). The engine keys only on CUDA: AMD and
   Intel cards aren't supported, and nothing falls back to the CPU. Keying on Windows is untested on a real NVIDIA PC
   (below).
-- **macOS is a preview and can't key yet.** The disk image is signed and notarized, installs and opens, but the Mac's
-  Core ML engine needs more work: setup doesn't install the Core ML models yet (backlog row 59), the Core ML set is HD
-  only (row 60), and it hasn't been proven on a real Apple Silicon Mac (row 24). README, "macOS, honestly", lists
-  what's left. No TensorRT on the Mac, and it updates from the releases page by hand.
+- **No macOS build in this one.** The Mac's Core ML engine can't key yet: setup doesn't install the Core ML models
+  (backlog row 59), the Core ML set is HD only (row 60), and stage 1 needs more memory under Core ML than a 16 GB Mac
+  has at a 4-frame window (measured on an M6 Mac mini, 2026-10-26; shorter windows not yet; row 24). README, "macOS, honestly", lists
+  what's left.
 
 **What's in it:**
 

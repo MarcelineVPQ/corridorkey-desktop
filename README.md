@@ -36,7 +36,7 @@ mode and outputs, and watch real progress: frames written, the temporal window t
 chose from your free graphics memory, and stills of the results.
 
 Status: 1.0 is almost ready. The first development build, 1.0.0-dev.1, keys on Linux and Windows with an NVIDIA
-graphics card. The macOS disk image installs and opens but can't key yet (macOS, honestly, below).
+graphics card. There's no macOS build in it yet: the Mac can't key (macOS, honestly, below).
 
 ## Requirements
 
@@ -71,8 +71,8 @@ your PC" the first time. Click **More info**, then **Run anyway**. It's asked on
 speed and quality number in this README was measured on Linux. If you try it on Windows, please tell us how it goes.
 
 **macOS, honestly:** a great many VFX artists work on Macs, so macOS is on the way, but **the Mac build can't key
-yet**. In 1.0.0-dev.1 the disk image is a preview: it's signed (Developer ID) and notarized by Apple, installs, opens
-and works through its pages (built and driven page by page on GitHub's Apple Silicon runners), but a job doesn't run.
+yet**, so 1.0.0-dev.1 has no macOS build. The app itself builds and runs on Apple Silicon (signed with a Developer ID,
+notarized by Apple, driven page by page on GitHub's Apple Silicon runners), but a job doesn't run.
 There's no NVIDIA card on a Mac, so the Mac engine uses ONNX Runtime's Core ML backend (Apple's GPU and Neural Engine)
 instead of CUDA, and that path needs more development before it keys:
 
