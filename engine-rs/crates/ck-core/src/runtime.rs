@@ -611,7 +611,8 @@ impl Net {
         // loop: NOT-WORTH — ≤ six inputs, once per session load
         let names: Vec<String> = session.inputs().iter().map(|i| i.name().to_string()).collect();
         // loop: NOT-WORTH — ≤ six inputs, once per session load
-        let renamed = names.iter().filter_map(|n| n.strip_prefix("ck_").filter(|b| !names.iter().any(|m| m == b)).map(|b| (b.to_string(), n.clone()))).collect();
+        let renamed =
+            names.iter().filter_map(|n| n.strip_prefix("ck_").filter(|b| !names.iter().any(|m| m == b)).map(|b| (b.to_string(), n.clone()))).collect();
         // on the GPU a run can give its arena's working memory back (the five sessions have one arena each, so
         // without this their peaks would add up); the pipeline decides per phase, see `shrinks`
         let shrink_options = if matches!(prov, Provider::Cuda | Provider::TensorRt) {
