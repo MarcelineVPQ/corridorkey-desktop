@@ -215,3 +215,33 @@ phases the window doesn't affect.** Code-read.
 | NICE | 13 |
 
 Evidence: M1 and S1 proved by runs; NICE 1 proved by a run; the rest code-read.
+
+## Status
+
+Marcy approved the MUST, the three SHOULDs and backlog rows for the 13 NICEs (2026-10-26). Branch
+`fix/review-2026-10-26`; each fix has a test that fails on the old code (run against f32ba6d) and passes now.
+
+| finding | status | test |
+|---|---|---|
+| M1 | fixed in 16d371d: `clip::MAX_SIDE` 16384 a side (native and at the model scale) refused at the probe as `input`, for `run` and `estimate`; every folder frame, hint frame and hint video checked from its header before its pixels are read | `a_clip_past_the_largest_side_is_refused_at_the_probe`, `a_frame_claiming_a_huge_size_is_an_error_before_it_is_decoded` (old code: test binary aborted, "memory allocation of 120000000000 bytes failed"), `a_later_frame_of_another_size_is_refused_from_its_header` |
+| S1 | fixed in 7fe69d0: `dnxhr444` under 256x120 a `bad-request` when the writers are set up; ffmpeg's first line kept next to the last 6 | `dnxhr_below_its_smallest_frame_is_a_bad_request_up_front`, `the_tail_keeps_ffmpegs_first_line` |
+| S2 | fixed in 2ca7c1a: only an out-of-memory in the windows' phase (stage 1; normal mode: C-RADIO, MoGe, stage 2 inside the windows) halves the window; others fail at once | `out_of_memory_outside_the_windows_is_not_retried` (old: retried at 4/2, 2/1, 1/1), `normal_mode_stage2_out_of_memory_in_the_windows_is_retried` (guard, passes on both) |
+| S3 | fixed in 1ad0bfc: one `catch_unwind` around every request in ck-engine, `reset` after any panic (`trt_build` too); the app fails its start at once on an error pong | `a_panic_in_any_request_is_an_error_reply_and_the_engine_keeps_serving` (old: the test thread died on "pong boom"), engine.test.ts "fails the start at once…" |
+| NICE 1-13 | backlog rows 82-94 (status idea) | — |
+
+Reproductions, debug engine binary, `--device cpu`, `CK_ENGINE_PRECISION=fp16`, the 2.0.0-onnx.4 models:
+
+- M1, a 320×200 EXR (ffmpeg) whose header claims 100000×100000, then `estimate`, `run` (low-VRAM 1/1), `ping`, `quit`:
+  - before (f32ba6d): `estimate` answered normally (`height` 100000); the run loaded RVM, then
+    `memory allocation of 120000000000 bytes failed`, exit 134; the `ping` and `quit` were never answered.
+  - after: `estimate` and `run` both `input` "This clip is too large (100000x100000): the engine takes at most 16384
+    pixels in each direction."; the pong came; exit 0.
+  - The same file as the second frame of a folder after a real 320×200 frame: before, exit 134 with the same
+    allocation failure; after, `input` "…/f_0002.exr: 100000x100000 is larger than the engine takes (16384 pixels in
+    each direction)", the pong, exit 0.
+- S1, a 200×150 H.264 clip (3 frames), `video_codec` `dnxhr444`, low-VRAM 2/1:
+  - before: probe, RVM, foundations, three stage-1 windows, the stage-2 load, then `engine` "ffmpeg writer: Broken pipe
+    (os error 32); ffmpeg said: … Could not open encoder before EOF | … Nothing was written into output file…" (9 s;
+    ffmpeg's reason, "Input dimensions too small", is not in it).
+  - after: `bad-request` "DNxHR 444 needs a frame of at least 256x120; this clip is 200x150 (H.264 takes any size)"
+    right after the probe (0 s).
