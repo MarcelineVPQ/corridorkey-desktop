@@ -95,6 +95,22 @@ gpu.ts with a non-Linux fallback, appImageQuit) are Linux-only by design and gua
 | N15 | docs/BACKLOG.md row 12 | "6.87 GB … TensorRT models from release `models-2.0.0-onnx.3-trt`" | STALE | Today: 5.53 GB from `models-2.0.0-onnx.4-trt` (install.ts sums; README:53 says 5.5 GB) | nice | Add a dated line to the row (S) |
 | N16 | engine-rs/crates/ck-core/src/pipeline/mod.rs:1211-1225 `trt_root_for` vs electron/main/platform.ts:26-31 + storage.ts:16 | per-OS cache root + "tensorrt" | DUPLICATED | The app always passes CK_ENGINE_TRT_CACHE (engine.ts:121), so the engine's copy matters only for bare runs and benches; folder name "tensorrt" in both | nice | Comment that the app's is the source; or leave (S) |
 
+## Status (2026-10-26, branch fix/passes-2026-10-26)
+
+| # | Status |
+| --- | --- |
+| M1 | Wording fixed in d04e05e: GUIDE says the table was measured on onnx.3 and that one onnx.4 point is 0.09 GiB over its estimate, so it's a close guide until it's measured again. Deferred: the re-measurement on onnx.4 and the new table numbers (GPU, running separately); ENGINE_PROTOCOL.md's matching lines and `estimate_basis` wait for it too. |
+| M2 | Deferred: the README headline speeds wait for the same-day onnx.4 bench (GPU, running separately). |
+| S1 | Fixed in d04e05e: 4.86 GB Linux, 4.64 GB Windows, 3.32 GB macOS in README (Requirements and the comparison table) and GUIDE; test: both state the sums of install.ts's pins. |
+| S2 | Fixed in d04e05e: README's build time is the onnx.4 measurement (4.4-4.8 min, 4K 4.8 with a warm timing cache), no "about half once warm". |
+| S3, S4, S7 | Deferred: GPU measurements running separately. |
+| S5 | Fixed in c1bc863: AbortSignal timeouts (API 60 s, download 20 min), the CI verdicts reworded; test in listLoops.test.ts. |
+| S6 | Fixed in bc67bfa (Marcy's decision): "Time left" and `remaining()` removed; speed and frames stay; test jobView.test.ts. |
+| S8 | Fixed in d04e05e: estimate.test.ts ties types.ts's and GUIDE's "× 1.1 + 0.3 GiB" to vram.rs MARGIN_SCALE / MARGIN_GB. |
+| S9 | Fixed in 15393af: one FOUNDATION_CHUNK (tensorrt.rs); keying.rs and pipeline/mod.rs use it. |
+| S10 | The TensorRT wheel name + SHA-256 was already tied (install.test.ts, "builds the shipped ck-trt-build against the same TensorRT wheel users download", reading tools/build_trt_builder.sh). Fixed in d04e05e: one ONNX Runtime version across install.ts's three runtimes' wheels, Cargo's `api-31` and make_manifest.py's `onnxruntime_min`. |
+| N1-N16 | Backlog rows 67-81 (c9322e9), status idea. |
+
 ## Checked and SOURCED (the notable ones; not findings)
 
 - install.ts: every runtime / model / TensorRT size matches the installed onnx.4 set; manifest.json,
