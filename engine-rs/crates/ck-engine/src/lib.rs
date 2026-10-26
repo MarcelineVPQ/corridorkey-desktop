@@ -45,8 +45,8 @@ fn trt_build_job<B: Backend, W: Write>(backend: &mut B, req: &Value, id: &str, r
     let frames = req.get("frames").and_then(|v| v.as_u64()).filter(|v| *v > 0).map(|v| v as usize).unwrap_or(1000);
     let cap = req.get("vram_budget_gb").and_then(|v| v.as_f64()).filter(|g| g.is_finite() && *g > 0.0);
     r.job = Some(id.to_string());
-    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| backend.trt_build(w, h, frames, cap, r)))
-        .unwrap_or_else(|p| Err(Error::engine(format!("internal error: {}", ck_core::panic_message(&*p)))));
+    // a panic: the protocol loop's guard replies and resets the backend (it skipped the reset when caught here)
+    let res = backend.trt_build(w, h, frames, cap, r);
     match res {
         Ok(v) => r.send(v),
         Err(e) => r.send(json!({"type": "error", "code": e.code.as_str(), "message": e.message})),
@@ -226,63 +226,86 @@ pub fn serve<B: Backend, R: BufRead + Send + 'static, W: Write>(backend: &mut B,
                 continue;
             }
         };
-        let id = req.get("id").cloned().unwrap_or(Value::Null);
-        match req["cmd"].as_str().unwrap() {
-            "ping" => {
-                let p = backend.pong();
-                r.send(p);
-            }
-            "quit" => return,
-            // the colour spaces a config offers (backlog row 29, ck_core::ocio::describe): answered at once, between jobs
-            "colorspaces" => {
-                let cfg = str_field(&req, "config");
-                let mut reply = match ck_core::ocio::describe(cfg.as_deref(), ck_core::ocio::env_ocio().as_deref()) {
-                    Ok(v) => v,
-                    Err(e) => json!({"type": "error", "code": e.code.as_str(), "message": e.message}),
-                };
-                if !id.is_null() {
-                    reply["id"] = id;
+        // one guard around the whole request (senior Rust review 2026-10-26 S3): a panic anywhere (`estimate` parsing a
+        // malformed header, `colorspaces` in OCIO, a job, a TensorRT build) is that request's `engine` error, the backend
+        // is reset (whatever the panic left half-made is dropped) and the engine keeps serving the queue
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| dispatch(backend, &req, &inbox, &mut pending_cancel, &mut r))) {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(p) => {
+                let m = ck_core::panic_message(&*p);
+                // the job's or build's id when one was running, else the request's own
+                let id = r.job.take().map(Value::from).or_else(|| req.get("id").cloned()).unwrap_or(Value::Null);
+                eprintln!("request {id} panicked: {m}");
+                // a reset that panics too is only logged
+                if let Err(p2) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| backend.reset())) {
+                    eprintln!("request {id}: resetting after the panic failed too: {}", ck_core::panic_message(&*p2));
                 }
-                r.send(reply);
-            }
-            // the peak graphics memory per window for a clip (backlog row 41): probe only, no model; between jobs
-            "estimate" => {
-                let mut reply = estimate_reply(backend, &req);
-                if !id.is_null() {
-                    reply["id"] = id;
-                }
-                r.send(reply);
-            }
-            // build the TensorRT engines for a size ahead of any job (the app's background build); between jobs
-            "trt_build" => match str_field(&req, "id") {
-                Some(bid) => trt_build_job(backend, &req, &bid, &mut r),
-                None => r.send(json!({"type": "error", "id": id, "code": "bad-request", "message": "trt_build needs an id"})),
-            },
-            "cancel" => match str_field(&req, "id") {
-                Some(jid) => {
-                    pending_cancel.insert(jid);
-                }
-                // no id: it can't name a job (it used to be filed under "null")
-                None => r.send(json!({"type": "error", "id": id, "code": "bad-request", "message": "cancel needs the id of a job"})),
-            },
-            "run" => {
-                let jid = str_field(&req, "id");
-                if jid.is_none() || str_field(&req, "input").is_none() || str_field(&req, "output_dir").is_none() || str_field(&req, "temp_dir").is_none() {
-                    r.send(json!({"type": "error", "id": id, "code": "bad-request", "message": "run needs id, input, output_dir and temp_dir"}));
-                    continue;
-                }
-                let jid = jid.unwrap();
-                if pending_cancel.remove(&jid) || inbox.cancel_queued(&jid) {
-                    r.send(json!({"type": "error", "id": jid, "code": "cancelled", "message": "cancelled"}));
-                    continue;
-                }
-                run_job(backend, &req, &jid, &mut r);
-            }
-            other => {
-                r.send(json!({"type": "error", "id": id, "code": "bad-request", "message": format!("unknown cmd: {other}")}));
+                r.send(json!({"type": "error", "id": id, "code": "engine", "message": format!("internal error: {m}")}));
             }
         }
     }
+}
+
+/// One request (the protocol loop's guard catches its panics); false: `quit`, stop serving.
+fn dispatch<B: Backend, W: Write>(backend: &mut B, req: &Value, inbox: &Inbox, pending_cancel: &mut HashSet<String>, r: &mut Replies<W>) -> bool {
+    let id = req.get("id").cloned().unwrap_or(Value::Null);
+    match req["cmd"].as_str().unwrap() {
+        "ping" => {
+            let p = backend.pong();
+            r.send(p);
+        }
+        "quit" => return false,
+        // the colour spaces a config offers (backlog row 29, ck_core::ocio::describe): answered at once, between jobs
+        "colorspaces" => {
+            let cfg = str_field(req, "config");
+            let mut reply = match ck_core::ocio::describe(cfg.as_deref(), ck_core::ocio::env_ocio().as_deref()) {
+                Ok(v) => v,
+                Err(e) => json!({"type": "error", "code": e.code.as_str(), "message": e.message}),
+            };
+            if !id.is_null() {
+                reply["id"] = id;
+            }
+            r.send(reply);
+        }
+        // the peak graphics memory per window for a clip (backlog row 41): probe only, no model; between jobs
+        "estimate" => {
+            let mut reply = estimate_reply(backend, req);
+            if !id.is_null() {
+                reply["id"] = id;
+            }
+            r.send(reply);
+        }
+        // build the TensorRT engines for a size ahead of any job (the app's background build); between jobs
+        "trt_build" => match str_field(req, "id") {
+            Some(bid) => trt_build_job(backend, req, &bid, r),
+            None => r.send(json!({"type": "error", "id": id, "code": "bad-request", "message": "trt_build needs an id"})),
+        },
+        "cancel" => match str_field(req, "id") {
+            Some(jid) => {
+                pending_cancel.insert(jid);
+            }
+            // no id: it can't name a job (it used to be filed under "null")
+            None => r.send(json!({"type": "error", "id": id, "code": "bad-request", "message": "cancel needs the id of a job"})),
+        },
+        "run" => {
+            let jid = str_field(req, "id");
+            if jid.is_none() || str_field(req, "input").is_none() || str_field(req, "output_dir").is_none() || str_field(req, "temp_dir").is_none() {
+                r.send(json!({"type": "error", "id": id, "code": "bad-request", "message": "run needs id, input, output_dir and temp_dir"}));
+                return true;
+            }
+            let jid = jid.unwrap();
+            if pending_cancel.remove(&jid) || inbox.cancel_queued(&jid) {
+                r.send(json!({"type": "error", "id": jid, "code": "cancelled", "message": "cancelled"}));
+                return true;
+            }
+            run_job(backend, req, &jid, r);
+        }
+        other => {
+            r.send(json!({"type": "error", "id": id, "code": "bad-request", "message": format!("unknown cmd: {other}")}));
+        }
+    }
+    true
 }
 
 fn run_job<B: Backend, W: Write>(backend: &mut B, req: &Value, jid: &str, r: &mut Replies<W>) {
@@ -290,17 +313,8 @@ fn run_job<B: Backend, W: Write>(backend: &mut B, req: &Value, jid: &str, r: &mu
     r.job = Some(jid.to_string());
     let res = match parse(req) {
         Err(e) => Err(e),
-        Ok(job) => match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| backend.run(&job, r))) {
-            Ok(res) => res,
-            Err(p) => {
-                let m = ck_core::panic_message(&*p);
-                // what the job left half-made is dropped before the next job (a reset that panics too is only logged)
-                if let Err(p2) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| backend.reset())) {
-                    eprintln!("job {jid}: resetting after the panic failed too: {}", ck_core::panic_message(&*p2));
-                }
-                Err(Error::engine(format!("internal error: {m}")))
-            }
-        },
+        // a panic: the protocol loop's guard replies and resets the backend
+        Ok(job) => backend.run(&job, r),
     };
     match res {
         Ok(done) => r.send(json!({

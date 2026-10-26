@@ -244,6 +244,14 @@ export class EngineProcess {
       wait.resolve(reply);
       return;
     }
+    // the ping answered with an error (the Rust engine answers a panic in any request, `ping` too, as an `engine`
+    // error and keeps running; senior Rust review 2026-10-26 S3): the start fails now with the engine's words,
+    // not after PING_TIMEOUT_MS
+    if (reply.type === "error" && this.pongWait && reply.id == null) {
+      this.fail(new Error(`engine couldn't answer the ping: ${String(reply.message)}`));
+      this.kill();
+      return;
+    }
     this.onReply(reply);
   }
 

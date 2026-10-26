@@ -48,6 +48,16 @@ describe("EngineProcess", () => {
     await expect(p.start()).rejects.toThrow(/protocol 9/);
   });
 
+  it("fails the start at once when the ping is answered with an error (a panic in the engine's pong)", async () => {
+    const p = new EngineProcess(
+      launch,
+      () => {},
+      () => {},
+      () => fakeChild((_l, out) => out.write('{"type":"error","id":null,"code":"engine","message":"internal error: boom"}\n')),
+    );
+    await expect(p.start()).rejects.toThrow(/couldn't answer the ping: internal error: boom/);
+  });
+
   it("strips variables that break a venv", () => {
     const env = engineEnv({ LD_LIBRARY_PATH: "/x", PYTHONPATH: "/y", HOME: "/h" });
     expect(env).toEqual({ HOME: "/h", PYTHONUNBUFFERED: "1", PYTHONDONTWRITEBYTECODE: "1" });

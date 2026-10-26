@@ -14,10 +14,16 @@ struct Fake {
     /// what each job found when it started
     found_half_made: Vec<bool>,
     resets: usize,
+    /// a request whose backend call panics: "pong" (`ping`), "card_memory" (`estimate`), "trt_build"
+    panic_in: Option<&'static str>,
 }
 
 impl Backend for Fake {
     fn pong(&mut self) -> Value {
+        if self.panic_in == Some("pong") {
+            self.half_made = true;
+            panic!("pong boom")
+        }
         json!({"type": "pong", "version": "0.2.0", "protocol": 1, "engine": "onnxruntime", "provider": "cpu", "precision": "fp32"})
     }
     fn run(&mut self, job: &JobConfig, sink: &mut dyn Sink) -> Result<JobResult, Error> {
@@ -41,6 +47,42 @@ impl Backend for Fake {
     fn reset(&mut self) {
         self.resets += 1;
         self.half_made = false;
+    }
+    fn card_memory(&mut self) -> Option<ck_core::vram::CardMemory> {
+        if self.panic_in == Some("card_memory") {
+            self.half_made = true;
+            panic!("estimate boom")
+        }
+        None
+    }
+    fn trt_build(&mut self, _w: usize, _h: usize, _frames: usize, _cap: Option<f64>, _sink: &mut dyn Sink) -> Result<Value, Error> {
+        if self.panic_in == Some("trt_build") {
+            self.half_made = true;
+            panic!("build boom")
+        }
+        Ok(json!({"type": "trt_built"}))
+    }
+}
+
+/// senior Rust review 2026-10-26 S3: a panic in any request (not only `run`) is that request's `engine` error with its
+/// id, the backend is reset, and the engine keeps serving the requests queued behind it (they were lost: the process
+/// ended). `trt_build`'s panic was caught but skipped the reset.
+#[test]
+fn a_panic_in_any_request_is_an_error_reply_and_the_engine_keeps_serving() {
+    // loop: NOT-WORTH — three requests that panic
+    for (panic_in, req) in [
+        ("pong", json!({"cmd": "ping", "id": "p1"})),
+        ("card_memory", json!({"cmd": "estimate", "id": "e1", "input": "/clip.mov", "windows": [[8, 4, false]]})),
+        ("trt_build", json!({"cmd": "trt_build", "id": "b1", "width": 1920, "height": 1080})),
+    ] {
+        let fake = Fake { panic_in: Some(panic_in), ..Fake::default() };
+        let (r, fake) = talk_to(fake, &[req.clone(), run("j1", "/a.mp4"), json!({"cmd": "quit"})]);
+        let id = req["id"].as_str();
+        assert_eq!((r[0]["type"].as_str(), r[0]["id"].as_str(), r[0]["code"].as_str()), (Some("error"), id, Some("engine")), "{panic_in}: {}", r[0]);
+        assert!(r[0]["message"].as_str().unwrap().starts_with("internal error: ") && r[0]["message"].as_str().unwrap().contains("boom"), "{}", r[0]);
+        // reset once, before the queued job, which found nothing half-made and ran
+        assert_eq!((fake.resets, fake.found_half_made.clone(), fake.ran.clone()), (1, vec![false], vec!["j1".to_string()]), "{panic_in}");
+        assert_eq!(r.last().unwrap()["type"], "result", "{panic_in}");
     }
 }
 
@@ -71,8 +113,18 @@ fn talk(lines: &[Value], raw: &[&str]) -> (Vec<Value>, Fake) {
 
 /// The engine's replies to raw input bytes.
 fn talk_bytes(input: Vec<u8>) -> (Vec<Value>, Fake) {
+    talk_bytes_to(Fake::default(), input)
+}
+
+/// `talk` with a fake set up by the test.
+fn talk_to(fake: Fake, lines: &[Value]) -> (Vec<Value>, Fake) {
+    // loop: NOT-WORTH — a test's few requests
+    let input = lines.iter().flat_map(line).collect();
+    talk_bytes_to(fake, input)
+}
+
+fn talk_bytes_to(mut fake: Fake, input: Vec<u8>) -> (Vec<Value>, Fake) {
     let mut out = Vec::new();
-    let mut fake = Fake::default();
     serve(&mut fake, std::io::Cursor::new(input), &mut out);
     // loop: NOT-WORTH — a test's few replies
     let replies = String::from_utf8(out).unwrap().lines().map(|l| serde_json::from_str(l).expect("every stdout line is JSON")).collect();

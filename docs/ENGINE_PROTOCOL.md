@@ -222,6 +222,11 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
   `{"type":"error","code":"bad-request","message":"..."}` and the engine keeps
   running. After a job's `error` the engine also keeps running and takes the
   next job.
+- Rust engine (senior Rust review 2026-10-26 S3, no new codes): a panic in any request (`run`, `trt_build`,
+  `estimate`, `colorspaces`, `ping`) is answered `{"type":"error","id":…,"code":"engine","message":"internal error: …"}`
+  with the job's or the request's id (null for an id-less `ping`; the app then fails the engine start with that
+  message), the engine drops what the request left half-made and keeps serving. Before, only `run` and `trt_build`
+  were caught and any other panic ended the process.
 - Rust engine (senior Rust review 2026-10-26, M1): a clip wider or taller than 16384 px, natively or at its `model_scale`, is an `input`
   error at the probe, for `run` and `estimate` (`ck_core::clip::MAX_SIDE`, the cap `trt_build` already had). A frame
   folder's later frame, a hint frame or a hint video is checked from its header before its pixels are read: one of
