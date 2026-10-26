@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isOurs, parentPid, parseApps, parseGpuLine, processName } from "../../electron/main/gpu";
+import { isOurs, otherGpuUsers, parentPid, parseApps, parseGpuLine, processName } from "../../electron/main/gpu";
 import { checkCheckout } from "../../electron/main/settings";
 
 describe("the app's own GPU processes", () => {
@@ -42,5 +42,32 @@ describe("checkCheckout", () => {
     expect(r.ok).toBe(false);
     expect(r.problems).toHaveLength(3);
     expect(checkCheckout(null).problems[0]).toMatch(/Choose/);
+  });
+});
+
+// bug hunt 2026-10-26 P6 (measured in an isolated copy: a paused build resumed at the queue's end was "blocked" by
+// "corridorkey-engine is using the graphics card", the queue's own engine still quitting, then waited a minute)
+describe("other programs on the card, for the background TensorRT build", () => {
+  it("leaves out the app's own processes (its quitting engine) and small users", async () => {
+    let asked: Set<number> | null = null;
+    const read = async (ours: Set<number>) => {
+      asked = ours;
+      const procs = [
+        { pid: 50, name: "corridorkey-engine", usedMb: 9000, parent: 4242 },
+        { pid: 60, name: "Sonata's word timing", usedMb: 2100, parent: 1 },
+        { pid: 70, name: "firefox", usedMb: 90, parent: 1 },
+      ];
+      // loop: NOT-WORTH — three processes in a test
+      return {
+        name: "GPU",
+        totalMb: 16303,
+        usedMb: 11000,
+        utilization: 0,
+        at: 0,
+        processes: procs.map((p) => ({ pid: p.pid, name: p.name, usedMb: p.usedMb, ours: isOurs(p.pid, ours, () => `${p.pid} (x) S ${p.parent} `) })),
+      };
+    };
+    expect(await otherGpuUsers(read, 4242)).toEqual(["Sonata's word timing"]);
+    expect([...asked!]).toEqual([4242]);
   });
 });

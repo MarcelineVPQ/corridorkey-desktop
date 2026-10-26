@@ -4,7 +4,7 @@
 // a job runs AND the window is shown. Nothing reads it while idle or hidden.
 import { readFileSync } from "node:fs";
 import { run } from "./run";
-import type { GpuInfo, GpuProcess } from "../../src/shared/types";
+import { OTHER_GPU_USER_MB, type GpuInfo, type GpuProcess } from "../../src/shared/types";
 
 export const GPU_POLL_MS = 2000;
 // nvidia-smi answers in ~50 ms; a driver in trouble can hang it: the read gives up (and says so) instead.
@@ -95,4 +95,16 @@ export async function readGpu(ourPids: Set<number>): Promise<GpuInfo> {
   // the full command line where /proc has it (Linux: Sonata runs as python, its script names it), else nvidia-smi's program name
   const processes: GpuProcess[] = parseApps(apps.stdout).map(({ pid, exe, usedMb }) => ({ pid, usedMb, name: processName(cmdline(pid) || exe), ours: isOurs(pid, ourPids) }));
   return { ...head, processes, at: Date.now() };
+}
+
+/**
+ * The other programs using the card (their names), for the background TensorRT build's start: compute processes holding
+ * OTHER_GPU_USER_MB or more that aren't this app's own. The app's own children count as ours: the queue's engine is
+ * still quitting (its model in graphics memory) for a few seconds after the queue ends, exactly when a paused build
+ * goes on, and was taken for another program (bug hunt 2026-10-26 P6: "corridorkey-engine is using the graphics card",
+ * then a minute's wait).
+ */
+export async function otherGpuUsers(read: (ours: Set<number>) => Promise<GpuInfo> = readGpu, appPid: number = process.pid): Promise<string[]> {
+  // loop: NOT-WORTH — a few compute processes, once per automatic start
+  return (await read(new Set([appPid]))).processes.filter((p) => !p.ours && p.usedMb >= OTHER_GPU_USER_MB).map((p) => p.name);
 }

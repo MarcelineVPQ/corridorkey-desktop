@@ -21,6 +21,7 @@ function harness(opts: { pongProtocol?: number; failStart?: boolean; slowStart?:
   let exit: (c: number | null, s: NodeJS.Signals | null, t: string[]) => void = () => {};
   let killed = 0;
   let quits = 0;
+  let changes = 0;
   let clock = 0;
   const engines: EngineHandle[] = [];
   const q = new Queue({
@@ -52,7 +53,7 @@ function harness(opts: { pongProtocol?: number; failStart?: boolean; slowStart?:
     tempDirFor: (id) => join(opts.tempRoot ?? "/nonexistent-ck-test", id),
     tensorrt: opts.tensorrt,
     tensorrtWhyNot: opts.tensorrtWhyNot,
-    changed: () => {},
+    changed: () => changes++,
     finished: () => {},
     now: () => clock,
   });
@@ -64,6 +65,7 @@ function harness(opts: { pongProtocol?: number; failStart?: boolean; slowStart?:
     exit: (c: number | null, s: NodeJS.Signals | null) => exit(c, s, ["boom"]),
     killed: () => killed,
     quits: () => quits,
+    changes: () => changes,
     engines,
     flush,
     tick: (ms: number) => (clock += ms),
@@ -308,6 +310,37 @@ describe("a job's started files (staging, partial.ts)", () => {
     // loop: SERIAL-REQUIRED — waits for the background removal [bounded: 50 × 20 ms]
     for (let i = 0; i < 50 && existsSync(join(dir, ".corridorkey-partial")); i++) await new Promise((r) => setTimeout(r, 20));
     expect(readdirSync(dir).sort()).toEqual(["notes.txt", "s1_alpha.mp4", "s1_alpha_exr", "s1_settings.txt"]);
+  });
+});
+
+// bug hunt 2026-10-26 P6: the background TensorRT build went on the moment the queue ended, while the queue's engine was
+// still quitting with its model in graphics memory (measured in an isolated copy: the build started 0.2 s after the queue's
+// end); the engine's trt_build picks its window from the memory it reads free
+describe("the queue's engine after the queue", () => {
+  it("counts as ending until it has exited, after a quit and after a Stop, and says when it is gone", async () => {
+    const h = harness();
+    h.q.add(job("a"));
+    await h.q.start();
+    await h.flush();
+    h.reply({ type: "result", id: "a", outputs: [] });
+    await h.flush();
+    expect(h.q.running).toBe(false);
+    expect(h.quits()).toBe(1);
+    expect(h.q.engineEnding).toBe(true);
+    const before = h.changes();
+    h.exit(0, null);
+    expect(h.q.engineEnding).toBe(false);
+    expect(h.changes()).toBeGreaterThan(before);
+
+    const s = harness();
+    s.q.add(job("b"));
+    await s.q.start();
+    await s.flush();
+    s.q.stop();
+    expect(s.killed()).toBe(1);
+    expect(s.q.engineEnding).toBe(true);
+    s.exit(null, "SIGKILL");
+    expect(s.q.engineEnding).toBe(false);
   });
 });
 

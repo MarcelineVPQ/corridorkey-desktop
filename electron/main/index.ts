@@ -7,7 +7,7 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { EngineProcess, type EngineReply } from "./engine";
 import { Estimator } from "./estimate";
-import { GPU_POLL_MS, readGpu } from "./gpu";
+import { GPU_POLL_MS, otherGpuUsers, readGpu } from "./gpu";
 import { expandPaths, probeClip, still, STILL_WIDTH, VIDEO_EXT, HINT_IMAGE_EXT } from "./media";
 import { clearJobTemps, Queue } from "./queue";
 import { checkCheckout, checkRustEngine, chooseEngine, loadSettings, saveSettings } from "./settings";
@@ -52,7 +52,6 @@ import {
   type MemoryEstimateResult,
   type OutputName,
   type TrtState,
-  OTHER_GPU_USER_MB,
 } from "../../src/shared/types";
 import { NOT_WHILE_BUSY } from "../../src/shared/texts";
 import type { DesktopPalette } from "../../src/ui/theme/palette";
@@ -283,12 +282,12 @@ const prebuild: Prebuilder = new Prebuilder({
     trtOnDisk = rangesOnDisk(join(cacheDir, TRT_ENGINES_DIR), folderBytes);
   },
   allowed: () => !cacheMoving && useTensorrt({ platform: PLATFORM, setting: settings.tensorrt, engine: chooseEngine(rustEngine, checkout), ready: trtReady(enginePaths().ort, enginePaths().models) }),
-  // while the queue runs the build waits for it (paused), and goes on when it stops
-  queueRunning: () => queue.running,
+  // while the queue runs the build waits for it (paused), and goes on once its engine has exited: a build started while
+  // the quitting engine still held its model would pick its window from the memory left (bug hunt 2026-10-26 P6)
+  queueRunning: () => queue.running || queue.engineEnding,
   othersOnGpu: async () => {
     try {
-      // loop: NOT-WORTH — a few compute processes, once per automatic start
-      return (await readGpu(new Set())).processes.filter((p) => p.usedMb >= OTHER_GPU_USER_MB).map((p) => p.name);
+      return await otherGpuUsers();
     } catch {
       // error: NOT-WORTH — no reading (nvidia-smi missing or stuck): nothing known to wait for
       return [];

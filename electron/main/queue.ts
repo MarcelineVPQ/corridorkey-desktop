@@ -148,6 +148,8 @@ export class Queue {
   running = false;
   engine: EngineState = { status: "stopped", pong: null, error: null };
   private proc: EngineHandle | null = null;
+  // the engine sent `quit` (the queue ended) or killed (Stop), until it has exited: its model still holds graphics memory
+  private ending: EngineHandle | null = null;
   private current: Job | null = null;
   private rateStart: { at: number; frames: number } | null = null;
   // the running job's staging folder (partial.ts): set once the engine was given it
@@ -160,6 +162,11 @@ export class Queue {
 
   get enginePid(): number | undefined {
     return this.proc?.running ? this.proc.pid : undefined;
+  }
+
+  /** The queue's last engine is still ending (quitting or killed): the background TensorRT build waits for its exit. */
+  get engineEnding(): boolean {
+    return this.ending !== null;
   }
 
   add(job: Job): void {
@@ -226,6 +233,7 @@ export class Queue {
       const job = this.current;
       this.current = null;
       // killed first, so nothing writes into the temp folder finish() removes
+      this.ending = this.proc ?? this.ending;
       this.proc?.kill();
       this.proc = null;
       this.engine = { status: "stopped", pong: null, error: null };
@@ -296,6 +304,7 @@ export class Queue {
     const job = this.jobs.find((j) => j.status === "waiting" && !j.clip.probeError && !missingInput(j));
     if (!job) {
       this.running = false;
+      this.ending = this.proc ?? this.ending;
       this.proc?.quit(); // frees the graphics memory the model holds
       this.proc = null;
       this.engine = { status: "stopped", pong: this.engine.pong, error: null };
@@ -410,6 +419,12 @@ export class Queue {
   }
 
   private exited(proc: EngineHandle, code: number | null, signal: NodeJS.Signals | null, tail: string[]): void {
+    if (proc === this.ending) {
+      // a quit or killed engine is gone: its graphics memory is free (the background TensorRT build goes on now)
+      this.ending = null;
+      this.deps.changed();
+      return;
+    }
     if (this.proc !== proc) return; // a killed engine we already replaced
     this.proc = null;
     this.engine = { status: "stopped", pong: this.engine.pong, error: null };
