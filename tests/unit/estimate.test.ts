@@ -1,8 +1,9 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ESTIMATE_FRESH_MS, Estimator, estimateErrorText, estimateRequest, parseEstimate } from "../../electron/main/estimate";
 import type { EngineReply } from "../../electron/main/engine";
 import type { EngineHandle } from "../../electron/main/queue";
-import { MANUAL_WINDOWS } from "../../src/shared/types";
+import { MANUAL_WINDOWS, VRAM_LIMIT_AUTO_HELP } from "../../src/shared/types";
 
 const GIB = 1073741824;
 
@@ -142,5 +143,21 @@ describe("memory estimate (backlog row 41)", () => {
     );
     expect(ok?.windows[0].fits).toBeNull();
     expect(ok?.freeBytes).toBeNull();
+  });
+});
+
+// hard-coded pass 2026-10-26 S8: the automatic window's margin in the app's help and the in-app guide is vram.rs's
+describe("the automatic window's safety margin", () => {
+  it("says what vram.rs's MARGIN_SCALE and MARGIN_GB are", () => {
+    const vram = readFileSync(new URL("../../engine-rs/crates/ck-core/src/vram.rs", import.meta.url), "utf8");
+    const scale = /const MARGIN_SCALE: f64 = ([\d.]+);/.exec(vram)?.[1];
+    const gb = /const MARGIN_GB: f64 = ([\d.]+);/.exec(vram)?.[1];
+    expect(scale && gb).toBeTruthy();
+    expect(VRAM_LIMIT_AUTO_HELP).toContain(`× ${scale} + ${gb} GiB`);
+    const guide = readFileSync(new URL("../../docs/GUIDE.md", import.meta.url), "utf8");
+    // loop: NOT-WORTH — the guide's few margin mentions
+    const said = [...guide.matchAll(/× ([\d.]+) \+ ([\d.]+) GiB/g)].map((m) => `${m[1]} ${m[2]}`);
+    expect(said.length).toBeGreaterThan(0);
+    expect(new Set(said)).toEqual(new Set([`${scale} ${gb}`]));
   });
 });

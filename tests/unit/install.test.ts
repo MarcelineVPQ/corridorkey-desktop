@@ -453,6 +453,32 @@ describe("TensorRT catalogue and rules", () => {
     expect(TENSORRT.libs.url).toBe(`https://pypi.nvidia.com/tensorrt-cu13-libs/${TENSORRT.libs.file}`);
   });
 
+  // hard-coded pass 2026-10-26 S10: one ONNX Runtime across the app's pinned wheels, the engine's `ort` API level
+  // (Cargo, api-NN) and the model set's manifest (make_manifest.py onnxruntime_min)
+  it("pins one ONNX Runtime version in the app, the engine and the model manifest", () => {
+    // loop: NOT-WORTH — three systems' runtimes and their few wheels
+    const versions = [RUNTIME, RUNTIME_WIN, RUNTIME_MAC].flatMap((r) => [
+      /^ort-(\d+\.\d+\.\d+)-/.exec(r.name)![1],
+      ...r.wheels.filter((w) => /^onnxruntime/.test(w.file)).map((w) => /^onnxruntime(?:_gpu)?-(\d+\.\d+\.\d+)-/.exec(w.file)![1]),
+    ]);
+    expect(new Set(versions).size).toBe(1);
+    const [ver] = versions;
+    const cargo = readFileSync(new URL("../../engine-rs/Cargo.toml", import.meta.url), "utf8");
+    expect(/^ort = .*"api-(\d+)"/m.exec(cargo)?.[1]).toBe(ver.split(".")[1]);
+    const manifest = readFileSync(new URL("../../engine-rs/export/make_manifest.py", import.meta.url), "utf8");
+    expect(/"onnxruntime_min": "([\d.]+)"/.exec(manifest)?.[1]).toBe(ver);
+  });
+
+  // hard-coded pass 2026-10-26 S1: the README's and the in-app guide's download sizes are the pinned files' sums
+  it("states each system's setup download as the sum of its pinned files", () => {
+    // loop: NOT-WORTH — a dozen sizes per system
+    const gb = (r: { wheels: { size: number }[] }) => ((r.wheels.reduce((n, w) => n + w.size, 0) + MODELS.files.reduce((n, f) => n + f.size, 0)) / 1e9).toFixed(2);
+    const text = `${gb(RUNTIME)} GB download on Linux, ${gb(RUNTIME_WIN)} GB on Windows, ${gb(RUNTIME_MAC)} GB on macOS, once`;
+    expect(text).toBe("4.86 GB download on Linux, 4.64 GB on Windows, 3.32 GB on macOS, once");
+    // loop: NOT-WORTH — two documents
+    for (const doc of ["../../README.md", "../../docs/GUIDE.md"]) expect(readFileSync(new URL(doc, import.meta.url), "utf8")).toContain(text);
+  });
+
   it("keeps the libraries the builder and ONNX Runtime's provider load, for Linux cards, and the licence", () => {
     for (const keep of [
       "tensorrt_libs/libnvinfer.so.10",
