@@ -194,6 +194,17 @@ export function sanitizeTrtSize(v: unknown): TrtSize | null {
   return { label: o.label.trim().slice(0, 80), width, height };
 }
 
+/**
+ * A size typed into Engine settings' "A size of my own" and its range: null unless the main process takes it
+ * (sanitizeTrtSize: whole sides from 16 px) and it falls in a TensorRT range, so the Build button is only enabled when
+ * pressing it does something.
+ */
+export function ownTrtSize(width: number, height: number): { size: TrtSize; key: string } | null {
+  const size = sanitizeTrtSize({ label: "Your size", width, height });
+  const key = size && trtSizeKey(size.width, size.height);
+  return size && key ? { size, key } : null;
+}
+
 /** The chosen sizes from settings.json: each checked, one per range (the first kept), at most 32; absent = the defaults. */
 export function sanitizeTrtSizes(v: unknown): TrtSize[] {
   // loop: NOT-WORTH — two sizes, once at start

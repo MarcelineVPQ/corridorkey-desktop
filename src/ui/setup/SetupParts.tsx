@@ -20,6 +20,7 @@ import {
   TRT_MAX_SIDE,
   TRT_SPEED,
   TRT_PIECES,
+  ownTrtSize,
   type TrtSize,
 } from "../../shared/trt";
 import { ProgressBar } from "../ProgressBar";
@@ -245,7 +246,9 @@ function TrtSizes({ trt }: { trt: TrtState }) {
   const { rows, outside } = trtSizeRows(chosen, trt.built);
   const [w, setW] = useState(2560);
   const [h, setH] = useState(1440);
-  const ownKey = trtSizeKey(w, h);
+  // what the main process takes (sides from 16 px) and TensorRT's ranges: the Build button is enabled only for that
+  const own = ownTrtSize(w, h);
+  const ownKey = own?.key ?? null;
   // loop: NOT-WORTH — a dozen rows
   const ownRow = ownKey ? rows.find((r) => r.key === ownKey) : undefined;
   // loop: NOT-WORTH — a few sizes in the row
@@ -279,7 +282,7 @@ function TrtSizes({ trt }: { trt: TrtState }) {
           <input type="number" aria-label="Width" min={16} max={16384} step={1} value={w} onChange={(e) => setW(Math.round(Number(e.target.value)) || 0)} />
           ×
           <input type="number" aria-label="Height" min={16} max={16384} step={1} value={h} onChange={(e) => setH(Math.round(Number(e.target.value)) || 0)} />
-          <button type="button" className="btn small" disabled={!ownKey || ownDone} onClick={() => void window.ck.trtSize("add", { label: "Your size", width: w, height: h })}>
+          <button type="button" className="btn small" disabled={!ownKey || ownDone} onClick={() => own && void window.ck.trtSize("add", own.size)}>
             <Download size={14} /> Build
           </button>
         </div>
@@ -287,7 +290,9 @@ function TrtSizes({ trt }: { trt: TrtState }) {
       <p className="size-note">
         {ownKey
           ? `${w}×${h} falls in the range ${sizeRangeText(ownKey)}${ownWith ? ` (with ${ownWith})` : ""}: ${ownDone ? "already built or chosen" : "not built"}.`
-          : `${w}×${h} is past TensorRT's sizes (at most ${TRT_MAX_SIDE} px a side and 4096×2176 in area), so it runs on CUDA.`}
+          : w < 16 || h < 16
+            ? `${w}×${h}: each side needs at least 16 px.`
+            : `${w}×${h} is past TensorRT's sizes (at most ${TRT_MAX_SIDE} px a side and 4096×2176 in area), so it runs on CUDA.`}
       </p>
     </>
   );

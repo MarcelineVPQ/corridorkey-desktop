@@ -11,6 +11,8 @@ import {
   builtWindows,
   DEFAULT_TRT_SIZES,
   MEASURED_4K_BUILD_S,
+  ownTrtSize,
+  sanitizeTrtSize,
   sanitizeTrtSizes,
   SHAPE_QUANTUM,
   TRT_DIM_RANGES,
@@ -329,6 +331,18 @@ describe("choosing the sizes TensorRT builds for", () => {
     expect(outside.map((x) => x.label)).toEqual(["4K open gate", "6K"]);
     // a chosen size in a named row is the size that row builds
     expect(trtSizeRows([{ label: "plate", width: 1998, height: 1080 }], []).rows[1]).toMatchObject({ sizes: [{ label: "HD" }, { label: "2K DCI" }, { label: "plate" }], build: { label: "plate" } });
+  });
+
+  // bug hunt 2026-10-26 U1: "A size of my own" enabled Build for a side under 16 px (it has a TensorRT range), but the
+  // main process refuses that size, so the button did nothing
+  it("offers Build for a size of one's own only when the main process takes it", () => {
+    // the mismatch the button had: a range, but a size the main process refuses
+    expect(trtSizeKey(10, 1080)).not.toBeNull();
+    expect(sanitizeTrtSize({ label: "Your size", width: 10, height: 1080 })).toBeNull();
+    expect(ownTrtSize(10, 1080)).toBeNull();
+    expect(ownTrtSize(1920, 0)).toBeNull();
+    expect(ownTrtSize(6144, 3240)).toBeNull();
+    expect(ownTrtSize(2560, 1440)).toEqual({ size: { label: "Your size", width: 2560, height: 1440 }, key: "h1408-1664_w2304-2816" });
   });
 
   it("reads the setting: 4K DCI and HD when absent; checked sizes, one per range, inside TensorRT's sizes", () => {
