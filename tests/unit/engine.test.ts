@@ -114,6 +114,21 @@ describe("engine launch", () => {
     expect(env.LD_LIBRARY_PATH).toBeUndefined();
   });
 
+  it("asks for Core ML on macOS (BACKLOG row 58), unless CK_ENGINE_DEVICE is already set; never elsewhere", () => {
+    const run = (env: NodeJS.ProcessEnv, platform: NodeJS.Platform) =>
+      rustEngineEnv(
+        env,
+        null,
+        () => false,
+        () => [],
+        platform,
+      ).CK_ENGINE_DEVICE;
+    expect(run({}, "darwin")).toBe("coreml");
+    expect(run({ CK_ENGINE_DEVICE: "cpu" }, "darwin")).toBe("cpu");
+    expect(run({}, "linux")).toBeUndefined();
+    expect(run({}, "win32")).toBeUndefined();
+  });
+
   it("puts the Windows DLL folders (bin, CUDA 13's bin/x86_64) first on PATH", () => {
     const rt = "/data/runtime/ort-1.31.0-cuda13";
     const vc = `${rt}/msvc_runtime-14.51.36231.data/data/Scripts`;

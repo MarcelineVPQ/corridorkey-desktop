@@ -98,6 +98,9 @@ export function rustEngineEnv(
   }
   // the engine ends with this app on every system (engine-rs proc.rs end_with_parent; Windows waits on this pid)
   out.CK_ENGINE_PARENT_PID = String(process.pid);
+  // macOS: Core ML (the engine's `auto` looks for an NVIDIA card only, so every Mac job failed with no-gpu; BACKLOG
+  // row 58); a CK_ENGINE_DEVICE already set (cpu for a reference run) wins
+  if (mac && !env.CK_ENGINE_DEVICE) out.CK_ENGINE_DEVICE = "coreml";
   // loop: NOT-WORTH — a user's extra library folders, once per engine spawn
   if (env.CK_ENGINE_LD_LIBRARY_PATH) dirs.push(...env.CK_ENGINE_LD_LIBRARY_PATH.split(win ? ";" : ":").filter(Boolean));
   // Windows finds DLLs on PATH (the folders go first); Linux on LD_LIBRARY_PATH; macOS on DYLD_LIBRARY_PATH
