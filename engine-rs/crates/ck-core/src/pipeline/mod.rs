@@ -163,6 +163,41 @@ struct TrtRange {
 /// The `fallback_reason` of a `tensorrt_build: false` job whose range isn't built yet.
 pub(crate) const TRT_NOT_BUILT: &str = "TensorRT for this resolution range isn't built yet";
 
+/// The `fallback_reason` of a `tensorrt_build: false` job whose size is built, but for other windows than the one the
+/// job picked (a range is used only at its own window, so the mattes match CUDA's; bug hunt 2026-10-26 T1).
+fn trt_other_window(built: &[usize], window: usize) -> String {
+    // loop: NOT-WORTH — a few built windows, once per job
+    let w: Vec<String> = built.iter().map(|t| t.to_string()).collect();
+    format!("TensorRT for this resolution is built for a window of {} frames; this job's automatic window is {window}", w.join(" or "))
+}
+
+/// The windows of `b`'s size (same height and width ranges) that the range folders `names` hold for another window
+/// than `b`'s, where `built` says the folder is built; sorted, once each.
+fn other_windows(b: &crate::tensorrt::Bucket, names: &[String], built: impl Fn(&str) -> bool) -> Vec<usize> {
+    let prefix = format!("h{}-{}_w{}-{}_t1-", b.h.0, b.h.1, b.w.0, b.w.1);
+    // loop: NOT-WORTH — the few range folders of one card, once per job
+    let mut out: Vec<usize> = names
+        .iter()
+        .filter_map(|name| {
+            // loop: NOT-WORTH — splits one short folder name
+            let t: usize = name.strip_prefix(&prefix)?.split('_').next()?.parse().ok()?;
+            (t != b.t.1 && built(name)).then_some(t)
+        })
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+/// A PNG file's bit depth from its header (IHDR's depth byte), None for anything else or an unreadable file.
+fn png_bit_depth(path: &Path) -> Option<u8> {
+    use std::io::Read;
+    let mut head = [0u8; 25];
+    // loop: NOT-WORTH — 25 bytes of one local file, once per job [bounded: a local read]
+    std::fs::File::open(path).ok()?.read_exact(&mut head).ok()?;
+    (head[..8] == *b"\x89PNG\r\n\x1a\n" && head[12..16] == *b"IHDR").then_some(head[24])
+}
+
 /// Whether a TensorRT job may use its range: a built one always; one not built yet only when the job may build it
 /// (`tensorrt_build`), else Err with the reason it runs on CUDA.
 fn trt_job_may_use(r: TrtRange, may_build: bool) -> Result<TrtRange, String> {
@@ -668,6 +703,16 @@ impl Pipeline<OrtLoader> {
                 format!("  input: a {}-bit video, read at 8 bits as CorridorKey 2.0 reads it (input_bit_depth 16 keeps every bit)", meta.video_bits)
             });
         }
+        // a 16-bit PNG folder says how it is read too (bug hunt 2026-10-26 I11: the line existed for video only)
+        if let crate::clip::Source::Frames(frames) = &meta.source {
+            if frames.first().is_some_and(|f| png_bit_depth(f) == Some(16)) {
+                sink.log(if meta.deep_input {
+                    "  input: 16-bit PNG frames, read at 16 bits (input_bit_depth 16; differs from CorridorKey 2.0)"
+                } else {
+                    "  input: 16-bit PNG frames, read at 8 bits as CorridorKey 2.0 reads them (input_bit_depth 16 keeps every bit)"
+                });
+            }
+        }
         // a colour-managed clip goes through its input processor instead (decode.rs prep_frame_views)
         meta.color_in = color.as_ref().and_then(|c| c.input.clone());
         let (mut chunk, mut stride, mut low_vram) = (job.hann_chunk, job.hann_stride, job.low_vram);
@@ -713,7 +758,10 @@ impl Pipeline<OrtLoader> {
                 let p = select_vram_profile((sh, sw), t_all, budget, true);
                 let why = match self.trt_range((sh, sw), p.chunk, p.low_vram) {
                     Ok(r) if r.built => None,
-                    Ok(_) => Some(TRT_NOT_BUILT.to_string()),
+                    Ok(r) => {
+                        let other = self.trt_built_windows(&r);
+                        Some(if other.is_empty() { TRT_NOT_BUILT.to_string() } else { trt_other_window(&other, p.chunk) })
+                    }
                     Err(why) => Some(why),
                 };
                 if let Some(why) = why {
@@ -916,11 +964,26 @@ impl Pipeline<OrtLoader> {
         let root = self.loader.rt.cfg.trt_cache.clone();
         let card_dir = crate::tensorrt::cache_dir(&root, &gpu.name, &gpu.driver, &trt_ver, &self.loader.rt.ort_version, "fp16");
         let dir = card_dir.join(bucket.key());
-        let built = ready.iter().all(|p| {
+        let built = self.trt_dir_built(&dir);
+        Ok(TrtRange { bucket, card_dir, dir, built })
+    }
+
+    /// Whether every network with a TensorRT-ready export is built in `dir` (or remembered as failing to build).
+    fn trt_dir_built(&self, dir: &Path) -> bool {
+        let trt_prec = Precision::Fp16;
+        // loop: NOT-WORTH — five networks, once per TensorRT job
+        crate::runtime::PIECES.iter().copied().filter(|p| self.models.trt_file(p, trt_prec).is_some()).all(|p| {
             let stamp = self.models.trt_file(p, trt_prec).map(|f| crate::tensorrt::source_stamp(&f)).unwrap_or_default();
             crate::tensorrt::built(&dir.join(p), p, &stamp) || crate::tensorrt::failed_before(&dir.join(p), p, &stamp, None).is_some()
-        });
-        Ok(TrtRange { bucket, card_dir, dir, built })
+        })
+    }
+
+    /// The windows other ranges of `r`'s size are built for (same height and width ranges, another window), sorted.
+    fn trt_built_windows(&self, r: &TrtRange) -> Vec<usize> {
+        let Ok(entries) = std::fs::read_dir(&r.card_dir) else { return Vec::new() };
+        // loop: NOT-WORTH — the few range folders of one card, once per job
+        let names: Vec<String> = entries.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        other_windows(&r.bucket, &names, |name| self.trt_dir_built(&r.card_dir.join(name)))
     }
 
     /// Remove the engines built for this card under another driver, TensorRT or ONNX Runtime (they can't be used);

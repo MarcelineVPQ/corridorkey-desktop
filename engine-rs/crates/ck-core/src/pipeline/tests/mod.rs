@@ -28,6 +28,43 @@ fn a_job_never_builds_tensorrt_when_told_not_to() {
     assert_eq!(trt_job_may_use(range(false), false).err().as_deref(), Some(TRT_NOT_BUILT));
 }
 
+#[test]
+fn a_size_built_for_another_window_says_so() {
+    // bug hunt 2026-10-26 T1: the HD range built at window 24 (the app's background build), a short clip's automatic
+    // window 80; the job ran on CUDA saying the range "isn't built yet"
+    let b = crate::tensorrt::bucket_for(1152, 1920, 80, false).unwrap();
+    let names: Vec<String> = [
+        "h1024-1280_w1792-2176_t1-24_f1-4",
+        "h1024-1280_w1792-2176_t1-8_f1-4",
+        "h1024-1280_w1792-2176_t1-80_f1-80",
+        "h1792-2176_w3584-4096_t1-8_f1-4",
+        "h1024-1280_w1792-2176_t1-48_f1-4",
+    ]
+    .map(String::from)
+    .to_vec();
+    // the 48 folder is a build that didn't finish; the 80 folder is the job's own range (not built: it's why we're here)
+    let windows = other_windows(&b, &names, |n| !n.contains("_t1-48_"));
+    assert_eq!(windows, vec![8, 24]);
+    assert_eq!(trt_other_window(&windows, 80), "TensorRT for this resolution is built for a window of 8 or 24 frames; this job's automatic window is 80");
+    assert!(other_windows(&b, &names[3..4], |_| true).is_empty(), "another size's range doesn't count");
+}
+
+#[test]
+fn a_png_says_its_bit_depth() {
+    // bug hunt 2026-10-26 I11: a 16-bit PNG folder now says at which depth it is read, as a deep video does
+    let d = scratch("png-depth");
+    let mut head = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR\0\0\0\x04\0\0\0\x04".to_vec();
+    head.push(16);
+    std::fs::write(d.0.join("a.png"), &head).unwrap();
+    head[24] = 8;
+    std::fs::write(d.0.join("b.png"), &head).unwrap();
+    std::fs::write(d.0.join("c.exr"), b"v/1\x01 not a png at all").unwrap();
+    assert_eq!(png_bit_depth(&d.0.join("a.png")), Some(16));
+    assert_eq!(png_bit_depth(&d.0.join("b.png")), Some(8));
+    assert_eq!(png_bit_depth(&d.0.join("c.exr")), None);
+    assert_eq!(png_bit_depth(&d.0.join("missing.png")), None);
+}
+
 /// A scratch folder, removed with everything in it when dropped.
 struct Dir(PathBuf);
 

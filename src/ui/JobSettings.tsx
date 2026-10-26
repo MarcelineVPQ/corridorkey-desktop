@@ -391,7 +391,9 @@ export function trtPlanFor(job: Job, trt: TrtState, engineKind: EngineKind | nul
   const windows = builtWindows(key, trt.built);
   if (windows.length)
     return {
-      status: "On · built for this size",
+      // not "built for this size": a range is used only at its own window, and a short clip's automatic window is
+      // often another (bug hunt 2026-10-26 T1)
+      status: `On · built for a window of ${windows.join(" or ")} frames`,
       text: `Built for ${width}×${height} with windows up to ${windows.join(" or ")} frames: it runs on TensorRT when the job's automatic window is one of those (at 4K on a 16 GB card it is 8).`,
     };
   // loop: NOT-WORTH — two ranges

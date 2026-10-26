@@ -1,4 +1,5 @@
-// The engine log saved with every job (backlog row 55): `<clip>_log.txt` next to the results, like the engine's
+// The engine log saved with every job (backlog row 55): `<clip>_log.txt` next to the results (`_log_failed.txt` /
+// `_log_cancelled.txt` for a run that didn't finish), like the engine's
 // `<clip>_settings.txt`, written by the app when the job ends (done, failed or cancelled: a cancel kills the engine,
 // so the engine can't write it). What ran it comes first ("Technology for this run" and the memory the job used, as
 // the job page shows them), then the whole log, then the engine's last error output when it failed. Copy log on the
@@ -24,8 +25,9 @@ export function clipStem(path: string): string {
   return name;
 }
 
-/** Where a job's log goes: `<output folder>/<clip>_log.txt`. */
-export const jobLogPath = (job: Job) => join(job.outputDir, `${clipStem(job.clip.path)}_log.txt`);
+/** Where a job's log goes: `<output folder>/<clip>_log.txt` for a finished run; `_log_failed.txt` / `_log_cancelled.txt`
+ * for one that didn't finish, so the finished results' own log stays next to them (bug hunt 2026-10-26 M1). */
+export const jobLogPath = (job: Job) => join(job.outputDir, `${clipStem(job.clip.path)}_log${job.status === "failed" ? "_failed" : job.status === "cancelled" ? "_cancelled" : ""}.txt`);
 
 const when = (ms: number | null) => (ms === null ? "—" : new Date(ms).toISOString());
 

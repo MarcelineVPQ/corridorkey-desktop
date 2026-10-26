@@ -85,8 +85,8 @@ describe("the engine log saved with every job", () => {
     r.reply({ type: "log", id: "b", text: "Reading the clip" });
     r.reply({ type: "error", id: "b", code: "oom", message: "out of graphics memory" });
     await discardsSettled();
-    expect(readdirSync(j.outputDir)).toEqual(["b_log.txt"]);
-    const text = readFileSync(join(j.outputDir, "b_log.txt"), "utf8");
+    expect(readdirSync(j.outputDir)).toEqual(["b_log_failed.txt"]);
+    const text = readFileSync(join(j.outputDir, "b_log_failed.txt"), "utf8");
     expect(text).toContain("Status: failed: out of graphics memory");
     expect(text).toContain("  Temporal window: not reported (the job ended before the engine chose it)");
     expect(text).toContain("The engine's last error output (code oom)\nthread 'main' panicked\n");
@@ -101,7 +101,7 @@ describe("the engine log saved with every job", () => {
     r.reply({ type: "log", id: "c", text: "Keying" });
     r.q.stop();
     expect(j.status).toBe("cancelled");
-    expect(readFileSync(join(j.outputDir, "c_log.txt"), "utf8")).toBe(jobLogText(j, "1.0.0-test"));
+    expect(readFileSync(join(j.outputDir, "c_log_cancelled.txt"), "utf8")).toBe(jobLogText(j, "1.0.0-test"));
     expect(jobLogText(j, "1.0.0-test")).toContain("Status: cancelled");
   });
 
