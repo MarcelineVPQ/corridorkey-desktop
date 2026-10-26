@@ -7,7 +7,7 @@
 // lifetime (rule 11): a short-lived engine of its own, only while no queue runs: the queue's start pauses it (the
 // engine is killed, the builder dies with it) and its end resumes it (what was built is kept; a half-built network is
 // built again). Not started by itself while other programs use the graphics card (Sonata); Build now starts it anyway.
-import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { access, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { EngineReply } from "./engine";
 import type { EngineHandle } from "./queue";
@@ -17,29 +17,37 @@ import { buildFraction, trtSizeKey, TRT_PIECES, type TrtSize } from "../../src/s
 // the 4K range, whose network build times are measured (README, Speed, 0.0.7-dev): its bar moves by them
 const KEY_4K = trtSizeKey(4096, 2160);
 
+const existsAsync = (p: string) =>
+  access(p).then(
+    () => true,
+    () => false,
+  );
+
 /**
  * Every range folder in the TensorRT cache (`<root>/<card>/<range>`, engine tensorrt.rs cache_dir) and whether it is
  * built: each network has its engine's stub (`<piece>_ctx.onnx`, written after a build succeeds) or a remembered
- * failed build (`<piece>.failed`, that network runs on CUDA).
+ * failed build (`<piece>.failed`, that network runs on CUDA). Async: the cache folder can be on a network share.
  */
-// loop: NOT-WORTH — a few readdirs and stats of the TensorRT cache, after a build, a job, a move or a removal (never per state push)
-export function trtRangeDirs(root: string, list: (p: string) => string[] = (p) => readdirSync(p), exists: (p: string) => boolean = existsSync): { range: string; dir: string; built: boolean }[] {
-  const dirs = (p: string) => {
-    try {
-      return list(p);
-    } catch {
+// loop: NOT-WORTH — a few async readdirs and stats of the TensorRT cache, after a build, a job, a move or a removal (never per state push)
+export async function trtRangeDirs(
+  root: string,
+  list: (p: string) => Promise<string[]> = (p) => readdir(p),
+  exists: (p: string) => Promise<boolean> = existsAsync,
+): Promise<{ range: string; dir: string; built: boolean }[]> {
+  const dirs = (p: string) =>
+    list(p).catch(
       // error: NOT-WORTH — no TensorRT engines built (the folder isn't there)
-      return [];
-    }
-  };
+      () => [] as string[],
+    );
   const out: { range: string; dir: string; built: boolean }[] = [];
   // loop: NOT-WORTH — one folder per card / driver (one or two), when the app reads what is built
-  for (const card of dirs(root)) {
+  for (const card of await dirs(root)) {
     // loop: NOT-WORTH — a few ranges per card
-    for (const range of dirs(join(root, card)).filter((n) => /^h\d+-\d+_w\d+-\d+_t/.test(n))) {
+    for (const range of (await dirs(join(root, card))).filter((n) => /^h\d+-\d+_w\d+-\d+_t/.test(n))) {
       const dir = join(root, card, range);
-      // loop: NOT-WORTH — five networks
-      const built = TRT_PIECES.every((p) => exists(join(dir, p, `${p}_ctx.onnx`)) || exists(join(dir, p, `${p}.failed`)));
+      let built = true;
+      // loop: NOT-WORTH — five networks, one or two async stats each
+      for (const p of TRT_PIECES) if (!(await exists(join(dir, p, `${p}_ctx.onnx`))) && !(await exists(join(dir, p, `${p}.failed`)))) built = false;
       out.push({ range, dir, built });
     }
   }
@@ -47,15 +55,9 @@ export function trtRangeDirs(root: string, list: (p: string) => string[] = (p) =
 }
 
 /** The built ranges' keys (what the waiting clip's line and the Engine page name). */
-export function builtRanges(root: string): string[] {
+export async function builtRanges(root: string): Promise<string[]> {
   // loop: NOT-WORTH — a few ranges, when the app reads what is built
-  return [
-    ...new Set(
-      trtRangeDirs(root)
-        .filter((r) => r.built)
-        .map((r) => r.range),
-    ),
-  ].sort();
+  return [...new Set((await trtRangeDirs(root)).filter((r) => r.built).map((r) => r.range))].sort();
 }
 
 /** The app's record of a range it built (in the range's folder; the engine ignores it): how long the build took here. */
@@ -63,22 +65,22 @@ export const BUILD_RECORD = ".corridorkey-build.json";
 
 /** A built range's size on disk and recorded build time, per range key (a range on two cards: the newest folder). */
 // loop: NOT-WORTH — a few range folders' files and one small record each, after a build, a job, a move or a removal
-export function rangesOnDisk(root: string, bytesOf: (dir: string) => number): { range: string; bytes: number; buildSeconds: number | null }[] {
+export async function rangesOnDisk(root: string, bytesOf: (dir: string) => Promise<number>): Promise<{ range: string; bytes: number; buildSeconds: number | null }[]> {
   const out = new Map<string, { range: string; bytes: number; buildSeconds: number | null; at: number }>();
   // loop: NOT-WORTH — a few ranges
-  for (const r of trtRangeDirs(root).filter((x) => x.built)) {
+  for (const r of (await trtRangeDirs(root)).filter((x) => x.built)) {
     let buildSeconds: number | null = null;
     try {
-      // loop: NOT-WORTH — one small file per range
-      const rec = JSON.parse(readFileSync(join(r.dir, BUILD_RECORD), "utf8")) as { seconds?: unknown };
+      // loop: NOT-WORTH — one small async file read per range
+      const rec = JSON.parse(await readFile(join(r.dir, BUILD_RECORD), "utf8")) as { seconds?: unknown };
       if (typeof rec.seconds === "number" && rec.seconds > 0) buildSeconds = rec.seconds;
     } catch {
       // error: NOT-WORTH — no record (built before the app recorded times, or by a job): "not measured"
     }
-    // loop: NOT-WORTH — one stat per range
-    const at = statSync(r.dir, { throwIfNoEntry: false })?.mtimeMs ?? 0;
+    // loop: NOT-WORTH — one async stat per range
+    const at = (await stat(r.dir).catch(() => null))?.mtimeMs ?? 0;
     const was = out.get(r.range);
-    if (!was || at > was.at) out.set(r.range, { range: r.range, bytes: bytesOf(r.dir), buildSeconds, at });
+    if (!was || at > was.at) out.set(r.range, { range: r.range, bytes: await bytesOf(r.dir), buildSeconds, at });
   }
   return (
     [...out.values()]
@@ -90,30 +92,27 @@ export function rangesOnDisk(root: string, bytesOf: (dir: string) => number): { 
 }
 
 /** Records how long the app's build of `range` took, in its newest folder (the card it was just built for). */
-export function recordBuild(root: string, range: string, seconds: number): void {
-  // loop: NOT-WORTH — one stat per range folder, once per build
-  const mtime = (dir: string) => statSync(dir, { throwIfNoEntry: false })?.mtimeMs ?? 0;
-  const newest = trtRangeDirs(root)
-    // loop: NOT-WORTH — a few range folders, once per build
-    .filter((r) => r.range === range)
-    // loop: NOT-WORTH — as above
-    .sort((a, b) => mtime(a.dir) - mtime(b.dir))
-    .at(-1);
+export async function recordBuild(root: string, range: string, seconds: number): Promise<void> {
+  const dirs: { dir: string; mtime: number }[] = [];
+  // loop: NOT-WORTH — a few range folders, one async stat each, once per build
+  for (const r of (await trtRangeDirs(root)).filter((x) => x.range === range)) dirs.push({ dir: r.dir, mtime: (await stat(r.dir).catch(() => null))?.mtimeMs ?? 0 });
+  // loop: NOT-WORTH — as above
+  const newest = dirs.sort((a, b) => a.mtime - b.mtime).at(-1);
   if (!newest) return;
   try {
-    // loop: NOT-WORTH — one small file per build
-    writeFileSync(join(newest.dir, BUILD_RECORD), JSON.stringify({ seconds, at: new Date().toISOString() }));
+    // loop: NOT-WORTH — one small async write per build
+    await writeFile(join(newest.dir, BUILD_RECORD), JSON.stringify({ seconds, at: new Date().toISOString() }));
   } catch {
     // error: NOT-WORTH — the row then says "build time not recorded"; the build itself is fine
   }
 }
 
 /** Removes every built range of a size (all windows, all cards). */
-export function removeSize(root: string, sizeKey: string): void {
+export async function removeSize(root: string, sizeKey: string): Promise<void> {
   // loop: NOT-WORTH — a few range folders, per user removal
-  for (const r of trtRangeDirs(root).filter((x) => x.range.startsWith(`${sizeKey}_t`))) {
-    // loop: NOT-WORTH — one range folder (five networks' engines) per removal, after the user's confirmation
-    rmSync(r.dir, { recursive: true, force: true });
+  for (const r of (await trtRangeDirs(root)).filter((x) => x.range.startsWith(`${sizeKey}_t`))) {
+    // loop: NOT-WORTH — one range folder (five networks' engines) per removal (async), after the user's confirmation
+    await rm(r.dir, { recursive: true, force: true });
   }
 }
 
@@ -126,8 +125,10 @@ export interface PrebuildDeps {
   queueRunning?(): boolean;
   // the other programs using the graphics card (names), checked before a start the user didn't ask for
   othersOnGpu(): Promise<string[]>;
-  // the built range keys, read from the cache
+  // the built range keys, as last read from the cache
   built(): string[];
+  // reads the cache again (async: the cache folder can be on a network share), before a start looks at built()
+  reread?(): Promise<void>;
   // the sizes to build (the setting; one per range, each inside TensorRT's ranges)
   sizes(): readonly TrtSize[];
   // a range the app just built, and the seconds its networks took (the engine's built_s): its build time on screen
@@ -209,15 +210,20 @@ export class Prebuilder {
     this.clearRecheck();
     if (this.checking && asked) this.askedWhileChecking = true;
     if (this.proc || this.checking || !this.deps.allowed()) return;
+    // one check at a time (the reread, then the look at the card): the queue's changes call this often
+    this.askedWhileChecking = false;
+    if (this.deps.reread) {
+      this.checking = true;
+      await this.deps.reread().finally(() => (this.checking = false));
+      if (this.proc || !this.deps.allowed()) return;
+    }
     this.refresh();
     // loop: NOT-WORTH — the few chosen sizes
     if (this.state.ranges.every((r) => r.state === "done")) return this.set({ status: "done", note: null });
     // the queue has the card (TensorRT's download ended, the switch or Build now while keying): it goes on after the queue
     if (this.deps.queueRunning?.()) return this.waitForQueue();
-    if (!asked) {
-      // one check at a time: the queue's changes call this often while a build is paused
+    if (!asked && !this.askedWhileChecking) {
       this.checking = true;
-      this.askedWhileChecking = false;
       const others = await this.deps.othersOnGpu().finally(() => (this.checking = false));
       if (this.proc || !this.deps.allowed()) return;
       if (this.deps.queueRunning?.()) return this.waitForQueue();

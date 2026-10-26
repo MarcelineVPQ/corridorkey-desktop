@@ -35,7 +35,14 @@ function rig() {
     saveLog: (j) => saveJobLog(j, "1.0.0-test"),
     now: () => 1_000,
   });
-  return { q, reply: (r: EngineReply) => reply(r), flush: () => new Promise((r) => setTimeout(r, 0)) };
+  return {
+    q,
+    reply: (r: EngineReply) => reply(r),
+    flush: async () => {
+      await new Promise((r) => setTimeout(r, 0));
+      await q.settled();
+    },
+  };
 }
 
 const job = (id: string): Job => fixtureJob(id, { clip: clipInfo(id, { path: join(OUT, `${id}.mov`) }), outputDir: join(OUT, `out_${id}`) });
@@ -61,6 +68,7 @@ describe("the engine log saved with every job", () => {
     // loop: NOT-WORTH — 40 lines in a test
     for (let i = 0; i < 40; i++) r.reply({ type: "log", id: "a", text: `line ${i}` });
     r.reply({ type: "result", id: "a", outputs: [] });
+    await r.flush();
     const file = join(j.outputDir, "a_log.txt");
     expect(j.logSaved).toEqual({ path: file, error: null });
     const text = readFileSync(file, "utf8");
@@ -84,6 +92,7 @@ describe("the engine log saved with every job", () => {
     await r.flush();
     r.reply({ type: "log", id: "b", text: "Reading the clip" });
     r.reply({ type: "error", id: "b", code: "oom", message: "out of graphics memory" });
+    await r.flush();
     await discardsSettled();
     expect(readdirSync(j.outputDir)).toEqual(["b_log_failed.txt"]);
     const text = readFileSync(join(j.outputDir, "b_log_failed.txt"), "utf8");
@@ -101,6 +110,7 @@ describe("the engine log saved with every job", () => {
     r.reply({ type: "log", id: "c", text: "Keying" });
     r.q.stop();
     expect(j.status).toBe("cancelled");
+    await r.flush();
     expect(readFileSync(join(j.outputDir, "c_log_cancelled.txt"), "utf8")).toBe(jobLogText(j, "1.0.0-test"));
     expect(jobLogText(j, "1.0.0-test")).toContain("Status: cancelled");
   });
@@ -118,10 +128,10 @@ describe("the engine log saved with every job", () => {
     expect(jobLogText(j, "x")).toContain("the first 5 lines were dropped");
   });
 
-  it("says why when the log can't be written", () => {
+  it("says why when the log can't be written", async () => {
     // a file where its folder should be
     writeFileSync(join(OUT, "blocker"), "");
-    const r = saveJobLog(fixtureJob("e", { outputDir: join(OUT, "blocker", "out") }), "x");
+    const r = await saveJobLog(fixtureJob("e", { outputDir: join(OUT, "blocker", "out") }), "x");
     expect(r.error).not.toBeNull();
     expect(existsSync(r.path)).toBe(false);
   });

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { CACHE_MARKER, cacheDirFor, cacheInfo, cacheUnavailable, clearOldCache, moveCache, prepareTarget, remapMedia, targetProblem } from "../../electron/main/cacheFolder";
+import { CACHE_MARKER, cacheDirFor, cacheInfo, cacheUnavailable, clearOldCache, jobTempDir, moveCache, prepareTarget, remapMedia, targetProblem } from "../../electron/main/cacheFolder";
 import { job } from "./fixtures";
 
 // the cache folder's location (backlog row 44): only the app's own folders are ever written or removed
@@ -37,29 +37,37 @@ describe("cache folder", () => {
           .sort()
       : [];
 
+  it("job temp files stay in the system's local cache folder whatever the chosen location (Marcy 2026-10-26)", () => {
+    expect(jobTempDir("/home/m/.cache/corridorkey-desktop", "j1")).toBe(join("/home/m/.cache/corridorkey-desktop", "jobs", "j1"));
+    // the queue's temp folders and the start's leftover clearing both use the system's folder, never the chosen one
+    const main = readFileSync(new URL("../../electron/main/index.ts", import.meta.url), "utf8");
+    expect(main).toMatch(/tempDirFor: \(id\) => jobTempDir\(appFolders\.cache, id\)/);
+    expect(main).toMatch(/clearJobTemps\(join\(appFolders\.cache, JOBS_DIR\)\)/);
+  });
+
   it("a chosen location gets the app's own folder inside it; none: the system's", () => {
     expect(cacheDirFor("/media/fast", "/home/m/.cache/corridorkey-desktop")).toBe(join("/media/fast", "corridorkey-desktop"));
     expect(cacheDirFor(null, "/home/m/.cache/corridorkey-desktop")).toBe("/home/m/.cache/corridorkey-desktop");
   });
 
-  it("refuses the same folder, one inside the other, and someone else's folder", () => {
+  it("refuses the same folder, one inside the other, and someone else's folder", async () => {
     const from = filled();
-    expect(targetProblem(from, from, false)).toMatch(/already there/);
-    expect(targetProblem(from, join(from, "media", "x"), false)).toMatch(/inside the current/);
-    expect(targetProblem(from, dirname(from), true)).toMatch(/current cache folder is inside/);
+    expect(await targetProblem(from, from, false)).toMatch(/already there/);
+    expect(await targetProblem(from, join(from, "media", "x"), false)).toMatch(/inside the current/);
+    expect(await targetProblem(from, dirname(from), true)).toMatch(/current cache folder is inside/);
     const theirs = fresh();
     put(join(theirs, "holiday.mov"), "not ours");
-    expect(targetProblem(from, theirs, false)).toMatch(/isn't a CorridorKey cache folder/);
+    expect(await targetProblem(from, theirs, false)).toMatch(/isn't a CorridorKey cache folder/);
     // absent, empty, or one of ours (the marker): fine; the system's folder is always ours
-    expect(targetProblem(from, fresh(), false)).toBeNull();
+    expect(await targetProblem(from, fresh(), false)).toBeNull();
     const empty = fresh();
     mkdirSync(empty);
-    expect(targetProblem(from, empty, false)).toBeNull();
+    expect(await targetProblem(from, empty, false)).toBeNull();
     const ours = fresh();
     put(join(ours, CACHE_MARKER), "");
     put(join(ours, "media", "old.jpg"), "x");
-    expect(targetProblem(from, ours, false)).toBeNull();
-    expect(targetProblem(from, theirs, true)).toBeNull();
+    expect(await targetProblem(from, ours, false)).toBeNull();
+    expect(await targetProblem(from, theirs, true)).toBeNull();
   });
 
   it("moves: every file copied and verified, then the originals removed; the new folder carries the marker", async () => {
@@ -118,7 +126,7 @@ describe("cache folder", () => {
     const from = filled();
     const gone = join(fresh(), "disk");
     const to = join(gone, "corridorkey-desktop");
-    expect(targetProblem(from, to, false)).toMatch(/isn't there: is its drive connected\?/);
+    expect(await targetProblem(from, to, false)).toMatch(/isn't there: is its drive connected\?/);
     await expect(prepareTarget(to, false)).rejects.toThrow(/isn't there: is its drive connected\?/);
     const r = await moveCache(from, to, false, true);
     expect(r.ok).toBe(false);
@@ -131,20 +139,20 @@ describe("cache folder", () => {
     expect(tree(there)).toEqual([join("corridorkey-desktop", CACHE_MARKER)]);
   });
 
-  it("the chosen folder is unavailable when its location is gone or the marked folder isn't in it (Linux, Windows, macOS paths)", () => {
-    expect(cacheUnavailable(null)).toBeNull();
+  it("the chosen folder is unavailable when its location is gone or the marked folder isn't in it (Linux, Windows, macOS paths)", async () => {
+    expect(await cacheUnavailable(null)).toBeNull();
     const there = new Set(["/media/m/disk", "E:\\", "/Volumes/Fast", join("/Volumes/Fast", "corridorkey-desktop", CACHE_MARKER)]);
-    const exists = (p: string) => there.has(p);
-    expect(cacheUnavailable("/Volumes/Fast", exists)).toBeNull();
-    expect(cacheUnavailable("/Volumes/Gone", exists)).toMatch(/\/Volumes\/Gone isn't there/);
-    expect(cacheUnavailable("F:\\", exists)).toMatch(/isn't there: is its drive connected/);
+    const exists = async (p: string) => there.has(p);
+    expect(await cacheUnavailable("/Volumes/Fast", exists)).toBeNull();
+    expect(await cacheUnavailable("/Volumes/Gone", exists)).toMatch(/\/Volumes\/Gone isn't there/);
+    expect(await cacheUnavailable("F:\\", exists)).toMatch(/isn't there: is its drive connected/);
     // an empty mount point left behind (the drive not mounted): the marked folder isn't in it
-    expect(cacheUnavailable("/media/m/disk", exists)).toMatch(/The cache folder isn't in \/media\/m\/disk/);
+    expect(await cacheUnavailable("/media/m/disk", exists)).toMatch(/The cache folder isn't in \/media\/m\/disk/);
     // real folders
     const ours = place();
     put(join(ours, "corridorkey-desktop", CACHE_MARKER), "");
-    expect(cacheUnavailable(ours)).toBeNull();
-    expect(cacheUnavailable(join(root, "unplugged"))).toMatch(/isn't there/);
+    expect(await cacheUnavailable(ours)).toBeNull();
+    expect(await cacheUnavailable(join(root, "unplugged"))).toMatch(/isn't there/);
   });
 
   it("starting fresh removes only the old cache's own parts", async () => {
@@ -155,23 +163,25 @@ describe("cache folder", () => {
     expect(tree(from)).toEqual(["settings-note.txt"]);
   });
 
-  it("measures per clip in the queue, the stills of clips no longer queued, and per TensorRT range", () => {
+  it("measures per clip in the queue, the stills of clips no longer queued, and per TensorRT range", async () => {
     const dir = filled();
-    put(join(dir, "jobs", "j1", "work.bin"), "12345");
+    // a running job's working files: in the system's folder, not the chosen one (jobTempDir)
+    const sys = place();
+    put(join(sys, "jobs", "j1", "work.bin"), "12345");
     const url = (f: string) => `ck-media://f/${encodeURIComponent(f)}`;
     const fileOf = (u: string) => decodeURIComponent(new URL(u).pathname.slice(1));
     const jobs = [
       job("j1", { clip: { ...job("j1").clip, name: "shot01", thumb: url(join(dir, "media", "a.jpg")) } }),
       job("j2", { clip: { ...job("j2").clip, name: "shot02" }, stills: [{ output: "alpha", url: url("/elsewhere/x.jpg") }] }),
     ];
-    const info = cacheInfo(dir, "/sys", jobs, fileOf);
+    const info = await cacheInfo(dir, sys, jobs, fileOf);
     expect(info.shots).toEqual([
       { name: "shot01", bytes: "still a".length + 5 },
       { name: "shot02", bytes: 0 },
     ]);
     expect(info.otherBytes).toBe("still b!".length);
     expect(info.trtRanges).toEqual([{ range: "h1024-1280_w1792-2176_t1-48_f1-4", bytes: "engine bytes".length }]);
-    expect(info.bytes).toBe("still a".length + "still b!".length + "engine bytes".length + 5);
+    expect(info.bytes).toBe("still a".length + "still b!".length + "engine bytes".length);
     expect(info.isDefault).toBe(false);
   });
 

@@ -2,6 +2,7 @@
 // replies into job state. Every number a job shows comes from an engine reply
 // (rule 1); nothing here estimates progress on its own.
 import { readdirSync, rmSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { EngineReply } from "./engine";
 import { LOG_KEPT, type EngineState, type Job, type JobOptions, type JobTech, type OutputName, type Stage } from "../../src/shared/types";
@@ -28,7 +29,7 @@ export interface QueueDeps {
   changed(): void;
   finished(job: Job): void;
   // saves the ended job's whole log next to its results (jobLog.ts; backlog row 55)
-  saveLog?: (job: Job) => { path: string; error: string | null };
+  saveLog?: (job: Job) => Promise<{ path: string; error: string | null }>;
   // ask the running engine for TensorRT (asked per job: the Rust engine, the setting on, its parts installed)
   tensorrt?: () => boolean;
   // why a job doesn't ask for TensorRT (install.ts tensorrtWhyNot), shown on its page
@@ -154,6 +155,14 @@ export class Queue {
   private rateStart: { at: number; frames: number } | null = null;
   // the running job's staging folder (partial.ts): set once the engine was given it
   private staged = new Map<string, { madeOutputDir: boolean }>();
+  // a finished job's results being moved into place (promote, async): the next job starts after it
+  private settling = false;
+  // a job's output folder being prepared (async)
+  private preparing: Promise<unknown> | null = null;
+  // the temp folders being removed (async), per job id: a retried job's run waits for its own
+  private cleaning = new Map<string, Promise<void>>();
+  // the ended jobs' discards and log writes in flight (finish, async): the quit waits for them (shutdown)
+  private endings = new Set<Promise<void>>();
   private now: () => number;
 
   constructor(private readonly deps: QueueDeps) {
@@ -237,7 +246,7 @@ export class Queue {
       this.proc?.kill();
       this.proc = null;
       this.engine = { status: "stopped", pong: null, error: null };
-      this.finish(job, "cancelled", null);
+      void this.finish(job, "cancelled", null);
     }
     this.deps.changed();
   }
@@ -245,15 +254,18 @@ export class Queue {
   /**
    * App quit: kill whatever runs; the running job ends as cancelled, its started files deleted before the app exits and
    * its log saying so (bug hunt 2026-10-26 Q1: the files were left behind, and the engine's exit was logged as a crash).
+   * Resolves when that is done (index.ts before-quit waits for it, with a deadline).
    */
-  shutdown(): void {
+  shutdown(): Promise<void> {
     this.running = false;
     const job = this.current;
     this.current = null;
     this.proc?.kill();
     // its exit is this quit, not a failure of the job
     this.proc = null;
-    if (job) this.finish(job, "cancelled", null, true);
+    if (job) void this.finish(job, "cancelled", null, true);
+    // loop: SERIAL-REQUIRED — waits for the ended jobs' deletes and log writes [bounded: the caller's QUIT_CLEANUP_MS]
+    return Promise.all([...this.endings]).then(() => {});
   }
 
   private async ensureEngine(): Promise<boolean> {
@@ -301,7 +313,7 @@ export class Queue {
   }
 
   private async next(): Promise<void> {
-    if (!this.running || this.current) return;
+    if (!this.running || this.current || this.settling) return;
     // A clip whose hint mode needs a file it doesn't have stays waiting (its task says so); never run it silently without the hint.
     // loop: NOT-WORTH — the queue's jobs, once per job start
     const job = this.jobs.find((j) => j.status === "waiting" && !j.clip.probeError && !missingInput(j));
@@ -321,23 +333,35 @@ export class Queue {
     if (!(await this.ensureEngine())) {
       if (this.current === job) {
         this.current = null;
-        this.finish(job, "failed", { code: "engine", message: this.engine.error ?? "engine did not start", stderrTail: [] });
+        void this.finish(job, "failed", { code: "engine", message: this.engine.error ?? "engine did not start", stderrTail: [] });
       }
       return;
     }
     if (this.current !== job) return;
     let staging: string;
     try {
-      const st = prepare(job.outputDir);
+      const pending = prepare(job.outputDir);
+      this.preparing = pending;
+      const st = await pending.finally(() => (this.preparing = null));
+      if (this.current !== job) {
+        // stopped meanwhile (finish already ran, without a staging folder to discard): what prepare made goes
+        void discard(job.outputDir, st.madeOutputDir);
+        return;
+      }
       staging = st.staging;
       this.staged.set(job.id, { madeOutputDir: st.madeOutputDir });
     } catch (e) {
+      if (this.current !== job) return;
       // error: SHOWN — the job fails naming the folder
       this.current = null;
-      this.finish(job, "failed", { code: "engine", message: `Couldn't create the output folder ${job.outputDir}: ${(e as Error).message}`, stderrTail: [] });
+      void this.finish(job, "failed", { code: "engine", message: `Couldn't create the output folder ${job.outputDir}: ${(e as Error).message}`, stderrTail: [] });
       this.next();
       return;
     }
+    // a retried job's old temp folder is still being removed: its run waits for that, so it can't remove the new files
+    // loop: NOT-WORTH — one awaited removal, only for a job retried at once [bounded: one local folder's rm]
+    await this.cleaning.get(job.id);
+    if (this.current !== job) return;
     const trt = this.deps.tensorrt?.() ?? false;
     // what ran it comes from the engine's provider reply; the app's own part is why it didn't ask for TensorRT
     job.tech = { ...NO_TECH, notAsked: trt ? null : (this.deps.tensorrtWhyNot?.() ?? null) };
@@ -400,21 +424,13 @@ export class Queue {
         // loop: NOT-WORTH — ≤ four output paths, once per job
         job.outputs = Array.isArray(r.outputs) ? (r.outputs as string[]).map((p) => finalPath(job.outputDir, String(p))) : [];
         this.current = null;
-        const moved = this.staged.has(job.id) ? promote(job.outputDir) : { moved: 0, error: null };
-        this.staged.delete(job.id);
-        if (moved.error)
-          this.finish(job, "failed", {
-            code: "engine",
-            message: `The results are complete but couldn't be moved into ${job.outputDir} (${moved.error}); what wasn't moved is in its ${PARTIAL_NAME} folder.`,
-            stderrTail: [],
-          });
-        else this.finish(job, "done", null);
-        this.next();
+        this.settling = true;
+        void this.settle(job);
         return;
       }
       case "error":
         this.current = null;
-        this.finish(job, String(r.code) === "cancelled" ? "cancelled" : "failed", { code: String(r.code), message: String(r.message), stderrTail: this.proc?.stderrTail() ?? [] });
+        void this.finish(job, String(r.code) === "cancelled" ? "cancelled" : "failed", { code: String(r.code), message: String(r.message), stderrTail: this.proc?.stderrTail() ?? [] });
         this.next();
         return;
     }
@@ -434,38 +450,70 @@ export class Queue {
     const job = this.current;
     if (job) {
       this.current = null;
-      this.finish(job, "failed", { code: "engine", message: `The engine stopped unexpectedly (${signal ?? `exit code ${code}`}).`, stderrTail: tail });
+      void this.finish(job, "failed", { code: "engine", message: `The engine stopped unexpectedly (${signal ?? `exit code ${code}`}).`, stderrTail: tail });
       this.next();
       return;
     }
     this.deps.changed();
   }
 
+  // A finished job's results move from its staging folder into place (async), then it ends and the next one starts.
+  private async settle(job: Job): Promise<void> {
+    const moved = this.staged.has(job.id) ? await promote(job.outputDir) : { moved: 0, error: null };
+    this.staged.delete(job.id);
+    this.settling = false;
+    if (moved.error)
+      void this.finish(job, "failed", {
+        code: "engine",
+        message: `The results are complete but couldn't be moved into ${job.outputDir} (${moved.error}); what wasn't moved is in its ${PARTIAL_NAME} folder.`,
+        stderrTail: [],
+      });
+    else void this.finish(job, "done", null);
+    this.next();
+  }
+
   // Every ending removes the job's temp folder: the engine deletes its files but not the folder (an empty
   // folder per finished job was left in the cache), and a killed engine leaves its files too.
   // A failed / cancelled / crashed job's started files go with its staging folder; the row says so (backlog row 19).
-  private finish(job: Job, status: "done" | "failed" | "cancelled", error: Job["error"], quitting = false): void {
+  // The job's state changes at once; the discard and the log write (output folder, async) follow, then `finished`.
+  private finish(job: Job, status: "done" | "failed" | "cancelled", error: Job["error"], quitting = false): Promise<void> {
     this.cleanTemp(job.id);
     const st = this.staged.get(job.id);
     this.staged.delete(job.id);
-    job.partial = status !== "done" && st ? discard(job.outputDir, st.madeOutputDir, quitting) : null;
     job.status = status;
     job.finishedAt = this.now();
     job.error = error;
     if (status !== "done") job.stage = null;
-    // after the discard: a failed job's log stays in its folder (which then isn't removed as empty)
-    if (this.deps.saveLog) job.logSaved = this.deps.saveLog(job);
     this.deps.changed();
-    this.deps.finished(job);
+    const done = (async () => {
+      job.partial = status !== "done" && st ? await discard(job.outputDir, st.madeOutputDir, quitting) : null;
+      // after the discard: a failed job's log stays in its folder (which then isn't removed as empty)
+      if (this.deps.saveLog) job.logSaved = await this.deps.saveLog(job);
+      this.deps.changed();
+      this.deps.finished(job);
+    })().finally(() => this.endings.delete(done));
+    this.endings.add(done);
+    return done;
+  }
+
+  /** Resolves once the queue's file work in flight (a job's folder prepared or promoted, the ended jobs' discards and
+   * log writes, temp folders removed) is done: the tests wait for it. */
+  async settled(): Promise<void> {
+    // loop: NOT-WORTH — the few folder operations in flight, in tests [bounded: each is one folder's rename, rm or small file]
+    while (this.settling || this.preparing || this.endings.size || this.cleaning.size)
+      await Promise.all([this.preparing?.catch(() => {}), ...this.endings, ...this.cleaning.values(), new Promise((r) => setImmediate(r))]);
   }
 
   private cleanTemp(id: string): void {
-    try {
-      // loop: NOT-WORTH — removes a cancelled / crashed job's temp folder once (the killed engine's float16 temp files, up to a few GB: a few unlinks on a local disk)
-      rmSync(this.deps.tempDirFor(id), { recursive: true, force: true });
-    } catch {
-      // error: NOT-WORTH — a temp folder we couldn't remove; the next start of that job clears it (safe_remove)
-    }
+    const dir = this.deps.tempDirFor(id);
+    // loop: NOT-WORTH — removes a job's temp folder once, async (the killed engine's float16 temp files, up to a few GB on the local system cache: jobTempDir)
+    const done = rm(dir, { recursive: true, force: true })
+      // error: NOT-WORTH — a temp folder we couldn't remove; the next start of that job clears it (safe_remove), the app's next start too
+      .catch(() => {})
+      .finally(() => {
+        if (this.cleaning.get(id) === done) this.cleaning.delete(id);
+      });
+    this.cleaning.set(id, done);
   }
 }
 

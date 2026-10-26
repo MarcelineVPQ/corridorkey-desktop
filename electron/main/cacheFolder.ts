@@ -6,10 +6,13 @@
 // and an existing folder of that name is used only when it is empty or carries the marker. A move copies every
 // file, verifies each copy (size and SHA-256 against the original), and only then removes the originals; on any
 // error it removes only the copies it made and leaves the old cache untouched and in use.
+//
+// Every file-system call here is async (fs/promises): the chosen location can be another drive or a network share, and
+// one that stops answering must not freeze the window (loop pass 2026-10-26, finding 2). Job temp files never go
+// there: they stay in the system's (local) cache folder whatever the location (jobTempDir; Marcy 2026-10-26).
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { copyFile, lstat, mkdir, readdir, rm, rmdir, stat, unlink, writeFile } from "node:fs/promises";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { access, copyFile, lstat, mkdir, readdir, rm, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { constants } from "node:fs";
 import { APP_DIR } from "./platform";
@@ -24,6 +27,22 @@ export const MEDIA_DIR = "media";
 export const JOBS_DIR = "jobs";
 export const MOVED_PARTS = [MEDIA_DIR, TRT_ENGINES_DIR] as const;
 
+/** Whether a path is there (async: a stat on a share that stopped answering doesn't block the main process). */
+export const exists = (p: string): Promise<boolean> =>
+  access(p).then(
+    () => true,
+    () => false,
+  );
+
+/**
+ * A job's temp folder: always in the system's cache folder (`systemCache`, a local disk), never in a chosen location.
+ * The low-memory passes stream features and baton frames through it every frame (engine pipeline/temps.rs), which on a
+ * network share would go over the network (loop pass 2026-10-26, finding 2; Marcy: job temps stay local).
+ */
+export function jobTempDir(systemCache: string, jobId: string): string {
+  return join(systemCache, JOBS_DIR, jobId);
+}
+
 /** The cache folder for a setting: the app's own folder inside the chosen location, else the system's. */
 export function cacheDirFor(cacheRoot: string | null, defaultDir: string): string {
   return cacheRoot ? join(cacheRoot, APP_DIR) : defaultDir;
@@ -35,11 +54,11 @@ export function cacheDirFor(cacheRoot: string | null, defaultDir: string): strin
  * (an empty mount point left behind on Linux). The app never makes the chosen location itself, only its own folder
  * inside an existing one.
  */
-export function cacheUnavailable(cacheRoot: string | null, exists: (p: string) => boolean = existsSync): string | null {
+export async function cacheUnavailable(cacheRoot: string | null, there: (p: string) => Promise<boolean> = exists): Promise<string | null> {
   if (!cacheRoot) return null;
-  // loop: NOT-WORTH — one or two stats, at start and when the cache is about to be written
-  if (!exists(cacheRoot)) return `${cacheRoot} isn't there: is its drive connected?`;
-  if (!exists(join(cacheRoot, APP_DIR, CACHE_MARKER))) return `The cache folder isn't in ${cacheRoot}: is its drive connected?`;
+  // loop: NOT-WORTH — one or two async stats, at start and when the cache is about to be written
+  if (!(await there(cacheRoot))) return `${cacheRoot} isn't there: is its drive connected?`;
+  if (!(await there(join(cacheRoot, APP_DIR, CACHE_MARKER)))) return `The cache folder isn't in ${cacheRoot}: is its drive connected?`;
   return null;
 }
 
@@ -53,19 +72,19 @@ const inside = (child: string, parent: string) => {
  * Why the cache can't go from `from` to `to` (null: it can). `owned`: `to` is the system's cache folder (always the
  * app's own); any other `to` must be absent, empty, or carry the marker.
  */
-export function targetProblem(from: string, to: string, owned: boolean): string | null {
+export async function targetProblem(from: string, to: string, owned: boolean): Promise<string | null> {
   if (resolve(from) === resolve(to)) return "The cache is already there.";
   if (inside(to, from)) return "That folder is inside the current cache folder.";
   if (inside(from, to)) return "The current cache folder is inside that folder.";
   // the chosen location itself is never made (an unplugged drive's mount path): it must be there
-  // loop: NOT-WORTH — one stat per location choice
-  if (!owned && !existsSync(dirname(to))) return `${dirname(to)} isn't there: is its drive connected?`;
-  // loop: NOT-WORTH — one stat per location choice
-  if (owned || !existsSync(to)) return null;
+  // loop: NOT-WORTH — one async stat per location choice
+  if (!owned && !(await exists(dirname(to)))) return `${dirname(to)} isn't there: is its drive connected?`;
+  // loop: NOT-WORTH — one async stat per location choice
+  if (owned || !(await exists(to))) return null;
   let names: string[];
   try {
-    // loop: NOT-WORTH — one readdir of the chosen folder, per choice
-    names = readdirSync(to);
+    // loop: NOT-WORTH — one async readdir of the chosen folder, per choice
+    names = await readdir(to);
   } catch (e) {
     // error: SHOWN — the choice is refused with why
     return `That folder can't be read: ${(e as Error).message}`;
@@ -76,7 +95,7 @@ export function targetProblem(from: string, to: string, owned: boolean): string 
 
 async function sha256(file: string): Promise<string> {
   const h = createHash("sha256");
-  // loop: SERIAL-REQUIRED — streams one file through the hash [bounded: the file's size; local disk]
+  // loop: SERIAL-REQUIRED — streams one file through the hash, async [bounded: the file's size]
   for await (const chunk of createReadStream(file)) h.update(chunk as Buffer);
   return h.digest("hex");
 }
@@ -135,19 +154,19 @@ export async function moveCache(from: string, to: string, owned: boolean, fromOw
   let bytes = 0;
   const plan: { part: string; rel: string }[] = [];
   // a folder made here is removed again if the move stops
-  // loop: NOT-WORTH — one stat per move
-  const made = !existsSync(to);
+  // loop: NOT-WORTH — one async stat per move
+  const made = !(await exists(to));
   try {
     // loop: NOT-WORTH — two parts, once per move
     for (const part of MOVED_PARTS) plan.push(...(await filesUnder(join(from, part))).map((rel) => ({ part, rel })));
     await prepareTarget(to, owned);
-    // loop: SERIAL-REQUIRED — one file copied and verified at a time (local disks; a few hundred files, a few GB at most)
+    // loop: SERIAL-REQUIRED — one file copied and verified at a time, async (a few hundred files, a few GB at most)
     for (const { part, rel } of plan) {
       const src = join(from, part, rel);
       const dst = join(to, part, rel);
       // the drive gone mid-move: never made again at its bare mount path
-      // loop: NOT-WORTH — one stat per file, once per move
-      if (!existsSync(to)) throw new Error(`${to} is no longer there: is its drive connected?`);
+      // loop: NOT-WORTH — one async stat per file, once per move
+      if (!(await exists(to))) throw new Error(`${to} is no longer there: is its drive connected?`);
       // loop: NOT-WORTH — one mkdir per file (exists after the first)
       await mkdir(dirname(dst), { recursive: true });
       // never over a file already there (COPYFILE_EXCL): the target was empty or a cache folder of ours
@@ -239,49 +258,50 @@ export function remapMedia(url: string, oldMedia: string, newMedia: string, file
   return urlOf(join(newMedia, relative(oldMedia, f)));
 }
 
-const size = (p: string) => {
-  try {
-    // loop: NOT-WORTH — one stat per still of a queued clip, when App settings shows Storage
-    return statSync(p, { throwIfNoEntry: false })?.size ?? 0;
-  } catch {
+const size = (p: string): Promise<number> =>
+  // loop: NOT-WORTH — one async stat per still of a queued clip, when App settings shows Storage
+  stat(p).then(
+    (s) => s.size,
     // error: NOT-WORTH — gone meanwhile: 0
-    return 0;
-  }
-};
+    () => 0,
+  );
 
 /**
  * What the cache holds, measured when App settings shows Storage: per clip in the queue its thumbnail and result
- * stills (and its job's working files while it runs), the stills of clips no longer queued, the TensorRT engines
- * per resolution range.
+ * stills (and its job's working files while it runs: in the system's folder `defaultDir`, jobTempDir), the stills of
+ * clips no longer queued, the TensorRT engines per resolution range.
  */
-export function cacheInfo(dir: string, defaultDir: string, jobs: readonly Job[], fileOf: (url: string) => string | null): Omit<CacheInfo, "moving" | "error"> {
+export async function cacheInfo(dir: string, defaultDir: string, jobs: readonly Job[], fileOf: (url: string) => string | null): Promise<Omit<CacheInfo, "moving" | "error">> {
   const media = join(dir, MEDIA_DIR);
-  const seen = new Set<string>();
+  const seen = new Map<string, number>();
+  const shots: CacheInfo["shots"] = [];
   // loop: NOT-WORTH — the queue's jobs, when App settings shows Storage
-  const shots = jobs.map((j) => {
+  for (const j of jobs) {
     let bytes = 0;
     // loop: NOT-WORTH — a thumbnail and ≤ four stills per job
     for (const url of [j.clip.thumb, ...j.stills.map((s) => s.url)]) {
       const f = url ? fileOf(url) : null;
       if (!f || !inside(f, media) || seen.has(f)) continue;
-      seen.add(f);
-      bytes += size(f);
+      const b = await size(f);
+      seen.set(f, b);
+      bytes += b;
     }
-    return { name: j.clip.name, bytes: bytes + folderBytes(join(dir, JOBS_DIR, j.id)) };
-  });
+    shots.push({ name: j.clip.name, bytes: bytes + (await folderBytes(jobTempDir(defaultDir, j.id))) });
+  }
   // loop: NOT-WORTH — the attributed stills, as above
-  const attributed = [...seen].reduce((n, f) => n + size(f), 0);
+  const attributed = [...seen.values()].reduce((n, b) => n + b, 0);
   const trt = join(dir, TRT_ENGINES_DIR);
+  const trtRanges: CacheInfo["trtRanges"] = [];
   // the ranges sit one level down, in the card's folder (`<card>/<range>`; listing the card folder named it a range)
   // loop: NOT-WORTH — a few ranges, when App settings shows Storage
-  const trtRanges = trtRangeDirs(trt).map(({ range, dir }) => ({ range, bytes: folderBytes(dir) }));
+  for (const { range, dir: d } of await trtRangeDirs(trt)) trtRanges.push({ range, bytes: await folderBytes(d) });
   return {
     dir,
     defaultDir,
     isDefault: resolve(dir) === resolve(defaultDir),
-    bytes: folderBytes(dir),
+    bytes: await folderBytes(dir),
     shots,
-    otherBytes: Math.max(0, folderBytes(media) - attributed),
+    otherBytes: Math.max(0, (await folderBytes(media)) - attributed),
     trtRanges,
   };
 }

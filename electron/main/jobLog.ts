@@ -4,7 +4,7 @@
 // so the engine can't write it). What ran it comes first ("Technology for this run" and the memory the job used, as
 // the job page shows them), then the whole log, then the engine's last error output when it failed. Copy log on the
 // job page copies the same text.
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { Job } from "../../src/shared/types";
 import { duration, ranOnText, trtJobText } from "../../src/ui/format";
@@ -62,14 +62,15 @@ export function jobLogText(job: Job, appVersion: string): string {
   return `${lines.join("\n")}\n`;
 }
 
-/** Writes a finished job's log next to its results (making the folder if a failed job's discard removed it). */
-export function saveJobLog(job: Job, appVersion: string): { path: string; error: string | null } {
+/** Writes a finished job's log next to its results (making the folder if a failed job's discard removed it). Async:
+ * the output folder can be on a share that stops answering (loop pass 2026-10-26, finding 2). */
+export async function saveJobLog(job: Job, appVersion: string): Promise<{ path: string; error: string | null }> {
   const path = jobLogPath(job);
   try {
-    // loop: NOT-WORTH — one small text file per finished job
-    mkdirSync(job.outputDir, { recursive: true });
+    // loop: NOT-WORTH — one small text file per finished job, async
+    await mkdir(job.outputDir, { recursive: true });
     // loop: NOT-WORTH — as above
-    writeFileSync(path, jobLogText(job, appVersion));
+    await writeFile(path, jobLogText(job, appVersion));
     return { path, error: null };
   } catch (e) {
     // error: SHOWN — the job page says the log couldn't be saved, and why (Copy log still works)

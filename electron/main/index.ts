@@ -57,7 +57,7 @@ import { NOT_WHILE_BUSY } from "../../src/shared/texts";
 import type { DesktopPalette } from "../../src/ui/theme/palette";
 import { IPC } from "./ipc";
 import { idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir, vramLimit } from "./validate";
-import { cacheDirFor, cacheInfo, cacheUnavailable, CACHE_MARKER, clearOldCache, MEDIA_DIR, moveCache, prepareTarget, remapMedia, targetProblem } from "./cacheFolder";
+import { cacheDirFor, cacheInfo, cacheUnavailable, CACHE_MARKER, clearOldCache, exists, JOBS_DIR, jobTempDir, MEDIA_DIR, moveCache, prepareTarget, remapMedia, targetProblem } from "./cacheFolder";
 import { gbBytes, mbOrGbBytes } from "../../src/shared/units";
 import { sanitizeTrtSize, sizeRangeText, sizeText, trtSizeKey } from "../../src/shared/trt";
 
@@ -90,9 +90,11 @@ const IS_MAC = isMac();
 const appFolders = appDirs(process.env, app.getPath("home"));
 let settings = loadSettings(settingsFile, process.env);
 // the cache folder: the system's, or the app's own folder in the location chosen in App settings, Storage (row 44);
-// a chosen location that isn't there (drive unplugged): the system's folder for now, the setting kept, Storage says so
-let cacheMissing = cacheUnavailable(settings.cacheRoot);
-let cacheDir = cacheMissing ? appFolders.cache : cacheDirFor(settings.cacheRoot, appFolders.cache);
+// a chosen location that isn't there (drive unplugged): the system's folder for now, the setting kept, Storage says so.
+// Checked async once the app is ready (checkCacheDrive; a share that stops answering mustn't hold the start); nothing
+// writes to the cache before that check (adding clips and starting the queue check it first).
+let cacheMissing: string | null = null;
+let cacheDir = cacheDirFor(settings.cacheRoot, appFolders.cache);
 let mediaDir = join(cacheDir, MEDIA_DIR);
 let checkout = checkCheckout(settings.corridorKeyRoot);
 /** Where the Engine page's lists look (engineFind.ts): the app's own engine, a dev build, the in-app install's folder. */
@@ -240,7 +242,8 @@ const queue = new Queue({
     const root = settings.corridorKeyRoot!;
     return new EngineProcess({ python: join(root, "venv", "bin", "python"), script: engineScript(), packageRoot: root, env: process.env }, onReply, onExit);
   },
-  tempDirFor: (id) => join(cacheDir, "jobs", id),
+  // job temp files stay on the system's local cache folder whatever the chosen location (Marcy 2026-10-26)
+  tempDirFor: (id) => jobTempDir(appFolders.cache, id),
   tensorrt: () => useTensorrt({ platform: PLATFORM, setting: settings.tensorrt, engine: runningKind, ready: trtReady(enginePaths().ort, enginePaths().models) }),
   tensorrtWhyNot: () => tensorrtWhyNot({ platform: PLATFORM, setting: settings.tensorrt, engine: runningKind, ready: trtReady(enginePaths().ort, enginePaths().models) }),
   changed: () => {
@@ -250,7 +253,7 @@ const queue = new Queue({
   },
   finished: (job) => {
     void makeStills(job);
-    refreshTrtBuilt();
+    void refreshTrtBuilt();
   },
   saveLog: (job) => saveJobLog(job, app.getVersion()),
 });
@@ -260,26 +263,33 @@ const estimator = new Estimator({ makeEngine: rustEngineProcess });
 let trtBuilt: string[] = [];
 // each built range's size on disk and recorded build time (Engine settings, TensorRT's size list; read with trtBuilt)
 let trtOnDisk: TrtState["onDisk"] = [];
-function readTrtCache(): void {
+// reads in flight: only the newest one's result is kept
+let trtReads = 0;
+/** Reads what is built (async: the cache folder can be on a network share). */
+async function readTrtCache(): Promise<void> {
   const root = join(cacheDir, TRT_ENGINES_DIR);
-  trtBuilt = trtSupported(PLATFORM) ? builtRanges(root) : [];
-  trtOnDisk = trtSupported(PLATFORM) ? rangesOnDisk(root, folderBytes) : [];
+  const n = ++trtReads;
+  const built = trtSupported(PLATFORM) ? await builtRanges(root) : [];
+  const onDisk = trtSupported(PLATFORM) ? await rangesOnDisk(root, folderBytes) : [];
+  if (n !== trtReads) return;
+  trtBuilt = built;
+  trtOnDisk = onDisk;
 }
-function refreshTrtBuilt(): void {
-  readTrtCache();
+async function refreshTrtBuilt(): Promise<void> {
+  await readTrtCache();
   prebuild.refresh();
+  scheduleSend();
 }
 // the background TensorRT build of the common ranges (trtPrebuild.ts): jobs never build; only while no queue runs
 const prebuild: Prebuilder = new Prebuilder({
   makeEngine: rustEngineProcess,
   changed: () => {
-    if (!prebuild.running) readTrtCache();
+    if (!prebuild.running) void readTrtCache().then(scheduleSend);
     scheduleSend();
   },
   sizes: () => settings.trtSizes,
   recordBuild: (range, seconds) => {
-    recordBuild(join(cacheDir, TRT_ENGINES_DIR), range, seconds);
-    trtOnDisk = rangesOnDisk(join(cacheDir, TRT_ENGINES_DIR), folderBytes);
+    void recordBuild(join(cacheDir, TRT_ENGINES_DIR), range, seconds).then(readTrtCache).then(scheduleSend);
   },
   allowed: () => !cacheMoving && useTensorrt({ platform: PLATFORM, setting: settings.tensorrt, engine: chooseEngine(rustEngine, checkout), ready: trtReady(enginePaths().ort, enginePaths().models) }),
   // while the queue runs the build waits for it (paused), and goes on once its engine has exited: a build started while
@@ -293,9 +303,10 @@ const prebuild: Prebuilder = new Prebuilder({
       return [];
     }
   },
-  built: () => (trtSupported(PLATFORM) ? builtRanges(join(cacheDir, TRT_ENGINES_DIR)) : []),
+  built: () => trtBuilt,
+  reread: readTrtCache,
 });
-refreshTrtBuilt();
+void refreshTrtBuilt();
 
 function state(): AppState {
   return {
@@ -417,8 +428,8 @@ async function makeStills(job: Job): Promise<void> {
   for (const output of order) {
     // loop: NOT-WORTH — ≤ four outputs, once per finished job
     const file = job.outputs.find((f) => basename(f).includes(`_${output === "checker" ? "checker_comp" : output}`));
-    // loop: NOT-WORTH — one stat per output, once per finished job
-    if (!file || !existsSync(file)) continue;
+    // loop: NOT-WORTH — one async stat per output, once per finished job
+    if (!file || !(await exists(file))) continue;
     try {
       job.stills.push({ output, url: mediaUrl(await still(mediaDir, file, seconds, STILL_WIDTH)) });
       scheduleSend();
@@ -429,7 +440,7 @@ async function makeStills(job: Job): Promise<void> {
 }
 
 async function addPaths(paths: string[]): Promise<void> {
-  checkCacheDrive();
+  await checkCacheDrive();
   // loop: SERIAL-REQUIRED — ffprobe/ffmpeg per clip, one at a time so a big drop doesn't fork dozens
   for (const { path, kind } of expandPaths(paths)) {
     // loop: NOT-WORTH — the queue's jobs per dropped clip (a drop of N clips is N × jobs comparisons)
@@ -468,20 +479,29 @@ async function addPaths(paths: string[]): Promise<void> {
  * The chosen cache folder's drive gone while the app runs (it is checked before the cache is written): the system's
  * folder for now, nothing moved or deleted, the setting kept for the next start; Storage says so.
  */
-function checkCacheDrive(): void {
-  if (cacheMissing || cacheMoving || !settings.cacheRoot) return;
-  cacheMissing = cacheUnavailable(settings.cacheRoot);
-  if (!cacheMissing) return;
+async function checkCacheDrive(): Promise<void> {
+  const root = settings.cacheRoot;
+  if (cacheMissing || cacheMoving || !root) return;
+  const missing = await cacheUnavailable(root);
+  // the location changed or a move started meanwhile: that one decides
+  if (!missing || cacheMissing || cacheMoving || settings.cacheRoot !== root) return;
+  cacheMissing = missing;
   cacheDir = appFolders.cache;
   mediaDir = join(cacheDir, MEDIA_DIR);
-  scheduleSend();
+  await refreshTrtBuilt();
 }
 
-/** Storage and the cache folder, measured (walks the folders: only when App settings shows Storage, or after a change). */
-function measureStorage(): void {
-  checkCacheDrive();
-  storage = storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort);
-  cache = { ...cacheInfo(cacheDir, appFolders.cache, queue.jobs, mediaFile), moving: cacheMoving, error: cacheError };
+// measures in flight: only the newest one's result is kept
+let storageReads = 0;
+/** Storage and the cache folder, measured (walks the folders, async: only when App settings shows Storage, or after a change). */
+async function measureStorage(): Promise<void> {
+  await checkCacheDrive();
+  const n = ++storageReads;
+  const items = await storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort);
+  const info = await cacheInfo(cacheDir, appFolders.cache, queue.jobs, mediaFile);
+  if (n !== storageReads) return;
+  storage = items;
+  cache = { ...info, moving: cacheMoving, error: cacheError };
 }
 
 /** The cache folder from now on: `root` the chosen location (null: the system's folder), `dir` the app's folder in it. */
@@ -506,7 +526,7 @@ async function pickCacheFolder(toDefault: boolean): Promise<void> {
   // the chosen drive isn't there and the cache is in the system's folder for now: Default keeps it there from now on
   if (toDefault && cacheMissing && resolve(cacheDir) === resolve(appFolders.cache)) {
     switchCache(null, appFolders.cache);
-    measureStorage();
+    await measureStorage();
     scheduleSend();
     return;
   }
@@ -516,21 +536,21 @@ async function pickCacheFolder(toDefault: boolean): Promise<void> {
     if (r.canceled || !r.filePaths[0]) return;
     const picked = r.filePaths[0];
     // the app's own cache folder itself picked (it carries the marker): its parent is the location
-    // loop: NOT-WORTH — one stat per choice
-    root = basename(picked) === APP_DIR && existsSync(join(picked, CACHE_MARKER)) ? dirname(picked) : picked;
+    // loop: NOT-WORTH — one async stat per choice
+    root = basename(picked) === APP_DIR && (await exists(join(picked, CACHE_MARKER))) ? dirname(picked) : picked;
   }
   const to = cacheDirFor(root, appFolders.cache);
   const toOwned = resolve(to) === resolve(appFolders.cache);
   if (toOwned) root = null;
   const from = cacheDir;
   const fromOwned = resolve(from) === resolve(appFolders.cache);
-  const problem = targetProblem(from, to, toOwned);
+  const problem = await targetProblem(from, to, toOwned);
   if (problem) {
     await dialog.showMessageBox(mainWindow, { type: "info", message: "The cache can't go there", detail: problem });
     return;
   }
-  const trtBytes = folderBytes(join(from, TRT_ENGINES_DIR));
-  const bytes = folderBytes(join(from, MEDIA_DIR)) + trtBytes;
+  const trtBytes = await folderBytes(join(from, TRT_ENGINES_DIR));
+  const bytes = (await folderBytes(join(from, MEDIA_DIR))) + trtBytes;
   let move = false;
   if (bytes > 0) {
     const trt = trtBytes > 0;
@@ -554,7 +574,8 @@ async function pickCacheFolder(toDefault: boolean): Promise<void> {
   const resumeBuild = prebuild.suspend();
   cacheMoving = move ? `Moving ${mbOrGbBytes(bytes)} to ${to}…` : `Starting fresh in ${to}…`;
   cacheError = null;
-  measureStorage();
+  if (cache) cache = { ...cache, moving: cacheMoving, error: null };
+  void measureStorage().then(scheduleSend);
   scheduleSend();
   try {
     if (move) {
@@ -591,8 +612,8 @@ async function pickCacheFolder(toDefault: boolean): Promise<void> {
     cacheError = `The cache folder wasn't changed: ${(e as Error).message}`;
   } finally {
     cacheMoving = null;
-    measureStorage();
-    refreshTrtBuilt();
+    await measureStorage();
+    await refreshTrtBuilt();
     resumeBuild();
     scheduleSend();
   }
@@ -773,23 +794,23 @@ function registerIpc(): void {
     const resume = prebuild.suspend();
     settings = { ...settings, trtSizes: others };
     persist();
-    removeSize(root, key);
-    refreshTrtBuilt();
+    await removeSize(root, key);
+    await refreshTrtBuilt();
     resume();
     scheduleSend();
   });
   ipcMain.handle(IPC.stopInstall, () => installAbort?.abort());
-  ipcMain.handle(IPC.measureStorage, () => {
-    measureStorage();
+  ipcMain.handle(IPC.measureStorage, async () => {
+    await measureStorage();
     scheduleSend();
   });
   ipcMain.handle(IPC.openStorageFolder, async (_e, idIn: unknown) => {
     // only the app's own folders: the cache folder, or one Storage lists
+    const items = idIn === "cache-root" ? [] : await storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort);
     // loop: NOT-WORTH — four items, once per click
-    const p =
-      idIn === "cache-root" ? cacheDir : storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort).find((i) => i.id === idIn)?.path;
-    // loop: NOT-WORTH — one stat per click
-    if (!p || !existsSync(p)) return;
+    const p = idIn === "cache-root" ? cacheDir : items.find((i) => i.id === idIn)?.path;
+    // loop: NOT-WORTH — one async stat per click
+    if (!p || !(await exists(p))) return;
     // loop: NOT-WORTH — hands the folder to the file manager once per click
     const err = await shell.openPath(p);
     // error: SHOWN — the file manager couldn't be started: a message box says why
@@ -803,7 +824,7 @@ function registerIpc(): void {
   });
   ipcMain.handle(IPC.removeStorage, async (_e, idIn: unknown) => {
     // loop: NOT-WORTH — three items, once per click
-    const item = storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort).find((i) => i.id === idIn);
+    const item = (await storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort)).find((i) => i.id === idIn);
     if (!item || !mainWindow || cacheMoving) return;
     if (queue.running || installAbort) {
       await dialog.showMessageBox(mainWindow, { type: "info", message: NOT_WHILE_BUSY, detail: "Stop it first, then remove." });
@@ -830,11 +851,11 @@ function registerIpc(): void {
     if (r.response !== 0) return;
     // the background TensorRT build writes into the cache folder: it ends first (and goes on after while it still can)
     const resumeBuild = prebuild.suspend();
-    removeStorage(item, enginePlaces().data, cacheDir);
-    measureStorage();
+    await removeStorage(item, enginePlaces().data, cacheDir);
+    await measureStorage();
     install = installIdle();
     trt = trtIdle();
-    refreshTrtBuilt();
+    await refreshTrtBuilt();
     recheckEngines();
     resumeBuild();
     scheduleSend();
@@ -887,8 +908,8 @@ function registerIpc(): void {
   ipcMain.handle(IPC.startQueue, async () => {
     recheckEngines();
     await recheckFfmpeg();
-    checkCacheDrive();
-    // not while the cache folder moves (a job writes its working files and TensorRT engines there)
+    await checkCacheDrive();
+    // not while the cache folder moves (a job writes its TensorRT engines there; its working files stay in the system's folder)
     if (!chooseEngine(rustEngine, checkout) || !ffmpeg.ok || cacheMoving) return scheduleSend();
     // one engine at a time: an estimate still asking gives way to the queue
     estimator.stop();
@@ -1019,10 +1040,15 @@ app.whenReady().then(() => {
     // loop: NOT-WORTH — one local file per media request (thumbnails / stills from the app's cache) [bounded: a local file: URL]
     return net.fetch(pathToFileURL(file).toString());
   });
-  // one copy runs (single-instance lock) and no engine yet: any job folder is left over from a crash
-  clearJobTemps(join(cacheDir, "jobs"));
-  // stills older than 30 days, or past 500 MB, go (storage.ts)
-  pruneCache(mediaDir);
+  // one copy runs (single-instance lock) and no engine yet: any job folder is left over from a crash (job temps are
+  // always in the system's local cache folder: jobTempDir)
+  clearJobTemps(join(appFolders.cache, JOBS_DIR));
+  // the chosen cache folder is checked, then its stills older than 30 days, or past 500 MB, go (storage.ts); async,
+  // so a cache folder on a share that stopped answering doesn't hold the window
+  void checkCacheDrive()
+    .then(() => pruneCache(mediaDir))
+    // error: NOT-WORTH — the stills stay until the next start; nothing else depends on the prune
+    .catch(() => {});
   nativeTheme.themeSource = settings.appearance.theme === "light" ? "light" : settings.appearance.theme === "dark" ? "dark" : "system";
   updatePaletteWatch();
   registerIpc();
@@ -1030,12 +1056,21 @@ app.whenReady().then(() => {
   updater.start();
 });
 
-app.on("before-quit", () => {
-  queue.shutdown();
+// The quit waits for a running job's started files to be deleted (bug hunt 2026-10-26 Q1; async now, partial.ts), at
+// most this long: an output share that stopped answering can't hold the quit (under updater.ts's 10 s exit after an update).
+const QUIT_CLEANUP_MS = 8_000;
+let quitCleaned = false;
+app.on("before-quit", (e) => {
+  if (quitCleaned) return;
+  quitCleaned = true;
+  e.preventDefault();
+  const cleanup = queue.shutdown();
   estimator.stop();
   prebuild.stop();
   stopPaletteWatch?.();
   updater.stop();
+  // loop: NOT-WORTH — one wait at quit [bounded: QUIT_CLEANUP_MS]
+  void Promise.race([cleanup, new Promise((r) => setTimeout(r, QUIT_CLEANUP_MS))]).then(() => app.quit());
 });
 app.on("window-all-closed", () => app.quit());
 // The DS5 app's AppImage mount guard: keeps the mount until the process is gone, so quitting never crashes on the way out.

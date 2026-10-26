@@ -57,7 +57,11 @@ function harness(opts: { pongProtocol?: number; failStart?: boolean; slowStart?:
     finished: () => {},
     now: () => clock,
   });
-  const flush = () => new Promise((r) => setTimeout(r, 0));
+  // the queue's folder work is async (output folders can be on a share): flush waits for it too
+  const flush = async () => {
+    await new Promise((r) => setTimeout(r, 0));
+    await q.settled();
+  };
   return {
     q,
     sent,
@@ -261,6 +265,7 @@ describe("a job's started files (staging, partial.ts)", () => {
     h.q.stop();
     expect(h.killed()).toBe(1);
     expect(h.q.jobs[0].status).toBe("cancelled");
+    await h.flush();
     await discardsSettled();
     await earlierIntact(dir, "c1");
     expect(h.q.jobs[0].partial).toMatch(/^Removed the 3 files/);
@@ -285,6 +290,7 @@ describe("a job's started files (staging, partial.ts)", () => {
     await h.q.start();
     await h.flush();
     h.q.stop();
+    await h.flush();
     expect(h.q.jobs[0].partial).toBe("It hadn't written any files.");
   });
 
@@ -348,7 +354,7 @@ describe("the queue's engine after the queue", () => {
 // a hidden .corridorkey-discarded-* folder in the output folder, and its log said "failed: The engine stopped
 // unexpectedly (SIGKILL)")
 describe("the app quits while a job runs", () => {
-  it("deletes the job's started files before it returns, and the job ends as cancelled", async () => {
+  it("deletes the job's started files before its promise resolves (the quit waits for it), and the job ends as cancelled", async () => {
     const h = harness();
     const j = job("q");
     h.q.add(j);
@@ -358,7 +364,7 @@ describe("the app quits while a job runs", () => {
     mkdirSync(join(staging, "q_alpha_exr"), { recursive: true });
     // loop: NOT-WORTH — a few frames in a test
     for (let i = 0; i < 5; i++) writeFileSync(join(staging, "q_alpha_exr", `q_alpha.${1001 + i}.exr`), "frame");
-    h.q.shutdown();
+    await h.q.shutdown();
     // nothing of the job is left (the folder it made goes too, empty)
     expect(existsSync(j.outputDir) ? readdirSync(j.outputDir) : []).toEqual([]);
     expect(j.status).toBe("cancelled");

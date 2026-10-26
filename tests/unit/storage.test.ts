@@ -17,13 +17,13 @@ describe("storage", () => {
     utimesSync(p, t, t);
   };
 
-  it("measures folders, nested ones too, and an absent one as 0", () => {
+  it("measures folders, nested ones too, and an absent one as 0", async () => {
     mkdirSync(join(dir, "data", "models", "set"), { recursive: true });
     writeFileSync(join(dir, "data", "models", "set", "a.onnx"), Buffer.alloc(1000));
     writeFileSync(join(dir, "data", "models", "b.json"), Buffer.alloc(24));
-    expect(folderBytes(join(dir, "data", "models"))).toBe(1024);
-    expect(folderBytes(join(dir, "nope"))).toBe(0);
-    const items = storageItems(join(dir, "data"), dir, "ONNX Runtime, CUDA, cuDNN", "win32");
+    expect(await folderBytes(join(dir, "data", "models"))).toBe(1024);
+    expect(await folderBytes(join(dir, "nope"))).toBe(0);
+    const items = await storageItems(join(dir, "data"), dir, "ONNX Runtime, CUDA, cuDNN", "win32");
     expect(items.map((i) => [i.id, i.bytes])).toEqual([
       ["runtime", 0],
       ["models", 1024],
@@ -31,7 +31,7 @@ describe("storage", () => {
     ]);
   });
 
-  it("measures TensorRT's parts as their own item (Linux), out of the runtime's and models' sizes, and removes only them", () => {
+  it("measures TensorRT's parts as their own item (Linux), out of the runtime's and models' sizes, and removes only them", async () => {
     const data = join(dir, "trt");
     const rt = join(data, "runtime", "rt");
     const m1 = join(data, "models", "m1");
@@ -64,31 +64,31 @@ describe("storage", () => {
     const cache = join(dir, "cache2");
     mkdirSync(join(cache, "tensorrt", "h1024"), { recursive: true });
     writeFileSync(join(cache, "tensorrt", "h1024", "stage2.engine"), Buffer.alloc(50));
-    const items = storageItems(data, cache, "ONNX Runtime, CUDA, cuDNN", "linux", c);
+    const items = await storageItems(data, cache, "ONNX Runtime, CUDA, cuDNN", "linux", c);
     expect(items.map((i) => [i.id, i.bytes])).toEqual([
       ["runtime", 100],
       ["models", 300 + modelsJson],
       ["tensorrt", 710 + 200 + list + 50],
       ["cache", 0],
     ]);
-    removeStorage(items[2], data, cache, c);
+    await removeStorage(items[2], data, cache, c);
     expect(readdirSync(cache)).toEqual([]);
     expect(readdirSync(rt)).toEqual(["onnxruntime"]);
     expect(readdirSync(m1).sort()).toEqual(["a.onnx", "models.json"]);
     expect(JSON.parse(readFileSync(join(m1, "models.json"), "utf8"))).toEqual({ fp16: { rvm: "a.onnx" } });
     // no TensorRT item off Linux: there is no switch to bring it back there
-    expect(storageItems(data, dir, "x", "darwin").map((i) => i.id)).toEqual(["runtime", "models", "cache"]);
+    expect((await storageItems(data, dir, "x", "darwin")).map((i) => i.id)).toEqual(["runtime", "models", "cache"]);
   });
 
-  it("prunes cached stills older than 30 days, then the oldest until under the cap", () => {
+  it("prunes cached stills older than 30 days, then the oldest until under the cap", async () => {
     mkdirSync(join(dir, "media"), { recursive: true });
     still("old.jpg", 100, 40);
     still("mid.jpg", 300, 10);
     still("new.jpg", 300, 1);
     // the old one goes for its age; then 600 bytes > a 400-byte cap: the next oldest goes too
-    expect(pruneCache(join(dir, "media"), now, 30, 400)).toBe(2);
+    expect(await pruneCache(join(dir, "media"), now, 30, 400)).toBe(2);
     expect(readdirSync(join(dir, "media"))).toEqual(["new.jpg"]);
-    expect(pruneCache(join(dir, "media"), now, 30, 400)).toBe(0);
-    expect(pruneCache(join(dir, "absent"), now)).toBe(0);
+    expect(await pruneCache(join(dir, "media"), now, 30, 400)).toBe(0);
+    expect(await pruneCache(join(dir, "absent"), now)).toBe(0);
   });
 });

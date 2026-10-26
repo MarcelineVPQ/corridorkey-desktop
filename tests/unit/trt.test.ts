@@ -79,7 +79,7 @@ const K4 = "trt-h1792-2176_w3584-4096";
 const KHD = "trt-h1024-1280_w1792-2176";
 
 describe("the background TensorRT build", () => {
-  it("reads which ranges are built: every network built or remembered as failing, one level under the card", () => {
+  it("reads which ranges are built: every network built or remembered as failing, one level under the card", async () => {
     const range = join(ROOT, "rtx-5080__drv615__fp16", "h1792-2176_w3584-4096_t1-8_f1-4");
     // loop: NOT-WORTH — five networks in a test
     for (const p of ["cradio", "moge", "rvm", "stage2"]) {
@@ -87,10 +87,10 @@ describe("the background TensorRT build", () => {
       writeFileSync(join(range, p, `${p}_ctx.onnx`), "");
     }
     mkdirSync(join(range, "stage1"), { recursive: true });
-    expect(trtRangeDirs(ROOT)).toEqual([{ range: "h1792-2176_w3584-4096_t1-8_f1-4", dir: range, built: false }]);
+    expect(await trtRangeDirs(ROOT)).toEqual([{ range: "h1792-2176_w3584-4096_t1-8_f1-4", dir: range, built: false }]);
     writeFileSync(join(range, "stage1", "stage1.failed"), "stamp\n8192\nno tactic\n");
-    expect(trtRangeDirs(ROOT)[0].built).toBe(true);
-    expect(trtRangeDirs(join(ROOT, "missing"))).toEqual([]);
+    expect((await trtRangeDirs(ROOT))[0].built).toBe(true);
+    expect(await trtRangeDirs(join(ROOT, "missing"))).toEqual([]);
   });
 
   function rig(opts: { others?: string[] | (() => string[] | Promise<string[]>); built?: string[]; sizes?: TrtSize[] } = {}) {
@@ -286,7 +286,7 @@ describe("the background TensorRT build", () => {
     expect(s.sent).toHaveLength(1);
   });
 
-  it("reads each built range's disk size and recorded build time, records a build, removes a size", () => {
+  it("reads each built range's disk size and recorded build time, records a build, removes a size", async () => {
     const root = join(ROOT, "sizes");
     const make = (card: string, range: string) => {
       const dir = join(root, card, range);
@@ -299,18 +299,18 @@ describe("the background TensorRT build", () => {
     };
     const hd = make("rtx-5080__drv615", "h1024-1280_w1792-2176_t1-48_f1-4");
     make("rtx-5080__drv615", "h1792-2176_w3584-4096_t1-8_f1-4");
-    const bytes = () => 2_500_000_000;
-    expect(rangesOnDisk(root, bytes)).toEqual([
+    const bytes = async () => 2_500_000_000;
+    expect(await rangesOnDisk(root, bytes)).toEqual([
       { range: "h1024-1280_w1792-2176_t1-48_f1-4", bytes: 2_500_000_000, buildSeconds: null },
       { range: "h1792-2176_w3584-4096_t1-8_f1-4", bytes: 2_500_000_000, buildSeconds: null },
     ]);
-    recordBuild(root, "h1024-1280_w1792-2176_t1-48_f1-4", 270.7);
+    await recordBuild(root, "h1024-1280_w1792-2176_t1-48_f1-4", 270.7);
     expect(JSON.parse(readFileSync(join(hd, BUILD_RECORD), "utf8")).seconds).toBe(270.7);
-    expect(rangesOnDisk(root, bytes)[0].buildSeconds).toBe(270.7);
+    expect((await rangesOnDisk(root, bytes))[0].buildSeconds).toBe(270.7);
     // the record doesn't make an unbuilt folder count as built, and the engine's networks are all it checks
-    expect(trtRangeDirs(root).every((d) => d.built)).toBe(true);
-    removeSize(root, "h1024-1280_w1792-2176");
-    expect(trtRangeDirs(root).map((d) => d.range)).toEqual(["h1792-2176_w3584-4096_t1-8_f1-4"]);
+    expect((await trtRangeDirs(root)).every((d) => d.built)).toBe(true);
+    await removeSize(root, "h1024-1280_w1792-2176");
+    expect((await trtRangeDirs(root)).map((d) => d.range)).toEqual(["h1792-2176_w3584-4096_t1-8_f1-4"]);
   });
 });
 

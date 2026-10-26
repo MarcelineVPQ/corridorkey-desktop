@@ -162,8 +162,9 @@ export function SettingsPage(props: { state: AppState; panelShown: boolean; narr
               <p className="hint-text">Removing asks first. Your settings and results are never touched here.</p>
               <More>
                 <p className="hint-text">
-                  The cache folder holds, per clip, its thumbnail and result stills, and its job&apos;s working files while it runs. Changing the cache folder asks whether to move the files or start
-                  fresh. The runtime and models come back through the setup when you need them{state.tensorrt.supported ? ", TensorRT through its switch (Engine settings)" : ""}.
+                  The cache folder holds, per clip, its thumbnail and result stills; a job&apos;s working files stay in the system&apos;s cache folder on this PC wherever the cache folder is. Changing
+                  the cache folder asks whether to move the files or start fresh. The runtime and models come back through the setup when you need them
+                  {state.tensorrt.supported ? ", TensorRT through its switch (Engine settings)" : ""}.
                 </p>
               </More>
             </>

@@ -53,7 +53,7 @@ export function missingInput(job: Job): string | null {
 export function startBlocked(state: AppState): string | null {
   if (!state.engineKind) return "Set up the engine first (Engine page)";
   if (!state.ffmpeg.ok) return state.ffmpeg.checked ? "Install ffmpeg first (Engine page)" : "Checking ffmpeg…";
-  // a job writes its working files and TensorRT engines into the cache folder
+  // a job writes its TensorRT engines into the cache folder (its working files stay in the system's: jobTempDir)
   if (state.cache?.moving) return "Moving the cache folder… the queue can start when it's done";
   // loop: HOT-PATH-OK — the queue's jobs per render (≤ 10/s while shown)
   if (!state.jobs.some((j) => j.status === "waiting" && !j.clip.probeError && !missingInput(j))) return "Add a clip that's ready to run";

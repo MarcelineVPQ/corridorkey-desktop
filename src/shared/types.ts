@@ -464,7 +464,7 @@ export interface CacheInfo {
   defaultDir: string;
   isDefault: boolean;
   bytes: number;
-  // per clip in the queue: its thumbnail and result stills, and its job's working files while it runs
+  // per clip in the queue: its thumbnail and result stills, and its job's working files while it runs (in the system's folder)
   shots: { name: string; bytes: number }[];
   // stills of clips no longer in the queue (pruned at start: 30 days, 500 MB)
   otherBytes: number;

@@ -6,7 +6,9 @@
 //            set's folder), measured on their own and taken out of the runtime's and models' sizes (Linux only)
 //   cache:   <cache>/media  (clip thumbnails and result stills; rebuilt as needed)
 // Settings (userData/settings.json) are a few KB and stay; job temp folders are cleared at start (queue.ts).
-import { readdirSync, rmSync, statSync } from "node:fs";
+// Every read and removal here is async (fs/promises): the cache folder can be on another drive or a network share
+// (backlog row 44), and a share that stops answering must not freeze the window (loop pass 2026-10-26, finding 2).
+import { readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { StorageItem } from "../../src/shared/types";
 import { MODELS_DIR, PLATFORM, RUNTIME_DIR } from "./platform";
@@ -22,12 +24,12 @@ export const CACHE_MAX_BYTES = 500e6;
  * as tensorrtBytes does). A link loop ends at the system's link limit (40 levels; measured: a folder linking to itself
  * counts its files 41 times); the app makes no links.
  */
-export function folderBytes(dir: string): number {
+export async function folderBytes(dir: string): Promise<number> {
   let total = 0;
   let names: string[];
   try {
-    // loop: NOT-WORTH — one readdir per folder, only when App settings shows Storage (a few hundred files)
-    names = readdirSync(dir);
+    // loop: NOT-WORTH — one async readdir per folder, only when App settings shows Storage (a few hundred files)
+    names = await readdir(dir);
   } catch {
     // error: NOT-WORTH — no such folder: nothing stored there
     return 0;
@@ -36,41 +38,40 @@ export function folderBytes(dir: string): number {
   for (const n of names) {
     const p = join(dir, n);
     try {
-      // loop: NOT-WORTH — one stat per file, as above
-      const s = statSync(p, { throwIfNoEntry: false });
-      if (!s) continue;
-      total += s.isDirectory() ? folderBytes(p) : s.size;
+      // loop: NOT-WORTH — one async stat per file, as above
+      const s = await stat(p);
+      total += s.isDirectory() ? await folderBytes(p) : s.size;
     } catch {
-      // error: NOT-WORTH — removed meanwhile: not counted
+      // error: NOT-WORTH — removed meanwhile (or a dangling link): not counted
     }
   }
   return total;
 }
 
 /** The TensorRT parts' bytes: in the runtime (libraries, licence) and in the model set (its files and list). */
-export function tensorrtBytes(data: string, c?: TrtCatalog): { runtime: number; models: number } {
+export async function tensorrtBytes(data: string, c?: TrtCatalog): Promise<{ runtime: number; models: number }> {
   const p = trtPaths(data, c);
   let licence = 0;
   try {
     // loop: NOT-WORTH — the runtime folder's few entries, only when App settings shows Storage
-    for (const d of readdirSync(p.runtime).filter((n) => TRT_DIST_INFO.test(n))) licence += folderBytes(join(p.runtime, d));
+    for (const d of (await readdir(p.runtime)).filter((n) => TRT_DIST_INFO.test(n))) licence += await folderBytes(join(p.runtime, d));
   } catch {
     // error: NOT-WORTH — no runtime installed: nothing of TensorRT's there
   }
   // loop: NOT-WORTH — sixteen names, only when App settings shows Storage
   const files = [TRT_MODELS_LIST, ...(c?.trtModels ?? TENSORRT.models).files.map((x) => x.file).filter((n) => n !== "models.json")];
   let models = 0;
-  // loop: NOT-WORTH — sixteen stats, only when App settings shows Storage
-  for (const f of files) models += statSync(join(p.models, f), { throwIfNoEntry: false })?.size ?? 0;
-  return { runtime: folderBytes(p.libs) + licence, models };
+  // loop: NOT-WORTH — sixteen async stats, only when App settings shows Storage
+  for (const f of files) models += (await stat(join(p.models, f)).catch(() => null))?.size ?? 0;
+  return { runtime: (await folderBytes(p.libs)) + licence, models };
 }
 
 /** `runtimeLabel`: what the runtime is on this system (install.ts systemSupport). TensorRT: Linux only. */
-export function storageItems(data: string, cacheDir: string, runtimeLabel: string, platform: NodeJS.Platform = PLATFORM, c?: TrtCatalog): StorageItem[] {
-  const trt = platform === "linux" ? tensorrtBytes(data, c) : { runtime: 0, models: 0 };
+export async function storageItems(data: string, cacheDir: string, runtimeLabel: string, platform: NodeJS.Platform = PLATFORM, c?: TrtCatalog): Promise<StorageItem[]> {
+  const trt = platform === "linux" ? await tensorrtBytes(data, c) : { runtime: 0, models: 0 };
   const items: StorageItem[] = [
-    { id: "runtime", label: `GPU runtime (${runtimeLabel})`, path: join(data, RUNTIME_DIR), bytes: folderBytes(join(data, RUNTIME_DIR)) - trt.runtime },
-    { id: "models", label: "CorridorKey models", path: join(data, MODELS_DIR), bytes: folderBytes(join(data, MODELS_DIR)) - trt.models },
+    { id: "runtime", label: `GPU runtime (${runtimeLabel})`, path: join(data, RUNTIME_DIR), bytes: (await folderBytes(join(data, RUNTIME_DIR))) - trt.runtime },
+    { id: "models", label: "CorridorKey models", path: join(data, MODELS_DIR), bytes: (await folderBytes(join(data, MODELS_DIR))) - trt.models },
   ];
   // the engines built for this card (engine.ts trtCache: <cache>/tensorrt) belong to it too
   if (platform === "linux")
@@ -78,9 +79,9 @@ export function storageItems(data: string, cacheDir: string, runtimeLabel: strin
       id: "tensorrt",
       label: "TensorRT (NVIDIA's libraries, the TensorRT models, the engines built for your card)",
       path: trtPaths(data, c).libs,
-      bytes: trt.runtime + trt.models + folderBytes(join(cacheDir, TRT_ENGINES_DIR)),
+      bytes: trt.runtime + trt.models + (await folderBytes(join(cacheDir, TRT_ENGINES_DIR))),
     });
-  items.push({ id: "cache", label: "Thumbnails and stills (rebuilt as needed)", path: join(cacheDir, "media"), bytes: folderBytes(join(cacheDir, "media")) });
+  items.push({ id: "cache", label: "Thumbnails and stills (rebuilt as needed)", path: join(cacheDir, "media"), bytes: await folderBytes(join(cacheDir, "media")) });
   return items;
 }
 
@@ -88,30 +89,31 @@ export function storageItems(data: string, cacheDir: string, runtimeLabel: strin
  * Remove one item. The runtime and models come back through the setup's download, TensorRT through its switch.
  * TensorRT's parts live inside the runtime and the model set: install.ts removes exactly those.
  */
-export function removeStorage(item: StorageItem, data: string, cacheDir: string, c?: TrtCatalog): void {
+export async function removeStorage(item: StorageItem, data: string, cacheDir: string, c?: TrtCatalog): Promise<void> {
   if (item.id === "tensorrt") {
     removeTensorrt(data, c);
-    // loop: NOT-WORTH — removes the built engines (a few files per resolution), per user click
-    rmSync(join(cacheDir, TRT_ENGINES_DIR), { recursive: true, force: true });
+    // loop: NOT-WORTH — removes the built engines (a few files per resolution), async, per user click
+    await rm(join(cacheDir, TRT_ENGINES_DIR), { recursive: true, force: true });
     return;
   }
-  // loop: NOT-WORTH — one folder removed per user click (a confirm dialog first)
-  rmSync(item.path, { recursive: true, force: true });
+  // loop: NOT-WORTH — one folder removed (async) per user click (a confirm dialog first)
+  await rm(item.path, { recursive: true, force: true });
 }
 
 /**
  * The cache prunes itself at start: files older than CACHE_MAX_AGE_DAYS go, then the oldest until it is under
  * CACHE_MAX_BYTES. Returns how many files were removed.
  */
-export function pruneCache(dir: string, now: number = Date.now(), maxAgeDays = CACHE_MAX_AGE_DAYS, maxBytes = CACHE_MAX_BYTES): number {
+export async function pruneCache(dir: string, now: number = Date.now(), maxAgeDays = CACHE_MAX_AGE_DAYS, maxBytes = CACHE_MAX_BYTES): Promise<number> {
   let files: { p: string; mtime: number; size: number }[] = [];
   try {
-    // loop: NOT-WORTH — one readdir + a stat per cached still, once per app start
-    files = readdirSync(dir).map((n) => {
-      // loop: NOT-WORTH — one stat per cached still, once per app start
-      const s = statSync(join(dir, n));
-      return { p: join(dir, n), mtime: s.mtimeMs, size: s.isFile() ? s.size : 0 };
-    });
+    // loop: NOT-WORTH — one async readdir + a stat per cached still, once per app start
+    const names = await readdir(dir);
+    // loop: NOT-WORTH — one async stat per cached still, once per app start
+    for (const n of names) {
+      const s = await stat(join(dir, n));
+      files.push({ p: join(dir, n), mtime: s.mtimeMs, size: s.isFile() ? s.size : 0 });
+    }
   } catch {
     // error: NOT-WORTH — no cache yet: nothing to prune
     return 0;
@@ -122,11 +124,11 @@ export function pruneCache(dir: string, now: number = Date.now(), maxAgeDays = C
   files.sort((a, b) => a.mtime - b.mtime);
   // loop: NOT-WORTH — sums the cached stills once per start
   let total = files.reduce((n, f) => n + f.size, 0);
-  // loop: NOT-WORTH — removes old stills once per start (local unlinks)
+  // loop: NOT-WORTH — removes old stills once per start (a few async unlinks)
   for (const f of files) {
     if (f.mtime >= cutoff && total <= maxBytes) break;
-    // loop: NOT-WORTH — one unlink per pruned still, once per app start
-    rmSync(f.p, { force: true, recursive: true });
+    // loop: NOT-WORTH — one async unlink per pruned still, once per app start
+    await rm(f.p, { force: true, recursive: true });
     total -= f.size;
     removed++;
   }
