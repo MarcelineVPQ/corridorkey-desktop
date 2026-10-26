@@ -806,10 +806,27 @@ against this app's own engine. As of the evening of 2026-10-24:
 | [#13](https://github.com/nikopueringer/CorridorKey2.0/pull/13) | Attention runs out of memory on GPUs without fused attention kernels (AMD RX 5700 XT): the math fallback builds the whole score matrix at once | **Not on NVIDIA:** the engine runs ONNX Runtime's CUDA kernels. The same question matters for the Core ML engine (Apple GPUs); its design includes attention in bounded chunks, to be measured on the Mac |
 | [#3](https://github.com/nikopueringer/CorridorKey2.0/pull/3), [#14](https://github.com/nikopueringer/CorridorKey2.0/pull/14) | Python version requirements; dependency management with uv | Not applicable (no Python) |
 
+## Built with
+
+Every third-party part, with its licence and full licence text, is in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md); the people and models behind it are in [docs/CREDITS.md](docs/CREDITS.md).
+The main pieces:
+
+| Part | Technology |
+| --- | --- |
+| The model | [CorridorKey 2.0](https://github.com/nikopueringer/CorridorKey2.0) by Corridor Digital (designed and trained by Zachary Harris), on the foundation models C-RADIO (NVIDIA), MoGe (Microsoft) and RVM (Google DeepMind); exported to ONNX at fp16, unchanged |
+| Engine | Rust 1.93, [ONNX Runtime](https://onnxruntime.ai) 1.31 (through the `ort` crate), OpenColorIO 2.5 (built in), `exr` and `image` for frames, `rayon` for CPU work |
+| Graphics card | NVIDIA CUDA 13.4 and cuDNN 9.27 (Linux, Windows), optional TensorRT 10.16 (Linux), Apple Core ML (macOS, in progress) |
+| App | Electron 45, React 18, TypeScript 5.9, Vite 7 with electron-vite, Lucide icons |
+| Video in and out | ffmpeg from the system (libx264 10-bit, DNxHR) |
+| Packaging | electron-builder: AppImage (Linux), NSIS installer (Windows), signed and notarized disk image (macOS); the Linux engine linked for glibc 2.28 with Zig (cargo-zigbuild), the Windows engine cross-built with MinGW-w64, the installer built through Wine |
+| Updates | Signed update feeds (Ed25519), checked by the app before it installs anything |
+| Checks | Vitest, Rust's own tests and clippy, Prettier, and the project's own gates (loops, theme colours, Electron security) |
+
 ## Why it's built this way
 
 - **Rust + ONNX Runtime instead of Python + PyTorch:** the tables above. One program (9.6 MB, with OpenColorIO built in) with no Python,
-  half the RAM, less graphics memory, 1.5-2.7× faster, same mattes.
+  half the RAM, less graphics memory, about 1.5-1.9× faster (the same-day pair of 2026-10-26), same mattes.
 - **fp16 on the graphics card:** the original runs bf16; fp16 is what NVIDIA's tensor cores and ONNX Runtime's CUDA
   kernels do fastest, and the Quality table shows it agrees with the original as closely as the original's own
   modes agree with each other.
