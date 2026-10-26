@@ -38,6 +38,40 @@ chose from your free graphics memory, and stills of the results.
 Status: 1.0 is almost ready. The first development build, 1.0.0-dev.1, keys on Linux and Windows with an NVIDIA
 graphics card. There's no macOS build in it yet: the Mac can't key (macOS, honestly, below).
 
+## What's coming
+
+Everything planned lives in one list, [docs/BACKLOG.md](docs/BACKLOG.md), each item with its status. In short
+(row numbers in brackets):
+
+**Working on now: the Mac (Apple Silicon).** The Core ML engine runs every network on an M6 Mac mini, but stage 1
+needs more memory than a 16 GB Mac has at a 4-frame window; shorter windows are next to measure. Then setup installs
+the Core ML models [59], a 4K Core ML set [60], the real-Mac gate against CUDA's mattes [24], and self-update on the
+Mac [57].
+
+**Next, toward 1.0:**
+- Keying on a real Windows PC with an NVIDIA card (only tested in a virtual machine so far)
+- Colour management with OpenColorIO / ACES, per clip [29]; EXRs to the studio spec [30]
+- A fully offline install for air-gapped studios [31]
+- The objective scorecard against CorridorKey 2.0, anyone can rerun it [36], with a release gate: never more hair
+  "sizzle" than the original [53]
+- The documented DaVinci Resolve round trip [40]
+
+**Agreed, after 1.0:** a render-farm command line [32]; Nuke reading our outputs as they are, with a script for the
+farm command line, never a plugin (Corridor sells theirs) [33]; anamorphic and overscan plates [34]; 8K and studio
+Linux (Rocky) [35]; source timecode carried through [38]; a quick preview frame before the full run [39]; garbage and
+core mattes [46]; Marion Spates' core-matte and edge-band workflow, with a Nuke template [48]; an edge-sharpness metric
+[50]; a watch folder for editors [52]; the Avid round trip, research first [51]; TensorRT built for the windows jobs
+pick [61]; Windows code signing [28].
+
+**Experiments, measured first:** a temporal edge stabilizer [47], a hybrid edge mode [49], flicker against the
+temporal window [37].
+
+**Ideas, not decided:** making hints in the app [4], review tools (A/B wipe, alpha view, loupe) [7], keying a frame
+range [9], a hint on any frame [11].
+
+Plus about 35 small engineering items from the October code passes and the independent senior review (rows 62-94):
+none of them changes what a user sees today.
+
 ## Requirements
 
 - Linux (the AppImage) or Windows 10/11 (the installer), x64, with an NVIDIA graphics card (RTX 20-series or newer, 8 GB or more; measured on an RTX 2070 SUPER 8 GB and an RTX 5080
