@@ -282,10 +282,9 @@ const prebuild: Prebuilder = new Prebuilder({
     recordBuild(join(cacheDir, TRT_ENGINES_DIR), range, seconds);
     trtOnDisk = rangesOnDisk(join(cacheDir, TRT_ENGINES_DIR), folderBytes);
   },
-  allowed: () =>
-    !queue.running &&
-    !cacheMoving &&
-    useTensorrt({ platform: PLATFORM, setting: settings.tensorrt, engine: chooseEngine(rustEngine, checkout), ready: trtReady(enginePaths().ort, enginePaths().models) }),
+  allowed: () => !cacheMoving && useTensorrt({ platform: PLATFORM, setting: settings.tensorrt, engine: chooseEngine(rustEngine, checkout), ready: trtReady(enginePaths().ort, enginePaths().models) }),
+  // while the queue runs the build waits for it (paused), and goes on when it stops
+  queueRunning: () => queue.running,
   othersOnGpu: async () => {
     try {
       // loop: NOT-WORTH — a few compute processes, once per automatic start
@@ -550,9 +549,10 @@ async function pickCacheFolder(toDefault: boolean): Promise<void> {
     if (r.response === 2) return;
     move = r.response === 0;
   }
-  // one engine at a time, and none while the cache moves (the estimate's engine is the only one that can run now)
+  // one engine at a time, and none while the cache moves (the estimate's engine is the only one that can run now); the
+  // background TensorRT build goes on after it
   estimator.stop();
-  prebuild.stop();
+  const resumeBuild = prebuild.suspend();
   cacheMoving = move ? `Moving ${mbOrGbBytes(bytes)} to ${to}…` : `Starting fresh in ${to}…`;
   cacheError = null;
   measureStorage();
@@ -594,6 +594,7 @@ async function pickCacheFolder(toDefault: boolean): Promise<void> {
     cacheMoving = null;
     measureStorage();
     refreshTrtBuilt();
+    resumeBuild();
     scheduleSend();
   }
 }
@@ -743,8 +744,7 @@ function registerIpc(): void {
       persist();
       prebuild.refresh();
       // it builds now, or after the queue; while another program uses the card (Sonata) it waits for it (Marcy 2026-10-25)
-      if (queue.running) prebuild.waitForQueue();
-      else void prebuild.start(false);
+      void prebuild.start(false);
       return scheduleSend();
     }
     if (actionIn !== "remove" || !mainWindow || cacheMoving) return;
@@ -769,14 +769,14 @@ function registerIpc(): void {
       });
       if (r.response !== 0) return;
     }
-    // the background build writes into these folders: it ends first, and goes on with the other sizes after
-    const wasRunning = prebuild.running;
-    prebuild.stop();
+    // the background build writes into these folders: it ends first, and goes on with the other sizes after (also one
+    // that was waiting for the queue or for the card)
+    const resume = prebuild.suspend();
     settings = { ...settings, trtSizes: others };
     persist();
     removeSize(root, key);
     refreshTrtBuilt();
-    if (wasRunning) void prebuild.start(false);
+    resume();
     scheduleSend();
   });
   ipcMain.handle(IPC.stopInstall, () => installAbort?.abort());
@@ -829,14 +829,15 @@ function registerIpc(): void {
       detail: `This deletes ${what} (${(item.bytes / 1e9).toFixed(2)} GB). ${again}`,
     });
     if (r.response !== 0) return;
-    // the background TensorRT build writes into the cache folder: it ends first
-    prebuild.stop();
+    // the background TensorRT build writes into the cache folder: it ends first (and goes on after while it still can)
+    const resumeBuild = prebuild.suspend();
     removeStorage(item, enginePlaces().data, cacheDir);
     measureStorage();
     install = installIdle();
     trt = trtIdle();
     refreshTrtBuilt();
     recheckEngines();
+    resumeBuild();
     scheduleSend();
   });
   ipcMain.handle(IPC.installFfmpeg, async () => {

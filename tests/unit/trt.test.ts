@@ -91,13 +91,14 @@ describe("the background TensorRT build", () => {
     expect(trtRangeDirs(join(ROOT, "missing"))).toEqual([]);
   });
 
-  function rig(opts: { others?: string[] | (() => string[]); built?: string[]; sizes?: TrtSize[] } = {}) {
+  function rig(opts: { others?: string[] | (() => string[] | Promise<string[]>); built?: string[]; sizes?: TrtSize[] } = {}) {
     const sent: Record<string, unknown>[] = [];
     const sizes: TrtSize[] = opts.sizes ?? DEFAULT_TRT_SIZES.map((x) => ({ ...x }));
     const records: [string, number][] = [];
     let reply: (r: EngineReply) => void = () => {};
     let kills = 0;
     let allowed = true;
+    let queue = false;
     const b = new Prebuilder({
       makeEngine: (onReply) => {
         reply = onReply;
@@ -113,6 +114,7 @@ describe("the background TensorRT build", () => {
       },
       changed: () => {},
       allowed: () => allowed,
+      queueRunning: () => queue,
       othersOnGpu: () => Promise.resolve(typeof opts.others === "function" ? opts.others() : (opts.others ?? [])),
       recheckMs: 5,
       built: () => opts.built ?? [],
@@ -120,7 +122,7 @@ describe("the background TensorRT build", () => {
       recordBuild: (range, secs) => records.push([range, secs]),
       now: () => 0,
     });
-    return { b, sent, sizes, records, reply: (r: EngineReply) => reply(r), kills: () => kills, allow: (v: boolean) => (allowed = v) };
+    return { b, sent, sizes, records, reply: (r: EngineReply) => reply(r), kills: () => kills, allow: (v: boolean) => (allowed = v), queue: (v: boolean) => (queue = v) };
   }
 
   it("builds 4K then HD until other sizes are chosen, moves its bar by network, and is done after both", async () => {
@@ -204,6 +206,82 @@ describe("the background TensorRT build", () => {
     q.b.queueStopped();
     await new Promise((res) => setTimeout(res, 0));
     expect(q.sent).toEqual([{ cmd: "trt_build", id: KHD, width: 1920, height: 1080 }]);
+  });
+
+  // bug hunt 2026-10-26 P2: started while the queue ran (TensorRT's download ending, the switch, Build now, a size
+  // ticked), the build did nothing and never went on after the queue (only a build already paused did)
+  it("waits for a running queue whatever starts it (the download's end, the switch, Build now) and goes on after it", async () => {
+    const r = rig();
+    r.queue(true);
+    await r.b.start(false);
+    expect(r.sent).toEqual([]);
+    expect(r.b.state.status).toBe("paused");
+    // Build now while keying: it says it waits (the button did nothing before)
+    await r.b.start(true);
+    expect(r.sent).toEqual([]);
+    expect(r.b.state.status).toBe("paused");
+    r.queue(false);
+    r.b.queueStopped();
+    await new Promise((res) => setTimeout(res, 0));
+    expect(r.sent).toEqual([{ cmd: "trt_build", id: K4, width: 4096, height: 2160 }]);
+  });
+
+  // bug hunt 2026-10-26 P3: a build held back by Sonata lost its look a minute when a queue ran (pause cleared the timer
+  // and left it "blocked"), so it never started by itself again
+  it("held back by another program when the queue starts, it looks at the card again after the queue", async () => {
+    let others = ["Sonata"];
+    const r = rig({ others: () => others });
+    await r.b.start(false);
+    expect(r.b.state.status).toBe("blocked");
+    r.b.pause();
+    expect(r.b.state.status).toBe("paused");
+    others = [];
+    r.b.queueStopped();
+    await new Promise((res) => setTimeout(res, 0));
+    expect(r.sent).toEqual([{ cmd: "trt_build", id: K4, width: 4096, height: 2160 }]);
+  });
+
+  // bug hunt 2026-10-26 P4: Build now pressed while an automatic start read the card did nothing
+  it("Build now pressed while an automatic start reads the card starts it whatever the reading says", async () => {
+    let answer: (v: string[]) => void = () => {};
+    const r = rig({ others: () => new Promise<string[]>((res) => (answer = res)) });
+    const auto = r.b.start(false);
+    await r.b.start(true);
+    answer(["Sonata"]);
+    await auto;
+    expect(r.sent).toEqual([{ cmd: "trt_build", id: K4, width: 4096, height: 2160 }]);
+    expect(r.b.state.status).toBe("running");
+  });
+
+  // bug hunt 2026-10-26 P5: removing a size (or moving the cache) stopped a build that was waiting for the queue or for the
+  // card for good ("stopped"); only one with an engine running went on
+  it("goes on after a cache change when it was running, waiting for the queue or held back", async () => {
+    let others = ["Sonata"];
+    const r = rig({ others: () => others });
+    await r.b.start(false);
+    expect(r.b.state.status).toBe("blocked");
+    const resume = r.b.suspend();
+    expect(r.b.state.status).toBe("stopped");
+    others = [];
+    resume();
+    await new Promise((res) => setTimeout(res, 0));
+    expect(r.sent).toHaveLength(1);
+    // waiting for the queue: it waits again
+    const q = rig();
+    q.queue(true);
+    await q.b.start(false);
+    const again = q.b.suspend();
+    again();
+    await new Promise((res) => setTimeout(res, 0));
+    expect(q.b.state.status).toBe("paused");
+    // stopped by the user: it stays stopped
+    const s = rig();
+    await s.b.start(true);
+    s.b.stop();
+    s.b.suspend()();
+    await new Promise((res) => setTimeout(res, 0));
+    expect(s.b.state.status).toBe("stopped");
+    expect(s.sent).toHaveLength(1);
   });
 
   it("reads each built range's disk size and recorded build time, records a build, removes a size", () => {

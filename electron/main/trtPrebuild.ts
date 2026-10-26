@@ -120,8 +120,10 @@ export function removeSize(root: string, sizeKey: string): void {
 export interface PrebuildDeps {
   makeEngine(onReply: (r: EngineReply) => void, onExit: (code: number | null, signal: NodeJS.Signals | null, stderrTail: string[]) => void): EngineHandle;
   changed(): void;
-  // whether it may run now: the setting on, the parts installed, the Rust engine, no queue running
+  // whether it may run at all: the setting on, the parts installed, the Rust engine, no cache move
   allowed(): boolean;
+  // the queue runs (it has the card): a build that may run waits for it (paused) and goes on when it stops
+  queueRunning?(): boolean;
   // the other programs using the graphics card (names), checked before a start the user didn't ask for
   othersOnGpu(): Promise<string[]>;
   // the built range keys, read from the cache
@@ -162,6 +164,8 @@ export class Prebuilder {
   private proc: EngineHandle | null = null;
   // an automatic start reading the graphics card (othersOnGpu)
   private checking = false;
+  // Build now pressed while that reading ran: the start that reads goes ahead whatever it finds
+  private askedWhileChecking = false;
   // the next look at the card while another program uses it (blocked)
   private recheck: ReturnType<typeof setTimeout> | null = null;
   private now: () => number;
@@ -203,15 +207,21 @@ export class Prebuilder {
    */
   async start(asked: boolean): Promise<void> {
     this.clearRecheck();
+    if (this.checking && asked) this.askedWhileChecking = true;
     if (this.proc || this.checking || !this.deps.allowed()) return;
     this.refresh();
     // loop: NOT-WORTH — the few chosen sizes
     if (this.state.ranges.every((r) => r.state === "done")) return this.set({ status: "done", note: null });
+    // the queue has the card (TensorRT's download ended, the switch or Build now while keying): it goes on after the queue
+    if (this.deps.queueRunning?.()) return this.waitForQueue();
     if (!asked) {
       // one check at a time: the queue's changes call this often while a build is paused
       this.checking = true;
+      this.askedWhileChecking = false;
       const others = await this.deps.othersOnGpu().finally(() => (this.checking = false));
-      if (others.length > 0) {
+      if (this.proc || !this.deps.allowed()) return;
+      if (this.deps.queueRunning?.()) return this.waitForQueue();
+      if (others.length > 0 && !this.askedWhileChecking) {
         // loop: NOT-WORTH — one look a minute while blocked, one timer at a time (cleared by start, pause and stop)
         this.recheck = setTimeout(() => {
           this.recheck = null;
@@ -219,7 +229,6 @@ export class Prebuilder {
         }, this.deps.recheckMs ?? 60_000);
         return this.set({ status: "blocked", note: `${others.join(", ")} ${others.length > 1 ? "are" : "is"} using the graphics card` });
       }
-      if (this.proc || !this.deps.allowed()) return;
     }
     // loop: NOT-WORTH — the few chosen sizes
     for (const r of this.state.ranges) if (r.state === "failed") Object.assign(r, { state: "todo", error: null });
@@ -242,9 +251,10 @@ export class Prebuilder {
 
   /** The queue starts: the build gives way (the engine is killed; it goes on when the queue stops). */
   pause(): void {
+    const was = this.state.status;
     this.clearRecheck();
-    if (!this.kill()) return;
-    this.set({ status: "paused", startedAt: null, note: null });
+    // one held back by another program on the card waits too: its next look is after the queue (the look a minute is off)
+    if (this.kill() || was === "blocked") this.set({ status: "paused", startedAt: null, note: null });
   }
 
   /** The user's Stop (or TensorRT switched off): the build ends; Build now goes on where it stopped. */
@@ -255,7 +265,19 @@ export class Prebuilder {
     if (was === "running" || was === "paused" || was === "blocked") this.set({ status: "stopped", startedAt: null, note: null });
   }
 
-  /** A size was chosen while the queue runs: the build waits for the queue (and goes on by itself when it stops). */
+  /**
+   * The build stops for a change in the cache (a size removed, the cache folder moved or cleared). The returned function
+   * lets a build that was running, waiting for the queue or held back by another program go on afterwards.
+   */
+  suspend(): () => void {
+    const was = this.state.status;
+    this.stop();
+    return () => {
+      if (was === "running" || was === "paused" || was === "blocked") void this.start(false);
+    };
+  }
+
+  /** The queue runs: the build waits for it (and goes on by itself when it stops). */
   waitForQueue(): void {
     if (this.proc || this.state.status === "done") return;
     this.set({ status: "paused", startedAt: null, note: null });
