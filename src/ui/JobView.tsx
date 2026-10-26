@@ -6,7 +6,7 @@ import { ProgressBar } from "./ProgressBar";
 import { FolderOpen, RotateCcw } from "lucide-react";
 import { LOG_SHOWN, type Job, type TrtPrebuild } from "../shared/types";
 import { prebuildStep, TRT_NOT_BUILT } from "../shared/trt";
-import { duration, ranOnText, remaining, STAGE_ORDER, STAGE_TEXT, trtJobText } from "./format";
+import { duration, ranOnText, STAGE_ORDER, STAGE_TEXT, trtJobText } from "./format";
 import { MainBlock } from "./panel/SplitView";
 import { PathText } from "./PathText";
 
@@ -21,7 +21,6 @@ export function JobView({ job, prebuild }: { job: Job; prebuild?: TrtPrebuild })
     return () => clearInterval(t);
   }, [job.status]);
 
-  const left = remaining(job);
   const elapsed = job.startedAt ? ((job.finishedAt ?? Date.now()) - job.startedAt) / 1000 : null;
   const nowIdx = job.stage ? STAGE_ORDER.indexOf(job.stage) : -1;
   const m = job.memory;
@@ -50,7 +49,6 @@ export function JobView({ job, prebuild }: { job: Job; prebuild?: TrtPrebuild })
           <div className="stats">
             <Stat k="Frames written" v={job.framesTotal ? `${job.framesDone} / ${job.framesTotal}` : String(job.framesDone)} />
             <Stat k="Speed (measured)" v={job.framesPerSecond ? `${job.framesPerSecond.toFixed(2)} fps` : "measuring…"} />
-            <Stat k="Time left" v={left !== null ? `about ${duration(left)}` : "after the first frames"} />
             <Stat k="Elapsed" v={elapsed !== null ? duration(elapsed) : "—"} />
             {job.stageDetail && <Stat k="Stage 1" v={job.stageDetail} />}
           </div>

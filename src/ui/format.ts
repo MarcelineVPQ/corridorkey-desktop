@@ -21,12 +21,6 @@ export function duration(seconds: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}` : `${m}:${String(r).padStart(2, "0")}`;
 }
 
-/** Time left from the measured frame rate, or null while there is no measured rate. */
-export function remaining(job: Job): number | null {
-  if (!job.framesPerSecond || !job.framesTotal) return null;
-  return (job.framesTotal - job.framesDone) / job.framesPerSecond;
-}
-
 export const STAGE_TEXT: Record<Stage, string> = {
   start: "Starting the engine",
   load: "Loading the model",
