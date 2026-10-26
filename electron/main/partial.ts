@@ -17,7 +17,7 @@ export function stagingDir(outputDir: string): string {
 
 /** Before a run: makes the output folder (remembering whether this job made it) and clears what a crashed app left
  * in the staging folder (ours by name). The engine gets the staging folder as its output_dir. */
-/** The background deletes still running (discard); discardsSettled() waits for them (tests, and before a quit). */
+/** The background deletes still running (discard); discardsSettled() waits for them (tests; a quit deletes at once, discard `now`). */
 const discarding = new Set<Promise<void>>();
 export async function discardsSettled(): Promise<void> {
   // loop: SERIAL-REQUIRED — waits for the few deletes in flight [bounded: each is one folder's rm]

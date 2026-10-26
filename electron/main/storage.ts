@@ -17,7 +17,11 @@ export const TRT_ENGINES_DIR = "tensorrt";
 export const CACHE_MAX_AGE_DAYS = 30;
 export const CACHE_MAX_BYTES = 500e6;
 
-/** Bytes under `dir` (0 when it doesn't exist). Symlinks count as themselves, never followed. */
+/**
+ * Bytes under `dir` (0 when it doesn't exist). Links are followed (a model set linked from another drive counts its files,
+ * as tensorrtBytes does). A link loop ends at the system's link limit (40 levels; measured: a folder linking to itself
+ * counts its files 41 times); the app makes no links.
+ */
 export function folderBytes(dir: string): number {
   let total = 0;
   let names: string[];
@@ -32,7 +36,7 @@ export function folderBytes(dir: string): number {
   for (const n of names) {
     const p = join(dir, n);
     try {
-      // loop: NOT-WORTH — one lstat per file, as above
+      // loop: NOT-WORTH — one stat per file, as above
       const s = statSync(p, { throwIfNoEntry: false });
       if (!s) continue;
       total += s.isDirectory() ? folderBytes(p) : s.size;
