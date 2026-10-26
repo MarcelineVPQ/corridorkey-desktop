@@ -143,8 +143,11 @@ compile_error!("the ffmpeg writers and temp files assume a little-endian host");
 /// frame at 1280x1080; x264's lookahead at UHD takes seconds, not minutes).
 pub(crate) const FINISH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
-/// The last lines of ffmpeg's stderr a writer keeps for its error message.
+/// The last lines of ffmpeg's stderr a writer keeps for its error message (its first line is kept too, `push_tail`).
 const TAIL_LINES: usize = 6;
+
+/// The smallest frame ffmpeg's DNxHR 444 encoder takes, width x height (`dnxhd`, profile dnxhr_444).
+const DNXHR_MIN: (usize, usize) = (256, 120);
 
 /// How long a failed writer waits for ffmpeg to exit (and say why) before it is killed.
 const FAIL_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -158,14 +161,14 @@ pub(crate) struct VideoWriter {
     child: Option<Child>,
     err: Shared,
     frames: usize,
-    /// reads ffmpeg's stderr: each line goes on to the engine's stderr (as before) and the last TAIL_LINES are kept
+    /// reads ffmpeg's stderr: each line goes on to the engine's stderr (as before); the first and the last TAIL_LINES are kept
     log: Option<JoinHandle<()>>,
     tail: Arc<Mutex<std::collections::VecDeque<String>>>,
     /// the failure with what ffmpeg said, once composed (asked again, the same error)
     said: Option<Error>,
 }
 
-/// Read a child's stderr to its end: every line on to ours, the last TAIL_LINES kept in `tail`.
+/// Read a child's stderr to its end: every line on to ours, the first and the last TAIL_LINES kept in `tail`.
 fn keep_tail(name: &str, err: std::process::ChildStderr, tail: Arc<Mutex<std::collections::VecDeque<String>>>) -> Result<JoinHandle<()>, Error> {
     // loop: SERIAL-REQUIRED — one reader per ffmpeg writer; ends when ffmpeg exits (its stderr closes)
     crate::ahead::spawn_named(name, move || {
@@ -184,13 +187,19 @@ fn keep_tail(name: &str, err: std::process::ChildStderr, tail: Arc<Mutex<std::co
                 continue;
             }
             eprintln!("{line}");
-            let mut t = tail.lock().unwrap();
-            if t.len() == TAIL_LINES {
-                t.pop_front();
-            }
-            t.push_back(line);
+            push_tail(&mut tail.lock().unwrap(), line);
         }
     })
+}
+
+/// Keep `line` in `tail`: ffmpeg's first line stays (often the reason: senior Rust review 2026-10-26 S1, DNxHR's
+/// "Input dimensions too small" came first of 10 lines and the last 6 were "Broken pipe ... Nothing was written"), then
+/// the last TAIL_LINES.
+fn push_tail(t: &mut std::collections::VecDeque<String>, line: String) {
+    if t.len() == TAIL_LINES + 1 {
+        t.remove(1);
+    }
+    t.push_back(line);
 }
 
 /// A writer's failure with what ffmpeg said: `Output` in words when ffmpeg couldn't write the file (a full disk, a
@@ -200,7 +209,7 @@ pub(crate) fn with_ffmpeg_tail(base: Error, path: &Path, tail: &[String]) -> Err
         return base;
     }
     let said = tail.join(" | ");
-    // loop: NOT-WORTH — ≤ TAIL_LINES lines of one failed writer
+    // loop: NOT-WORTH — ≤ TAIL_LINES + 1 lines of one failed writer
     match tail.iter().find_map(|l| crate::write_failure_text(l)) {
         Some(why) if base.code == crate::ErrorCode::Engine => {
             Error::new(crate::ErrorCode::Output, format!("Can't write {}: {why} (ffmpeg: {said})", path.display()))
@@ -231,6 +240,15 @@ impl VideoWriter {
             if let Some(why) = odd_size_for(&cfg.pix_fmt, w, h) {
                 return Err(Error::bad_request(why));
             }
+        }
+        // DNxHR 444 below its smallest frame: refused now, before anything is keyed (senior Rust review 2026-10-26 S1:
+        // ffmpeg 8.0.1 refused 200x150, 255x130, 129x300 and 255x2000 at its first frame, after all of stage 1 in
+        // low-VRAM mode, and the job's message ended in "Broken pipe")
+        if cfg.codec == VideoCodec::Dnxhr444 && (w < DNXHR_MIN.0 || h < DNXHR_MIN.1) {
+            return Err(Error::bad_request(format!(
+                "DNxHR 444 needs a frame of at least {}x{}; this clip is {w}x{h} (H.264 takes any size)",
+                DNXHR_MIN.0, DNXHR_MIN.1
+            )));
         }
         // every video output is 3-channel BGR (the alpha as three equal channels; the cutout premultiplied, render.rs)
         let channels = 3;
@@ -290,7 +308,7 @@ impl VideoWriter {
             // loop: SERIAL-REQUIRED — joins the stderr reader [bounded: ffmpeg has exited or was killed, so its stderr is closed]
             let _ = crate::ahead::joined(l);
         }
-        // loop: NOT-WORTH — ≤ TAIL_LINES lines, once per failed writer
+        // loop: NOT-WORTH — ≤ TAIL_LINES + 1 lines, once per failed writer
         let tail: Vec<String> = self.tail.lock().unwrap().iter().cloned().collect();
         let e = with_ffmpeg_tail(base, &self.path, &tail);
         *self.err.lock().unwrap() = Some(e.clone());
@@ -546,6 +564,38 @@ mod tests {
         }
         assert_eq!(VideoCodec::parse("prores"), None);
         assert_eq!((VideoCodec::H264Lossless.ext(), VideoCodec::Dnxhr444.ext(), VideoCodec::H264Crf12.ext()), ("mp4", "mov", "mp4"));
+    }
+
+    /// senior Rust review 2026-10-26 S1: DNxHR 444 under 256x120 is a bad-request when the writer is set up (before
+    /// keying), not ffmpeg's "Broken pipe" at the first frame; 256x120 itself is taken
+    #[test]
+    fn dnxhr_below_its_smallest_frame_is_a_bad_request_up_front() {
+        let cfg = WriterConfig { codec: VideoCodec::Dnxhr444, ..WriterConfig::default() };
+        let p = std::env::temp_dir().join(format!("ck-dnx-{}.mov", std::process::id()));
+        // loop: NOT-WORTH — the sizes ffmpeg 8.0.1 refused
+        for (w, h) in [(200, 150), (255, 130), (129, 300), (255, 2000), (321, 119)] {
+            let e = VideoWriter::new(&p, 24.0, w, h, &cfg, "iec61966-2-1").err().unwrap_or_else(|| panic!("{w}x{h} was taken"));
+            assert_eq!(e.code, crate::ErrorCode::BadRequest, "{w}x{h}");
+            assert!(e.message.contains(&format!("at least 256x120; this clip is {w}x{h}")), "{}", e.message);
+        }
+        assert!(!p.exists(), "nothing was started");
+    }
+
+    /// S1 too: ffmpeg's first line (its reason) is kept next to the last TAIL_LINES
+    #[test]
+    fn the_tail_keeps_ffmpegs_first_line() {
+        let mut t = std::collections::VecDeque::new();
+        // loop: NOT-WORTH — ten test lines
+        for i in 0..10 {
+            push_tail(&mut t, format!("l{i}"));
+        }
+        assert_eq!(Vec::from(t), ["l0", "l4", "l5", "l6", "l7", "l8", "l9"]);
+        let mut short = std::collections::VecDeque::new();
+        // loop: NOT-WORTH — three test lines
+        for i in 0..3 {
+            push_tail(&mut short, format!("l{i}"));
+        }
+        assert_eq!(Vec::from(short), ["l0", "l1", "l2"]);
     }
 
     #[test]

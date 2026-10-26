@@ -232,7 +232,7 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
 - Rust engine: a request line that isn't UTF-8 text, a `cancel` without an `id`, a
   `run` option outside its documented range (`hint_quality`, `carry_hint_quality`,
   `despill_strength`: 0–1; `model_scale` above 0 and at most 2; `linear_brightness` and `linear_contrast` above 0; `start_mode` one of its three; `seed` a whole number ≥ 0; for video output a `video_codec` it doesn't know, a `preset` or `pix_fmt` libx264 doesn't take, a
-  `crf` outside 0–51, or 0–63 for 10-bit formats, a 4:2:0 `pix_fmt` at an odd width or height or a 4:2:2 one at an odd width (found
-  once the clip is probed, before keying); `frame_dir_fps` at 0 or below) or a number that isn't finite (`"nan"`, `"inf"`) is a
+  `crf` outside 0–51, or 0–63 for 10-bit formats, a 4:2:0 `pix_fmt` at an odd width or height or a 4:2:2 one at an odd width, `dnxhr444` below 256x120
+  (ffmpeg's DNxHR encoder refuses smaller frames) (found once the clip is probed, before keying); `frame_dir_fps` at 0 or below) or a number that isn't finite (`"nan"`, `"inf"`) is a
   `bad-request` (for a `run`, with its id, before anything loads); the engine keeps
   reading. An option that isn't a number at all stays an `input` error.
