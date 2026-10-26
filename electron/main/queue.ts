@@ -242,15 +242,18 @@ export class Queue {
     this.deps.changed();
   }
 
-  /** App quit: kill whatever runs, no state updates needed. */
+  /**
+   * App quit: kill whatever runs; the running job ends as cancelled, its started files deleted before the app exits and
+   * its log saying so (bug hunt 2026-10-26 Q1: the files were left behind, and the engine's exit was logged as a crash).
+   */
   shutdown(): void {
     this.running = false;
+    const job = this.current;
+    this.current = null;
     this.proc?.kill();
-    if (this.current) {
-      this.cleanTemp(this.current.id);
-      const st = this.staged.get(this.current.id);
-      if (st) discard(this.current.outputDir, st.madeOutputDir);
-    }
+    // its exit is this quit, not a failure of the job
+    this.proc = null;
+    if (job) this.finish(job, "cancelled", null, true);
   }
 
   private async ensureEngine(): Promise<boolean> {
@@ -441,11 +444,11 @@ export class Queue {
   // Every ending removes the job's temp folder: the engine deletes its files but not the folder (an empty
   // folder per finished job was left in the cache), and a killed engine leaves its files too.
   // A failed / cancelled / crashed job's started files go with its staging folder; the row says so (backlog row 19).
-  private finish(job: Job, status: "done" | "failed" | "cancelled", error: Job["error"]): void {
+  private finish(job: Job, status: "done" | "failed" | "cancelled", error: Job["error"], quitting = false): void {
     this.cleanTemp(job.id);
     const st = this.staged.get(job.id);
     this.staged.delete(job.id);
-    job.partial = status !== "done" && st ? discard(job.outputDir, st.madeOutputDir) : null;
+    job.partial = status !== "done" && st ? discard(job.outputDir, st.madeOutputDir, quitting) : null;
     job.status = status;
     job.finishedAt = this.now();
     job.error = error;

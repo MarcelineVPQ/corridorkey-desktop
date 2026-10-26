@@ -344,6 +344,31 @@ describe("the queue's engine after the queue", () => {
   });
 });
 
+// bug hunt 2026-10-26 Q1 (measured in an isolated copy: the window closed during an EXR job left 1.7 GB of its frames in
+// a hidden .corridorkey-discarded-* folder in the output folder, and its log said "failed: The engine stopped
+// unexpectedly (SIGKILL)")
+describe("the app quits while a job runs", () => {
+  it("deletes the job's started files before it returns, and the job ends as cancelled", async () => {
+    const h = harness();
+    const j = job("q");
+    h.q.add(j);
+    await h.q.start();
+    await h.flush();
+    const staging = String(h.sent[0].output_dir);
+    mkdirSync(join(staging, "q_alpha_exr"), { recursive: true });
+    // loop: NOT-WORTH — a few frames in a test
+    for (let i = 0; i < 5; i++) writeFileSync(join(staging, "q_alpha_exr", `q_alpha.${1001 + i}.exr`), "frame");
+    h.q.shutdown();
+    // nothing of the job is left (the folder it made goes too, empty)
+    expect(existsSync(j.outputDir) ? readdirSync(j.outputDir) : []).toEqual([]);
+    expect(j.status).toBe("cancelled");
+    // the killed engine's exit is the quit, not a crash
+    h.exit(null, "SIGKILL");
+    expect(j.status).toBe("cancelled");
+    expect(j.error).toBeNull();
+  });
+});
+
 describe("engineOptions", () => {
   it("sends a manual window only in manual mode and hints only for their mode", () => {
     const auto = engineOptions({ ...DEFAULT_OPTIONS, hintMode: "none", hintFirstFrame: "/h.png" }, "video");

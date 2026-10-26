@@ -115,8 +115,9 @@ function removeStagingWhenEmpty(staging: string): void {
 }
 
 /** After a failure, cancel or crash: removes the staging folder (only this job's files) and the output folder too
- * when this job made it and it is left empty. Returns what the job's row says about it. */
-export function discard(outputDir: string, madeOutputDir: boolean): string {
+ * when this job made it and it is left empty. Returns what the job's row says about it. `now`: the app quits, so the
+ * delete runs before it returns (a background one would be cut short with the process). */
+export function discard(outputDir: string, madeOutputDir: boolean, now = false): string {
   const staging = stagingDir(outputDir);
   let n = 0;
   try {
@@ -138,22 +139,37 @@ export function discard(outputDir: string, madeOutputDir: boolean): string {
       return `Couldn't remove the files it had started in ${staging}: ${(e as Error).message}`;
     }
   }
+  const removeMadeFolder = () => {
+    if (!madeOutputDir) return;
+    try {
+      // loop: NOT-WORTH — one rmdir; it fails (and is left) when anything else is in the folder
+      rmdirSync(outputDir);
+    } catch {
+      // error: NOT-WORTH — the folder holds something else now: it stays
+    }
+  };
+  const files = n === 1 ? "the 1 file it had started" : `the ${n} files it had started`;
+  const said = n === 0 ? "It hadn't written any files." : `Removed ${files}; earlier results in the folder are untouched.`;
+  if (now) {
+    // the app quits: measured (bug hunt 2026-10-26 Q1), a background delete was cut short by the exit and left 1.7 GB of a
+    // cancelled EXR job's frames hidden in the output folder; the quit waits for it instead
+    try {
+      // loop: NOT-WORTH — one delete at quit (the window is closing); ≤ 2 retries 50 ms apart [bounded: 2 retries]
+      rmSync(aside, { recursive: true, force: true, maxRetries: 2, retryDelay: 50 });
+      removeMadeFolder();
+    } catch (e) {
+      // error: SHOWN — logged; prepare() removes a leftover aside folder at the next run into this folder
+      console.error(`[partial] could not remove ${aside}:`, e);
+    }
+    return said;
+  }
   // loop: NOT-WORTH — one background delete per failed job; ≤ 2 retries 50 ms apart for a file a killed engine was still
   // creating [bounded: 2 retries]
   const done = rm(aside, { recursive: true, force: true, maxRetries: 2, retryDelay: 50 })
-    .then(() => {
-      if (!madeOutputDir) return;
-      try {
-        // loop: NOT-WORTH — one rmdir; it fails (and is left) when anything else is in the folder
-        rmdirSync(outputDir);
-      } catch {
-        // error: NOT-WORTH — the folder holds something else now: it stays
-      }
-    })
+    .then(removeMadeFolder)
     // error: SHOWN — logged; prepare() removes a leftover aside folder at the next run into this folder
     .catch((e: unknown) => console.error(`[partial] could not remove ${aside}:`, e))
     .finally(() => discarding.delete(done));
   discarding.add(done);
-  const files = n === 1 ? "the 1 file it had started" : `the ${n} files it had started`;
-  return n === 0 ? "It hadn't written any files." : `Removed ${files}; earlier results in the folder are untouched.`;
+  return said;
 }
