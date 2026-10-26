@@ -77,7 +77,7 @@ ORT=$(ls "$RUNTIME"/onnxruntime/capi/libonnxruntime.so.* 2>/dev/null | head -1)
 [ -n "$ORT" ] || die "no ONNX Runtime under $RUNTIME (--runtime)"
 LD="$RUNTIME/onnxruntime/capi:$RUNTIME/nvidia/cu13/lib:$RUNTIME/nvidia/cudnn/lib"
 NAME=$(basename "${PLATE%/}"); NAME=${NAME%.*}
-OUT=${OUT:-$SCRATCH/window-sweep/$(date +%F)-$NAME$([ "$CPU" = 1 ] && echo -cpu)}
+OUT=${OUT:-$SCRATCH/window-sweep/$(date +%F)-$NAME$([ "$CPU" = 1 ] && echo -cpu || true)}
 
 run() { printf '+'; printf ' %q' "$@"; printf '\n'; [ "$DRY" = 1 ] || "$@"; }
 wait_mem() {

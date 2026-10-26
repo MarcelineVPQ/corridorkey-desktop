@@ -197,8 +197,8 @@ for c in "${CLIP_LIST[@]}"; do
 done
 echo "clips: ${CLIP_NAMES[*]}"
 OUT=${OUT:-$SCRATCH/mac-gate/$(date +%F)-$SHORT}
-WIN_TAG="w${CHUNK}-${STRIDE}$([ "$LOW_VRAM" = true ] && echo low)${FRAMES:+-f$FRAMES}"
-KEY="$SHORT-$PROVIDER$([ "$PROVIDER" = coreml ] && echo "-$COREML_UNITS")-$PRECISION-$WIN_TAG"
+WIN_TAG="w${CHUNK}-${STRIDE}$([ "$LOW_VRAM" = true ] && echo low || true)${FRAMES:+-f$FRAMES}"
+KEY="$SHORT-$PROVIDER$([ "$PROVIDER" = coreml ] && echo "-$COREML_UNITS" || true)-$PRECISION-$WIN_TAG"
 echo "run: $KEY → report in $OUT"
 if [ "$DRY" = 0 ]; then
   mkdir -p "$OUT"
@@ -213,7 +213,7 @@ BENCH_OPTS=(--option 'output_format="exr"' --option 'exr_dtype="float"' --option
 # the Mac's side only: Core ML's compute units
 MAC_OPTS=()
 [ "$PROVIDER" != coreml ] || MAC_OPTS+=(--env "CK_ENGINE_COREML_UNITS=$COREML_UNITS")
-SETTINGS="$([ "$PROVIDER" = coreml ] && echo "Core ML units $COREML_UNITS, ")window $CHUNK/$STRIDE$([ "$LOW_VRAM" = true ] && echo ' low-memory'), precision $PRECISION, EXR float, outputs alpha+fg${FRAMES:+, first $FRAMES frames}"
+SETTINGS="$([ "$PROVIDER" = coreml ] && echo "Core ML units $COREML_UNITS, " || true)window $CHUNK/$STRIDE$([ "$LOW_VRAM" = true ] && echo ' low-memory' || true), precision $PRECISION, EXR float, outputs alpha+fg${FRAMES:+, first $FRAMES frames}"
 # where things are, for every step
 SET=$(basename "$MODELS")
 FACTS="$OUT/facts.txt"
