@@ -26,6 +26,7 @@
 // from the second job's `run` line.
 // Defaults for both engines: outputs alpha+fg, automatic memory window, no hint.
 // GPU guard: refuses to start, and stops between clips, while Sonata runs or another process holds > 1 GiB.
+// CK_GPU_IGNORE_SONATA=1 skips the Sonata half (only on Marcy's word that Sonata won't be used; printed when it applies).
 import { spawn, execFileSync } from "node:child_process";
 import { createInterface } from "node:readline";
 import { appendFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -211,7 +212,9 @@ export function gpuBusy(ownPids = []) {
       .split("\n")
       // loop: NOT-WORTH — pgrep's few lines, once per clip
       .filter((l) => l.trim() && !l.includes("claude-scratch") && !l.includes("pgrep"));
-    if (out.length) return `Sonata is running (${out[0]})`;
+    // CK_GPU_IGNORE_SONATA=1: only on Marcy's word that Sonata won't be used (she's away; 2026-10-26); said in the log
+    if (out.length && process.env.CK_GPU_IGNORE_SONATA === "1") console.error(`GPU guard: Sonata is running (${out[0]}), ignored: CK_GPU_IGNORE_SONATA=1`);
+    else if (out.length) return `Sonata is running (${out[0]})`;
   } catch {
     // pgrep exits 1 when nothing matches
   }

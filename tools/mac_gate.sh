@@ -488,6 +488,8 @@ else
     echo "the reference for this commit and settings is already there: $REF"
   else
     sonata=$(pgrep -fai 'mount_sonata|Sonata.AppImage' | grep -v -e claude-scratch -e pgrep || true)
+    # CK_GPU_IGNORE_SONATA=1: only on Marcy's word that Sonata won't be used (2026-10-26); printed when it applies
+    if [ -n "$sonata" ] && [ "${CK_GPU_IGNORE_SONATA:-}" = 1 ]; then echo "GPU guard: Sonata is running, ignored: CK_GPU_IGNORE_SONATA=1" >&2; sonata=""; fi
     [ -z "$sonata" ] || die "Marcy's Sonata is running ($sonata): no GPU work now. Re-run later, or pass --ref DIR."
     [ "$DRY" = 1 ] || command -v nvidia-smi >/dev/null || die "no nvidia-smi: this PC can't key the CUDA reference (--ref DIR)"
     # the engine at this commit (the bundled Linux build; cargo rebuilds only what changed)

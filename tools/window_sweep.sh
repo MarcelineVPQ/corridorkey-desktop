@@ -116,6 +116,8 @@ for w in ${WINDOWS//,/ }; do
     run flock "$SCRATCH/heavy.lock" "$MEMRUN" 12 env CUDA_VISIBLE_DEVICES= "${bench[@]}"
   else
     sonata=$(pgrep -fai 'mount_sonata|Sonata.AppImage' | grep -v -e claude-scratch -e pgrep || true)
+    # CK_GPU_IGNORE_SONATA=1: only on Marcy's word that Sonata won't be used (2026-10-26); printed when it applies
+    if [ -n "$sonata" ] && [ "${CK_GPU_IGNORE_SONATA:-}" = 1 ]; then echo "GPU guard: Sonata is running, ignored: CK_GPU_IGNORE_SONATA=1" >&2; sonata=""; fi
     [ -z "$sonata" ] || die "Marcy's Sonata is running ($sonata): no GPU work now (finished windows are kept in $OUT)"
     run flock "$SCRATCH/heavy.lock" "$MEMRUN" 18 flock "$SCRATCH/gpu.lock" "${bench[@]}"
   fi

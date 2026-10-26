@@ -174,7 +174,12 @@ SETTINGS="${BUDGET} GB graphics-memory budget, automatic temporal window, alpha 
 
 step() { printf '\n== %s (%s)\n' "$*" "$(date +%T)"; }
 run() { printf '+'; printf ' %q' "$@"; printf '\n'; [ "$DRY" = 1 ] || "$@"; }
-sonata() { pgrep -fai 'mount_sonata|Sonata.AppImage' | grep -v -e claude-scratch -e pgrep || true; }
+# CK_GPU_IGNORE_SONATA=1: only on Marcy's word that Sonata won't be used (2026-10-26); printed when it applies
+sonata() {
+  local s; s=$(pgrep -fai 'mount_sonata|Sonata.AppImage' | grep -v -e claude-scratch -e pgrep || true)
+  if [ -n "$s" ] && [ "${CK_GPU_IGNORE_SONATA:-}" = 1 ]; then echo "GPU guard: Sonata is running, ignored: CK_GPU_IGNORE_SONATA=1" >&2; return; fi
+  printf '%s' "$s"
+}
 wait_mem() {
   [ "$DRY" = 1 ] && return 0
   local deadline=$(( $(date +%s) + MEM_WAIT_MIN * 60 )) avail
