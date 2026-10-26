@@ -34,11 +34,15 @@ Corridor Digital's AI green-screen keyer (model by Zachary Harris). Drop clips i
 mode and outputs, and watch real progress: frames written, the temporal window the runtime
 chose from your free graphics memory, and stills of the results.
 
-Status: 1.0 is almost ready, for Linux, Windows and macOS (Apple Silicon).
+Status: 1.0 is almost ready. The first development build, 1.0.0-dev.1, keys on Linux and Windows with an NVIDIA
+graphics card. The macOS disk image installs and opens but can't key yet (macOS, honestly, below).
 
 ## Requirements
 
 - Linux (the AppImage) or Windows 10/11 (the installer), x64, with an NVIDIA graphics card (RTX 30-series or newer).
+  **On Linux and Windows the NVIDIA card is required**: the engine keys only on CUDA. AMD and Intel graphics cards aren't
+  supported, and without an NVIDIA card nothing falls back to the CPU: a job stops with "CorridorKey needs an NVIDIA
+  graphics card with CUDA." (AMD would need ONNX Runtime's MIGraphX or DirectML build; not in 1.0.)
 - macOS 14 or newer on Apple Silicon (M1 or newer; the disk image). Intel Macs aren't supported.
 - Nothing else to set up: the engine comes with the app, and on first start the setup downloads the GPU runtime and
   the CorridorKey models (a 4.9 GB download on Linux and Windows, about 3.3 GB on macOS, once). If `ffmpeg` is
@@ -64,12 +68,23 @@ your PC" the first time. Click **More info**, then **Run anyway**. It's asked on
 **keying on an NVIDIA card under Windows has not been tested yet**: we don't have a real Windows PC with one. Every
 speed and quality number in this README was measured on Linux. If you try it on Windows, please tell us how it goes.
 
-**macOS, honestly:** a great many VFX artists work on Macs, so macOS is part of 1.0. The app runs on Apple Silicon,
-with the engine on ONNX Runtime's Core ML backend (Apple's GPU and Neural Engine), and it's built, installed and
-driven page by page on GitHub's Apple Silicon runners. The Core ML engine is in progress: all five networks reach
-full Core ML coverage after exact graph rewrites; the Core ML provider comes next. GitHub's runners are virtual machines without
-the GPU or the Neural Engine, so **Mac keying is measured on a real Apple Silicon Mac** (an M6 Mac mini,
-`tools/mac_gate.sh`: mattes against CUDA and speed); 1.0 includes macOS only if that gate passes. The disk image is signed (Developer ID) and notarized by Apple: Gatekeeper accepts it as "Notarized Developer ID".
+**macOS, honestly:** a great many VFX artists work on Macs, so macOS is on the way, but **the Mac build can't key
+yet**. In 1.0.0-dev.1 the disk image is a preview: it's signed (Developer ID) and notarized by Apple, installs, opens
+and works through its pages (built and driven page by page on GitHub's Apple Silicon runners), but a job doesn't run.
+There's no NVIDIA card on a Mac, so the Mac engine uses ONNX Runtime's Core ML backend (Apple's GPU and Neural Engine)
+instead of CUDA, and that path needs more development before it keys:
+
+- **Core ML models in setup** (backlog row 59): Core ML compiles for fixed sizes, so the Mac needs its own model set.
+  It's built but not published, and setup doesn't download it yet. Until it does, a Mac job stops on the missing set.
+- **The app asks for Core ML** (row 58): built, not yet tried on a real Mac.
+- **HD only** (row 60): the one Core ML set is for HD (clips up to 1280×1080). 4K needs its own set or per-size
+  builds in the engine, measured on a Mac (compile time, memory on 16 GB, speed).
+- **Proven on a real Mac** (row 24): GitHub's runners are virtual Macs without the GPU or the Neural Engine, so Mac
+  keying is measured on a real Apple Silicon Mac (an M6 Mac mini, `tools/mac_gate.sh`): mattes within fp16 rounding of
+  CUDA on the same clips, and the speed. macOS is in 1.0 only if that gate passes; otherwise 1.0 is Linux and Windows
+  and the Mac follows in 1.1.
+- **No TensorRT** (NVIDIA only), video outputs are lossless H.264 (ProRes 4444 XQ comes with the Mac work), and the Mac
+  updates from the releases page by hand, not by itself (row 57).
 
 ## Install size
 
