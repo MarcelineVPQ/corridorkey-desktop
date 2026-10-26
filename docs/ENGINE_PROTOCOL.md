@@ -205,7 +205,9 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
   startup from its command line and `CK_ENGINE_*` variables (docs/ENGINE_RUST.md "Knobs").
 - `provider` (Rust engine, additive) says what really runs the job: the
   provider and precision, and for TensorRT the shape range, whether its
-  engines are built or reused, and every network that fell back to CUDA, with why.
+  engines are built or reused, and every network that fell back to CUDA, with why. In a low-VRAM TensorRT job it
+  comes after the first phase's networks load and again whenever a later phase's network falls back (`provider`
+  and `fallbacks` then cover the job so far; `pieces` the networks loaded now).
 - `optimize` (Rust engine, TensorRT only) is a one-time engine build for the
   clip's shape range, one `progress` per network built (`detail`: "stage 1 (4/5)");
   the builder reports no fraction, so it has no `p`. `build_s` in the second

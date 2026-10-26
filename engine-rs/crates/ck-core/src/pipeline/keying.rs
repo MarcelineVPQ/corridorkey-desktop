@@ -266,13 +266,18 @@ impl<L: Loader> Pipeline<L> {
 
     /// TensorRT jobs: the `provider` reply once the first phase's networks are loaded (which run on TensorRT,
     /// which fell back to CUDA and why, the engines built in this job).
-    fn send_trt_provider(&self, sink: &mut dyn Sink) {
+    /// (`pieces`: the networks loaded now; `provider` and `fallbacks` cover the whole job so far: sent again by `ensure`
+    /// when a later low-VRAM phase adds a fallback)
+    pub(super) fn send_trt_provider(&mut self, sink: &mut dyn Sink) {
         // loop: NOT-WORTH — five networks, once per TensorRT job
         let pieces: BTreeMap<&str, &str> = self.nets.iter().map(|(k, n)| (*k, n.provider().name())).collect();
         // loop: NOT-WORTH — five networks, once per TensorRT job
         let built: BTreeMap<&str, f64> = self.trt_seconds.iter().filter(|(_, v)| v.1).map(|(k, v)| (*k, v.0)).collect();
-        sink.send(json!({"type": "provider", "provider": if self.trt_fallbacks.is_empty() { "tensorrt" } else if self.trt_fallbacks.len() == pieces.len() { "cuda" } else { "tensorrt+cuda" },
+        // "cuda" only when every network fell back (in a low-VRAM phase only some are loaded)
+        let all = self.trt_fallbacks.len() >= crate::runtime::PIECES.len();
+        sink.send(json!({"type": "provider", "provider": if self.trt_fallbacks.is_empty() { "tensorrt" } else if all { "cuda" } else { "tensorrt+cuda" },
             "pieces": pieces, "fallbacks": self.trt_fallbacks, "build_s": built}));
+        self.trt_reported = Some(self.trt_fallbacks.len());
     }
 
     /// Low-VRAM: the foundations prepass, C-RADIO and MoGe over the clip in chunks of 4 frames, their features to

@@ -138,6 +138,9 @@ pub struct Pipeline<L: Loader = OrtLoader> {
     preload_s: f64,
     /// this job's main-thread seconds around stage 2: [inputs, waiting for the render thread]
     s2_host: [f64; 2],
+    /// TensorRT jobs: the number of fallbacks the last `provider` reply carried (None: none sent yet), so a later
+    /// low-VRAM phase whose network falls back to CUDA sends it again
+    trt_reported: Option<usize>,
 }
 
 pub struct JobResult {
@@ -230,6 +233,7 @@ impl<L: Loader> Pipeline<L> {
             pending: Vec::new(),
             preload_s: 0.0,
             s2_host: [0.0; 2],
+            trt_reported: None,
         }
     }
 
@@ -360,6 +364,11 @@ impl<L: Loader> Pipeline<L> {
         if key.provider == Provider::CoreMl {
             self.send_coreml_provider(key, sink);
         }
+        // a later low-VRAM phase's network fell back to CUDA: the `provider` reply sent after the first phase said
+        // "tensorrt" with no fallbacks (measured: a broken stage-1 engine ran on CUDA, the only reply said TensorRT)
+        if key.provider == Provider::TensorRt && self.trt_reported.is_some_and(|n| n != self.trt_fallbacks.len()) {
+            self.send_trt_provider(sink);
+        }
         Ok(())
     }
 
@@ -461,6 +470,7 @@ impl<L: Loader> Pipeline<L> {
         self.unload();
         self.trt_fallbacks.clear();
         self.trt_seconds.clear();
+        self.trt_reported = None;
     }
 
     /// Drop loads started ahead (a job ends or restarts).
@@ -1019,6 +1029,7 @@ impl Pipeline<OrtLoader> {
         self.unload();
         self.trt_fallbacks.clear();
         self.trt_seconds.clear();
+        self.trt_reported = None;
         self.key = Some(key.clone());
         let Some(dir) = key.trt_cache.clone() else { return Ok(()) };
         let timing = dir.parent().map(|p| p.join("timing.cache")).unwrap_or_else(|| dir.join("timing.cache"));

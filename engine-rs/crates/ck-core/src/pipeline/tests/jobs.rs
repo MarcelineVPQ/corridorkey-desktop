@@ -247,6 +247,26 @@ fn a_network_tensorrt_cant_load_runs_on_cuda_at_the_same_window() {
     assert_eq!(out.frames(), vec![9, 9]);
 }
 
+/// bug hunt 2026-10-26 (GPU, a broken stage-1 engine in a low-VRAM TensorRT job): the only `provider` reply came after
+/// the RVM phase and said "tensorrt" with no fallbacks while stage 1 ran on CUDA.
+#[test]
+fn a_later_low_vram_phase_falling_back_is_reported() {
+    let mut cfg = FakeCfg::new(SHAPE);
+    cfg.fail_load = Some(Arc::new(|piece, prov| (prov == Provider::TensorRt && piece == "stage1").then(|| Error::engine("no engine".into()))));
+    let mut h = Harness::new(cfg, 9, options(json!({})));
+    let dir = h.job.temp_dir.join("trt");
+    let k = ModelKey { trt_cache: Some(dir.clone()), ..key(Provider::TensorRt) };
+    let trt = move |p: &str| TrtSettings { dir: dir.join(p) };
+    let out = h.keying(&k, Some(&trt), 4, 2, true);
+    out.res.as_ref().unwrap();
+    let prov = out.sink.of_type("provider");
+    let last = prov.last().unwrap();
+    assert_eq!(last["provider"], "tensorrt+cuda", "{prov:?}");
+    assert!(last["fallbacks"]["stage1"].as_str().unwrap().contains("no engine"), "{prov:?}");
+    assert_eq!(last["pieces"]["stage1"], "cuda");
+    assert_eq!(out.frames(), vec![9, 9]);
+}
+
 #[test]
 fn every_network_falling_back_is_a_cuda_job() {
     let mut cfg = FakeCfg::new(SHAPE);
