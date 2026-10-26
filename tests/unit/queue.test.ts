@@ -353,7 +353,10 @@ describe("engineOptions", () => {
     const d = engineOptions(DEFAULT_OPTIONS, "video");
     expect(d).not.toHaveProperty("model_scale");
     expect(d).not.toHaveProperty("linear_brightness");
-    expect(engineOptions({ ...DEFAULT_OPTIONS, modelScale: 0.5 }, "frames")).toMatchObject({ model_scale: 0.5 });
+    expect(engineOptions({ ...DEFAULT_OPTIONS, modelScale: 0.5 }, "frames", false, true)).toMatchObject({ model_scale: 0.5 });
+    // the PyTorch reference engine runs at full (its panel says "Full") and refuses any other scale as an input error
+    // (bug hunt 2026-10-26 P1: a clip set to ½ under the Rust engine failed on the PyTorch engine)
+    expect(engineOptions({ ...DEFAULT_OPTIONS, modelScale: 0.5 }, "frames", false, false)).not.toHaveProperty("model_scale");
     const lin = { ...DEFAULT_OPTIONS, linearBrightness: 1.5, linearContrast: 1.2, linearContrastPivot: 0.25 };
     expect(engineOptions(lin, "video")).toMatchObject({ linear_brightness: 1.5, linear_contrast: 1.2, linear_contrast_pivot: 0.25 });
     // a frame folder: the original ignores the adjust there, so it is never sent

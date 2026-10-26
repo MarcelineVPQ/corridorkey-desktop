@@ -39,8 +39,9 @@ export interface QueueDeps {
 /**
  * The engine's `options` object for a job (docs/ENGINE_PROTOCOL.md). `tensorrt`: the Rust engine runs it on
  * TensorRT (index.ts sends it only with the setting on and the TensorRT parts installed; never to the PyTorch engine).
- * `rust`: the engine is the Rust engine, which takes `video_codec`; the PyTorch reference engine writes the
- * original's H.264 CRF 12 whatever the job says (the panel says so), so it never gets the key.
+ * `rust`: the engine is the Rust engine, which takes `video_codec`, `model_scale` and `input_bit_depth`; the PyTorch
+ * reference engine writes the original's H.264 CRF 12 at full resolution from an 8-bit read whatever the job says (the
+ * panel says so), so it never gets those keys.
  */
 export function engineOptions(o: JobOptions, kind: "video" | "frames", tensorrt = false, rust = false): Record<string, unknown> {
   const out: Record<string, unknown> = {
@@ -65,8 +66,9 @@ export function engineOptions(o: JobOptions, kind: "video" | "frames", tensorrt 
     out.frame_dir_fps = o.frameDirFps;
     out.frame_dir_linear = o.frameDirLinear;
   }
-  // internal resolution (backlog row 42): sent only when not full, so a job at full sends what it always did
-  if (o.modelScale !== 1) out.model_scale = o.modelScale;
+  // internal resolution (backlog row 42): sent only when not full, so a job at full sends what it always did; the Rust
+  // engine only: the PyTorch reference engine runs at full (its panel says so) and refuses any other scale
+  if (rust && o.modelScale !== 1) out.model_scale = o.modelScale;
   // the linear adjust (row 45): video clips only (the original's frame-folder probe ignores it), and only when set
   if (kind === "video" && (o.linearBrightness !== 1 || o.linearContrast !== 1)) {
     out.linear_brightness = o.linearBrightness;
