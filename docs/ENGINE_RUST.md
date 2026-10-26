@@ -208,6 +208,13 @@ MAE 3.41e-4, max 6.25e-2, 3.08 % > 1/255; PyTorch bf16 5.00e-4, 2.23e-1, 3.57 %.
 
 ## Graphics memory: the measured table (BACKLOG row 41, 2026-10-24)
 
+**Re-measured on model set onnx.4 (2026-10-26).** This section is the onnx.3 measurement. The app ships onnx.4 since
+2026-10-25; the same sweep on it (85 points: 69 ran, 16 out of memory; engine 1afed1c) found this table under the
+measured peak at 31 of 69 points (up to 16 %) and 1920×1080 48/24 low-VRAM out of memory where it had run at 11.35
+GiB. `vram.rs` now holds the onnx.4 table, built by the same rules (its header says how, and how the three 960×720
+low-VRAM windows onnx.4 didn't measure are filled); `measured_peaks_are_bounded` holds the onnx.4 points: the estimate is
+at least 0.12 GiB over every one, 6-7 % over at 48 of 69, within 15 % at 54, up to 57 % over at small windows.
+
 The peak estimate (`vram.rs`, one function for the automatic window, the `memory` reply and the `estimate` command)
 is this engine's own measurement: peak graphics memory of the engine's process tree (nvidia-smi every 250 ms,
 `tools/engine_bench.mjs`), RTX 5080 16 GB, ONNX Runtime 1.31 CUDA, a 14 GiB budget, the engine built from main that

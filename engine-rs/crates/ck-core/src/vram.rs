@@ -2,23 +2,34 @@
 //! chosen from it (runtime.select_vram_profile's search with this engine's numbers).
 //!
 //! The table is the measured peak (GiB: nvidia-smi over the engine's process tree, tools/engine_bench.mjs; RTX 5080,
-//! ONNX Runtime 1.31 CUDA, 2026-10-24, docs/BACKLOG.md row 41) per padded model-input size (megapixels: 960x720,
-//! 1280x1080, 1920x1080, 2560x1440, 3200x1800, 4096x2160) and window length, the highest of the clips and runs at
-//! each point, rounded up to 0.01 GiB, then made monotone (never lower for a longer window or a larger size). A
-//! window not measured at a size takes the next measured window's peak; past the largest one that ran, it is
-//! proportional to the window, and at least 14 GiB where the 16 GB card ran out of memory (those runs had a 14 GiB
-//! budget). It replaced the upstream runtime's PyTorch table, which was up to 32 % under real peaks and 73 % over.
+//! ONNX Runtime 1.31 CUDA, docs/BACKLOG.md row 41) on model set 2.0.0-onnx.4, the set the app ships (measured
+//! 2026-10-26, engine 1afed1c: 69 points ran, 16 ran out of memory), per padded model-input size (megapixels:
+//! 960x720, 1280x1080, 1920x1080, 2560x1440, 3200x1800, 4096x2160) and window length, the highest of the clips and
+//! runs at each point, rounded up to 0.01 GiB, then made monotone (never lower for a longer window or a larger size).
+//! A window not measured at a size takes the next measured window's peak; past the largest one that ran, it is
+//! proportional to the window (from the highest peak measured at that size up to that window), and at least 14 GiB
+//! where the 16 GB card ran out of memory (those runs had a 14 GiB budget). One exception: 960x720 low-VRAM at 8, 16
+//! and 24 frames, measured on onnx.3 (2.73 / 3.30 / 4.38) but not on onnx.4, whose measured neighbours there rose up
+//! to 26 % (48 frames 6.80 -> 8.43, 80 frames 9.20 -> 11.58), so onnx.3's values are no longer shown to be a bound;
+//! they take 1280x1080's measured onnx.4 peaks at the same windows (3.95 / 5.51 / 8.04, 45-84 % above onnx.3's), the
+//! reading for an unmeasured size, rather than the next measured window's 8.43, which the size rule would have
+//! carried into 1280x1080's short windows. The onnx.3 table (2026-10-24) was under onnx.4's measured peaks at 31 of
+//! 69 points, up to 16 %, and let the automatic window pick 1920x1080 48/24 low-VRAM, which runs out of memory on
+//! onnx.4. The first measured table replaced the upstream runtime's PyTorch table, which was up to 32 % under real
+//! peaks and 73 % over.
 //!
 //! Read so that it stays an upper bound (estimate_peak_vram_gb):
 //! - window: the next table window at or above (the peak never falls as the window grows); past the largest,
 //!   proportional to the window;
 //! - size: the next measured size at or above; below the smallest, the smallest's; above the largest, proportional
 //!   to the megapixels;
-//! - then UPLIFT on top: the largest spread between clips and runs at one point (5.3 %), rounded up.
+//! - then UPLIFT on top: the largest spread between clips and runs at one point (5.3 % on onnx.3, 2.8 % on onnx.4;
+//!   kept at onnx.3's), rounded up.
 //!
 //! Every measured peak is in the tests (`measured_peaks_are_bounded`). Between the measured sizes the bound rests on
 //! the peak growing with the size, which the measurements break at single points (cuDNN picks its algorithms per
-//! shape: 1920x1080 at window 2 or 4 peaks higher than 2560x1440): an unmeasured size can be over the estimate.
+//! shape: 1920x1080 at window 2 or 4 peaks higher than 2560x1440, 3200x1800 at 8 low-VRAM 2.5 GiB higher than
+//! 4096x2160, which the 4096x2160 row therefore carries): an unmeasured size can be over the estimate.
 
 /// (window lengths, rows of (megapixels, peak GiB per window length)) for low_vram false / true.
 type Table = (&'static [usize], &'static [(f64, &'static [f64])]);
@@ -26,23 +37,23 @@ type Table = (&'static [usize], &'static [(f64, &'static [f64])]);
 const NORMAL: Table = (
     &[8, 16, 24, 48, 80],
     &[
-        (0.786432, &[4.37, 4.75, 5.55, 7.11, 8.00]),
-        (1.47456, &[5.13, 5.90, 7.46, 10.54, 17.57]),
-        (2.21184, &[5.90, 7.00, 9.31, 18.61, 31.01]),
-        (3.93216, &[6.02, 7.91, 10.14, 20.28, 33.80]),
-        (6.144, &[9.35, 18.70, 28.05, 56.09, 93.48]),
-        (8.912896, &[11.02, 22.03, 33.04, 66.08, 110.12]),
+        (0.786432, &[4.54, 5.09, 6.06, 8.12, 9.84]),
+        (1.47456, &[5.33, 6.29, 8.05, 11.73, 19.54]),
+        (2.21184, &[6.17, 7.57, 10.16, 20.31, 33.84]),
+        (3.93216, &[6.44, 9.34, 12.24, 24.47, 40.79]),
+        (6.144, &[10.23, 20.45, 30.68, 61.35, 102.25]),
+        (8.912896, &[10.83, 21.65, 32.47, 64.93, 108.21]),
     ],
 );
 const LOW: Table = (
     &[1, 2, 4, 8, 16, 24, 48, 56, 64, 80],
     &[
-        (0.786432, &[1.91, 2.61, 2.61, 2.73, 3.30, 4.38, 6.80, 9.20, 9.20, 9.20]),
-        (1.47456, &[1.91, 3.37, 3.58, 4.00, 4.96, 7.38, 8.47, 9.96, 10.65, 14.00]),
-        (2.21184, &[1.91, 4.26, 4.51, 5.19, 6.98, 9.83, 11.35, 13.25, 15.14, 18.92]),
-        (3.93216, &[2.21, 4.26, 4.51, 5.45, 8.68, 9.83, 17.22, 20.09, 22.96, 28.70]),
-        (6.144, &[3.16, 4.26, 5.92, 9.87, 19.73, 29.59, 59.18, 69.05, 78.91, 98.64]),
-        (8.912896, &[4.10, 4.45, 7.78, 9.87, 19.73, 29.59, 59.18, 69.05, 78.91, 98.64]),
+        (0.786432, &[1.92, 2.61, 2.61, 3.95, 5.51, 8.04, 8.43, 11.59, 11.59, 11.59]),
+        (1.47456, &[1.92, 3.37, 3.57, 3.95, 5.51, 8.04, 9.07, 11.59, 11.59, 14.31]),
+        (2.21184, &[1.93, 4.29, 4.48, 5.15, 7.81, 11.08, 22.15, 25.84, 29.53, 36.91]),
+        (3.93216, &[2.18, 4.29, 4.48, 6.34, 10.61, 11.08, 22.15, 25.84, 29.53, 36.91]),
+        (6.144, &[3.29, 4.29, 5.98, 11.80, 23.59, 35.39, 70.77, 82.57, 94.36, 117.95]),
+        (8.912896, &[4.25, 4.61, 7.80, 11.80, 23.59, 35.39, 70.77, 82.57, 94.36, 117.95]),
     ],
 );
 /// On top of the table (the module header).
@@ -112,7 +123,8 @@ impl Profile {
 /// `low_only` (a TensorRT job): low-VRAM mode only. The table's normal-mode peaks are measured on CUDA only, and
 /// with them a 16 GB card's free memory would put HD 48/24 and 4K 8/4 in the normal mode, where TensorRT's peaks
 /// are unmeasured; TensorRT keeps the low mode it had before the measured table (row 41) until they are measured.
-/// The window is the same as CUDA's (a low-mode peak is never above the normal one at the same window).
+/// The window is CUDA's, or shorter where the low mode's measured peak is above the normal one's (onnx.4: 960x720 at
+/// 80 frames).
 pub fn select_vram_profile(shape_hw: (usize, usize), num_frames: usize, budget_gb: f64, low_only: bool) -> Profile {
     let mp = (shape_hw.0 * shape_hw.1) as f64 / 1e6;
     let mut estimate = 0.0;
@@ -236,17 +248,17 @@ mod tests {
     fn table_points_and_reading() {
         let up = 1.0 + UPLIFT;
         // a measured size and window: the table's value plus the uplift
-        assert!((estimate_peak_vram_gb(1.47456, 48, true) - 8.47 * up).abs() < 1e-12);
-        assert!((estimate_peak_vram_gb(8.912896, 8, false) - 11.02 * up).abs() < 1e-12);
+        assert!((estimate_peak_vram_gb(1.47456, 48, true) - 9.07 * up).abs() < 1e-12);
+        assert!((estimate_peak_vram_gb(8.912896, 8, false) - 10.83 * up).abs() < 1e-12);
         // a window between table windows: the next one up; a normal-mode window below 8: the 8-frame one
-        assert!((estimate_peak_vram_gb(1.47456, 50, true) - 9.96 * up).abs() < 1e-12);
-        assert!((estimate_peak_vram_gb(1.47456, 4, false) - 5.13 * up).abs() < 1e-12);
+        assert!((estimate_peak_vram_gb(1.47456, 50, true) - 11.59 * up).abs() < 1e-12);
+        assert!((estimate_peak_vram_gb(1.47456, 4, false) - 5.33 * up).abs() < 1e-12);
         // a size between measured sizes: the next one up (2048x1152 -> 2560x1536); below the smallest: the smallest
-        assert!((estimate_peak_vram_gb(2.359296, 8, true) - 5.45 * up).abs() < 1e-12);
-        assert!((estimate_peak_vram_gb(0.1, 8, true) - 2.73 * up).abs() < 1e-12);
+        assert!((estimate_peak_vram_gb(2.359296, 8, true) - 6.34 * up).abs() < 1e-12);
+        assert!((estimate_peak_vram_gb(0.1, 8, true) - 3.95 * up).abs() < 1e-12);
         // past the largest size and window: proportional
-        assert!((estimate_peak_vram_gb(2.0 * 8.912896, 8, true) - 2.0 * 9.87 * up).abs() < 1e-9);
-        assert!((estimate_peak_vram_gb(0.786432, 160, true) - 2.0 * 9.20 * up).abs() < 1e-9);
+        assert!((estimate_peak_vram_gb(2.0 * 8.912896, 8, true) - 2.0 * 11.80 * up).abs() < 1e-9);
+        assert!((estimate_peak_vram_gb(0.786432, 160, true) - 2.0 * 11.59 * up).abs() < 1e-9);
     }
 
     #[test]
@@ -280,93 +292,83 @@ mod tests {
         }
     }
 
-    /// Every measured peak (row 41): (padded h x w, frames per window, low_vram, GiB) — 81 points
+    /// Every measured peak on model set onnx.4 (2026-10-26, row 41): (padded h x w, frames per window, low_vram,
+    /// GiB) — 69 points
     const MEASURED: &[((usize, usize), usize, bool, f64)] = &[
-        ((768, 1024), 1, true, 1.9043),
-        ((768, 1024), 4, true, 2.6074),
-        ((768, 1024), 8, true, 2.7227),
-        ((768, 1024), 16, true, 3.2930),
-        ((768, 1024), 24, true, 4.3789),
-        ((768, 1024), 48, true, 6.7988),
-        ((768, 1024), 80, true, 9.1992),
-        ((1152, 1280), 1, true, 1.6992),
-        ((1152, 1280), 2, true, 3.3672),
-        ((1152, 1280), 4, true, 3.5762),
-        ((1152, 1280), 8, true, 3.9902),
-        ((1152, 1280), 8, true, 3.9902),
-        ((1152, 1280), 8, true, 3.9277),
-        ((1152, 1280), 8, true, 3.8672),
-        ((1152, 1280), 16, true, 4.9453),
-        ((1152, 1280), 16, true, 4.9453),
-        ((1152, 1280), 16, true, 4.9473),
-        ((1152, 1280), 16, true, 4.9531),
-        ((1152, 1280), 24, true, 7.0449),
-        ((1152, 1280), 24, true, 7.0449),
-        ((1152, 1280), 24, true, 7.3789),
-        ((1152, 1280), 24, true, 7.0781),
-        ((1152, 1280), 24, true, 7.0469),
-        ((1152, 1280), 48, true, 8.4668),
-        ((1152, 1280), 48, true, 8.3828),
-        ((1152, 1280), 48, true, 8.0723),
-        ((1152, 1280), 48, true, 8.4238),
-        ((1152, 1280), 50, true, 9.4375),
-        ((1152, 1280), 56, true, 9.9570),
-        ((1152, 1280), 64, true, 10.6426),
-        ((1152, 1920), 1, true, 1.8203),
-        ((1152, 1920), 2, true, 4.2559),
-        ((1152, 1920), 4, true, 4.5020),
-        ((1152, 1920), 8, true, 5.1855),
-        ((1152, 1920), 16, true, 6.9727),
-        ((1152, 1920), 24, true, 9.8262),
-        ((1152, 1920), 48, true, 11.3496),
-        ((1536, 2560), 1, true, 2.2090),
-        ((1536, 2560), 2, true, 2.6543),
-        ((1536, 2560), 4, true, 3.5332),
-        ((1536, 2560), 8, true, 5.4414),
-        ((1536, 2560), 16, true, 8.6719),
-        ((1536, 2560), 24, true, 8.6074),
-        ((1920, 3200), 1, true, 3.1543),
-        ((1920, 3200), 2, true, 3.7227),
-        ((1920, 3200), 4, true, 5.9180),
-        ((1920, 3200), 8, true, 9.8633),
-        ((2176, 4096), 1, true, 4.0996),
-        ((2176, 4096), 2, true, 4.4434),
-        ((2176, 4096), 4, true, 7.7734),
-        ((2176, 4096), 4, true, 7.3789),
-        ((2176, 4096), 8, true, 9.1500),
-        ((2176, 4096), 8, true, 9.1300),
-        ((2176, 4096), 8, true, 9.4180),
-        ((2176, 4096), 8, true, 9.2200),
-        ((2176, 4096), 8, true, 9.2129),
-        ((2176, 4096), 8, true, 9.2900),
-        ((768, 1024), 4, false, 4.1719),
-        ((768, 1024), 8, false, 4.3652),
-        ((768, 1024), 16, false, 4.7461),
-        ((768, 1024), 24, false, 5.5449),
-        ((768, 1024), 48, false, 7.1016),
-        ((768, 1024), 80, false, 7.9902),
-        ((1152, 1280), 1, false, 3.8848),
-        ((1152, 1280), 4, false, 4.7461),
-        ((1152, 1280), 8, false, 5.1270),
-        ((1152, 1280), 8, false, 5.1270),
-        ((1152, 1280), 16, false, 5.8945),
-        ((1152, 1280), 24, false, 7.4512),
-        ((1152, 1280), 24, false, 7.4512),
-        ((1152, 1280), 48, false, 10.5391),
-        ((1152, 1280), 48, false, 10.5391),
-        ((1152, 1920), 8, false, 5.8965),
-        ((1152, 1920), 16, false, 6.9980),
-        ((1152, 1920), 24, false, 9.3008),
-        ((1536, 2560), 8, false, 6.0156),
-        ((1536, 2560), 16, false, 7.9004),
-        ((1536, 2560), 24, false, 10.1387),
-        ((1920, 3200), 8, false, 9.3477),
-        ((2176, 4096), 8, false, 11.0117),
-        ((2176, 4096), 8, false, 11.0117),
+        ((768, 1024), 1, true, 1.9121),
+        ((768, 1024), 4, true, 2.6035),
+        ((768, 1024), 48, true, 8.4277),
+        ((768, 1024), 80, true, 11.5840),
+        ((1152, 1280), 1, true, 1.5918),
+        ((1152, 1280), 2, true, 3.3633),
+        ((1152, 1280), 4, true, 3.5605),
+        ((1152, 1280), 8, true, 3.9473),
+        ((1152, 1280), 16, true, 5.5059),
+        ((1152, 1280), 24, true, 8.0371),
+        ((1152, 1280), 24, true, 7.8984),
+        ((1152, 1280), 24, true, 7.8887),
+        ((1152, 1280), 48, true, 9.0684),
+        ((1152, 1280), 48, true, 9.0684),
+        ((1152, 1280), 48, true, 8.8203),
+        ((1152, 1280), 48, true, 9.0684),
+        ((1152, 1280), 50, true, 10.0566),
+        ((1152, 1280), 56, true, 10.6582),
+        ((1152, 1280), 64, true, 11.4434),
+        ((1152, 1920), 1, true, 1.9219),
+        ((1152, 1920), 2, true, 4.2852),
+        ((1152, 1920), 4, true, 4.4785),
+        ((1152, 1920), 8, true, 5.1406),
+        ((1152, 1920), 16, true, 7.8047),
+        ((1152, 1920), 24, true, 11.0723),
+        ((1536, 2560), 1, true, 2.1777),
+        ((1536, 2560), 2, true, 2.8965),
+        ((1536, 2560), 4, true, 3.7715),
+        ((1536, 2560), 8, true, 6.3359),
+        ((1536, 2560), 16, true, 10.6074),
+        ((1536, 2560), 24, true, 9.4102),
+        ((1920, 3200), 1, true, 3.2852),
+        ((1920, 3200), 2, true, 3.7656),
+        ((1920, 3200), 4, true, 5.9746),
+        ((1920, 3200), 8, true, 11.7949),
+        ((2176, 4096), 1, true, 4.2402),
+        ((2176, 4096), 2, true, 4.6055),
+        ((2176, 4096), 4, true, 7.7969),
+        ((2176, 4096), 4, true, 7.7266),
+        ((2176, 4096), 8, true, 9.2910),
+        ((2176, 4096), 8, true, 9.2910),
+        ((2176, 4096), 8, true, 9.2910),
+        ((2176, 4096), 8, true, 9.2910),
+        ((2176, 4096), 8, true, 9.2891),
+        ((2176, 4096), 8, true, 9.2891),
+        ((768, 1024), 4, false, 4.2598),
+        ((768, 1024), 8, false, 4.5352),
+        ((768, 1024), 16, false, 5.0820),
+        ((768, 1024), 24, false, 6.0527),
+        ((768, 1024), 48, false, 8.1172),
+        ((768, 1024), 80, false, 9.8359),
+        ((1152, 1280), 1, false, 3.9043),
+        ((1152, 1280), 4, false, 4.8535),
+        ((1152, 1280), 8, false, 5.3242),
+        ((1152, 1280), 8, false, 5.3242),
+        ((1152, 1280), 16, false, 6.2871),
+        ((1152, 1280), 24, false, 8.0410),
+        ((1152, 1280), 24, false, 8.0410),
+        ((1152, 1280), 48, false, 11.7207),
+        ((1152, 1280), 48, false, 11.7207),
+        ((1152, 1920), 8, false, 6.1602),
+        ((1152, 1920), 16, false, 7.5625),
+        ((1152, 1920), 24, false, 10.1504),
+        ((1536, 2560), 8, false, 6.4375),
+        ((1536, 2560), 16, false, 9.3359),
+        ((1536, 2560), 24, false, 12.2344),
+        ((1920, 3200), 8, false, 10.2246),
+        ((2176, 4096), 8, false, 10.8203),
+        ((2176, 4096), 8, false, 10.8203),
     ];
-    /// The windows that ran out of memory on the 16 GB card with a 14 GiB budget — 15 points
+    /// The windows that ran out of memory on the 16 GB card with a 14 GiB budget (onnx.4) — 16 points
     const OUT_OF_MEMORY: &[((usize, usize), usize, bool)] = &[
         ((1152, 1280), 80, true),
+        ((1152, 1920), 48, true),
         ((1152, 1920), 80, true),
         ((1536, 2560), 48, true),
         ((1920, 3200), 16, true),
@@ -402,17 +404,30 @@ mod tests {
     }
 
     #[test]
+    fn a_16_gb_card_gets_a_measured_1080p_window() {
+        // a 1920x1080 clip with a 16 GB card's ~14.5 GiB free: 48/24 low ran out of memory on onnx.4 at a 14 GiB
+        // budget, so the automatic window is one that ran, with its measured peak inside the budget
+        let shape = (1152, 1920);
+        let p = select_vram_profile(shape, 240, 14.5, false);
+        assert!(!OUT_OF_MEMORY.contains(&(shape, p.chunk, p.low_vram)), "{p:?} ran out of memory");
+        let peak = MEASURED.iter().filter(|m| m.0 == shape && m.1 == p.chunk && m.2 == p.low_vram).map(|m| m.3).fold(f64::NAN, f64::max);
+        assert!(peak <= 14.5, "{p:?}: measured peak {peak} GiB (NaN: not measured)");
+    }
+
+    #[test]
     fn automatic_windows_for_the_readme_clips_at_12_gib() {
         // the six HD clips and the four 4K plates (padded size, frames) at a 12 GiB budget, as before the measured
-        // table except godiva_close, which now gets the normal mode at the same 80/40 window (row 41)
+        // table except godiva_close, which now gets the normal mode at the same 80/40 window (row 41); on the onnx.4
+        // table with_motion_blur (50 frames, the 56-frame column) takes 48/24 and 4K 4/2 (its 8/4 low column is
+        // 3200x1800's 11.80 GiB: the table never falls for a larger size)
         let cases = [
             ((768, 1024), 349, (80, 40, false)),
             ((1152, 1280), 80, (48, 24, true)),
             ((1152, 1280), 139, (48, 24, true)),
             ((1152, 1280), 250, (48, 24, true)),
             ((1152, 1280), 314, (48, 24, true)),
-            ((1152, 1280), 50, (80, 40, true)),
-            ((2176, 4096), 120, (8, 4, true)),
+            ((1152, 1280), 50, (48, 24, true)),
+            ((2176, 4096), 120, (4, 2, true)),
         ];
         // loop: NOT-WORTH — seven cases
         for (shape, frames, want) in cases {
@@ -425,14 +440,15 @@ mod tests {
     fn tensorrt_keeps_low_memory_mode() {
         // where the measured table puts CUDA in the normal mode (a 16 GB card's ~14.5 GiB free: HD 48/24, 4K 8/4;
         // godiva_close at 12 GiB), a TensorRT job takes the same window in low-VRAM mode (its normal-mode peaks
-        // are unmeasured, row 41)
-        let cases = [((1152, 1280), 250, 14.5, 48), ((2176, 4096), 120, 14.5, 8), ((768, 1024), 349, 12.0, 80)];
+        // are unmeasured, row 41), or a shorter one where the low mode's measured peak is higher (onnx.4: 960x720
+        // at 80 frames, 11.58 GiB low vs 9.84 normal)
+        let cases = [((1152, 1280), 250, 14.5, 48, 48), ((2176, 4096), 120, 14.5, 8, 8), ((768, 1024), 349, 12.0, 80, 48)];
         // loop: NOT-WORTH — three cases
-        for (shape, frames, budget, chunk) in cases {
+        for (shape, frames, budget, chunk, trt_chunk) in cases {
             let cuda = select_vram_profile(shape, frames, budget, false);
             let trt = select_vram_profile(shape, frames, budget, true);
             assert_eq!((cuda.chunk, cuda.stride, cuda.low_vram), (chunk, chunk / 2, false), "CUDA {shape:?} {frames} frames");
-            assert_eq!((trt.chunk, trt.stride, trt.low_vram), (chunk, chunk / 2, true), "TensorRT {shape:?} {frames} frames");
+            assert_eq!((trt.chunk, trt.stride, trt.low_vram), (trt_chunk, trt_chunk / 2, true), "TensorRT {shape:?} {frames} frames");
             assert!(trt.fits(budget));
         }
         // nothing fits: the single-frame low window either way

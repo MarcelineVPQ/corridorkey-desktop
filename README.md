@@ -493,6 +493,17 @@ the background with a progress bar and an explanation, never inside a job.
 **5. The memory estimate wasn't an upper bound (2026-10-24).** The old table was off by −32 % to +73 % against
 measured peaks. Recalibrated on 96 measured points; it is now above every one of them (+6 % margin).
 
+**5, again: the table was measured on the previous models (2026-10-26).** The 2026-10-24 table came from model set
+onnx.3; the app ships onnx.4 since 2026-10-25. The same sweep on onnx.4 (RTX 5080, CUDA fp16, 85 points: 69 ran, 16
+ran out of memory) found the old table under the measured peak at 31 of 69 points (up to 16 %: 960×720 80/40
+low-memory, 11.58 GiB against 9.75), and on a 16 GB card it picked 48/24 low-memory for a 1920×1080 clip, which runs
+out of memory on onnx.4. The table is now onnx.4's, again above every measured point (by at least 0.12 GiB), and the
+windows that ran out of memory are never picked on a 16 GB card. The automatic window on a 16 GB card (~14.5 GiB
+free): 1920×1080 48/24 low-memory → 24/12 normal (measured 10.15 GiB); 1280×1080 (48/24) and 4K (8/4) keep their
+windows. At a 12 GiB budget: 4K 8/4 → 4/2 low-memory (3200×1800 peaks 11.79 GiB at 8/4, and the table never falls
+for a larger size), with_motion_blur 80/40 → 48/24, 1920×1080 24/12 → 8/4; the 1280×1080 clips and godiva_close keep
+theirs. The tables above stay as measured.
+
 **6. Smaller ones.** The README's time column once showed time to the first frames instead of the total (corrected).
 An early reading that longer temporal windows give steadier hair was overturned by three more plates.
 
