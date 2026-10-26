@@ -209,8 +209,29 @@ pub(crate) fn with_ffmpeg_tail(base: Error, path: &Path, tail: &[String]) -> Err
     }
 }
 
+/// Why libx264 can't take `pix_fmt` at w x h (None: it can): its 4:2:0 formats need an even width and height, its
+/// 4:2:2 ones an even width. Measured (ffmpeg 8.0.1): a 321x199 clip with `pix_fmt` yuv420p keyed, then failed
+/// "ffmpeg writer: Broken pipe" with only "Generic error in an external library" in ffmpeg's last lines.
+pub(crate) fn odd_size_for(pix_fmt: &str, w: usize, h: usize) -> Option<String> {
+    let (even_w, even_h) = match pix_fmt {
+        "yuv420p" | "yuvj420p" | "nv12" | "nv21" | "yuv420p10le" => (true, true),
+        "yuv422p" | "yuvj422p" | "nv16" | "yuv422p10le" | "nv20le" => (true, false),
+        _ => (false, false),
+    };
+    ((even_w && w % 2 == 1) || (even_h && h % 2 == 1)).then(|| {
+        let need = if even_h { "an even width and height" } else { "an even width" };
+        format!("pix_fmt {pix_fmt} needs {need}; this clip is {w}x{h} (yuv444p10le, the default, takes any size)")
+    })
+}
+
 impl VideoWriter {
     pub(crate) fn new(path: &Path, fps: f64, w: usize, h: usize, cfg: &WriterConfig, color_trc: &str) -> Result<VideoWriter, Error> {
+        // the job's own pix_fmt applies to H.264 CRF 12 only (the other codecs write 4:4:4)
+        if cfg.codec == VideoCodec::H264Crf12 {
+            if let Some(why) = odd_size_for(&cfg.pix_fmt, w, h) {
+                return Err(Error::bad_request(why));
+            }
+        }
         // every video output is 3-channel BGR (the alpha as three equal channels; the cutout premultiplied, render.rs)
         let channels = 3;
         let mut child = Command::new("ffmpeg")
@@ -498,6 +519,23 @@ mod tests {
         assert!(!l.contains("-crf") && l.contains("-color_trc linear"), "{l}");
         let d = ffmpeg_args(Path::new("/o/c.mov"), 24.0, 8, 8, &with(VideoCodec::Dnxhr444), "iec61966-2-1").join(" ");
         assert!(d.contains("-c:v dnxhd -profile:v dnxhr_444 -pix_fmt yuv444p10le -threads 2") && !d.contains("-crf") && !d.contains("-preset"), "{d}");
+    }
+
+    #[test]
+    fn a_subsampled_pix_fmt_at_an_odd_size_is_refused_before_anything_is_keyed() {
+        // bug hunt 2026-10-26: 321x199 with yuv420p keyed the clip, then failed in ffmpeg ("Broken pipe")
+        let cfg = WriterConfig { pix_fmt: "yuv420p".into(), ..WriterConfig::default() };
+        let path = std::env::temp_dir().join(format!("ck-odd-{}.mp4", std::process::id()));
+        let refused = match VideoWriter::new(&path, 24.0, 321, 199, &cfg, "iec61966-2-1") {
+            Ok(_) => None,
+            Err(e) => Some(e.code),
+        };
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(refused, Some(crate::ErrorCode::BadRequest));
+        // what x264 takes (measured): 4:2:2 at an odd height, 4:4:4 and grey at any size; even sizes always
+        assert!(odd_size_for("yuv422p", 320, 199).is_none() && odd_size_for("yuv422p", 321, 200).is_some());
+        assert!(odd_size_for("yuv444p10le", 321, 199).is_none() && odd_size_for("gray", 321, 199).is_none());
+        assert!(odd_size_for("nv12", 320, 200).is_none() && odd_size_for("nv12", 320, 199).is_some());
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! Stage-2 logits -> the output frames (runtime._render_predictions_torch for video,
 //! _render_predictions_exr_torch for EXR): crop the padding, alpha clamped, fg decoded from asinh to linear,
 //! despill, the checker composite, the cutout.
-use crate::color::{asinh_to_linear, despill, linear_to_srgb, srgb_to_linear, to_u16, LinearAdjust, ToF32};
+use crate::color::{asinh_to_linear, despill, finite_input, linear_to_srgb, srgb_to_linear, to_u16, LinearAdjust, ToF32};
 use crate::image::{resize_lanczos4, Planar};
 use crate::writers::Batch;
 
@@ -135,9 +135,12 @@ impl<L: ToF32> Px for Native<'_, L> {
     fn alpha(&self, y: usize, x: usize) -> f32 {
         self.at(0, y, x).clamp(0.0, 1.0)
     }
+    /// Kept finite (`finite_input`: within +-1e30, as the inputs): the decode overflows to infinity past a logit of
+    /// ~10.78. Measured: a linear EXR plate with +inf pixels (made 1e30 on the way in) at model scale 0.9 gave logits
+    /// past it, and the Lanczos resize of that infinity wrote 57 NaN and 159 infinite fg values, reported as success.
     #[inline]
     fn lin(&self, y: usize, x: usize) -> [f32; 3] {
-        [0, 1, 2].map(|c| self.adjust.invert(asinh_to_linear(self.at(1 + c, y, x), self.denom)))
+        [0, 1, 2].map(|c| finite_input(self.adjust.invert(asinh_to_linear(self.at(1 + c, y, x), self.denom))))
     }
     #[inline]
     fn video(&self, y: usize, x: usize) -> ([f32; 3], [f32; 3]) {
@@ -502,5 +505,25 @@ mod tests {
         // checker at alpha 0 is the background: 0.75 -> 49151
         let Batch::U16(c) = &vid[2].1 else { panic!() };
         assert!((c[3] as i32 - 49151).abs() <= 1, "{}", c[3]);
+    }
+
+    #[test]
+    fn a_colour_logit_past_the_decodes_range_stays_finite() {
+        // bug hunt 2026-10-26: a +inf plate pixel (1e30 on the way in) gave logits past ~10.78 at model scale 0.9,
+        // where sinh overflows: the EXR fg had NaN and infinity. Here a 2x2 model output, one colour logit at 11.
+        let mut lg = vec![0f32; 4 * 4];
+        lg[0..4].copy_from_slice(&[1.0; 4]);
+        lg[4] = 11.0;
+        let all_finite = |out: &[(&str, Batch)]| {
+            out.iter().all(|(_, b)| match b {
+                Batch::F32(v) => v.iter().all(|x| x.is_finite()),
+                Batch::U16(_) => true,
+            })
+        };
+        // native size, and resized to 3x3 (the Lanczos taps meet the big value)
+        let native = render(&opts(true), &lg, (2, 2), (0, 0), (2, 2), &[0.75; 4]);
+        assert!(all_finite(&native), "native: a non-finite EXR value");
+        let scaled = render_scaled(&opts(true), &lg, (2, 2), (0, 0), (2, 2), (3, 3), &[0.75; 9]);
+        assert!(all_finite(&scaled), "model scale: a non-finite EXR value");
     }
 }

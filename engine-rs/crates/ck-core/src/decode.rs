@@ -336,6 +336,46 @@ pub fn read_still(p: &Path) -> Result<Still, Error> {
     })
 }
 
+/// A hint still as video_io.read_hint_image's cv2.imread(IMREAD_UNCHANGED) reads it: `read_still`, except an EXR's
+/// first layer keeps its alpha (R, G, B and A: 4 channels) and a matte stored as `Y` alone is read (1 channel).
+/// Measured against cv2 4.11: an RGBA EXR matte gave its blue channel instead of A, a Y-only EXR was refused ("no
+/// layer in the image matched your specified requirements"); cv2 reads both.
+pub(crate) fn read_hint_still(p: &Path) -> Result<Still, Error> {
+    if !is_exr(p) {
+        return read_still(p);
+    }
+    use exr::prelude::{ReadChannels, ReadLayers};
+    let img = exr::prelude::read()
+        .no_deep_data()
+        .largest_resolution_level()
+        .all_channels()
+        .first_valid_layer()
+        .all_attributes()
+        .from_file(p)
+        .map_err(|e| Error::input(format!("{}: {e}", p.display())))?;
+    let layer = &img.layer_data;
+    let (w, h) = (layer.size.width(), layer.size.height());
+    let list = &layer.channel_data.list;
+    // loop: NOT-WORTH — a few channels, once per hint file
+    let find = |n: &str| list.iter().find(|c| c.name.eq_case_insensitive(n));
+    let picked: Vec<_> = match (find("R"), find("G"), find("B"), find("Y")) {
+        // loop: NOT-WORTH — four channels at most
+        (Some(r), Some(g), Some(b), _) => [Some(r), Some(g), Some(b), find("A")].into_iter().flatten().collect(),
+        (_, _, _, Some(y)) => vec![y],
+        _ => return Err(Error::input(format!("{}: no R, G, B or Y channels for a matte", p.display()))),
+    };
+    let ch = picked.len();
+    let mut data = vec![0f32; w * h * ch];
+    // loop: NOT-WORTH — ≤ four channels of one hint frame, each one pass
+    for (c, chan) in picked.iter().enumerate() {
+        // loop: HOT-PATH-OK — one channel's samples into the interleaved hint (hint EXRs only)
+        for (i, v) in chan.sample_data.values_as_f32().enumerate().take(w * h) {
+            data[i * ch + c] = v;
+        }
+    }
+    Ok(Still::F32 { ch, h, w, data })
+}
+
 /// (h, w) of a still without keeping its pixels.
 pub(crate) fn image_size(p: &Path) -> Result<(usize, usize), Error> {
     if is_exr(p) {
@@ -677,6 +717,9 @@ pub fn prep_hint(still: Still, meta: &ClipMeta) -> Vec<f32> {
         }
     };
     let mut p = Planar::from_vec(1, h, w, g);
+    // made finite before the resize: a NaN in a float hint spread to every pixel whose taps reach it (an 8x8 block
+    // at 2x), which then became 0
+    p.map(finite_input);
     if (h, w) != (meta.model_h, meta.model_w) {
         p = resize_lanczos4(&p, meta.model_h, meta.model_w);
     }
@@ -687,7 +730,8 @@ pub fn prep_hint(still: Still, meta: &ClipMeta) -> Vec<f32> {
 }
 
 /// video_io.read_hint_image + load_initial_hint_frame: the first-frame matte (a file, or the first frame of a
-/// folder). 4 channels: the alpha; 3: the first channel cv2 reads (blue); its size must be the clip's.
+/// folder). 4 channels: the alpha; 3: the first channel cv2 reads (blue); 2 (grey + alpha): the alpha, as cv2 reads
+/// such a PNG as BGRA; its size must be the clip's.
 pub fn load_initial_hint(path: &Path, meta: &ClipMeta) -> Result<Vec<f32>, Error> {
     let file = if path.is_dir() {
         crate::clip::frame_paths(path)?.into_iter().find(|p| p.is_file())
@@ -702,11 +746,13 @@ pub fn load_initial_hint(path: &Path, meta: &ClipMeta) -> Result<Vec<f32>, Error
             3
         } else if ch == 3 {
             2
+        } else if ch == 2 {
+            1
         } else {
             0
         }
-    }; // BGR(A) index 0 = blue = RGB index 2
-    let (h, w, g): (usize, usize, Vec<f32>) = match read_still(&file)? {
+    }; // BGR(A) index 0 = blue = RGB index 2; grey + alpha: cv2 makes it BGRA, so the alpha
+    let (h, w, g): (usize, usize, Vec<f32>) = match read_hint_still(&file)? {
         // loop: NOT-WORTH — the first-frame hint: one image per job
         Still::U8 { ch, h, w, data } => (h, w, (0..h * w).map(|i| data[i * ch + pick(ch)] as f32 / 255.0).collect()),
         // loop: NOT-WORTH — the first-frame hint: one image per job
@@ -772,7 +818,7 @@ impl HintReader {
                 let (w, h) = (v.w, v.h);
                 Still::U8 { ch: 3, h, w, data: v.next_rgb()?.to_vec() }
             }
-            None => read_still(&self.paths[self.next])?,
+            None => read_hint_still(&self.paths[self.next])?,
         };
         self.next += 1;
         Ok(prep_hint(still, &self.meta))
@@ -904,5 +950,49 @@ mod tests {
     fn rgb_bytes_to_planes() {
         let p = rgb8_to_planar(&[255, 0, 51, 0, 255, 102], 1, 2);
         assert_eq!(p.data, vec![1.0, 0.0, 0.0, 1.0, 0.2, 0.4]);
+    }
+
+    /// bug hunt 2026-10-26: the first-frame hint is the matte cv2.imread(IMREAD_UNCHANGED) gives
+    /// (video_io.read_hint_image), measured with cv2 4.11: a grey + alpha PNG reads as BGRA (its alpha is the matte; it
+    /// took the grey), an RGBA EXR keeps its A (it took blue), a Y-only EXR is read (it was refused).
+    #[test]
+    fn first_frame_hint_reads_the_matte_cv2_reads() {
+        use exr::prelude::{AnyChannel, AnyChannels, FlatSamples, Image, WritableImage};
+        let dir = std::env::temp_dir().join(format!("ck-hint-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (h, w) = (8, 8);
+        let meta = ClipMeta::with_shape(crate::clip::Source::Frames(vec![]), 24.0, h, w, 1, false, 1.0);
+        let centre = |v: &[f32]| v[(meta.pad.t + 4) * meta.shape_w + meta.pad.l + 4];
+        // grey 255, alpha 51: the matte is 0.2
+        let la = dir.join("la.png");
+        ::image::GrayAlphaImage::from_pixel(w as u32, h as u32, ::image::LumaA([255, 51])).save(&la).unwrap();
+        // RGBA EXR (written B, G, R, A as the engine writes a cutout): blue 0.3, alpha 0.9
+        let rgba = dir.join("rgba.exr");
+        let px: Vec<f32> = (0..h * w).flat_map(|_| [0.3f32, 0.2, 0.1, 0.9]).collect();
+        crate::writers::write_exr(&rgba, w, h, 4, &px, crate::writers::ExrType::Float).unwrap();
+        // a matte as Y alone (cv2.imwrite of a one-channel float image): 0.7
+        let y = dir.join("y.exr");
+        let chans = AnyChannels::sort(vec![AnyChannel::new("Y", FlatSamples::F32(vec![0.7; h * w]))].into_iter().collect());
+        Image::from_channels((w, h), chans).write().to_file(&y).unwrap();
+        let got: Vec<std::result::Result<f32, String>> =
+            [&la, &rgba, &y].into_iter().map(|p| load_initial_hint(p, &meta).map(|v| centre(&v)).map_err(|e| e.message)).collect();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(got, vec![Ok(bf16_round(51.0 / 255.0)), Ok(bf16_round(0.9)), Ok(bf16_round(0.7))]);
+    }
+
+    /// bug hunt 2026-10-26: a NaN in a float hint frame that is resized (model scale) became 0 over a whole block (it
+    /// spread through the Lanczos taps first); made finite first, only its own neighbourhood dips.
+    #[test]
+    fn a_nan_hint_pixel_stays_local_when_resized() {
+        let (h, w) = (8, 8);
+        let meta = ClipMeta::with_shape(crate::clip::Source::Frames(vec![]), 24.0, h, w, 1, false, 2.0);
+        let mut g = vec![1.0f32; h * w];
+        g[4 * w + 4] = f32::NAN;
+        let out = prep_hint(Still::F32 { ch: 1, h, w, data: g }, &meta);
+        let zeros = (0..meta.model_h)
+            .flat_map(|y| (0..meta.model_w).map(move |x| (y, x)))
+            .filter(|&(y, x)| out[(meta.pad.t + y) * meta.shape_w + meta.pad.l + x] == 0.0)
+            .count();
+        assert!(zeros <= 4, "{zeros} hint pixels became 0 around one NaN");
     }
 }

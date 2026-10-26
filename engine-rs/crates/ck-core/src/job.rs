@@ -272,7 +272,12 @@ pub fn parse(req: &Value) -> Result<JobConfig, Error> {
         exr_float: exr_dtype == "float",
         despill_strength: unit(o, "despill_strength", 0.5)?,
         cutout_linear: boolean(o, "cutout_linear", false),
-        frame_dir_fps: num(o, "frame_dir_fps")?.unwrap_or(24.0),
+        // a rate of 0 or below failed only in ffmpeg's writer, after the whole clip was keyed (bug hunt 2026-10-26)
+        frame_dir_fps: match num(o, "frame_dir_fps")? {
+            None => 24.0,
+            Some(v) if v > 0.0 => v,
+            Some(v) => return Err(Error::bad_request(format!("frame_dir_fps must be above 0, got {v}"))),
+        },
         frame_dir_linear: boolean(o, "frame_dir_linear", false),
         num_frames: int(o, "num_frames")?.unwrap_or(-1),
         model_scale: model_scale(o)?,
@@ -407,6 +412,12 @@ mod tests {
         }
         // not a number at all stays an input error
         assert_eq!(parse(&req(json!({"despill_strength": "lots"}))).unwrap_err().code.as_str(), "input");
+        // a frame folder's rate: above 0 (0 and -5 failed in ffmpeg after the whole clip was keyed)
+        assert_eq!(parse(&req(json!({"frame_dir_fps": 23.976}))).unwrap().frame_dir_fps, 23.976);
+        // loop: NOT-WORTH — two values
+        for v in [0.0, -5.0] {
+            assert_eq!(parse(&req(json!({"frame_dir_fps": v}))).unwrap_err().code.as_str(), "bad-request", "{v}");
+        }
     }
 
     #[test]
