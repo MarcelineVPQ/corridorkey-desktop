@@ -152,7 +152,10 @@ The automatic window came from the upstream PyTorch table, as ported, until 2026
 engine's measured ONNX Runtime CUDA peaks, an upper bound at every measured point (BACKLOG row 41). With the old table:
 on CUDA fp16 at 1280×1152 a 16-frame window doesn't fit 12 GB, where the table picks 48/24 low-VRAM. So an
 automatic window that runs out of memory before any frame reached the writers is halved and the job
-restarted; a second `memory` reply says so (`retry_after_oom`). Measured peaks (nvidia-smi every 250 ms, the
+restarted; a second `memory` reply says so (`retry_after_oom`). Only an out-of-memory in the phase the window sizes
+(stage 1 on the windows; in the normal mode also C-RADIO, MoGe and stage 2 inside them) is retried: one in the RVM
+prepass or the low-VRAM foundations and stage-2 pass fails at once with its own cause (senior Rust review
+2026-10-26 S2). Measured peaks (nvidia-smi every 250 ms, the
 process tree; short peaks can be missed, the same method as the PyTorch baseline), CUDA fp16, 12 GB budget,
 one window:
 

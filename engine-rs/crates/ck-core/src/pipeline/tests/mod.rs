@@ -158,7 +158,7 @@ impl Harness {
         let mut sink = RecSink::default();
         let ctx = JobCtx::new(&self.job, &meta, &self.frames, trt, "clip");
         let plan = JobPlan { chunk, stride, low_vram, key: key.clone() };
-        let res = self.pipe.keying(&ctx, &plan, &mut writers, &mut report, &mut sink);
+        let res = self.pipe.keying(&ctx, &plan, &mut writers, &mut report, &mut sink, &mut false);
         // loop: NOT-WORTH — ≤ four writers
         let written = seen.iter().map(|(n, s)| (n.clone(), *s.lock().unwrap())).collect();
         Outcome { res, sink, written }

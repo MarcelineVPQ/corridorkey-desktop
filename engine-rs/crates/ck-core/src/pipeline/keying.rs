@@ -124,7 +124,9 @@ enum Found {
 
 impl<L: Loader> Pipeline<L> {
     /// Steps 2-4 at `plan`'s window (and the low-VRAM staging). Frames go to `writers` (lent to the render thread
-    /// while it runs, back when the attempt ends, also on a failure).
+    /// while it runs, back when the attempt ends, also on a failure). `in_windows` ends true when the failure came
+    /// from the phase the window sizes (stage 1 on the windows; in the normal mode also C-RADIO, MoGe and stage 2
+    /// inside them), false from any other (the RVM prepass, the low-VRAM foundations and stage-2 pass).
     pub(super) fn keying(
         &mut self,
         ctx: &JobCtx<'_>,
@@ -132,7 +134,9 @@ impl<L: Loader> Pipeline<L> {
         writers: &mut Writers,
         report: &mut FrameReport,
         sink: &mut dyn Sink,
+        in_windows: &mut bool,
     ) -> Result<(), Error> {
+        *in_windows = false;
         let (job, meta) = (ctx.job, ctx.meta);
         let t_all = meta.num_frames;
         let mut times = JobTimes::new(Instant::now());
@@ -185,7 +189,9 @@ impl<L: Loader> Pipeline<L> {
         let geo = Geometry { shape: (sh, sw), crop: (meta.pad.t, meta.pad.l), model: (meta.model_h, meta.model_w), hw: (meta.h, meta.w) };
         let worker_s = {
             let mut writing = Writing { render: RenderWorker::start(writers, ro, checker, geo)?, report: &mut *report };
+            *in_windows = true;
             let states = self.stage1_windows(ctx, plan, WindowsIn { rvm, found, initial_hint, starts }, &mut writing, &mut times, sink)?;
+            *in_windows = false;
             // low-VRAM phase 2: stage 2 over the stored states
             if let Some(states) = states {
                 self.stage2_pass(ctx, plan, states, &mut writing, &mut times, sink)?;

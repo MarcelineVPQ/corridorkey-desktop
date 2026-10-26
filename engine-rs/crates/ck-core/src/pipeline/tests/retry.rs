@@ -119,3 +119,35 @@ fn out_of_memory_after_frames_were_written_is_not_retried() {
     assert_eq!((r.retried.len(), r.plan.chunk), (0, 4));
     assert_eq!(r.out.frames(), vec![4, 4]);
 }
+
+/// senior Rust review 2026-10-26 S2: an out-of-memory in a phase the window doesn't size (the RVM prepass; the
+/// low-VRAM stage-2 pass) fails at once with its own cause, instead of re-running the job at every halved window
+#[test]
+fn out_of_memory_outside_the_windows_is_not_retried() {
+    let oom_in = |piece: &'static str| -> FailRun { Arc::new(move |p, _| (p == piece).then(|| Error::ort(piece, "CUDA failure 2: out of memory"))) };
+    // loop: NOT-WORTH — three cases
+    for (piece, low_vram) in [("rvm", false), ("rvm", true), ("stage2", true)] {
+        let mut h = Harness::new(with_fail(oom_in(piece)), 10, options(json!({})));
+        let r = h.attempts(8, 4, low_vram);
+        let e = r.out.res.as_ref().unwrap_err();
+        assert_eq!(e.code, ErrorCode::Oom, "{piece} low_vram {low_vram}");
+        assert!(e.message.contains(&format!("ran out of memory ({piece})")), "{}", e.message);
+        assert_eq!((r.retried.clone(), r.plan.chunk), (vec![], 8), "{piece} low_vram {low_vram}");
+        assert_eq!(r.out.sink.of_type("memory").len(), 0);
+        // one attempt: its RVM pass ran once (or failed at its first frame)
+        assert!(h.loader.runs_of("rvm").len() <= 10, "{piece} low_vram {low_vram}");
+    }
+}
+
+/// S2: in the normal mode stage 2 runs inside the windows (its memory shares the card with the window's), so its
+/// out-of-memory before any frame was written still halves the window
+#[test]
+fn normal_mode_stage2_out_of_memory_in_the_windows_is_retried() {
+    let n = std::sync::atomic::AtomicUsize::new(0);
+    let fail: FailRun = Arc::new(move |p, _| (p == "stage2" && n.fetch_add(1, Ordering::Relaxed) == 0).then(|| Error::oom("out of memory".into())));
+    let mut h = Harness::new(with_fail(fail), 10, options(json!({})));
+    let r = h.attempts(8, 4, false);
+    r.out.res.as_ref().unwrap();
+    assert_eq!(r.retried, vec![(4, 2)]);
+    assert_eq!(r.out.frames(), vec![10, 10]);
+}

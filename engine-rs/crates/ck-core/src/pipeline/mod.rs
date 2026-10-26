@@ -546,10 +546,12 @@ impl<L: Loader> Pipeline<L> {
         self.nets.get_mut(piece).ok_or_else(|| Error::engine(format!("{piece} is not loaded")))
     }
 
-    /// Steps 2-4 (`keying`) at `plan`'s window. An automatic window that runs out of graphics memory before any
-    /// frame reached the writers is halved and the job restarted (the PyTorch table the window comes from is not
-    /// ONNX Runtime's measured memory, docs/ENGINE_RUST.md); `retried` hears each new window (the settings file).
-    /// `plan` ends as the window really used.
+    /// Steps 2-4 (`keying`) at `plan`'s window. An automatic window that runs out of graphics memory in the phase it
+    /// sizes (`keying`'s `in_windows`) before any frame reached the writers is halved and the job restarted (the
+    /// table the window comes from is an estimate, docs/ENGINE_RUST.md); `retried` hears each new window (the settings
+    /// file). An out-of-memory anywhere else fails at once with its own cause: a smaller window doesn't change those
+    /// phases (senior Rust review 2026-10-26 S2: a low-VRAM stage 2 out of memory re-ran the RVM pass, the
+    /// foundations and all of stage 1 up to 7 times before failing anyway). `plan` ends as the window really used.
     fn attempts(
         &mut self,
         ctx: &JobCtx<'_>,
@@ -563,11 +565,12 @@ impl<L: Loader> Pipeline<L> {
         let mut res;
         // loop: SERIAL-REQUIRED — one attempt at a time [bounded: the window halves each round, and only while nothing was written: ≤ log2(80) ≈ 7 rounds]
         loop {
-            res = self.keying(ctx, plan, writers, report, sink);
+            let mut in_windows = false;
+            res = self.keying(ctx, plan, writers, report, sink, &mut in_windows);
             // loop: NOT-WORTH — ≤ four writers, once per attempt
             let nothing_written = writers.iter().all(|(_, w)| w.frames() == 0);
             match &res {
-                Err(e) if e.code == crate::ErrorCode::Oom && !job.manual && nothing_written && plan.chunk > 1 => {
+                Err(e) if e.code == crate::ErrorCode::Oom && in_windows && !job.manual && nothing_written && plan.chunk > 1 => {
                     let (old_chunk, old_stride) = (plan.chunk, plan.stride);
                     plan.chunk = (plan.chunk / 2).max(1);
                     plan.stride = (plan.chunk / 2).max(1);
