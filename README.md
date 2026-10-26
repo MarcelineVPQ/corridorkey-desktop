@@ -16,10 +16,11 @@ This was the perfect crossroads between the two. I've moved PyTorch projects to 
 knew there were gains to be found. I took Corridor's model, gave it a new engine (Rust on ONNX Runtime, no Python),
 and wrapped it in a desktop app that installs itself.
 
-On my RTX 5080 it keys 4K at about two frames a second: 2.4-2.7× faster than the original on the same machine
-(1.5-1.8× at HD), with the same mattes, less graphics memory and RAM, and less than half the install. Every number
-is below, with the clips and the commands to check them yourself. On Linux, an optional TensorRT mode takes that to
-about 2× the original's speed at HD and about 3.7-4.2× at 4K. Rust and ONNX Runtime also mean one engine for every platform: NVIDIA on Linux and
+On my RTX 5080 it keys 4K at about 1.7 frames a second: about 1.8-1.9× faster than the original on the same machine
+(1.5-1.9× at HD; a short clip gains less, since loading the models dominates), with the same mattes, less graphics
+memory and RAM, and less than half the install (the same-day pair of 2026-10-26, Speed). Every number is below, with
+the clips and the commands to check them yourself. On Linux, an optional TensorRT mode takes that to about 1.9-2.2×
+the original's speed at HD and about 2.3-2.4× at 4K. Rust and ONNX Runtime also mean one engine for every platform: NVIDIA on Linux and
 Windows, and Apple Silicon through Core ML.
 
 It's free, it stays free, and it's Corridor's model. Huge thanks to Niko, Zachary Harris and the Corridor crew.
@@ -39,7 +40,8 @@ graphics card. The macOS disk image installs and opens but can't key yet (macOS,
 
 ## Requirements
 
-- Linux (the AppImage) or Windows 10/11 (the installer), x64, with an NVIDIA graphics card (RTX 30-series or newer).
+- Linux (the AppImage) or Windows 10/11 (the installer), x64, with an NVIDIA graphics card (RTX 20-series or newer, 8 GB or more; measured on an RTX 2070 SUPER 8 GB and an RTX 5080
+  16 GB, Speed).
   **On Linux and Windows the NVIDIA card is required**: the engine keys only on CUDA. AMD and Intel graphics cards aren't
   supported, and without an NVIDIA card nothing falls back to the CPU: a job stops with "CorridorKey needs an NVIDIA
   graphics card with CUDA." (AMD would need ONNX Runtime's MIGraphX or DirectML build; not in 1.0.)
@@ -47,8 +49,8 @@ graphics card. The macOS disk image installs and opens but can't key yet (macOS,
 - Nothing else to set up: the engine comes with the app, and on first start the setup downloads the GPU runtime and
   the CorridorKey models (a 4.86 GB download on Linux, 4.64 GB on Windows, 3.32 GB on macOS, once). If `ffmpeg` is
   missing, it offers to install it (apt or pacman on Linux, `winget` on Windows, Homebrew on macOS).
-- Optional, Linux: **TensorRT** (Engine settings, TensorRT; off by default) for about 2× the original's speed at HD
-  and about 3.7-4.2× at 4K, with the same mattes (Speed, 0.0.6-dev and 0.0.7-dev). Switching it on offers its own download: NVIDIA's TensorRT 10.16
+- Optional, Linux: **TensorRT** (Engine settings, TensorRT; off by default) for about 1.9-2.2× the original's speed at
+  HD and about 2.3-2.4× at 4K, with the same mattes (Speed, the same-day pair of 2026-10-26). Switching it on offers its own download: NVIDIA's TensorRT 10.16
   libraries (3.7 GB, from pypi.nvidia.com) and the TensorRT models (1.8 GB, from this repository's releases; C-RADIO's
   weights are copied from the models you already have), 5.5 GB in all, 6.1 GB on disk. Each
   resolution range is optimized once (about 4.4-4.8 minutes for the five networks on an RTX 5080: 4.4 at 1280×1080,
@@ -392,6 +394,41 @@ The one-time build per resolution range, seconds per network (the engine's own l
 From these: the build pays for itself after about 750 frames at 4K (about 30 s of 24 fps footage) and about 2,200
 frames at 1280×1080. Not measured: the HD 1920×1080 range and every other range, other cards, and the build as the
 very first on a card (the 4K build ran second, with the timing cache the first one wrote).
+
+### The same-day pair on onnx.4 (2026-10-26)
+
+The headline numbers above, measured again because the app ships onnx.4 since 2026-10-25: the original and this
+engine back to back on the RTX 5080, the same day, with `tools/vs_original.sh --steps speed --repeats 1` (12 GB
+budget, automatic window, alpha + foreground videos, no hint), then TensorRT with its ranges built
+(`tools/engine_bench.mjs --tensorrt`, same clips and settings). Engine at main 1afed1c. One repeat each; totals are
+engine start to result, model load included.
+
+| Clip | Original | CUDA | Faster | TensorRT (built) | Faster |
+| --- | --- | --- | --- | --- | --- |
+| godiva_close 960×720, 349 frames | 67.8 s | 40.7 s | 1.67× | 37.0 s | 1.83× |
+| locked_backdrop 1280×1080, 80 | 37.0 s | 19.6 s | 1.89× | 16.5 s | 2.24× |
+| metal_glasses, 139 | 42.1 s | 28.3 s | 1.49× | 22.0 s | 1.92× |
+| smoke, 250 | 73.2 s | 48.7 s | 1.50× | 37.7 s | 1.94× |
+| walking_sitting, 314 | 86.9 s | 59.5 s | 1.46× | 45.8 s | 1.90× |
+| with_motion_blur, 50 | 18.6 s | 17.2 s | 1.08× | 17.9 s | 1.04× |
+| 04_5h 4K EXR, 120 | 328.7 s | 174.4 s | 1.89× | 135.6 s | 2.42× |
+| 04_5d 4K EXR, 120 | 325.7 s | 176.0 s | 1.85× | 136.5 s | 2.39× |
+| 08_3a 4K EXR, 120 | 327.2 s | 180.0 s | 1.82× | 139.5 s | 2.34× |
+| 04_2c 4K EXR, 120 | 321.8 s | 174.6 s | 1.84× | 134.7 s | 2.39× |
+
+Steady frames per second: the original 9.6-10.4 at 1280×1080 and 0.93-0.97 at 4K; CUDA 16.9-17.3 and 1.69-1.75;
+TensorRT 21.1-21.8 and 2.29-2.32. Peak graphics memory: the original 11.97 GiB (HD) and 11.34 GiB (4K); CUDA 9.07 and
+9.29; TensorRT 11.04 and 10.79.
+
+What changed against the tables above: our times are about the same as on 2026-10-24 (4K 174-180 s against
+170-174 s), but **the original ran faster this time** (4K 322-329 s against 413-472 s; steady 0.93-0.97 fps against
+0.48-0.60). Same checkout, same machine; we don't know why yet, and only more same-day repeats will show which of its
+days is typical. The ratios above are the conservative ones. with_motion_blur gains least: 50 frames in one window,
+so loading the models is most of its time.
+
+Since this pair the memory table moved to onnx.4 too (main 1e7cf76, "What we got wrong" item 5's follow-up): at the
+pair's 12 GB budget a 4K clip now gets the 4/2 window instead of 8/4 (slower, and safe: 3200×1800 at 8/4 measured
+11.79 GiB). On a 16 GB card with its whole free memory (about 14.5 GiB), 4K keeps 8/4 and 1080p gets 24/12 normal.
 
 ### TensorRT, first measurement (2026-10-21)
 
