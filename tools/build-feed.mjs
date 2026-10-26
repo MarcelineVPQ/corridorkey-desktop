@@ -22,14 +22,17 @@ if (channel !== "stable" && channel !== "dev") throw new Error(`unknown channel 
 const out = opt("--out", channel === "dev" ? "latest-dev.json" : "latest.json");
 const headers = { Accept: "application/vnd.github+json", "User-Agent": "corridorkey-feed-builder" };
 if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+// the deadlines of the two network reads (tools/release.sh runs this on the release PC; a stalled read fails the release)
+const API_TIMEOUT_MS = 60_000;
+const DOWNLOAD_TIMEOUT_MS = 20 * 60_000;
 
 async function measure(asset) {
-  // loop: SERIAL-REQUIRED — one release asset download per feed build (CI) [bounded: the feed job's timeout-minutes: 20]
-  const r = await fetch(asset.browser_download_url, { redirect: "follow" });
+  // loop: SERIAL-REQUIRED — one release asset download per feed build [bounded: DOWNLOAD_TIMEOUT_MS, body included]
+  const r = await fetch(asset.browser_download_url, { redirect: "follow", signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
   if (!r.ok || !r.body) throw new Error(`${asset.name}: download returned ${r.status}`);
   const hash = createHash("sha512");
   let size = 0;
-  // loop: SERIAL-REQUIRED — the hash is sequential; one AppImage, once per feed per CI run
+  // loop: SERIAL-REQUIRED — the hash is sequential; one AppImage, once per feed build [bounded: DOWNLOAD_TIMEOUT_MS]
   for await (const chunk of r.body) {
     size += chunk.byteLength;
     hash.update(chunk);
@@ -38,8 +41,8 @@ async function measure(asset) {
   return { sha512: hash.digest("hex"), size };
 }
 
-// loop: SERIAL-REQUIRED — one GitHub API read per feed build (CI) [bounded: the feed job's timeout-minutes: 20]
-const r = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=50`, { headers });
+// loop: SERIAL-REQUIRED — one GitHub API read per feed build [bounded: API_TIMEOUT_MS]
+const r = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=50`, { headers, signal: AbortSignal.timeout(API_TIMEOUT_MS) });
 if (!r.ok) throw new Error(`GitHub API returned ${r.status}`);
 const picked = selectRelease(await r.json(), channel);
 if (!picked) {

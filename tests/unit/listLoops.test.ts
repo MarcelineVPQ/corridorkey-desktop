@@ -1,7 +1,16 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { problems, ROOTS, scan, type Row } from "../../tools/list_loops.mjs";
 
 describe("loop pass lister", () => {
+  it("finds a deadline on both of build-feed's network reads (hard-coded pass 2026-10-26 S5)", () => {
+    const file = "tools/build-feed.mjs";
+    const waits = scan(readFileSync(new URL(`../../${file}`, import.meta.url), "utf8"), file).filter((r) => r.kind.includes("wait"));
+    expect(waits).toHaveLength(2);
+    // loop: NOT-WORTH — two rows
+    expect(waits.filter((r) => r.flags.includes("no-timeout") || /CI|timeout-minutes/.test(r.reason))).toEqual([]);
+  });
+
   it("covers every code root rule 7 names, the model export scripts too (loop pass 2026-10-26, finding 3)", () => {
     expect(ROOTS).toEqual(expect.arrayContaining(["electron", "src", "engine", "engine-rs/crates", "engine-rs/export", "engine-rs/tools", "tools"]));
   });
