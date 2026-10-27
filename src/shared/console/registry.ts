@@ -83,6 +83,12 @@ export interface CliSpec {
   commands: SpecCommand[];
 }
 
+/**
+ * A table's own entry for a key the user typed, else undefined: never one of Object.prototype's (`constructor`,
+ * `toString`, `__proto__` typed as a command or a value would otherwise find a function).
+ */
+export const own = <T>(table: Readonly<Record<string, T>>, key: string): T | undefined => (Object.hasOwn(table, key) ? table[key] : undefined);
+
 /** The CLI's value names that are paths (docs/CLI.md: INPUT, DIR|PATTERN, FILE.json, LIB, CONFIG…). */
 const PATH_VALUES = new Set(["INPUT", "DIR", "DIR|PATTERN", "FILE", "FILE.json", "PATH", "LIB", "CONFIG"]);
 /** Flags whose path the CLI writes to (verify only reads its -o). */
@@ -126,10 +132,10 @@ function cliCommand(c: SpecCommand): ConsoleCommand {
       multiple: a.multiple,
       required: a.required,
       // loop: NOT-WORTH — one or three names
-      writes: (WRITES[c.name] ?? []).includes(a.id),
+      writes: (own(WRITES, c.name) ?? []).includes(a.id),
       // loop: NOT-WORTH — as above
-      destructive: (DESTRUCTIVE[c.name] ?? []).includes(a.id),
-      refused: REFUSED[a.id] ?? null,
+      destructive: (own(DESTRUCTIVE, c.name) ?? []).includes(a.id),
+      refused: own(REFUSED, a.id) ?? null,
       conflicts: a.conflicts_with ?? [],
       dos: [],
       folderOnly: false,

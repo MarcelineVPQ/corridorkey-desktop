@@ -82,7 +82,9 @@ missing there).
   order through `consoleRunLines`, the same path as `run`, each line as a typed one: one that leaves a quote open is
   refused and nothing runs; Esc keeps the first line; Ctrl+C drops them), `sudo <command>`,
   `sudo -k`, `farm export` (below), and `corridorkey render | verify | prepare | info` (also bare `render` …). Other command lines' names get
-  an answer instead of "unknown command" (`ANSWERS` in registry.ts): `exit` / `quit` (the Console stays open), `rm` /
+  an answer instead of "unknown command" (`ANSWERS` in registry.ts, read with `own`: only its own entries, so
+  `constructor` or `__proto__` typed as a command is unknown, never an Object.prototype member; `MEANINGS`, the CLI
+  tables and a bookmark's earlier folder are read the same way): `exit` / `quit` (the Console stays open), `rm` /
   `del` / `rmdir` (the Console never deletes files), `cp` / `mv`, `more` / `less` (`cat`, `head`, `tail`),
   `which`, `export` / `setenv` / `setx` and a line starting `X=1` or `$env:X=` (the variables are `set X=1`, `${X}`:
   `assignmentAnswer`), `lsseq` (`dir`), `grep` (`history <term>`, `help -k`); `echo $HOME` prints it and says only

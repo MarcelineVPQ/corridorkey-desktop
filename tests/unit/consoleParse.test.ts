@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parse, quoteArg, tokenize, valueProblem } from "../../src/shared/console/parse";
-import { makeRegistry, MEANINGS, suggest } from "../../src/shared/console/registry";
+import { makeRegistry, MEANINGS, own, suggest } from "../../src/shared/console/registry";
 import { parseLine } from "../../src/shared/console/script";
 
 const reg = makeRegistry();
@@ -384,5 +384,23 @@ describe("docs/GUIDE.md's Console examples", () => {
     expect(lines.length).toBeGreaterThanOrEqual(5);
     // loop: NOT-WORTH — as above
     for (const l of lines) expect(parseLine(l, reg, posix).errors, l).toEqual([]);
+  });
+});
+
+describe("lookups never reach Object.prototype", () => {
+  it("constructor, toString, __proto__, hasOwnProperty typed as a command are unknown commands, not an answer", () => {
+    // loop: NOT-WORTH — four test words
+    for (const w of ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"]) {
+      const p = parse(`${w} x`, reg, posix);
+      expect(p.errors[0].message, w).toMatch(new RegExp(`^unknown command '${w}'`));
+    }
+  });
+
+  it("a value named like a prototype member gets no meaning-based suggestion; own() reads own entries only", () => {
+    const m = parse("render a.mov -o out/ --device constructor", reg, posix).errors.map((e) => e.message);
+    expect(m).toEqual([expect.stringMatching(/^--device takes .*, not 'constructor'$/)]);
+    expect(own({ a: 1 }, "a")).toBe(1);
+    expect(own({ a: 1 }, "constructor")).toBeUndefined();
+    expect(own({ a: 1 }, "__proto__")).toBeUndefined();
   });
 });

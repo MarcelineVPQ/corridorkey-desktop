@@ -7,7 +7,7 @@
 // path separator and always literal (cmd's rule), so C:\shots\sh010 needs no quoting. `--` ends the options; an
 // unquoted `?` (or -h, --help, /?) asks for the command's help. Every token and error carries its source range
 // (UTF-16 offsets, the page's string indices).
-import { ANSWERS, assignmentAnswer, commandNames, MEANINGS, findCommand, fullName, suggest, type ConsoleArg, type ConsoleCommand, type Registry } from "./registry";
+import { ANSWERS, assignmentAnswer, commandNames, MEANINGS, findCommand, fullName, own, suggest, type ConsoleArg, type ConsoleCommand, type Registry } from "./registry";
 
 export interface ParseOptions {
   /** Windows' rules: backslash literal */
@@ -156,7 +156,8 @@ export function valueProblem(arg: ConsoleArg, v: string): string | null {
   // any case (EXR is exr: the Console passes the CLI's own spelling)
   if (arg.kind === "enum" && enumValue(arg, v) === null) {
     // a word with the same meaning first (gpu means auto, not cpu), else the closest spelling
-    const s = MEANINGS[arg.id]?.[v.toLowerCase()] ?? suggest(v, arg.values);
+    const meanings = own(MEANINGS, arg.id);
+    const s = (meanings && own(meanings, v.toLowerCase())) ?? suggest(v, arg.values);
     return `${name} takes ${arg.values.join(", ")}, not '${v}'${s ? ` (did you mean ${s}?)` : ""}`;
   }
   if (arg.kind === "number") {
@@ -191,7 +192,7 @@ export function parse(line: string, reg: Registry, opts: ParseOptions): Parsed {
   }
   const first = words[i];
   let cmd = first.quoted ? null : findCommand(reg, first.value);
-  const answer = first.quoted ? undefined : (ANSWERS[first.value.toLowerCase()] ?? assignmentAnswer(first.value) ?? undefined);
+  const answer = first.quoted ? undefined : (own(ANSWERS, first.value.toLowerCase()) ?? assignmentAnswer(first.value) ?? undefined);
   if (!cmd && answer) {
     fail(answer, first.start, first.end);
     // loop: HOT-PATH-OK — the rest of the line's words, per keystroke

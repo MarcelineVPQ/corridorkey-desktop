@@ -2692,3 +2692,13 @@ describe("SME reviews: jobs, wait, kill", () => {
     expect(killed).toEqual([]);
   });
 });
+
+describe("lookups never reach Object.prototype (runner)", () => {
+  it("a new bookmark named constructor isn't said to replace Object's; typing constructor is an unknown command", async () => {
+    const { c } = make();
+    const b = await c.run("bookmark constructor");
+    expect([b.state, b.lines[0].text]).toEqual(["done", `@constructor is ${shots}: cd @constructor goes there.`]);
+    expect((await c.run("cd @toString")).lines[0].text).toMatch(/^No bookmark toString/);
+    expect((await c.run("constructor")).lines[0].text).toMatch(/^unknown command 'constructor'/);
+  });
+});

@@ -12,7 +12,7 @@ import { posix, win32 } from "node:path";
 import { naturalCompare } from "../media";
 import { enumValue, parse, quoteArg, type Parsed, type ParseOptions } from "../../../src/shared/console/parse";
 import { isBinary, LINES_MAX, readLength, TEXT_MAX, TextCount, textLines, treeLines, WC_MAX, type TreeNode } from "./files";
-import { EXIT_MEANINGS, fullName, type ConsoleArg, type Registry } from "../../../src/shared/console/registry";
+import { EXIT_MEANINGS, fullName, own, type ConsoleArg, type Registry } from "../../../src/shared/console/registry";
 import type { ConsoleBlock, ConsoleEntry, ConsoleHistoryEntry, ConsoleSession, DoctorRow, Job as QueueJob } from "../../../src/shared/types";
 import { farmExport, fileList, type FarmFormat, type FarmJob } from "./farm";
 import { EXR_HEADER_MAX, exrLines, parseExrHeader } from "./exr";
@@ -1091,7 +1091,8 @@ export class Console {
           return this.finish(b, "failed", `Can't bookmark ${folder}: ${fsErrorText(e, dir)}. Tab completes a folder's name.`);
         }
       }
-      const was = all[name];
+      // an own entry only: a bookmark named constructor isn't Object.prototype's
+      const was = own(all, name);
       this.d.setBookmarks({ ...all, [name]: dir });
       return this.finish(b, "done", `@${name} is ${dir}${was && was !== dir ? ` (was ${was})` : ""}: cd @${name} goes there.`);
     })();
