@@ -11,7 +11,9 @@
 #      model set from this PC (rsync, every file's sha256 checked against manifest.json); skipped when already verified
 #   4. the clips (rsync; the originals are only read)
 #   5. keying on the Mac with tools/engine_bench.mjs (detached under caffeinate, so a dropped SSH connection doesn't
-#      end it; this script follows its log and picks it up again when re-run), EXR float outputs
+#      end it; this script follows its log and picks it up again when re-run), EXR float outputs; under
+#      tools/mac_memgate.c (killed past 9 GB footprint, 512 MB swap growth or memory pressure warn: a 16 GB Mac
+#      swapped 22.8 GB on 2026-10-26 under a watchdog that read RSS)
 #   6. the reference: the same clips and settings keyed here with CUDA (or --ref DIR); refuses while Sonata runs,
 #      holds ~/.cache/claude-scratch/gpu.lock
 #   7. the Mac's outputs pulled back, compared exactly (matte_compare.py, side_by_side.py: EXR read as float by OpenCV),
@@ -27,7 +29,7 @@
 #   --coreml-set DIR     coreml: the Core ML set (engine-rs/export/coreml/build_coreml_models.sh's OUT/set: the files,
 #                        coreml.json, SHA256SUMS; default ~/.cache/claude-scratch/coreml-p4/set, built from 2.0.0-onnx.4). Copied next to the
 #                        model set on the Mac, every file's sha256 checked on both sides
-#   --coreml-units U     coreml: Core ML's compute units on the Mac: all (default) | cpu-gpu | cpu-ane | cpu
+#   --coreml-units U     coreml: Core ML's compute units on the Mac: cpu-gpu (default, the engine's) | all | cpu-ane | cpu
 #   --no-low-vram        normal mode instead of staged low-memory mode (identical mattes; low-memory is the default)
 #   --frames N           key only the first N frames of each clip (default: all)
 #   --clips A,B,...      clips (files or frame folders) instead of the default set (coreml's default: the HD clips the
@@ -47,7 +49,7 @@
 # ~/.cache/claude-scratch/tools/memrun.sh (when present) and ~/.cache/claude-scratch/heavy.lock.
 set -euo pipefail
 
-HOST="" PROVIDER=cpu PRECISION=fp16 WINDOW="" LOW_VRAM=true COREML_UNITS=all FRAMES="" CLIPS="" REF="" OUT="" STALL="" MAX_HOURS=24
+HOST="" PROVIDER=cpu PRECISION=fp16 WINDOW="" LOW_VRAM=true COREML_UNITS=cpu-gpu FRAMES="" CLIPS="" REF="" OUT="" STALL="" MAX_HOURS=24
 MODELS="$HOME/.local/share/corridorkey-desktop/models/2.0.0-onnx.4" FRESH=0 DRY=0 STEPS=1,2,3,4,5,6,7
 [ -d "$MODELS" ] || MODELS="$HOME/.cache/claude-scratch/models/2.0.0-onnx.4"
 COREML_SET="$HOME/.cache/claude-scratch/coreml-p4/set"
@@ -426,9 +428,12 @@ ORT=$(ls runtime/$RT/onnxruntime/capi/libonnxruntime.*.dylib | head -1)
 cat >"$RUN/run.sh" <<RUNEOF
 cd "\$HOME/ck-gate"
 export PATH="$PATH" NODE_OPTIONS=--max-old-space-size=512
-node src/tools/engine_bench.mjs rust --bin src/engine-rs/target/dist/corridorkey-engine --models models/$SET --ort $ORT \
-  --device $PROVIDER --cpu --stall-s $STALL $OPTS --out $RUN $CLIPS
+# the memory gate (tools/mac_memgate.c): footprint, swap growth and pressure limits; it kills the run, saying why
+cc -O2 -o $RUN/mac_memgate src/tools/mac_memgate.c
+$RUN/mac_memgate --log $RUN/memgate.log -- node src/tools/engine_bench.mjs rust --bin src/engine-rs/target/dist/corridorkey-engine \
+  --models models/$SET --ort $ORT --device $PROVIDER --cpu --stall-s $STALL $OPTS --out $RUN $CLIPS
 echo \$? >$RUN/exit
+grep -E '^(NOT STARTED|KILLED|end)' $RUN/memgate.log
 RUNEOF
 nohup caffeinate -i -s bash "$RUN/run.sh" >"$RUN/run.log" 2>&1 </dev/null &
 echo $! >"$RUN/pid"

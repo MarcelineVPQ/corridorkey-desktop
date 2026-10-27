@@ -30,7 +30,10 @@ impl Device {
     }
 }
 
-/// CK_ENGINE_COREML_UNITS: what Core ML may run the networks on (its MLComputeUnits).
+/// CK_ENGINE_COREML_UNITS: what Core ML may run the networks on (its MLComputeUnits). Default cpu-gpu: with the
+/// Neural Engine allowed (all), every session load compiled stage 2 for it again (~145 s each time, a new ~0.9 GB
+/// bundle in Core ML's cache, the compiled model in ours reused) and its first call passed 9.7 GB; on CPU + GPU it
+/// loads in 0.5-1.5 s and a whole HD job peaks at 1.8-3.2 GB, mattes within 1/255 of CUDA (Mac mini M6, 2026-10-27).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CoremlUnits {
     /// CPU, GPU and Neural Engine (Core ML picks per layer)
@@ -103,7 +106,7 @@ pub struct EngineConfig {
     pub vram_budget_gb: Option<f64>,
     /// the TensorRT engine cache root (CK_ENGINE_TRT_CACHE, else the system's cache folder: pipeline::trt_root_for)
     pub trt_cache: PathBuf,
-    /// CK_ENGINE_COREML_UNITS (default all)
+    /// CK_ENGINE_COREML_UNITS (default cpu-gpu)
     pub coreml_units: CoremlUnits,
     /// Core ML's compiled-model cache root (CK_ENGINE_COREML_CACHE, else `coreml` next to the TensorRT cache root)
     pub coreml_cache: PathBuf,
@@ -133,7 +136,7 @@ impl Default for EngineConfig {
             arena_shrink: ArenaShrink::Auto,
             vram_budget_gb: None,
             trt_cache: PathBuf::from("tensorrt"),
-            coreml_units: CoremlUnits::All,
+            coreml_units: CoremlUnits::CpuGpu,
             coreml_cache: PathBuf::from("coreml"),
             trt_build: None,
             trt_build_timeout: Duration::from_secs(1800),
@@ -185,7 +188,7 @@ impl EngineConfig {
                 &v,
                 &[("all", CoremlUnits::All), ("cpu-gpu", CoremlUnits::CpuGpu), ("cpu-ane", CoremlUnits::CpuAne), ("cpu", CoremlUnits::Cpu)],
             )?,
-            None => CoremlUnits::All,
+            None => CoremlUnits::CpuGpu,
         };
         let trt_cache = crate::pipeline::trt_root_for(os, |k| var(k));
         let coreml_cache = var("CK_ENGINE_COREML_CACHE")
@@ -408,6 +411,9 @@ mod tests {
         let c =
             EngineConfig::parse(&args(&["e", "--device", "coreml"]), &env(&[("HOME", "/Users/m"), ("CK_ENGINE_COREML_UNITS", "cpu-gpu")]), "macos").unwrap();
         assert_eq!((c.device, c.coreml_units), (Device::CoreMl, CoremlUnits::CpuGpu));
+        // unset: CPU + GPU, not the Neural Engine (its compile isn't reused between loads; 9.7 GB at stage 2)
+        let c = EngineConfig::parse(&args(&["e", "--device", "coreml"]), &env(&[("HOME", "/Users/m")]), "macos").unwrap();
+        assert_eq!((c.coreml_units, EngineConfig::default().coreml_units), (CoremlUnits::CpuGpu, CoremlUnits::CpuGpu));
         assert_eq!(c.coreml_cache, PathBuf::from("/Users/m/Library/Caches/corridorkey-desktop/coreml"));
         assert_eq!(c.to_json()["device"].as_str(), Some("coreml"));
         // empty means unset

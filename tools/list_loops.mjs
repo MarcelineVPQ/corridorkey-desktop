@@ -4,7 +4,7 @@
 // docs/LOOP_PASS_2026-10.md is the pass; its tables come from `--md`.
 //
 // Listed mechanically, tests excluded (tests/, *.test.*, test_*.py, Rust `#[cfg(test)]` modules):
-//   electron/, src/, tools/, .hooks/ (.ts/.tsx/.mjs/.js, .sh), the Python tools (.py, tools/reference/ included),
+//   electron/, src/, tools/, .hooks/ (.ts/.tsx/.mjs/.js, .sh, .c), the Python tools (.py, tools/reference/ included),
 //   engine-rs/crates/*/src (.rs), engine-rs/export (model export: .py, .sh), engine-rs/tools (.sh, .py, the ck-trt-build C++).
 // Kinds (one row per line; a line with several gets them joined, e.g. loop+iter):
 //   loop    for / while / do / loop statements (sh: for / while / until)
@@ -50,7 +50,7 @@ export function langOf(file) {
   if (/\.(tsx?|mjs|js)$/.test(file)) return "ts";
   if (/\.rs$/.test(file)) return "rs";
   if (/\.py$/.test(file)) return "py";
-  if (/\.(cpp|cc|hpp|h)$/.test(file)) return "cpp";
+  if (/\.(c|cpp|cc|hpp|h)$/.test(file)) return "cpp";
   if (/\.sh$/.test(file)) return "sh";
   return null;
 }

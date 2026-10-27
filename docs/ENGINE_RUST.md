@@ -96,7 +96,9 @@ The engine runs `ffmpeg` / `ffprobe` from the system: they are not bundled.
   as with the PyTorch engine.
 - `--device coreml` (macOS only; elsewhere the engine stops with an error) runs ONNX Runtime's Core ML provider
   (BACKLOG row 24, phase 1): ML Program format, fp16, compute units `CK_ENGINE_COREML_UNITS` (all | cpu-gpu |
-  cpu-ane | cpu; default all), compiled models cached under `CK_ENGINE_COREML_CACHE` (default `coreml` next to the
+  cpu-ane | cpu; default cpu-gpu: with the Neural Engine allowed, every load of stage 2 compiled it again for ~145 s
+  and its first call passed 9.7 GB on a 16 GB Mac; on CPU + GPU an HD job peaks at 1.8-3.2 GB, "Core ML on a 16 GB
+  Mac" below), compiled models cached under `CK_ENGINE_COREML_CACHE` (default `coreml` next to the
   TensorRT cache root, e.g. `~/Library/Caches/corridorkey-desktop/coreml`; one folder per ORT version, units and
   file). Core ML compiles for fixed shapes, so it runs the **Core ML set**: `coreml.json` in the models folder lists
   one file per network, padded size and frames per call (`engine-rs/export/coreml/build_coreml_models.sh`; the
@@ -325,6 +327,34 @@ in the mode it had before this table; the rule is lifted once TensorRT's normal-
 | 3200×1800 (6.14) | normal | 48/24 | 1 | out of memory (14 GiB budget) | 34.53 | 59.46 | doesn't fit, as measured |
 | 4096×2160 (8.91) | normal | 8/4 | 2 | 11.01 | 14.55 (+32 %) | 11.68 | +0.67 (+6 %) |
 | 4096×2160 (8.91) | normal | 16/8 | 1 | out of memory (14 GiB budget) | 20.95 | 23.35 | doesn't fit, as measured |
+
+## Core ML on a 16 GB Mac (2026-10-27, Mac mini M6, macOS 27.0.1)
+
+Every run under `tools/mac_memgate.c` (phys_footprint of the job's process tree, swap growth, memory pressure; killed
+past 9 GB, +512 MB swap or pressure warn). 04_5d_hd (1280×1080, padded 1152×1280), EXR float, alpha + fg, the HD Core
+ML set, Firefox and the desktop running beside it (about 12 GB available at the start).
+
+- **Compute units `all` (the default until this date): unusable on 16 GB.** Each load of stage 2 took 145-188 s with
+  ORT's compiled model already in its cache (`compiled_model.mlmodelc` untouched): Core ML compiled it for the Neural
+  Engine again every time (two identical loads left two new ~0.9 GB bundles in `~/Library/Caches/<process>/
+  com.apple.e5rt.e5bundlecache`), its load peaked at 5.1-5.7 GB and its first call passed 9.7 GB. Whole jobs: stage 1
+  at window 4 over 12 GB (2026-10-26), at window 1 8.0 GB; the 2026-10-26 runs swapped 22.8 GB.
+- **`cpu-gpu` (the default since): single networks load in 0.5-5.4 s (C-RADIO, MoGe, RVM, stage 1 up to 4
+  frames, stage 2), the whole job peaks at 1.8-3.4 GB, the GPU at 95-99 % while the networks run (IOAccelerator).** Mattes against CUDA fp16, same window and frames (12, `matte_compare.py`): alpha
+  max 1/255 or less, MAE 2.7-3.1e-5, 0 % of pixels over 1/255, alpha PSNR 79.1-79.7 dB, fg PSNR 74.6-74.7 dB.
+
+| window | mode | peak footprint | 12 frames (cold / warm cache) | 120 frames |
+|---|---|---|---|---|
+| 1/1 | low-memory | 1.78 GB | 33.1 s | |
+| 2/1 | low-memory | 1.79 GB | 39.8 s | |
+| 4/2 | low-memory | 2.19-2.29 GB | 38.7 / 34.5 s | 714 s (0.17 fps) |
+| 4/2 | normal | 2.49 GB | 37.8 s | |
+| 8/4 | low-memory | 3.17-3.39 GB | 78.5 / 49.6 s | 491 s (0.24 fps) |
+
+Per call (12-frame runs): stage 1 3.0 s per 4-frame window, 7-10 s per 8-frame window; stage 2 1.3 s per frame. The
+120-frame runs were slower per call (stage 1 6.1 s per 4-frame window, stage 2 1.9-2.5 s per frame) with the Mac's
+video wallpaper decoding beside them; not separated yet. The ORT cache: a warm load is 3-4x faster than a cold one
+(job session loads 1.9 against 7.5 s at 4/2) and the compiled model is reused, not rewritten.
 
 ## Against the PyTorch engine (`tools/engine_bench.mjs`, 12 GB budget, alpha+fg, auto, no hint)
 
