@@ -54,6 +54,31 @@ export function highlight(line: string, parsed: Parsed): Span[] {
   return out;
 }
 
+/**
+ * The prompt's folder (SME review 2026-10-26 N9: the last folder alone, `key`, says nothing when every shot has
+ * comp/key): inside a bookmark, `@sh010` and the rest (`@sh010/key`, `@sh010/…/key`); else the last two folders
+ * (`comp/key`); `~` at home.
+ */
+export function promptFolder(cwd: string, home: string, bookmarks: Readonly<Record<string, string>>): string {
+  const sep = (p: string) => p.replace(/[\\/]+$/, "");
+  const at = sep(cwd);
+  if (at === sep(home)) return "~";
+  let best: [string, string] | null = null;
+  // loop: NOT-WORTH — ≤ 200 bookmarks, per folder change
+  for (const [name, folder] of Object.entries(bookmarks)) {
+    const f = sep(folder);
+    if ((at === f || at.startsWith(f + "/") || at.startsWith(f + "\\")) && (!best || f.length > best[1].length)) best = [name, f];
+  }
+  // loop: NOT-WORTH — a path's few parts
+  const parts = (p: string) => p.split(/[\\/]/).filter(Boolean);
+  if (best) {
+    const rest = parts(at.slice(best[1].length));
+    return `@${best[0]}${rest.length === 0 ? "" : rest.length === 1 ? `/${rest[0]}` : `/…/${rest[rest.length - 1]}`}`;
+  }
+  const all = parts(at);
+  return all.length ? all.slice(-2).join("/") : cwd;
+}
+
 /** Blocks the page keeps (oldest dropped first); each keeps at most 2000 lines and 256 000 characters (the main process's caps). */
 export const BLOCKS_KEPT = 200;
 

@@ -262,7 +262,9 @@ inner loop's words);
   line (its own state, the arrow at its start); Session → Show → Failed only (`filterBlocks`: failed, refused and
   running blocks; the page's view for this session) is said above the log with the count hidden and Show all; Ctrl+↑ /
   Ctrl+↓ (`nextBlock`, the editor's `jump` effect) outline the block before or after and scroll to it, the line kept
-  (SME review 2026-10-26 N8). A corridorkey block keeps
+  (SME review 2026-10-26 N8). The prompt (`promptFolder`) names the bookmark the folder is in, `@sh010/key`
+  (`@sh010/…/key` deeper; the longest bookmark wins), else the last two folders, `comp/key` (SME review 2026-10-26
+  N9). A corridorkey block keeps
   `command` (its argv as asked: the dialog's, without `--progress-format` and the Console's `--temp`) and offers
   **Copy as farm line**, `jobCommand.ts commandLine` (shellWord's quoting for this system's shell: bash, or cmd on
   Windows, where a word cmd.exe would read is refused and the button says why; SME review 2026-10-26 N7). A render

@@ -147,7 +147,8 @@ popd                                   come back
 dirs                                   the folders pushd remembered
 ```
 
-`dir`, `open`, `pushd` and `allow` take `@names` too, and Tab completes them. Bookmarks are kept after a restart;
+`dir`, `open`, `pushd` and `allow` take `@names` too, and Tab completes them. Inside a bookmarked folder the prompt
+starts with its name, `@sh010/key ❯` (deeper: `@sh010/…/key`); elsewhere it shows the last two folders, `comp/key ❯`. Bookmarks are kept after a restart;
 `j` learns from the folders you typed commands in.
 
 ## Variables

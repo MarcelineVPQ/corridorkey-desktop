@@ -41,7 +41,7 @@ interface Props {
   past: readonly HistoryLine[];
   running: boolean;
   elevated: boolean;
-  /** the current folder's last part, for the prompt */
+  /** the prompt's folder (model.ts promptFolder: @bookmark/…, else the last two folders) */
   folder: string;
   mode: SuggestMode;
   autosuggest: boolean;

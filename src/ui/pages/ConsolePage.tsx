@@ -16,7 +16,7 @@ import { usePref } from "../prefs";
 import { LineEditor, type LineEditorHandle } from "../console/LineEditor";
 import { OutputBlock } from "../console/OutputBlock";
 import { uniqueHistory, type SuggestMode } from "../console/editor";
-import { announcement, clearScreen, filterBlocks, inputTakesFocus, mergeBlocks, nextBlock, visibleBlocks, type BlockList } from "../console/model";
+import { announcement, clearScreen, filterBlocks, inputTakesFocus, mergeBlocks, nextBlock, promptFolder, visibleBlocks, type BlockList } from "../console/model";
 
 const registry = makeRegistry();
 
@@ -159,8 +159,7 @@ export function ConsolePage(props: {
     [setBlocks],
   );
   const reinsert = useCallback((line: string) => editor.current?.insert(line), []);
-  // loop: HOT-PATH-OK — a path's few parts, per render
-  const folder = session.cwd === state.system.home ? "~" : (session.cwd.split(/[\\/]/).filter(Boolean).pop() ?? session.cwd);
+  const folder = useMemo(() => promptFolder(session.cwd, state.system.home, state.settings.consoleBookmarks), [session.cwd, state.system.home, state.settings.consoleBookmarks]);
 
   const main = (
     <div className="page-body console-page">

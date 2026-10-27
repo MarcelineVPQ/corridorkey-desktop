@@ -24,6 +24,7 @@ import {
   filterBlocks,
   lineWords,
   nextBlock,
+  promptFolder,
   nukeRead,
   rateText,
   sequenceCell,
@@ -515,5 +516,21 @@ describe("SME review 2026-10-26 N8 (row 125): fold, filter and jump between bloc
     expect(nextBlock([], null, -1)).toBeNull();
     // a block no longer shown (cleared, filtered): from the newest
     expect(nextBlock(ids, 4, -1)).toBe(9);
+  });
+});
+
+describe("SME review 2026-10-26 N9 (row 126): a shot-aware prompt", () => {
+  it("inside a bookmark: @name and the rest; else the last two folders; ~ at home", () => {
+    const marks = { sh010: "/mnt/show/sq01/sh010", sq01: "/mnt/show/sq01" };
+    expect(promptFolder("/mnt/show/sq01/sh010", "/home/m", marks)).toBe("@sh010");
+    expect(promptFolder("/mnt/show/sq01/sh010/key", "/home/m", marks)).toBe("@sh010/key");
+    expect(promptFolder("/mnt/show/sq01/sh010/comp/key", "/home/m", marks)).toBe("@sh010/…/key");
+    expect(promptFolder("/mnt/show/sq01/sh020/comp/key", "/home/m", marks)).toBe("@sq01/…/key");
+    // /mnt/show/sq01/sh0100 isn't inside sh010
+    expect(promptFolder("/mnt/show/sq01/sh0100", "/home/m", { sh010: "/mnt/show/sq01/sh010" })).toBe("sq01/sh0100");
+    expect(promptFolder("/mnt/show/sq01/sh020/comp/key", "/home/m", {})).toBe("comp/key");
+    expect(promptFolder("/home/m", "/home/m", marks)).toBe("~");
+    expect(promptFolder("/", "/home/m", {})).toBe("/");
+    expect(promptFolder("D:\\shows\\sh010\\key", "C:\\Users\\m", { sh010: "D:\\shows\\sh010" })).toBe("@sh010/key");
   });
 });
