@@ -110,6 +110,12 @@ pub struct EngineConfig {
     pub coreml_units: CoremlUnits,
     /// Core ML's compiled-model cache root (CK_ENGINE_COREML_CACHE, else `coreml` next to the TensorRT cache root)
     pub coreml_cache: PathBuf,
+    /// CK_ENGINE_COREML_FAST_PREDICTION=1: Core ML's SpecializationStrategy FastPrediction (faster calls for a longer
+    /// load, more memory and disk, per Apple). Off by default: a measurement knob, not measured yet
+    pub coreml_fast_prediction: bool,
+    /// CK_ENGINE_COREML_LOW_PRECISION_GPU=1: Core ML's AllowLowPrecisionAccumulationOnGPU (float16 sums on the GPU
+    /// instead of float32). Off by default: a measurement knob; mattes must stay within the CUDA bar to keep it
+    pub coreml_low_precision_gpu: bool,
     /// CK_ENGINE_TRT_BUILD: the engine builder (None: ck-trt-build next to the engine)
     pub trt_build: Option<PathBuf>,
     /// CK_ENGINE_TRT_BUILD_TIMEOUT_S: one engine build's deadline (1800 s)
@@ -138,6 +144,8 @@ impl Default for EngineConfig {
             trt_cache: PathBuf::from("tensorrt"),
             coreml_units: CoremlUnits::CpuGpu,
             coreml_cache: PathBuf::from("coreml"),
+            coreml_fast_prediction: false,
+            coreml_low_precision_gpu: false,
             trt_build: None,
             trt_build_timeout: Duration::from_secs(1800),
             parent_pid: None,
@@ -194,6 +202,12 @@ impl EngineConfig {
         let coreml_cache = var("CK_ENGINE_COREML_CACHE")
             .map(PathBuf::from)
             .unwrap_or_else(|| trt_cache.parent().map(|p| p.join("coreml")).unwrap_or_else(|| PathBuf::from("coreml")));
+        let on_off = |k: &str| match var(k) {
+            Some(v) => pick(k, &v, &[("0", false), ("1", true), ("false", false), ("true", true)]),
+            None => Ok(false),
+        };
+        let coreml_fast_prediction = on_off("CK_ENGINE_COREML_FAST_PREDICTION")?;
+        let coreml_low_precision_gpu = on_off("CK_ENGINE_COREML_LOW_PRECISION_GPU")?;
         let precision = match var("CK_ENGINE_PRECISION") {
             Some(v) => Some(pick("CK_ENGINE_PRECISION", &v, &[("fp16", Precision::Fp16), ("fp32", Precision::Fp32)])?),
             None => None,
@@ -262,6 +276,8 @@ impl EngineConfig {
             trt_cache,
             coreml_units,
             coreml_cache,
+            coreml_fast_prediction,
+            coreml_low_precision_gpu,
             trt_build: var("CK_ENGINE_TRT_BUILD").map(PathBuf::from),
             trt_build_timeout,
             parent_pid: crate::proc::parent_pid_from(var("CK_ENGINE_PARENT_PID").as_deref()),
@@ -297,6 +313,8 @@ impl EngineConfig {
             "trt_cache": self.trt_cache.to_string_lossy(),
             "coreml_units": self.coreml_units.name(),
             "coreml_cache": self.coreml_cache.to_string_lossy(),
+            "coreml_fast_prediction": self.coreml_fast_prediction,
+            "coreml_low_precision_gpu": self.coreml_low_precision_gpu,
             "trt_build": path(&self.trt_build),
             "trt_build_timeout_s": self.trt_build_timeout.as_secs(),
             "parent_pid": self.parent_pid,
@@ -370,6 +388,8 @@ mod tests {
             ("CK_ENGINE_TRT_BUILD_TIMEOUT_S", "0"),
             ("CK_ENGINE_PARENT_PID", "4242"),
             ("ORT_ENABLE_CUDNN_FLASH_ATTENTION", "0"),
+            ("CK_ENGINE_COREML_FAST_PREDICTION", "1"),
+            ("CK_ENGINE_COREML_LOW_PRECISION_GPU", "true"),
         ]);
         let c = EngineConfig::parse(&args(&["e"]), &e, "windows").unwrap();
         assert_eq!((c.precision, c.threads, c.graph_opt, c.cudnn_search), (Some(Precision::Fp32), 6, GraphOpt::Layout, CudnnSearch::Exhaustive));
@@ -380,7 +400,9 @@ mod tests {
             (PathBuf::from("/trt"), Some(PathBuf::from("/b/ck-trt-build")), Duration::from_secs(1))
         );
         assert_eq!((c.parent_pid, c.cudnn_flash_attention.as_deref()), (Some(4242), Some("0")));
+        assert_eq!((c.coreml_fast_prediction, c.coreml_low_precision_gpu), (true, true));
         let j = c.to_json();
+        assert_eq!((j["coreml_fast_prediction"].as_bool(), j["coreml_low_precision_gpu"].as_bool()), (Some(true), Some(true)));
         assert_eq!((j["precision"].as_str(), j["graph_opt"].as_str(), j["arena_shrink"][1].as_str()), (Some("fp32"), Some("layout"), Some("stage1")));
         assert_eq!((j["trt_build_timeout_s"].as_u64(), j["vram_budget_gb"].as_f64()), (Some(1), Some(12.0)));
     }
@@ -400,6 +422,8 @@ mod tests {
             ("CK_ENGINE_VRAM_BUDGET_GB", "lots"),
             ("CK_ENGINE_TRT_BUILD_TIMEOUT_S", "1h"),
             ("CK_ENGINE_COREML_UNITS", "gpu"),
+            ("CK_ENGINE_COREML_FAST_PREDICTION", "yes"),
+            ("CK_ENGINE_COREML_LOW_PRECISION_GPU", "fp16"),
         ] {
             let e = move |n: &str| (n == k).then(|| v.to_string());
             let err = EngineConfig::parse(&args(&["e"]), &e, "linux").unwrap_err();

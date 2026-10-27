@@ -121,6 +121,9 @@ The engine runs `ffmpeg` / `ffprobe` from the system: they are not bundled.
   `CK_ENGINE_PROFILE=<dir>` (ORT per-node profile; on CUDA it times kernel launches, not GPU work),
   `CK_ENGINE_THREADS`; TensorRT: `CK_ENGINE_TRT_CACHE` (engine folder; the app passes its cache folder + `tensorrt`, else the system cache folder: `~/.cache`, `%LOCALAPPDATA%\corridorkey-desktop\cache`, `~/Library/Caches`), `CK_ENGINE_TRT_BUILD` (ck-trt-build,
   else next to the engine binary), `CK_ENGINE_TRT_BUILD_TIMEOUT_S` (one engine build's deadline, default 1800 s).
+  Core ML measurement knobs, off by default and not measured yet: `CK_ENGINE_COREML_FAST_PREDICTION=1` (Core ML's
+  SpecializationStrategy FastPrediction), `CK_ENGINE_COREML_LOW_PRECISION_GPU=1` (AllowLowPrecisionAccumulationOnGPU:
+  float16 sums on the GPU; kept only if mattes stay within the CUDA bar).
   Also `CK_ENGINE_DEVICE` (auto | cuda | cpu | coreml, = `--device`), `CK_ENGINE_PRECISION` (fp16 | fp32), `CK_ENGINE_MODELS`,
   `CK_ENGINE_ORT` / `ORT_DYLIB_PATH`, and `CK_ENGINE_PARENT_PID` (the app passes its pid; the engine ends with that
   process, ck-core `proc.rs`). All are read once at startup (`ck-core/src/config.rs`, `EngineConfig`; flags win
@@ -398,7 +401,12 @@ ML set (1280×1080 clips only), Firefox and the desktop running beside it (about
 - **Compute units `all` (the default until this date): unusable on 16 GB.** Each load of stage 2 took 145-188 s with
   ORT's compiled model already in its cache (`compiled_model.mlmodelc` untouched): Core ML compiled it for the Neural
   Engine again every time (two identical loads left two new ~0.9 GB bundles in `~/Library/Caches/<process>/
-  com.apple.e5rt.e5bundlecache`), its load peaked at 5.1-5.7 GB and its first call passed 9.7 GB. Whole jobs: stage 1
+  com.apple.e5rt.e5bundlecache`), its load peaked at 5.1-5.7 GB and its first call passed 9.7 GB. Why (measured 2026-10-27 on
+  a 256×384 stage 2): Apple's Neural Engine compiler (ANECompilerService) crashes on stage 2, a stack overflow in its
+  attention scheduler (crash reports in /Library/Logs/DiagnosticReports), so nothing is cached and every load
+  compiles it again in pieces. C-RADIO, MoGe and RVM compile once and load from the cache in 0.15-1.2 s afterwards,
+  but run 2-8x slower on the Neural Engine than on the GPU (a quarter to a third of their work, the float32 casts and
+  norms, falls back to the CPU), so cpu-gpu stays the default for every network. Whole jobs: stage 1
   at window 4 over 12 GB (2026-10-26), at window 1 8.0 GB; the 2026-10-26 runs swapped 22.8 GB.
 - **`cpu-gpu` (the default since): single networks load in 0.5-5.4 s (C-RADIO, MoGe, RVM, stage 1 up to 4
   frames, stage 2), the whole job peaks at 1.8-3.4 GB, the GPU at 95-99 % while the networks run (IOAccelerator).** Mattes against CUDA fp16, same window and frames (12, `matte_compare.py`): alpha

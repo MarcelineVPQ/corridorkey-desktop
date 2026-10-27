@@ -402,11 +402,18 @@ impl Runtime {
                         crate::config::CoremlUnits::CpuAne => ComputeUnits::CPUAndNeuralEngine,
                         crate::config::CoremlUnits::Cpu => ComputeUnits::CPUOnly,
                     };
-                    let ep = ort::ep::CoreML::default()
+                    let mut ep = ort::ep::CoreML::default()
                         .with_model_format(ModelFormat::MLProgram)
                         .with_compute_units(units)
                         .with_static_input_shapes(true)
                         .with_model_cache_dir(cache.display());
+                    // measurement knobs, off by default (unset: Core ML's own defaults, as before)
+                    if self.cfg.coreml_fast_prediction {
+                        ep = ep.with_specialization_strategy(ort::ep::coreml::SpecializationStrategy::FastPrediction);
+                    }
+                    if self.cfg.coreml_low_precision_gpu {
+                        ep = ep.with_low_precision_accumulation_on_gpu(true);
+                    }
                     b = b.with_config_entry("session.disable_cpu_ep_fallback", "1").map_err(|e| e.to_string())?;
                     b = b.with_execution_providers([ep.build().error_on_failure()]).map_err(|e| e.to_string())?;
                 }
