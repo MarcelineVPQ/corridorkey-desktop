@@ -14,7 +14,7 @@ electron/main/install.ts. Do not edit it by hand: run `node tools/gen_notices.mj
 | Engine (Rust crates) | yes | 70 | Apache-2.0 OR MIT: 41 · MIT: 8 · Apache-2.0 OR MIT OR Zlib: 7 · BSD-3-Clause: 4 · Apache-2.0 OR BSD-2-Clause OR MIT: 2 · Apache-2.0 OR BSD-3-Clause: 2 · ISC: 2 · MIT OR Unlicense: 2 · (MIT OR Apache-2.0) AND Unicode-3.0: 1 · 0BSD OR Apache-2.0 OR MIT: 1 |
 | Interface (npm packages) | yes | 107 | MIT: 105 · ISC: 2 |
 | OpenColorIO and its bundled C++ libraries (inside the engine) | yes | 9 | BSD-3-Clause: 3 · MIT: 2 · Zlib: 2 · BSD-2-Clause: 1 · ICC Software License 0.2: 1 |
-| Electron 45.0.0-beta.3 with Chromium | yes | 1 | MIT (Electron); Chromium's own notices in LICENSES.chromium.html |
+| Electron 45.1.0 with Chromium | yes | 1 | MIT (Electron); Chromium's own notices in LICENSES.chromium.html |
 | TensorRT engine builder (ck-trt-build, Linux) | yes | 2 | Apache-2.0 (TensorRT headers); Apache-2.0 WITH LLVM-exception (LLVM libc++) |
 | GPU runtime, models | no: downloaded at first run from their publishers | 12 wheels, 3 model sets | see below |
 
@@ -251,7 +251,7 @@ app.asar by electron-builder. Development tools (devDependencies) are not shippe
 
 ### Electron and Chromium
 
-Electron 45.0.0-beta.3 (MIT, Copyright (c) Electron contributors, Copyright (c) 2013-2020 GitHub Inc.) is the app's
+Electron 45.1.0 (MIT, Copyright (c) Electron contributors, Copyright (c) 2013-2020 GitHub Inc.) is the app's
 runtime. Its licence and Chromium's third-party notices (Chromium, V8, FFmpeg as libffmpeg and the rest) ship with
 every copy of the app, unchanged, as Electron provides them:
 
