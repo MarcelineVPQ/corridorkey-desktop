@@ -211,12 +211,17 @@ The `corridorkey` command line ([CLI.md](CLI.md)) runs the same jobs without thi
   provider) and `estimate_basis` (`onnxruntime-cuda-measured` since 2026-10-24: the
   estimate is this engine's measured peaks on ONNX Runtime CUDA plus 6 %, an upper bound at every measured point,
   re-measured on model set 2.0.0-onnx.4 on 2026-10-26, docs/BACKLOG.md row 41; since 2026-10-27 also the 8 GB card's peaks where memory is tight, docs/ENGINE_RUST.md; before, `pytorch-bf16-table`, the upstream runtime's PyTorch table).
+- `retry_after_oom` (Rust engine `memory`, additive): an automatic window that ran out of graphics memory before any
+  frame reached the writers is halved and the job restarted; the second `memory` reply carries the new window and
+  `retry_after_oom` (`hann_chunk`, `hann_stride` and `message` of the window that failed; docs/ENGINE_RUST.md).
 - `decoders` (Rust engine pong, additive): the JPEG decoder frame folders get (libjpeg-turbo,
   the one OpenCV uses, or the image crate's, which differs by a few levels) and the ffmpeg and
   ffprobe versions. A job writes the same three at the end of its `_settings.txt`
   (`JPEG Decoder:`, `FFmpeg:`, `FFprobe:`) and in a `log` line.
 - `version` (Rust engine pong): the app release it ships in (package.json's version, read when the engine is
   built), the same number `corridorkey --version` prints. Before 2026-10-26 it was the Rust workspace's own 0.2.0.
+- `coreml_available` (Rust engine pong, additive): the loaded ONNX Runtime has the Core ML provider. When no provider
+  can run (`provider` null, e.g. `--device coreml` without it) `unavailable` says why; nothing runs on the CPU instead.
 - `ocio` (Rust engine pong, additive): the version of the OpenColorIO library linked into the engine ("2.5.2"). An
   engine built without it (a stub) refuses to start.
 - Colour management (Rust engine, backlog row 29; docs/ENGINE_RUST.md "Colour"): with `input_colorspace` the clip's
@@ -234,7 +239,10 @@ The `corridorkey` command line ([CLI.md](CLI.md)) runs the same jobs without thi
   provider and precision, and for TensorRT the shape range, whether its
   engines are built or reused, and every network that fell back to CUDA, with why. In a low-VRAM TensorRT job it
   comes after the first phase's networks load and again whenever a later phase's network falls back (`provider`
-  and `fallbacks` then cover the job so far; `pieces` the networks loaded now).
+  and `fallbacks` then cover the job so far; `pieces` the networks loaded now). `cache_invalidated` lists the
+  TensorRT engine folders of this card it removed because they were built under another driver, TensorRT or ONNX
+  Runtime. A Core ML job's `provider` is `coreml`, with `pieces` and `coreml` (`files`: each network's set file,
+  `nodes`, `partitions`, `compute_units`, `model_format`, `cpu_fallback`, `cache`).
 - `optimize` (Rust engine, TensorRT only) is a one-time engine build for the
   clip's shape range, one `progress` per network built (`detail`: "stage 1 (4/5)");
   the builder reports no fraction, so it has no `p`. `build_s` in the second
