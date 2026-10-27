@@ -85,6 +85,7 @@ export const FALLBACK_SCRIPT = [
   'exec "$@"',
 ].join("; ");
 export function shellArgs(oldPid: number, target: string, args: string[] = []): string[] {
+  // gate: shell-ok — a fixed script (FALLBACK_SCRIPT); the pid, target and args are passed as "$@", never as script text
   return ["-c", FALLBACK_SCRIPT, "corridorkey-relaunch", String(oldPid), target, ...args];
 }
 

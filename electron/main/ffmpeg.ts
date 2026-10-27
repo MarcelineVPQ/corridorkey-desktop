@@ -77,6 +77,7 @@ export function installPlan(osRelease: string): InstallPlan {
   // loop: NOT-WORTH — a few os-release ids
   // the package lists first: on a system that hasn't updated in a while, install alone fails with 404s
   if (ids.some((i) => i === "debian" || i === "ubuntu"))
+    // gate: shell-ok — a fixed command line (no user text), run elevated by the install flow
     return { command: "sudo apt update && sudo apt install ffmpeg", argv: ["sh", "-c", "apt-get update && apt-get install -y ffmpeg"], note: null };
   // loop: NOT-WORTH — a few os-release ids
   if (ids.some((i) => i === "arch")) return { command: "sudo pacman -S ffmpeg", argv: ["pacman", "-S", "--noconfirm", "--needed", "ffmpeg"], note: null };

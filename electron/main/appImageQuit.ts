@@ -47,6 +47,7 @@ export const WAIT_SCRIPT = `end=$(($(date +%s) + ${MAX_WAIT_MS / 1000})); while 
 
 /** /bin/sh's argv for the helper that waits for `pids`. */
 // loop: NOT-WORTH — ≤ MAX_PIDS process ids, once at quit
+// gate: shell-ok — a fixed script (WAIT_SCRIPT); only process ids are passed, as "$@", never as script text
 export const mountGuardArgs = (pids: number[]): string[] => ["-c", WAIT_SCRIPT, "sh", ...pids.map(String)];
 
 /** A process's direct children (every thread's, from /proc). */
@@ -69,5 +70,6 @@ export function holdAppImageMountUntilExit(): void {
   const pids = [process.pid, ...descendantPids(process.pid, procChildren)];
   // lifetime: OK — detached and unref'd: it outlives this process on purpose and ends by itself once these processes are gone (MAX_WAIT_MS at most)
   // error: NOT-WORTH — without it the quit is as before (a zygote may still crash on the way out); nothing for the user to do
+  // gate: shell-ok — /bin/sh runs only mountGuardArgs' fixed script (above)
   spawn("/bin/sh", mountGuardArgs(pids), { detached: true, stdio: "ignore", env: { PATH: "/usr/bin:/bin" } }).unref();
 }

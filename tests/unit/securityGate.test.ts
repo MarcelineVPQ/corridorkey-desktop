@@ -61,6 +61,17 @@ describe("Electron security gate", () => {
     ["a default import", 'import cp from "child_process";\ncp.exec("ls");'],
     ["require", 'const cp = require("child_process");\ncp.exec("ls");'],
     ["nodeIntegration", "new BrowserWindow({ webPreferences: { nodeIntegration: true } });"],
+    // the senior review of 2026-10-26 (S5): a shell by another spelling
+    ['shell: "/bin/bash"', 'spawn(x, [], { shell: "/bin/bash" });'],
+    ["shell: <expression>", 'spawn(x, [], { shell: process.platform === "win32" });'],
+    ["shell on its own line", "spawn(x, [], {\n  shell: useShell,\n});"],
+    ["sh -c", 'spawn("/bin/sh", ["-c", line]);'],
+    ["bash by name", 'spawn("bash", args);'],
+    ["cmd.exe /c", 'execFile("cmd.exe", ["/d", "/s", "/c", line]);'],
+    ["powershell -Command", 'spawnSync("powershell.exe", ["-NoProfile", "-Command", line]);'],
+    ["a dynamic import", 'const cp = await import("node:child_process");\ncp.exec(line);'],
+    ["a destructured dynamic import", 'const { spawn: run } = await import("child_process");'],
+    ["shell.openPath", "await shell.openPath(p);"],
   ];
   // loop: NOT-WORTH — a dozen fixtures, each in electron/ and in src/
   for (const [name, code] of forbidden) {
@@ -69,6 +80,20 @@ describe("Electron security gate", () => {
       expect(runGate({ "src/ui/bad.tsx": code }).code).toBe(1);
     });
   }
+
+  it("lets a reviewed shell use through with its marker on the line or the line above", () => {
+    const ok = [
+      "// gate: shell-ok — a fixed script, no user text",
+      'spawn("/bin/sh", ["-c", SCRIPT]);',
+      "const err = await shell.openPath(p); // gate: shell-ok — the app's own folder",
+      "spawn(x, [], { shell: false });",
+    ].join("\n");
+    const r = runGate({ "electron/main/ok.ts": ok });
+    expect(r.out).toBe("");
+    expect(r.code).toBe(0);
+    // the marker covers only its own line and the next one
+    expect(runGate({ "electron/main/bad.ts": '// gate: shell-ok — x\nconst a = 1;\nspawn("/bin/sh", ["-c", line]);' }).code).toBe(1);
+  });
 
   it("fails without the Content-Security-Policy, or with a loosened one", () => {
     expect(runGate({}, "export default {};").code).toBe(1);

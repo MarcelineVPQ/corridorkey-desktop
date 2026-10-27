@@ -879,6 +879,7 @@ function registerIpc(): void {
     // loop: NOT-WORTH — one async stat per click
     if (!p || !(await exists(p))) return;
     // loop: NOT-WORTH — hands the folder to the file manager once per click
+    // gate: shell-ok — p is one of the app's own folders (the cache folder, or one Storage lists), never a file
     const err = await shell.openPath(p);
     // error: SHOWN — the file manager couldn't be started: a message box says why
     if (err && mainWindow) await dialog.showMessageBox(mainWindow, { type: "info", message: "The folder couldn't be opened", detail: `${p}: ${err}` });

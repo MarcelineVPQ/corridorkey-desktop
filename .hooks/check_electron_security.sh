@@ -12,7 +12,13 @@
 #   shell: true                  a command line through the system shell (spawn / execFile with a shell)
 #   exec( / execSync(            child_process's shell-string runners: the app runs a fixed program with an argv
 #                                (execFile / spawn) only. Also child_process.exec, `exec as`, and child_process
-#                                imported whole (namespace, default, require), so every use is a named import.
+#                                imported whole (namespace, default, require, dynamic import()), so every use is a
+#                                named import.
+# and, unless the line or the one above says `gate: shell-ok — why` (a reviewed use; senior review 2026-10-26 S5):
+#   shell: <anything but false>  a shell by another spelling ("/bin/bash", an expression)
+#   spawn / execFile of a shell  sh, bash, zsh, dash, ksh, fish, cmd(.exe), powershell(.exe), pwsh(.exe) by name
+#   "-c" "/c" "-Command"         a shell's command-string argument, wherever an argv is built
+#   shell.openPath               opens a path with its default program (an .exe, a script: runs it)
 #
 # Requires the renderer's Content-Security-Policy (electron.vite.config.ts, injected into index.html at build):
 #   default-src 'self', script-src 'self' (never 'unsafe-inline' or 'unsafe-eval'), object-src 'none',
@@ -29,6 +35,26 @@ hits=$(grep -rnE \
 '|(^|[^.[:alnum:]_$])exec(Sync)?\s*\(|\.execSync\s*\(|child_process\.exec|\bexec(Sync)?\s+as\b'\
 "|import\s+(\*\s+as\s+)?[[:alnum:]_\$]+\s+from\s+$cp|require\(\s*$cp" \
   electron src --include='*.ts' --include='*.tsx' --include='*.js' 2>/dev/null)
+
+# the shell rules: a hit passes only with the marker on its line or the line above
+q="[\"'\`]"
+shellHits=$( {
+  grep -rnE "(^|[{,])[[:space:]]*shell[[:space:]]*:" electron src --include='*.ts' --include='*.tsx' --include='*.js' 2>/dev/null |
+    grep -vE ":[0-9]+:.*shell[[:space:]]*:[[:space:]]*false([^[:alnum:]_\$]|$)"
+  grep -rniE "(spawn|execFile)(Sync)?[[:space:]]*\([[:space:]]*$q([^\"'\`]*[/\\])?(sh|bash|zsh|dash|ksh|fish|cmd|cmd\.exe|powershell|powershell\.exe|pwsh|pwsh\.exe)$q" \
+    electron src --include='*.ts' --include='*.tsx' --include='*.js' 2>/dev/null
+  grep -rnE "$q(-c|/c|/C|-Command|-command|-EncodedCommand)$q|import\([[:space:]]*$cp|shell\.openPath" \
+    electron src --include='*.ts' --include='*.tsx' --include='*.js' 2>/dev/null
+} | sort -u)
+# loop: NOT-WORTH — the few hits, one sed each, once per gate run
+while IFS= read -r h; do
+  [ -n "$h" ] || continue
+  f=${h%%:*}
+  rest=${h#*:}
+  n=${rest%%:*}
+  sed -n "$(( n > 1 ? n - 1 : 1 )),${n}p" "$f" | grep -q "gate: shell-ok" || hits="${hits:+$hits
+}$h"
+done <<< "$shellHits"
 
 if [ -n "$hits" ]; then
   echo "Electron security gate: forbidden setting found"
