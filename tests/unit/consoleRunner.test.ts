@@ -14,10 +14,15 @@ import { AuditLog, History } from "../../electron/main/console/logs";
 import { BlockPusher, PUSH_EVERY_MS } from "../../electron/main/console/push";
 import { consoleLineArg, consoleLinesArg, cursorArg, fromAppPage } from "../../electron/main/validate";
 import { makeRegistry } from "../../src/shared/console/registry";
+import { blockText } from "../../src/ui/console/model";
 import { DEFAULT_OPTIONS, type ConsoleBlock, type DoctorRow, type Job } from "../../src/shared/types";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "ck-console-run-")));
-afterAll(() => rmSync(root, { recursive: true, force: true }));
+// the last tests' history appends (fire-and-forget, as in the app) land before the folder goes
+afterAll(async () => {
+  await new Promise((r) => setTimeout(r, 50));
+  rmSync(root, { recursive: true, force: true });
+});
 const out = join(root, "out");
 const elsewhere = join(root, "elsewhere");
 const shots = join(root, "my shots");
@@ -1055,7 +1060,7 @@ describe("Phase 4: doctor", () => {
     expect(spawned[0].args).toEqual(["info", "--json"]);
     expect(spawned[0].opts.shell).toBe(false);
     expect(gpuTaken).toBe(0);
-    const text = b.lines.map((l) => l.text);
+    const text = blockText(b).split("\n");
     expect(text.find((l) => l.includes("Graphics card"))).toMatch(/^✓ Graphics card +NVIDIA GeForce RTX 5080 · driver 590.44 · 15.9 GiB · cuda \(fp16\)$/);
     expect(text.find((l) => l.includes("Models"))).toMatch(/^✓ Models +2.0.0-onnx.4 in \/m\/2.0.0-onnx.4$/);
     expect(text.find((l) => l.includes("Results folder"))).toMatch(/^✓ Results folder .*writable · 500 GiB free/);
@@ -1078,7 +1083,7 @@ describe("Phase 4: doctor", () => {
       models: { dir: "/m", set: null, assets: { cradio: true, moge: true, rvm: false, stage1: true, stage2: false } },
     });
     const b = await p;
-    const text = b.lines.map((l) => l.text);
+    const text = blockText(b).split("\n");
     const at = (s: string) => text.findIndex((l) => l.includes(s));
     expect(text[at("Graphics card")]).toMatch(/^✗ Graphics card +no NVIDIA driver found$/);
     expect(text[at("Graphics card") + 1]).toMatch(/^ +fix: /);
@@ -1101,14 +1106,22 @@ describe("Phase 4: doctor", () => {
     const p = c.run("doctor");
     await answer(null, 7, ["ERROR: ONNX Runtime didn't load: libonnxruntime.so: not found (--ort LIB, or CK_ENGINE_ORT) (exit 7, assets)"]);
     const f = await p;
-    expect(f.lines.map((l) => l.text).find((l) => l.includes("ONNX Runtime"))).toMatch(/^✗ ONNX Runtime +ONNX Runtime didn't load: libonnxruntime.so: not found/);
+    expect(
+      blockText(f)
+        .split("\n")
+        .find((l) => l.includes("ONNX Runtime")),
+    ).toMatch(/^✗ ONNX Runtime +ONNX Runtime didn't load: libonnxruntime.so: not found/);
     // every row is output, a ✓ one too, though the block failed
     expect(f.lines.every((l) => l.kind === "out")).toBe(true);
     // a model set info can't open is the Models row
     const p2 = c.run("doctor");
     await new Promise((r) => setTimeout(r, 5));
     await finish(spawned[1].child, [], 7, ["ERROR: /m/models.json: not a model set manifest (exit 7, assets)"]);
-    expect((await p2).lines.map((l) => l.text).find((l) => l.includes("Models"))).toMatch(/^✗ Models +\/m\/models.json: not a model set manifest$/);
+    expect(
+      blockText(await p2)
+        .split("\n")
+        .find((l) => l.includes("Models")),
+    ).toMatch(/^✗ Models +\/m\/models.json: not a model set manifest$/);
   });
 });
 
@@ -1391,6 +1404,8 @@ describe("Phase 4: bookmarks, j, pushd and popd", () => {
     await c.run("cd /");
     const b = await c.run("j sh0");
     expect([b.state, b.lines[0].text]).toEqual(["done", join(out, "sh010")]);
+    // the page shows it shortened (whole on hover and in Copy output)
+    expect(b.paths).toEqual([join(out, "sh010")]);
     expect(c.session().cwd).toBe(join(out, "sh010"));
     expect((await c.run("j out")).state).toBe("failed");
     expect((await c.run("j else")).lines[0].text).toBe(elsewhere);
@@ -1636,6 +1651,8 @@ describe("Phase 4: file built-ins (read-only)", () => {
     const { c } = make({ startDir: dir });
     expect(text(await c.run("du"))).toEqual(["     2.0 KiB  sub/", "     2.0 KiB  . (total)"]);
     expect(text(await c.run("tree"))).toEqual([".", "├── bin.dat", "├── notes.txt", "└── sub/", "    ├── a.####.exr  1001-1002 · 2 frames", "    └── deep/", "2 folders, 3 files or sequences"]);
+    // a drawing: the page never wraps its lines
+    expect((await c.run("tree")).nowrap).toBe(true);
     expect(text(await c.run("tree -L 3 sub"))).toEqual(["sub", "├── a.####.exr  1001-1002 · 2 frames", "└── deep/", "    └── x.txt", "1 folder, 2 files or sequences"]);
   });
 });

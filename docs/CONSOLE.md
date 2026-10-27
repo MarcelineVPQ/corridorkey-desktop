@@ -157,7 +157,13 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   networks; a model set info can't open is the Models row, a runtime that doesn't load the ONNX Runtime row); an
   isolated copy ran it against the real `corridorkey info` (CPU device).
 - **Output** goes to the page as blocks (`ConsoleBlock` in `src/shared/types.ts`): the line, its state and exit code,
-  progress, the last 2000 lines, `dir`'s rows. The page keeps them quiet: a block's actions show on hover and on
+  progress, the last 2000 lines, `dir`'s rows, `doctor`'s rows. A listing's Name column takes the room and stays on one
+  line (a long name or a sequence's gaps end in …, never broken inside a number; the whole text on hover and in Copy
+  output); `doctor` is a table (mark, check, detail, a problem's fix on its own line under its detail); `tree`'s
+  lines are a drawing (`nowrap`: never wrapped, the block scrolls sideways); the absolute paths a block names (`paths`,
+  `DoctorRow.path`: dir's folder, doctor's, `bookmarks`, `j`, `dirs`, `cd -`, `set`'s `cwd` and `home`) show as the
+  app shows paths, `~` and the
+  middle as … (`shortenKnown` in model.ts), whole on hover and in Copy output. The page keeps them quiet: a block's actions show on hover and on
   keyboard focus (`:focus-within`; opacity only, so Tab always reaches them; always shown without hover), a built-in's
   block is compact, `cd` prints nothing on success (`cd -` prints where it went). Updates are pushed on `ck:console-blocks`, at most 10 a second and only
   while the window is shown; the session (folder, elevation's end, the running line) rides in the app state.

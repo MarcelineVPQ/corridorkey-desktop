@@ -4,7 +4,8 @@
 import type { Parsed, Token } from "../../shared/console/parse";
 import { expandHistory, hasExpansion, type HistoryLine } from "../../shared/console/expand";
 import { fullName, type Registry } from "../../shared/console/registry";
-import type { ConsoleBlock, ConsoleEntry } from "../../shared/types";
+import type { ConsoleBlock, ConsoleEntry, DoctorRow } from "../../shared/types";
+import { shortenPath } from "../paths";
 import { fileSizeText } from "../../shared/units";
 
 export type SpanKind = "plain" | "command" | "flag" | "value" | "path" | "string" | "error" | "danger";
@@ -164,7 +165,27 @@ export function blockText(b: ConsoleBlock): string {
     // loop: NOT-WORTH — as above
     for (const r of [["Name", "Size", "Modified"], ...rows]) lines.push(`${r[0].padEnd(w)}  ${r[1].padEnd(10)}  ${r[2]}`.trimEnd());
   }
+  if (b.doctor?.length) lines.push(...doctorText(b.doctor));
   return lines.join("\n");
+}
+
+export const DOCTOR_MARK = { ok: "✓", warn: "⚠", fail: "✗" } as const;
+
+/** doctor's rows as aligned text (Copy output): mark, check, detail, and a problem's fix under its detail; paths whole. */
+export function doctorText(rows: readonly DoctorRow[]): string[] {
+  // loop: NOT-WORTH — the few rows
+  const w = Math.max(...rows.map((r) => r.check.length));
+  // loop: NOT-WORTH — as above
+  return rows.flatMap((r) => [`${DOCTOR_MARK[r.status]} ${r.check.padEnd(w)}  ${r.detail}`, ...(r.fix && r.status !== "ok" ? [`  ${" ".repeat(w)}  fix: ${r.fix}`] : [])]);
+}
+
+/** A block line with the absolute paths it is known to hold shown as the app shows paths (~, the middle as …). */
+export function shortenKnown(text: string, paths: readonly string[] | null | undefined, home: string, max = 48): string {
+  // the longest first, and only where a whole path ends (…/sh010 never inside …/sh010/plates)
+  // loop: NOT-WORTH — a block's few paths (≤ 50), per line shown
+  for (const p of [...(paths ?? [])].sort((x, y) => y.length - x.length))
+    if (p && text.includes(p)) text = text.replace(new RegExp(`${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w./\\\\-])`, "g"), () => shortenPath(p, home, max));
+  return text;
 }
 
 /** A sequence row's frames, lsseq-style: "1001-1100 · 96 frames · missing 1047, 1050-1052". */

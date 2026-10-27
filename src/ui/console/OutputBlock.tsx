@@ -3,13 +3,14 @@
 // it printed (selectable), a folder listing, the paths it wrote (Show in folder), and Copy command / Copy output /
 // Re-run (which puts the line back in the input, never runs it), shown on hover and on keyboard focus. An elevated
 // block is marked; a built-in's is compact.
-import { memo, useEffect, useState } from "react";
+import { memo, useContext, useEffect, useState } from "react";
 import { Check, Copy, CornerDownLeft, FolderOpen, ShieldAlert } from "lucide-react";
 import type { Registry } from "../../shared/console/registry";
 import type { ConsoleBlock } from "../../shared/types";
 import { ProgressBar } from "../ProgressBar";
 import { fileSizeText } from "../../shared/units";
-import { blockStatus, blockText, compactBlock, duration, errorSpans, isoTime, sequenceText, writtenPaths } from "./model";
+import { blockStatus, blockText, compactBlock, DOCTOR_MARK, duration, entryName, errorSpans, isoTime, sequenceText, shortenKnown, writtenPaths } from "./model";
+import { HomeContext } from "../PathText";
 
 const COPIED_MS = 1500;
 
@@ -35,6 +36,7 @@ export const OutputBlock = memo(function OutputBlock({ b, registry, onReinsert }
   const took = duration(b);
   const written = b.state === "done" || b.state === "failed" || b.state === "cancelled" ? writtenPaths(b, registry) : [];
   const out = blockText(b);
+  const home = useContext(HomeContext);
   return (
     // the line is the user's own input: it labels the block, the live log announces only what the command printed
     <article className={`cblock tone-${st.tone} ${b.elevated ? "elevated" : ""} ${b.parent !== null ? "child" : ""} ${compactBlock(b) ? "compact" : ""}`} aria-label={b.line}>
@@ -78,15 +80,19 @@ export const OutputBlock = memo(function OutputBlock({ b, registry, onReinsert }
         </div>
       )}
       {(b.lines.length > 0 || b.linesDropped > 0) && (
-        <pre className="cb-out">
+        <pre className={`cb-out ${b.nowrap ? "nowrap" : ""}`}>
           {b.linesDropped > 0 && <span className="l-info">{`… ${b.linesDropped} earlier lines not kept\n`}</span>}
           {/* loop: HOT-PATH-OK — ≤ 2000 lines, per render of a changed block (memo: others don't re-render) */}
-          {b.lines.map((l, i) => (
-            <span key={i} className={`l-${l.kind}`}>
-              {l.text}
-              {"\n"}
-            </span>
-          ))}
+          {b.lines.map((l, i) => {
+            // a known long path (dir's folder) shown short; the whole line on hover and in Copy output
+            const shown = shortenKnown(l.text, b.paths, home);
+            return (
+              <span key={i} className={`l-${l.kind}`} title={shown !== l.text ? l.text : undefined}>
+                {shown}
+                {"\n"}
+              </span>
+            );
+          })}
         </pre>
       )}
       {b.entries && b.entries.length > 0 && (
@@ -102,7 +108,8 @@ export const OutputBlock = memo(function OutputBlock({ b, registry, onReinsert }
             {/* loop: HOT-PATH-OK — ≤ 5000 rows, once per listing (memo) */}
             {b.entries.map((e) => (
               <tr key={e.name} className={e.folder ? "folder" : ""}>
-                <td>
+                {/* one line: a long name or a sequence's gaps end in … (never broken inside a number), whole on hover */}
+                <td title={entryName(e)}>
                   {e.folder ? `${e.name}/` : e.name}
                   {e.sequence && <span className="cb-seq">{sequenceText(e.sequence)}</span>}
                 </td>
@@ -110,6 +117,28 @@ export const OutputBlock = memo(function OutputBlock({ b, registry, onReinsert }
                 <td>{isoTime(e.modified)}</td>
               </tr>
             ))}
+          </tbody>
+        </table>
+      )}
+      {b.doctor && b.doctor.length > 0 && (
+        <table className="cb-doctor">
+          <tbody>
+            {/* loop: NOT-WORTH — doctor's dozen rows */}
+            {b.doctor.map((r) => {
+              const detail = shortenKnown(r.detail, r.path ? [r.path] : null, home);
+              return (
+                <tr key={r.check + r.detail} className={r.status}>
+                  <td className="cbd-mark" aria-label={r.status === "ok" ? "ok" : r.status === "warn" ? "warning" : "problem"}>
+                    {DOCTOR_MARK[r.status]}
+                  </td>
+                  <th scope="row">{r.check}</th>
+                  <td title={detail !== r.detail ? r.detail : undefined}>
+                    <span className="cbd-detail">{detail}</span>
+                    {r.fix && r.status !== "ok" && <span className="cbd-fix">fix: {r.fix}</span>}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}

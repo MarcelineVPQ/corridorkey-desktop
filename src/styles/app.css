@@ -904,6 +904,12 @@ select {
   max-height: 60vh;
   overflow: auto;
 }
+/* drawn lines (tree): never wrapped, the block scrolls sideways */
+.cb-out.nowrap {
+  white-space: pre;
+  word-break: normal;
+  overflow-x: auto;
+}
 .l-err {
   color: var(--status-error);
 }
@@ -926,10 +932,12 @@ select {
   color: var(--text-3);
   font-weight: 600;
 }
+/* the name takes the room; a long one (or a sequence's gaps) ends in … on one line, whole on hover and in Copy output */
 .cb-dir td:first-child {
   width: 100%;
-  white-space: normal;
-  word-break: break-all;
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .cb-dir td:nth-child(2) {
   text-align: right;
@@ -946,6 +954,50 @@ select {
 }
 .cb-dir tr.folder td:first-child {
   color: var(--status-info);
+}
+/* doctor: mark, check, detail; a problem's fix on its own line under the detail */
+.cb-doctor {
+  width: 100%;
+  border-collapse: collapse;
+  border-top: 1px solid var(--border-1);
+  user-select: text;
+}
+.cb-doctor td,
+.cb-doctor th {
+  padding: 2px 10px 2px 0;
+  text-align: left;
+  vertical-align: top;
+}
+.cb-doctor td.cbd-mark {
+  width: 1ch;
+  padding-left: 10px;
+  font-weight: 700;
+}
+.cb-doctor th {
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.cb-doctor td:last-child {
+  width: 100%;
+  overflow-wrap: anywhere;
+}
+.cb-doctor .cbd-detail,
+.cb-doctor .cbd-fix {
+  display: block;
+}
+.cb-doctor .cbd-fix {
+  color: var(--text-2);
+}
+.cb-doctor tr.ok td.cbd-mark {
+  color: var(--accent-ink);
+}
+.cb-doctor tr.warn td.cbd-mark {
+  color: var(--status-warn);
+}
+.cb-doctor tr.fail td.cbd-mark,
+.cb-doctor tr.fail .cbd-detail {
+  color: var(--status-error);
 }
 .cb-paths {
   display: flex;

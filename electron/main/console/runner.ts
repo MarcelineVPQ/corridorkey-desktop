@@ -347,6 +347,7 @@ export class Console {
       const names = [...this.vars.keys()].sort(naturalCompare);
       // loop: NOT-WORTH — five names
       const own = READ_ONLY.map((k) => `${k}=${this.lookup(k)}  (the Console's own)`);
+      b.paths = [this.cwd, this.d.paths.home];
       // loop: NOT-WORTH — as above
       return this.finish(b, "done", ...names.map((k) => `${k}=${this.vars.get(k)}${Object.hasOwn(kept, k) ? "  (kept)" : ""}`), ...own);
     }
@@ -565,6 +566,7 @@ export class Console {
     const r = await this.go(to);
     if (typeof r !== "string") return this.finish(b, "failed", r.error);
     // silent on success (the bar and the prompt show the folder); cd - prints where it went, as bash does
+    if (back) b.paths = [r];
     return back ? this.finish(b, "done", r) : this.finish(b, "done");
   }
 
@@ -655,6 +657,8 @@ export class Console {
       // loop: NOT-WORTH — as above
       const w = Math.max(...names.map((n) => n.length + 1));
       // loop: NOT-WORTH — as above
+      b.paths = names.map((n) => all[n]);
+      // loop: NOT-WORTH — as above
       return this.finish(b, "done", ...names.map((n) => `${`@${n}`.padEnd(w)}  ${all[n]}`));
     }
     if (!BOOKMARK_NAME.test(name)) return this.finish(b, "refused", `${name} can't be a bookmark's name: a letter or digit first, then letters, digits, _ . or - (at most 64).`);
@@ -695,6 +699,9 @@ export class Console {
     if (!parts.length) {
       if (!ranked.length) return this.finish(b, "done", "No folders in the history yet: j learns the folders you type commands in.");
       // loop: NOT-WORTH — the 20 best
+      // loop: NOT-WORTH — as above
+      b.paths = ranked.slice(0, JUMP_LISTED).map((r) => r.folder);
+      // loop: NOT-WORTH — as above
       return this.finish(b, "done", ...ranked.slice(0, JUMP_LISTED).map((r) => `${r.score.toFixed(2).padStart(7)}  ${r.folder}`));
     }
     // loop: NOT-WORTH — the history's folders, best first; one async stat per match until one is a folder
@@ -702,6 +709,7 @@ export class Console {
       if (r.folder === this.cwd || !matches(r.folder, parts)) continue;
       if (!(await this.d.fs.stat(r.folder).catch(() => null))?.isDirectory()) continue;
       const to = await this.go(r.folder);
+      if (typeof to === "string") b.paths = [to];
       return typeof to === "string" ? this.finish(b, "done", to) : this.finish(b, "failed", to.error);
     }
     return this.finish(b, "failed", `No folder in the history matches ${parts.join(" ")} (j alone lists them; cd goes anywhere).`);
@@ -727,8 +735,10 @@ export class Console {
 
   /** dirs: where you are (0), then pushd's folders, newest first. */
   private dirsList(b: ConsoleBlock): ConsoleBlock {
+    // the page shows the folders shortened (~, the middle as …)
+    b.paths = [this.cwd, ...this.stack];
     // loop: NOT-WORTH — ≤ STACK_MAX folders
-    return this.finish(b, "done", ...[this.cwd, ...this.stack].map((f, i) => `${String(i).padStart(2)}  ${f}`));
+    return this.finish(b, "done", ...b.paths.map((f, i) => `${String(i).padStart(2)}  ${f}`));
   }
 
   private async dir(b: ConsoleBlock, folder: string | undefined, p: Parsed): Promise<ConsoleBlock> {
@@ -815,6 +825,8 @@ export class Console {
     if (by !== "name") entries.sort((x, y) => key(y) - key(x) || naturalCompare(x.name, y.name));
     if (reverse) entries = entries.reverse();
     b.entries = entries;
+    // the summary's folder: shown shortened by the page
+    b.paths = [dir];
     // loop: NOT-WORTH — the listed entries
     const files = entries.filter((e) => !e.folder);
     // loop: NOT-WORTH — as above
@@ -855,7 +867,7 @@ export class Console {
         fix: "App: install CorridorKey again (corridorkey ships next to its engine, in resources/engine)",
       });
     else {
-      rows.push({ check: "corridorkey", status: "ok", detail: bin, fix: null });
+      rows.push({ check: "corridorkey", status: "ok", detail: bin, fix: null, path: bin });
       rows.push(...infoRows(await this.cliInfo(bin)));
     }
     const app = this.d.doctor();
@@ -872,12 +884,12 @@ export class Console {
       return this.finish(b, failed ? "failed" : "done");
     };
     if (json) return print(JSON.stringify(rows, null, 2).split("\n"));
+    // the page draws the rows as a table (OutputBlock); the block's text is their count
+    b.doctor = rows;
     // loop: NOT-WORTH — the few rows
-    const w = Math.max(...rows.map((r) => r.check.length));
-    const sym = { ok: "✓", warn: "⚠", fail: "✗" } as const;
-    // loop: NOT-WORTH — as above
-    const lines = rows.flatMap((r) => [`${sym[r.status]} ${r.check.padEnd(w)}  ${r.detail}`, ...(r.fix && r.status !== "ok" ? [`  ${" ".repeat(w)}  fix: ${r.fix}`] : [])]);
-    return print(lines);
+    const count = (s: DoctorRow["status"]) => rows.filter((r) => r.status === s).length;
+    const [warn, fail] = [count("warn"), count("fail")];
+    return print([`${rows.length} checks: ${rows.length - warn - fail} ok${warn ? `, ${warn} warning${warn === 1 ? "" : "s"}` : ""}${fail ? `, ${fail} problem${fail === 1 ? "" : "s"}` : ""}`]);
   }
 
   /** `corridorkey info --json`: its JSON, or what went wrong (its error line, without the exit code it prints). */
@@ -918,13 +930,16 @@ export class Console {
         status: "warn",
         detail: `${path} isn't there yet (the first job or command that writes there makes it)`,
         fix: "App settings: choose another folder if this one was on a drive that is gone",
+        path,
       };
-    if (!st.isDirectory()) return { check: label, status: "fail", detail: `${path} is a file, not a folder`, fix: "App settings: choose a folder" };
-    if (!(await this.d.fs.writable(path))) return { check: label, status: "fail", detail: `${path} isn't writable`, fix: "App settings: choose a folder you can write to (or fix its permissions)" };
+    if (!st.isDirectory()) return { check: label, status: "fail", detail: `${path} is a file, not a folder`, fix: "App settings: choose a folder", path };
+    if (!(await this.d.fs.writable(path)))
+      return { check: label, status: "fail", detail: `${path} isn't writable`, fix: "App settings: choose a folder you can write to (or fix its permissions)", path };
     const free = await this.d.fs.freeBytes(path).catch(() => null);
     const detail = `${path} · writable · ${free === null ? "free space unknown" : `${fileSizeText(free)} free`}`;
-    if (free !== null && free < DISK_LOW) return { check: label, status: free < DISK_FULL ? "fail" : "warn", detail, fix: "Free space on that disk, or App settings: choose a folder on another disk" };
-    return { check: label, status: "ok", detail, fix: null };
+    if (free !== null && free < DISK_LOW)
+      return { check: label, status: free < DISK_FULL ? "fail" : "warn", detail, fix: "Free space on that disk, or App settings: choose a folder on another disk", path };
+    return { check: label, status: "ok", detail, fix: null, path };
   }
 
   /**
@@ -1227,6 +1242,7 @@ export class Console {
     };
     const root = await read(dir, folder ?? ".", 1);
     if ("error" in root) return this.finish(b, "failed", `Can't list ${folder ?? "."}: ${fsErrorText(root.error, dir)}.`);
+    b.nowrap = true;
     // loop: NOT-WORTH — ≤ TREE_ROWS lines
     for (const l of treeLines(root, a.sep)) this.note(b, "out", l);
     return this.finish(
@@ -1881,8 +1897,8 @@ function infoRows(r: { info: Record<string, unknown> } | { error: string }): Doc
       .map(([name]) => name);
     rows.push(
       missing.length
-        ? { check: "Models", status: "fail", detail: `${i.models.dir} has no ${missing.join(", ")} network${missing.length > 1 ? "s" : ""}`, fix: MODELS_FIX }
-        : { check: "Models", status: "ok", detail: `${i.models.set ?? "no manifest"} in ${i.models.dir}`, fix: null },
+        ? { check: "Models", status: "fail", detail: `${i.models.dir} has no ${missing.join(", ")} network${missing.length > 1 ? "s" : ""}`, fix: MODELS_FIX, path: i.models.dir }
+        : { check: "Models", status: "ok", detail: `${i.models.set ?? "no manifest"} in ${i.models.dir}`, fix: null, path: i.models.dir },
     );
   }
   return rows;

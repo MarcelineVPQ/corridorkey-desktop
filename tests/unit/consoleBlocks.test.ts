@@ -20,6 +20,8 @@ import {
   visibleBlocks,
   writtenPaths,
   BLOCKS_KEPT,
+  doctorText,
+  shortenKnown,
 } from "../../src/ui/console/model";
 import type { ConsoleBlock } from "../../src/shared/types";
 import { fileSizeText as sizeText } from "../../src/shared/units";
@@ -279,5 +281,40 @@ describe("variables in the typed line", () => {
     expect(lineHint(parse("render a.mov -F ${range}", reg, opts), "render a.mov -F ${range}", 3, reg, false)?.error).toBe(false);
     // a real mistake still is
     expect(kinds("render a.mov -F abc")).toContainEqual(["abc", "error"]);
+  });
+});
+
+describe("layout polish: long paths and doctor's table (Phase 4)", () => {
+  const home = "/home/marcy";
+  it("shortens a block's known paths as the app shows paths: ~, the middle as …; other text untouched", () => {
+    const dir = "/home/marcy/.cache/claude-scratch/ck-console-p4a/iso/home/shots/sh010/plates";
+    const line = `${dir}: 43 files (2.7 KiB), 43 of them in 1 sequence (dir -f lists the frames), 0 folders`;
+    const short = shortenKnown(line, [dir], home);
+    expect(short).toBe("~/…/ck-console-p4a/iso/home/shots/sh010/plates: 43 files (2.7 KiB), 43 of them in 1 sequence (dir -f lists the frames), 0 folders");
+    expect(shortenKnown("/home/marcy/renders: 1 files", ["/home/marcy/renders"], home)).toBe("~/renders: 1 files");
+    expect(shortenKnown("no path here", [dir], home)).toBe("no path here");
+    expect(shortenKnown("x", null, home)).toBe("x");
+    // a path inside a longer one is left to the longer one
+    const sh = "/home/marcy/shots/a-long-show-name/sequence-010/sh010";
+    expect(shortenKnown(`0  ${sh}/plates/and/more/folders`, [sh, `${sh}/plates/and/more/folders`], home)).toBe("0  ~/…/sequence-010/sh010/plates/and/more/folders");
+    expect(shortenKnown(`1  ${sh}`, [sh, `${sh}/plates/and/more/folders`], home)).toBe("1  ~/shots/a-long-show-name/sequence-010/sh010");
+    // Copy output keeps the whole path
+    expect(blockText(block(1, { lines: [{ kind: "out", text: line }], paths: [dir] }))).toBe(line);
+  });
+
+  it("doctor's rows as aligned text (Copy output), the fix under its detail, paths whole", () => {
+    const rows = [
+      { check: "corridorkey", status: "ok" as const, detail: "/opt/ck/corridorkey", fix: null, path: "/opt/ck/corridorkey" },
+      { check: "Models", status: "fail" as const, detail: "/m has no rvm network", fix: "App: Engine page", path: "/m" },
+      { check: "TensorRT", status: "warn" as const, detail: "on, not downloaded", fix: "App: Engine page → TensorRT" },
+    ];
+    expect(doctorText(rows)).toEqual([
+      "✓ corridorkey  /opt/ck/corridorkey",
+      "✗ Models       /m has no rvm network",
+      "               fix: App: Engine page",
+      "⚠ TensorRT     on, not downloaded",
+      "               fix: App: Engine page → TensorRT",
+    ]);
+    expect(blockText(block(1, { lines: [{ kind: "out", text: "3 checks: 1 ok, 1 warning, 1 problem" }], doctor: rows })).split("\n")[1]).toBe("✓ corridorkey  /opt/ck/corridorkey");
   });
 });

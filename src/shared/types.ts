@@ -612,6 +612,12 @@ export interface ConsoleBlock {
   clear: boolean;
   // a queue job's line, echoed (teach by echo): what started it ("the queue started sh010.mov"); never typed or run here
   echo?: string | null;
+  // doctor's rows: the page shows them as a table (Copy output: as text)
+  doctor?: DoctorRow[] | null;
+  // its lines are a drawing (tree): never wrapped
+  nowrap?: boolean;
+  // absolute paths in its lines the page may show shortened (~, the middle as …), the full one on hover and in Copy
+  paths?: string[] | null;
 }
 
 /** One `doctor` check: ✓ ok, ⚠ warn, ✗ fail, what it found, and for a problem the exact fix (a Console line or an App action). */
@@ -620,6 +626,8 @@ export interface DoctorRow {
   status: "ok" | "warn" | "fail";
   detail: string;
   fix: string | null;
+  // the path in its detail (the page shortens it; Copy output keeps it whole)
+  path?: string | null;
 }
 
 export interface ConsoleCompletionItem {
