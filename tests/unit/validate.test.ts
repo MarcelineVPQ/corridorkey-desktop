@@ -73,6 +73,12 @@ describe("IPC and settings validation", () => {
       expect(s.lastOptions.memory).toEqual({ auto: true });
       expect(s.appearance).toEqual(DEFAULT_APPEARANCE);
       expect(s.outputRoot).toBeNull();
+      // no frame-folder choice saved yet: by the frames' format (EXR scene-linear); a saved choice is kept
+      expect(s.frameDirLinear).toBeNull();
+      writeFileSync(file, JSON.stringify({ frameDirLinear: false }));
+      expect(loadSettings(file).frameDirLinear).toBe(false);
+      writeFileSync(file, JSON.stringify({ frameDirLinear: "yes" }));
+      expect(loadSettings(file).frameDirLinear).toBeNull();
       writeFileSync(file, "[1, 2"); // cut short
       expect(loadSettings(file).lastOptions).toEqual(DEFAULT_OPTIONS);
     } finally {

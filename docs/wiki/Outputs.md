@@ -36,8 +36,10 @@ This differs on purpose from the original CorridorKey's EXR writer (which number
 and writes a straight cutout); the matte values themselves are the same. The README explains it in
 [EXR outputs a compositor can read as they are](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/README.md#exr-outputs-a-compositor-can-read-as-they-are-10).
 
-For a frame folder input, tell the app whether the frames are scene-linear (**Frame folder → Color → Frames are
-scene-linear**) so it reads them correctly.
+For a frame folder input, the app needs to know whether the frames are scene-linear (**Frame folder → Color → Frames
+are scene-linear**). A folder of EXR frames starts with it on, PNG/JPEG with it off; change it if your frames differ
+(new frame folders then start with your choice). The `corridorkey` command line reads frames as display-coded unless
+given `--linear`, which the app's Copy as command adds when the box is on.
 
 ## Video, 10-bit
 

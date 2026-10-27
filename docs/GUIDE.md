@@ -23,6 +23,10 @@ The rail on the right takes you to the pages. Hover it for names, or press **Ctr
 
 A matte named like the clip (`shot01FrameHint.png`, `shot01_AlphaHint.mp4`) is found and selected when the clip is added. **Hint trust** tells the model how far to trust your matte: 0.95 for an artist's matte, 0.75 for a rough automatic one, 0.5 or less for a loose one.
 
+## Frame folders
+
+A folder of frames has its own **Frame folder** section: the frame rate (24 by default) and **Frames are scene-linear**. A folder of OpenEXR frames starts with it on (EXR plates are scene-linear by convention); PNG and JPEG frames start with it off (display-coded, read as sRGB and clipped to 0-1). Once you change the box yourself, new frame folders start with your choice instead. The Queue's **Copy as command** and the farm export say `--linear` exactly when the box is on; the `corridorkey` command line itself reads frames as display-coded unless it's given `--linear`.
+
 ## Internal resolution
 
 **Full** runs the networks at the clip's own size. **¾**, **½** and **¼** run them smaller (the original CorridorKey's `--model_scale`, the plugin's Internal Resolution): faster and lighter on graphics memory, and the result is resized back to the clip's size with the same Lanczos filter the original uses, so the edges carry less detail. The section shows the size the networks run at, and the Manual memory estimate follows it. What each step costs in detail and gains in speed is measured in docs/BACKLOG.md row 42.

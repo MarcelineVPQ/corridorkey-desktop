@@ -28,6 +28,7 @@ export function loadSettings(file: string): Settings {
     ortLibrary: path(saved.ortLibrary),
     tensorrt: saved.tensorrt === true,
     vramLimitGb: vramLimit(saved.vramLimitGb),
+    frameDirLinear: typeof saved.frameDirLinear === "boolean" ? saved.frameDirLinear : null,
     // the sizes TensorRT builds for (row 56); absent: 4K DCI and HD, what the background build always did
     trtSizes: sanitizeTrtSizes(saved.trtSizes),
     // an absolute folder only (anything else: the system's cache folder)

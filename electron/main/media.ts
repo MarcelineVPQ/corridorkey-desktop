@@ -59,6 +59,17 @@ export function frameFiles(dir: string): string[] {
   );
 }
 
+/**
+ * Whether a frame folder's frames are scene-linear: the user's own choice when they made one, else by the frames'
+ * format, as the engine reads it (its first frame in natural order): OpenEXR plates are scene-linear by convention,
+ * PNG/JPEG display-coded (Marcy 2026-10-27: an EXR folder read as display-coded clipped every value above 1).
+ */
+export function frameDirLinearFor(dir: string, chosen: boolean | null): boolean {
+  if (chosen !== null) return chosen;
+  const first = frameFiles(dir)[0];
+  return first !== undefined && extname(first).toLowerCase() === ".exr";
+}
+
 /** Whether a folder holds any frame file: a scan, no sort (the sort happens once, in probeClip; leak audit 2026-10-24, #9). */
 export function hasFrames(dir: string): boolean {
   // loop: NOT-WORTH — one readdir per added folder, stops at the first frame file

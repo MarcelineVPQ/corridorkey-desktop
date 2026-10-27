@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { EngineProcess, rustEngineEnv, type EngineReply } from "./engine";
 import { Estimator } from "./estimate";
 import { GPU_POLL_MS, otherGpuUsers, readGpu } from "./gpu";
-import { expandPaths, probeClip, still, STILL_WIDTH, VIDEO_EXT, HINT_IMAGE_EXT } from "./media";
+import { expandPaths, frameDirLinearFor, probeClip, still, STILL_WIDTH, VIDEO_EXT, HINT_IMAGE_EXT } from "./media";
 import { clearJobTemps, Queue } from "./queue";
 import { checkRustEngine, loadSettings, saveSettings } from "./settings";
 import { effectivePath, findCli, findEngineFiles, findTrtBuilder, isInsideApp, modelSetVersion, windowTitle } from "./engineFind";
@@ -671,6 +671,8 @@ async function addPaths(paths: string[]): Promise<void> {
     const options: JobOptions = { ...settings.lastOptions, hintFirstFrame: null, hintVideo: null, hintMode: "none", vramLimitGb: settings.vramLimitGb };
     if (clip.companionHintVideo) Object.assign(options, { hintMode: "video", hintVideo: clip.companionHintVideo });
     else if (clip.companionFirstFrame) Object.assign(options, { hintMode: "first-frame", hintFirstFrame: clip.companionFirstFrame });
+    // an EXR folder starts scene-linear, other frames display-coded, unless the user has set the box themselves
+    if (kind === "frames") options.frameDirLinear = frameDirLinearFor(path, settings.frameDirLinear);
     const parent = kind === "frames" && basename(path).toLowerCase() === "input" ? dirname(dirname(path)) : dirname(path);
     queue.add({
       id: randomUUID(),
@@ -1093,8 +1095,12 @@ function registerIpc(): void {
     const id = idArg(idIn);
     if (!id) return;
     const options: JobOptions = sanitizeOptions(optionsIn);
+    // loop: NOT-WORTH — the queue's jobs, once per options change
+    const before = queue.jobs.find((j) => j.id === id);
+    // the scene-linear box set by the user on a frame folder: their choice from now on, whatever the format
+    const frameDirLinear = before?.clip.kind === "frames" && before.options.frameDirLinear !== options.frameDirLinear ? options.frameDirLinear : settings.frameDirLinear;
     queue.setOptions(id, options);
-    settings = { ...settings, lastOptions: { ...options, hintFirstFrame: null, hintVideo: null, hintMode: "none" } };
+    settings = { ...settings, frameDirLinear, lastOptions: { ...options, hintFirstFrame: null, hintVideo: null, hintMode: "none" } };
     persist();
   });
   ipcMain.handle(IPC.estimateMemory, async (_e, idIn: unknown): Promise<MemoryEstimateResult> => {

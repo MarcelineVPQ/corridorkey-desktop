@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { clipName, expandPaths, findFirstFrameHint, findHintVideo, frameFiles, isCompanionHint, naturalCompare } from "../../electron/main/media";
+import { clipName, expandPaths, findFirstFrameHint, findHintVideo, frameDirLinearFor, frameFiles, isCompanionHint, naturalCompare } from "../../electron/main/media";
 
 // every folder a test made goes at the end (each run used to leave five in /tmp, which is RAM on many desktops)
 const made: string[] = [];
@@ -59,5 +59,21 @@ describe("frame order (CorridorKey2.0 PR #4: natural order, any extension case)"
     for (const n of ["f_1.png", "f_10.PNG", "f_2.Png", "notes.txt"]) writeFileSync(join(dir, n), "");
     expect(frameFiles(dir).map((p) => basename(p))).toEqual(["f_1.png", "f_2.Png", "f_10.PNG"]);
     rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+// Marcy 2026-10-27: an EXR plate folder (scene-linear by convention, e.g. Tears of Steel's F65 plates) started as
+// "display-coded", clipping everything above 1, unless the user noticed the box
+describe("a frame folder's scene-linear default", () => {
+  it("is on for EXR frames and off for the others, unless the user chose", () => {
+    const exr = dir(["f.0002.exr", "f.0001.EXR"]);
+    const png = dir(["f.0001.png", "f.0002.png"]);
+    const jpg = dir(["f.0001.jpg"]);
+    expect(frameDirLinearFor(exr, null)).toBe(true);
+    expect(frameDirLinearFor(png, null)).toBe(false);
+    expect(frameDirLinearFor(jpg, null)).toBe(false);
+    // the user's own choice wins either way
+    expect(frameDirLinearFor(exr, false)).toBe(false);
+    expect(frameDirLinearFor(png, true)).toBe(true);
   });
 });

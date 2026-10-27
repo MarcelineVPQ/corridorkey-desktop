@@ -77,6 +77,9 @@ on its own rail icon. Not a system shell: its own commands only, each parsed and
 - The engine said its version was 0.2.0 (in its replies, and so in logs): it now says the app's version.
 - The Engine page's list of programs using the graphics card showed other programs' whole command lines (a
   Chromium-based app's arguments and home-folder paths): it now shows the program's name alone.
+- A folder of EXR frames started as "display-coded", clipping every value above 1 unless the box was noticed: an EXR
+  folder now starts scene-linear (PNG/JPEG frames stay display-coded), and a choice you make on the box is kept for
+  the frame folders you add after it. The `corridorkey` command line is unchanged (`--linear` to read scene-linear).
 
 **Docs**
 
