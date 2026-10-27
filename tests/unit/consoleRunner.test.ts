@@ -2554,8 +2554,8 @@ describe("SME reviews: man pages", () => {
   it("row 130: man <command> is the long page from the registry: every option with its facts, every example (each parses), the exit status", async () => {
     const { c } = make();
     const reg = makeRegistry();
-    // loop: NOT-WORTH — every command, once
-    for (const cmd of [...reg.commands.filter((x) => x !== reg.cli), ...reg.cli.subcommands]) {
+    // loop: NOT-WORTH — every command, once (corridorkey run is the built-in run's name: man run is the built-in's)
+    for (const cmd of [...reg.commands.filter((x) => x !== reg.cli), ...reg.cli.subcommands.filter((x) => x.name !== "run")]) {
       const b = await c.run(`man ${cmd.name}`);
       const text = b.lines.map((l) => l.text).join("\n");
       expect(b.state, cmd.name).toBe("done");
