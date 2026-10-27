@@ -11,7 +11,7 @@ import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { replaceFile } from "../../electron/main/console/paths";
 import { clipName, Console, type ConsoleDeps, type ElevationRequest, type ScriptElevationRequest } from "../../electron/main/console/runner";
-import { dropOnLockAndSleep, Elevation } from "../../electron/main/console/elevation";
+import { dropOnLockAndSleep, Elevation, LinuxLockWatch, LOCK_POLL_MS, parseLockedHint } from "../../electron/main/console/elevation";
 import { AuditLog, History } from "../../electron/main/console/logs";
 import { BlockPusher, PUSH_EVERY_MS } from "../../electron/main/console/push";
 import { consoleLineArg, consoleLinesArg, cursorArg, fromAppPage } from "../../electron/main/validate";
@@ -1899,5 +1899,72 @@ describe("review 2026-10-27 S2: a program's confirmation shows its lines filled 
     expect(spawned[0].args).toContain(join(out, "s5"));
     await finish(spawned[0].child, [], 0);
     expect(b.state).not.toBe("refused");
+  });
+});
+
+// senior review 2026-10-27 S1: Electron's powerMonitor has no lock-screen event on Linux (darwin, win32 only), so a locked
+// screen kept the elevation there. While elevated, logind's LockedHint is read; where it can't be, the window's blur drops.
+describe("review 2026-10-27 S1: the elevation drops on a Linux screen lock", () => {
+  const watch = (answers: (boolean | null)[], active = { v: true }) => {
+    const dropped: string[] = [];
+    let asked = 0;
+    const w = new LinuxLockWatch(
+      async () => answers[Math.min(asked++, answers.length - 1)],
+      () => active.v,
+      (why) => {
+        dropped.push(why);
+        active.v = false;
+        w.update();
+      },
+    );
+    return { w, dropped, asked: () => asked, active };
+  };
+
+  it("reads busctl's answer for LockedHint", () => {
+    expect([parseLockedHint("b true\n"), parseLockedHint("b false"), parseLockedHint(""), parseLockedHint("Failed to get property")]).toEqual([true, false, null, null]);
+  });
+
+  it("while elevated it polls the lock and drops when the screen is locked; not elevated, it reads nothing", async () => {
+    vi.useFakeTimers();
+    try {
+      const idle = watch([false], { v: false });
+      idle.w.update();
+      await vi.advanceTimersByTimeAsync(LOCK_POLL_MS * 3);
+      expect(idle.asked()).toBe(0);
+      const t = watch([false, true]);
+      t.w.update();
+      await vi.advanceTimersByTimeAsync(LOCK_POLL_MS);
+      expect(t.dropped).toEqual([]);
+      await vi.advanceTimersByTimeAsync(LOCK_POLL_MS);
+      expect(t.dropped).toEqual(["the screen was locked"]);
+      // dropped: it stops reading
+      await vi.advanceTimersByTimeAsync(LOCK_POLL_MS * 3);
+      expect(t.asked()).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("where the lock can't be read (no logind, no busctl) the window's blur drops it instead; where it can, blur never does", async () => {
+    const none = watch([null]);
+    await none.w.probe();
+    none.w.blur();
+    expect(none.dropped).toEqual(["the window lost focus (this system's screen lock can't be read)"]);
+    const ok = watch([false]);
+    await ok.w.probe();
+    ok.w.blur();
+    expect(ok.dropped).toEqual([]);
+    // a read that starts failing later: from then on blur drops
+    vi.useFakeTimers();
+    try {
+      const later = watch([false, null]);
+      await later.w.probe();
+      later.w.update();
+      await vi.advanceTimersByTimeAsync(LOCK_POLL_MS);
+      later.w.blur();
+      expect(later.dropped).toEqual(["the window lost focus (this system's screen lock can't be read)"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

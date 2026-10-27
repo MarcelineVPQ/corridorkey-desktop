@@ -240,7 +240,13 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   bytes; confirmed, the Console stays elevated for 5 minutes, each elevated command extending it, never past 15
   minutes after the confirmation. Dropped by `sudo -k` (or the panel), a screen lock or sleep (Electron's `powerMonitor` `lock-screen` / `suspend`),
   quit and restart, never by the window losing focus (Alt+Tab to Nuke and back is the look-dev loop sudo is for); it lives in memory
-  only, never on disk. A line the file scope refuses is refused before any dialog. `sudo` on a line that replaces
+  only, never on disk. **Linux** has no `lock-screen` event (Electron's is macOS and Windows only; senior review
+  2026-10-27 S1): while elevated, the app reads this login session's `LockedHint` from systemd-logind every 5 s
+  (`/usr/bin/busctl get-property org.freedesktop.login1 …/session/auto … LockedHint`: an argv, no shell, at most 2 s;
+  KDE's and GNOME's lockers set it) and a locked screen drops the elevation (`LinuxLockWatch` in elevation.ts). Where
+  it can't be read (no logind, no busctl, not in a login session) the window losing focus drops it instead: safety
+  over the Alt+Tab loop. The read answered on Marcy's KDE desktop (`b false`); a real lock wasn't triggered on her
+  screen to test it, the decision logic is tested with a fake reader. A line the file scope refuses is refused before any dialog. `sudo` on a line that replaces
   nothing says so ("sudo isn't needed for this") and runs it as it is; the hint drops "(needs sudo)" once `sudo` is on
   the line. **Scripts** (`run`, pasted lines) never use, extend or grant the session's elevation: before any line runs,
   a line that replaces files must say `sudo` (else the whole script is refused), and all such lines are listed in ONE

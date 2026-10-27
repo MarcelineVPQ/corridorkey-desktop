@@ -1,4 +1,5 @@
 // CorridorKey desktop: main process. One window, one queue, one engine.
+import { execFile } from "node:child_process";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, net, powerMonitor, protocol, shell } from "electron";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
@@ -59,7 +60,7 @@ import type { DesktopPalette } from "../../src/ui/theme/palette";
 import { IPC } from "./ipc";
 import { consoleLineArg, consoleLinesArg, cursorArg, fromAppPage, idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir, vramLimit } from "./validate";
 import { Console, LINE_MAX, type ElevationRequest, type ScriptElevationRequest } from "./console/runner";
-import { dropOnLockAndSleep, Elevation, ELEVATION_CAP_MS, ELEVATION_TTL_MS } from "./console/elevation";
+import { dropOnLockAndSleep, Elevation, ELEVATION_CAP_MS, ELEVATION_TTL_MS, LinuxLockWatch, parseLockedHint } from "./console/elevation";
 import { AuditLog, History } from "./console/logs";
 import { BlockPusher } from "./console/push";
 import { realPathDeps, replaceFile } from "./console/paths";
@@ -311,6 +312,30 @@ void refreshTrtBuilt();
 // build waits), and the queue doesn't start while it runs (consoleGpu, above the queue).
 const userData = app.getPath("userData");
 const consolePush = new BlockPusher((blocks) => mainWindow?.webContents.send(IPC.consoleBlocks, blocks));
+const consoleElevation = new Elevation();
+/**
+ * This login session's LockedHint from systemd-logind (busctl, by its full path, an argv and no shell; at most 2 s), or
+ * null when it can't be read. Linux only: its screen lock has no Electron event (elevation.ts LinuxLockWatch).
+ */
+function readLockedHint(): Promise<boolean | null> {
+  return new Promise((resolve) => {
+    // loop: NOT-WORTH — one busctl read every LOCK_POLL_MS while elevated [bounded: timeout 2 s]
+    execFile(
+      "/usr/bin/busctl",
+      ["get-property", "org.freedesktop.login1", "/org/freedesktop/login1/session/auto", "org.freedesktop.login1.Session", "LockedHint"],
+      { timeout: 2000, windowsHide: true },
+      (err, stdout) => resolve(err ? null : parseLockedHint(stdout)),
+    );
+  });
+}
+const lockWatch =
+  PLATFORM === "linux"
+    ? new LinuxLockWatch(
+        readLockedHint,
+        () => consoleElevation.active,
+        (why) => appConsole.dropElevation(why),
+      )
+    : null;
 /** The sudo confirmation: the line as typed, the command as it runs, and what it would replace, counted now. */
 async function confirmElevation(req: ElevationRequest): Promise<boolean> {
   if (!mainWindow) return false;
@@ -460,11 +485,15 @@ const appConsole = new Console({
   },
   confirm: confirmElevation,
   confirmScript,
-  elevation: new Elevation(),
+  elevation: consoleElevation,
   audit: new AuditLog(join(userData, "console-audit.jsonl")),
   history: new History(join(userData, "console-history.jsonl")),
   changed: (b) => consolePush.mark(b),
-  sessionChanged: () => scheduleSend(),
+  sessionChanged: () => {
+    scheduleSend();
+    // Linux: the screen lock is read while elevated (elevation.ts LinuxLockWatch)
+    lockWatch?.update();
+  },
   jobs: () => queue.jobs,
   doctor: () => ({
     rows: [trtDoctorRow(), ffmpegDoctorRow()],
@@ -1225,6 +1254,8 @@ function createWindow(): void {
   mainWindow.on("restore", shown(true));
   mainWindow.on("hide", shown(false));
   mainWindow.on("minimize", shown(false));
+  // the Console's elevation: only on Linux without a readable screen lock (elevation.ts LinuxLockWatch)
+  mainWindow.on("blur", () => lockWatch?.blur());
   mainWindow.on("closed", () => {
     mainWindow = null;
     setShown(false);
@@ -1262,9 +1293,13 @@ app.whenReady().then(() => {
     return;
   }
   void recheckFfmpeg();
-  // the Console's elevation ends when the screen locks or the computer sleeps (never on the window's blur: Alt+Tab
-  // to Nuke and back is the look-dev loop sudo exists for); powerMonitor works only once the app is ready
+  // the Console's elevation ends when the screen locks or the computer sleeps (not on the window's blur where the lock
+  // can be read: Alt+Tab to Nuke and back is the look-dev loop sudo exists for); powerMonitor works only once the app is
+  // ready
   dropOnLockAndSleep(powerMonitor, (why) => appConsole.dropElevation(why));
+  // Linux has no lock-screen event: logind's LockedHint is read while elevated; where it can't be, the window's blur
+  // drops the elevation instead (senior review 2026-10-27 S1)
+  void lockWatch?.probe();
   protocol.handle(MEDIA_SCHEME, (req) => {
     const file = decodeURIComponent(new URL(req.url).pathname.slice(1));
     if (!resolve(file).startsWith(mediaDir + sep)) return new Response("not found", { status: 404 });

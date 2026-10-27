@@ -132,7 +132,7 @@ keys the whole set again unless every frame is already there and whole) runs onl
 the line as you typed it, the command as it runs (each word quoted) and how many files at the run's names are there
 now; confirmed, the Console stays elevated for 5 minutes (each
 elevated command extends it, never past 15), shown by a badge with its countdown in the bar and in **Session**,
-where **Drop elevation** ends it (as does `sudo -k`, locking the screen, the computer sleeping, or quitting; switching to another window doesn't). Elevated commands are
+where **Drop elevation** ends it (as does `sudo -k`, locking the screen, the computer sleeping, or quitting; switching to another window doesn't, except on a Linux desktop without systemd-logind, where the app can't see the screen lock). Elevated commands are
 logged (`history --audit`); one the log can't record doesn't run. A script (`run`, or several lines you paste: the
 Console offers to run them in order, Enter runs, Esc keeps the first) never uses the Console's elevation: its lines that
 replace files must say `sudo`, and one dialog lists them all before anything runs. `sudo` on a line that replaces
