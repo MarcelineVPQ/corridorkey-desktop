@@ -231,7 +231,9 @@ farm export shell --queue -o ~/farm
 What each format writes, and how to submit it: [Render farm](Render-Farm#from-the-app-farm-export). The frames land
 where the queue puts them, every format replaces frames already there (a farm retries tasks), and the block lists
 notes for the wrangler (this computer's paths when you gave no `--models` / `--ort`, a Deadline job without a GPU
-group, a clip left out and why). It never replaces its own job files unless you say `sudo farm export … --overwrite`.
+group, a clip left out and why), and each clip's submit line, ready to paste (`deadlinecommand …` with its job files'
+full paths, `deadline bundle submit …`, `CUE_SHOW=<show> sh …`, `curl … <manager>/api/v3/jobs …`: fill in what is in
+`<…>`). It never replaces its own job files unless you say `sudo farm export … --overwrite`.
 
 ## From the queue to the command line
 

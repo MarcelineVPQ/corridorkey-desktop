@@ -1239,6 +1239,7 @@ export class Console {
       local: { models: opt("models") === null, ort: opt("ort") === null },
       deadline: { batch: a.basename(w.path), pool: opt("pool"), group: opt("group"), priority: Number(opt("priority") ?? 50) },
       platform: platform as "linux" | "windows" | "darwin",
+      written: { folder: w.path, windows: this.opts.windows },
     });
     if (exp.error) return this.finish(b, "refused", exp.error);
     // loop: NOT-WORTH — the files to write

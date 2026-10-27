@@ -10,7 +10,8 @@ import deadlineOptions from "../../../farm/deadline10/CorridorKey/CorridorKey.op
 import opencueSubmit from "../../../farm/opencue/corridorkey_submit.py?raw";
 import flamencoJobType from "../../../farm/flamenco/corridorkey.js?raw";
 import shellFarm from "../../../farm/shell/corridorkey-farm.sh?raw";
-import { flagWords, jobFlags, type Flag, type JobLike } from "../../../src/shared/console/jobCommand";
+import { posix, win32 } from "node:path";
+import { flagWords, jobFlags, shellWord, type Flag, type JobLike } from "../../../src/shared/console/jobCommand";
 import { quoteArg } from "../../../src/shared/console/parse";
 
 export const FARM_FORMATS = ["openjd", "deadline", "opencue", "flamenco", "shell"] as const;
@@ -35,6 +36,8 @@ export interface FarmEnv {
   deadline?: { batch: string; pool: string | null; group: string | null; priority: number };
   /** Flamenco's submitter_platform, Go's names: the computer that submits, whose paths its variables translate (S5) */
   platform?: "linux" | "windows" | "darwin";
+  /** the export folder as written, and this computer's shell: the notes print each clip's submit line (SME N11) */
+  written?: { folder: string; windows: boolean };
 }
 
 /** One policy for frames already at the output's names, in every format (S5): replace them, since a farm retries. */
@@ -213,6 +216,7 @@ export function farmExport(format: FarmFormat, jobs: readonly FarmJob[], env: Fa
       notes.push(`Run: bash run-shots.sh (each shot list in turn, one shot per graphics card at a time; --gpus 0,1 in it for more cards; logs per list in logs/). ${runtimeNote(env)}`);
       break;
   }
+  if (files.length && env.written) notes.push(...submitLines(format, ranged, env.written));
   if (files.length) notes.push(layoutNote(ranged), OVERWRITE_NOTE);
   return { files, notes };
 }
@@ -220,6 +224,60 @@ export function farmExport(format: FarmFormat, jobs: readonly FarmJob[], env: Fa
 /** The flag words an OpenJD template's Key step takes: scene-linear and low-memory are the template's own parameters. */
 // loop: NOT-WORTH — a job's few flags
 const openjdExtra = (j: FarmJob): string[] => flagWords(farmFlags(j).filter(([n]) => n !== "linear" && n !== "no-linear" && n !== "low-vram"));
+/**
+ * Each clip's submit line, to paste (SME review 2026-10-27 N11: the notes said `<clip>`): the exported files by their
+ * full path, each word quoted for this computer's shell (jobCommand.ts shellWord); what only the wrangler knows, the
+ * OpenCue show and the Flamenco Manager's address, stays a `<…>` to fill in. A path a shell would misread gets no line,
+ * said instead.
+ */
+function submitLines(format: FarmFormat, jobs: readonly FarmJob[], at: { folder: string; windows: boolean }): string[] {
+  const join = (...parts: string[]) => (at.windows ? win32 : posix).join(at.folder, ...parts);
+  // a placeholder the wrangler fills in (<show>, <manager>): as it is; every other word quoted
+  const fill = (w: string) => ({ fill: w });
+  const line = (...words: (string | { fill: string })[]): string => {
+    const out: string[] = [];
+    // loop: NOT-WORTH — a submit line's few words
+    for (const w of words) {
+      if (typeof w !== "string") {
+        out.push(w.fill);
+        continue;
+      }
+      const q = shellWord(w, at.windows);
+      if ("error" in q) return `(no line: ${q.error})`;
+      out.push(q.word);
+    }
+    return `  ${out.join(" ")}`;
+  };
+  // loop: NOT-WORTH — the exported jobs, one line or two each
+  const per = jobs.flatMap((j): string[] => {
+    switch (format) {
+      case "openjd":
+        return [line("openjd", "check", join(j.name, "template.yaml")), line("deadline", "bundle", "submit", join(j.name))];
+      case "deadline":
+        return [
+          line(
+            "deadlinecommand",
+            "-SubmitMultipleJobs",
+            "-dependent",
+            "-job",
+            join(`${j.name}_job_info.txt`),
+            join(`${j.name}_plugin_info.txt`),
+            "-job",
+            join(`${j.name}_verify_job_info.txt`),
+            join(`${j.name}_verify_plugin_info.txt`),
+          ),
+        ];
+      case "opencue":
+        return [line(fill("CUE_SHOW=<show>"), "sh", join(`${j.name}_opencue.sh`))];
+      case "flamenco":
+        return [line("curl", "-X", "POST", fill("<manager>/api/v3/jobs"), "-H", "Content-Type: application/json", "-d", `@${join(`${j.name}.flamenco.json`)}`)];
+      case "shell":
+        return [];
+    }
+  });
+  if (format === "shell") return ["To run, paste:", line("bash", join("run-shots.sh"))];
+  return [`To submit, paste each clip's line${format === "opencue" ? " (with your show)" : format === "flamenco" ? " (with your Manager's address)" : ""}:`, ...per];
+}
 
 /** An OpenJD job bundle: the template with the clip's other flags in its Key step, and its parameter values. */
 function openjd(j: FarmJob, env: FarmEnv): FarmExport["files"] {

@@ -140,7 +140,12 @@ missing there).
   (`-o` is a written path), and so does each file it writes, resolved (a linked folder inside that leads out is
   refused); a file name that is a link is refused, dangling or not, with sudo too, and each file is written as a new one
   renamed over the name, so a link raced in after the checks is replaced, never written through (M2). Files already
-  there are refused unless `sudo farm export … --overwrite` (the same elevation, dialog and audit as render's). Tests: `tests/unit/farmExport.test.ts` (each format parsed as its farm
+  there are refused unless `sudo farm export … --overwrite` (the same elevation, dialog and audit as render's). The
+  notes end with each clip's submit line to paste (`submitLines`: the exported files by full path, each word quoted for
+  this computer's shell by `shellWord`; OpenJD's `openjd check` and `deadline bundle submit`, Deadline's
+  `deadlinecommand -SubmitMultipleJobs -dependent …`, OpenCue's `CUE_SHOW=<show> sh …`, Flamenco's `curl … -d @…` with
+  `<manager>`, the shell list's `bash …/run-shots.sh`; a path a shell would misread gets no line, said: SME review
+  2026-10-27 N11). Tests: `tests/unit/farmExport.test.ts` (each format parsed as its farm
   reads it: YAML, key=value, JSON, shell words; `run-shots.sh` run by `/bin/sh` with a stub), the runner's scope and
   sudo. `openjd check` and `openjd summary` (with the exported values) passed on a movie's and a frame folder's bundle
   (openjd-cli 0.8.0 in a scratch venv, 2026-10-27; it isn't installed for the tests, which check the bundle

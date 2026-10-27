@@ -618,3 +618,40 @@ describe("farm export: the CLI reproduces the app's job (round trip)", () => {
     }
   });
 });
+
+describe("SME review 2026-10-27 N11 (row 150): each clip's submit line", () => {
+  const at = { written: { folder: "/mnt/farm/sq 01", windows: false } };
+  /** the lines after "To submit…", as a POSIX shell reads them */
+  // loop: NOT-WORTH — an export's few notes
+  const submit = (e: ReturnType<typeof farmExport>) => e.notes.slice(e.notes.findIndex((n) => /^To (submit|run)/.test(n)) + 1).filter((n) => n.startsWith("  "));
+
+  it("Deadline: deadlinecommand with the clip's four files by full path; OpenJD: openjd check and deadline bundle submit", () => {
+    const d = farmExport("deadline", [sh010, sh020], { ...env, ...at });
+    expect(d.notes).toContain("To submit, paste each clip's line:");
+    expect(submit(d).map(words)[0]).toEqual([
+      "deadlinecommand",
+      "-SubmitMultipleJobs",
+      "-dependent",
+      "-job",
+      "/mnt/farm/sq 01/sh010_job_info.txt",
+      "/mnt/farm/sq 01/sh010_plugin_info.txt",
+      "-job",
+      "/mnt/farm/sq 01/sh010_verify_job_info.txt",
+      "/mnt/farm/sq 01/sh010_verify_plugin_info.txt",
+    ]);
+    const o = submit(farmExport("openjd", [sh010], { ...env, ...at })).map(words);
+    expect(o).toEqual([
+      ["openjd", "check", "/mnt/farm/sq 01/sh010/template.yaml"],
+      ["deadline", "bundle", "submit", "/mnt/farm/sq 01/sh010"],
+    ]);
+  });
+
+  it("OpenCue and Flamenco keep <show> and <manager> to fill in; shell runs its script; cmd on Windows", () => {
+    expect(submit(farmExport("opencue", [sh010], { ...env, ...at }))).toEqual(["  CUE_SHOW=<show> sh '/mnt/farm/sq 01/sh010_opencue.sh'"]);
+    expect(submit(farmExport("flamenco", [sh010], { ...env, ...at }))).toEqual(["  curl -X POST <manager>/api/v3/jobs -H 'Content-Type: application/json' -d '@/mnt/farm/sq 01/sh010.flamenco.json'"]);
+    expect(submit(farmExport("shell", [sh010], { ...env, ...at }))).toEqual(["  bash '/mnt/farm/sq 01/run-shots.sh'"]);
+    expect(submit(farmExport("deadline", [sh010], { ...env, written: { folder: "D:\\farm", windows: true } }))[0]).toContain(" -job D:\\farm\\sh010_job_info.txt ");
+    // no folder given: no lines (the notes' <clip> forms stay)
+    expect(farmExport("deadline", [sh010], env).notes.some((n) => n.startsWith("To submit"))).toBe(false);
+  });
+});
