@@ -364,7 +364,9 @@ export class Queue {
     // what ran it comes from the engine's provider reply; the app's own part is why it didn't ask for TensorRT
     job.tech = { ...NO_TECH, notAsked: trt ? null : (this.deps.tensorrtWhyNot?.() ?? null) };
     // the same job as a corridorkey line (teach by echo): its settings, and TensorRT as asked here
-    job.command = jobCommand(job, trt, PLATFORM === "win32");
+    // (none when a path has characters a shell would read: jobCommand says which; then nothing is echoed)
+    const line = jobCommand(job, trt, PLATFORM === "win32");
+    job.command = "line" in line ? line.line : null;
     this.proc!.send({
       cmd: "run",
       id: job.id,

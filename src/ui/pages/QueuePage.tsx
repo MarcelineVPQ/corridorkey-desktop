@@ -230,8 +230,9 @@ function LogLine({ job }: { job: Job }) {
 }
 
 /**
- * Copy as command (teach by echo): the job as its corridorkey render line, for the Console or a farm. Once it has
- * started, the line it ran as (TensorRT as the queue asked); before, its settings (TensorRT is chosen when it starts).
+ * Copy as command (teach by echo): the job as its corridorkey render line, for the Console, a terminal or a farm (quoted
+ * so a shell runs nothing in it: jobCommand). Once it has started, the line it ran as (TensorRT as the queue asked);
+ * before, its settings (TensorRT is chosen when it starts).
  */
 function CopyCommand({ job, windows }: { job: Job; windows: boolean }) {
   const [copied, setCopied] = useState(false);
@@ -242,7 +243,15 @@ function CopyCommand({ job, windows }: { job: Job; windows: boolean }) {
     const t = setTimeout(() => setCopied(false), COPIED_MS);
     return () => clearTimeout(t);
   }, [copied]);
-  const line = job.command ?? jobCommand(job, false, windows);
+  const r = job.command ? { line: job.command } : jobCommand(job, false, windows);
+  // no safe line (a path a shell would read part of): said instead of a button that copies nothing
+  if ("error" in r)
+    return (
+      <div className="hint-text" style={{ marginTop: 8 }}>
+        Copy as command: {r.error}.
+      </div>
+    );
+  const line = r.line;
   return (
     <div style={{ marginTop: 8 }}>
       <button type="button" className="btn small" title={line} onClick={() => void window.ck.copyText(line).then(setCopied)}>

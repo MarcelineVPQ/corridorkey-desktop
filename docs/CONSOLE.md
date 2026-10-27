@@ -64,7 +64,12 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   default). The queue's `started` hook hands it to `Console.echo`: an informational block (`echo`: where it came from;
   state done, no exit code, never run, not in the history), shown unless **Console settings → Show GUI jobs as
   commands** is off (a page setting, default on; the page filters, `visibleBlocks`). The Queue page's **Copy as
-  command** copies the same line (before the job starts: its settings, TensorRT being chosen when it starts).
+  command** copies the same line (before the job starts: its settings, TensorRT being chosen when it starts). The line
+  is pasted into terminals too, so each word is quoted for a shell and the Console alike (`shellWord`; senior review
+  2026-10-27 M3): on Linux and macOS in `'…'` (a `'` as `'\''`), where bash and zsh expand nothing; on Windows in
+  `"…"`, and a path with `%`, `!`, `$`, a backtick or `"` gets no line at all (no quoting stops cmd.exe's `%…%` or
+  PowerShell's `$` inside `"…"`): the Queue says why instead of the button, and nothing is echoed. A control character
+  gives no line on any system.
   `tests/unit/jobCommand.test.ts` parses the line with the Console's parser, maps it with ck-cli's own `RUN_OPTIONS`
   (read from args.rs) and checks the engine gets exactly the options the queue sends.
 - **Farm export.** `farm export <openjd|deadline|opencue|flamenco|shell> [clips…|--queue] -o <folder>` writes the

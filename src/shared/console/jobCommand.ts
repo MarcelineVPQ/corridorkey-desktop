@@ -3,7 +3,6 @@
 // differs from the CLI's default (its help's "[default: …]"; tests/unit/jobCommand.test.ts checks both against the spec
 // and that the line, parsed by the Console, gives the engine the same options). Pure.
 import type { ClipKind, JobOptions } from "../types";
-import { quoteArg } from "./parse";
 
 export interface JobLike {
   clip: { path: string; kind: ClipKind };
@@ -71,8 +70,34 @@ export function jobArgs(job: JobLike, tensorrt: boolean): string[] {
   return ["render", "-i", job.clip.path, "-o", job.outputDir, ...flagWords(jobFlags(job.options, job.clip.kind, tensorrt))];
 }
 
-/** The job as one line, quoted as the Console (and a shell) reads it: corridorkey render -i … -o … */
-export function jobCommand(job: JobLike, tensorrt: boolean, windows: boolean): string {
+/**
+ * A word quoted so that a shell and the Console both read it back as `value` (senior review 2026-10-27 M3: the line is
+ * pasted into terminals). Linux and macOS: plain when it has only characters no shell reads specially, else in single
+ * quotes (a `'` as `'\\''`), where bash and zsh expand nothing. Windows: plain, else in double quotes; no quoting
+ * keeps cmd.exe from reading `%…%` (and `!` with delayed expansion) or PowerShell from reading `$` and a backtick
+ * inside `"…"`, so a word with one of them (or a `"`) is an error. A control character is one everywhere (a new line
+ * pastes as two lines).
+ */
+export function shellWord(value: string, windows: boolean): { word: string } | { error: string } {
+  if (/[\u0000-\u001f\u007f]/.test(value)) return { error: `${JSON.stringify(value)} has a control character (a new line, a tab): no command line is offered for this job` };
+  if (windows) {
+    if (/[%!$`"]/.test(value))
+      return {
+        error: `${value} has ${value.match(/[%!$`"]/)![0]} in it, which cmd.exe and PowerShell would read as part of a variable or a command: no command line is offered for this job (rename it to copy one)`,
+      };
+    return { word: value !== "" && /^[\p{L}\p{N}_\-./\\:]+$/u.test(value) ? value : `"${value}"` };
+  }
+  return { word: value !== "" && value !== "--" && /^[\p{L}\p{N}_\-./:@%+,]+$/u.test(value) ? value : `'${value.replace(/'/g, "'\\''")}'` };
+}
+
+/** The job as one line a shell and the Console read the same: corridorkey render -i … -o …; or why there is none. */
+export function jobCommand(job: JobLike, tensorrt: boolean, windows: boolean): { line: string } | { error: string } {
+  const words = ["corridorkey"];
   // loop: NOT-WORTH — a job's few words
-  return ["corridorkey", ...jobArgs(job, tensorrt).map((w) => quoteArg(w, { windows }))].join(" ");
+  for (const w of jobArgs(job, tensorrt)) {
+    const q = shellWord(w, windows);
+    if ("error" in q) return q;
+    words.push(q.word);
+  }
+  return { line: words.join(" ") };
 }

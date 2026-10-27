@@ -252,6 +252,7 @@ export interface Job {
   // the whole log saved next to the results as <clip>_log.txt when the job ended (backlog row 55), or why it couldn't be
   logSaved?: { path: string; error: string | null } | null;
   // the corridorkey line the queue ran it as (src/shared/console/jobCommand.ts), set when it starts; the Console echoes it
+  // (null: a path has characters a shell would read, so there is no safe line)
   command?: string | null;
 }
 
