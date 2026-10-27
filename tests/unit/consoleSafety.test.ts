@@ -103,8 +103,7 @@ describe("path policy (logic, Windows and macOS rules)", () => {
     expect(isInside("/home/m/out/..x", "/home/m/out", "linux")).toBe(true);
   });
 
-  it("P9 (N3, BACKLOG row 108, open): macOS folds case by platform, so on a case-sensitive volume a missing results/new passes inside Results", async () => {
-    // pins today's behaviour of an open NICE item (review 2026-10-26): flip when the row is built
+  it("P9 (N3, BACKLOG row 108): on a case-sensitive volume a missing results/new is not inside Results; the names realpath returned still fold", async () => {
     const d: PathDeps = {
       platform: "darwin",
       home: "/Users/m",
@@ -114,7 +113,11 @@ describe("path policy (logic, Windows and macOS rules)", () => {
         throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
       },
     };
-    expect(await checkWrite("/vol/results/new", "/", ["/vol/Results"], d)).toEqual({ ok: true, path: "/vol/results/new" });
+    expect(await checkWrite("/vol/results/new", "/", ["/vol/Results"], d)).toMatchObject({ ok: false, path: "/vol/results/new" });
+    expect(await checkWrite("/vol/Results/new", "/", ["/vol/Results"], d)).toEqual({ ok: true, path: "/vol/Results/new" });
+    // a case-insensitive volume: realpath answers for any case (here as typed), so the names it returned compare without case
+    const ci: PathDeps = { ...d, realpath: async (p) => (p.toLowerCase() === "/vol/results" || p === "/vol" ? p : Promise.reject(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))) };
+    expect(await checkWrite("/vol/results/new", "/", ["/VOL/Results"], ci)).toEqual({ ok: true, path: "/vol/results/new" });
   });
 
   it("expands ~ only at the start", () => {

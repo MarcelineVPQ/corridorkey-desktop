@@ -266,7 +266,9 @@ inner loop's words);
   already write to needs no dialog; nothing adds one without it. Every "outside the folders the Console may write to"
   refusal ends with the exact line to type, `allow "<folder>"` (the folder typed with a trailing separator, else the
   nearest existing folder above the path). It is resolved with realpath first (symlinks and `..`; a path that
-  doesn't exist yet through its nearest existing parent; without case on Windows and macOS), and the resolved path is
+  doesn't exist yet through its nearest existing parent; on Windows and macOS the names realpath returned compare
+  without case, the missing names below them as typed, so a case-sensitive volume's `results/new` isn't inside
+  `Results`), and the resolved path is
   what corridorkey is given. Anything else is refused with the reason. Only `--ocio`'s `ocio://` names pass unchecked
   (they name a built-in config); any other value is a path (`C://…` is one on Windows). A `--job` file is read and
   parsed by the app (at most 1 MiB, a regular file) or refused; its checked `output_dir` and `temp_dir` go to
@@ -320,7 +322,7 @@ append-only; the history cap), `consoleRunner.test.ts` (a fake spawn: the exact 
 cancel then kill, the JSON events, one job at a time, the queue's card, refusals, the sudo flow and its audit, the
 built-ins, scripts, quit, completion, the throttled push, the IPC checks), `cliSpec.test.ts` (the drift check). The senior review of 2026-10-26 (docs/REVIEW_CONSOLE_2026-10-26.md) left 14
 probes; each is a regression test (`consoleRunner.test.ts` "review 2026-10-26 probes", P9 in `consoleSafety.test.ts`,
-P10 in `consoleParse.test.ts`, the gate fixtures in `securityGate.test.ts`); P7 checks backlog row 106 (built), P8-P9 pin rows 107-108. The
+P10 in `consoleParse.test.ts`, the gate fixtures in `securityGate.test.ts`); P7-P9 check backlog rows 106-108, built. The
 Phase 4 senior review (docs/REVIEW_CONSOLE_P4_2026-10-27.md) proved its findings with probes; each is a test: hostile
 names per farm format and Deadline's argument split (`farmExport.test.ts`), the shell-safe copied line read back by
 `/bin/sh` (`jobCommand.test.ts`), the 30 000-line program (`consoleScript.test.ts`), and in `consoleRunner.test.ts`

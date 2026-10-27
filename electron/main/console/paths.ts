@@ -30,6 +30,12 @@ export function expandHome(p: string, d: Pick<PathDeps, "home" | "platform">): s
 
 /** The absolute, symlink-free path `p` (relative to `cwd`) names; a missing tail is kept as typed below its real parent. */
 export async function resolveReal(p: string, cwd: string, d: PathDeps): Promise<string> {
+  const { real, tail } = await resolveRealParts(p, cwd, d);
+  return api(d.platform).join(real, ...tail);
+}
+
+/** resolveReal in two parts: what realpath returned, and the missing tail below it as typed. */
+async function resolveRealParts(p: string, cwd: string, d: PathDeps): Promise<{ real: string; tail: string[] }> {
   const a = api(d.platform);
   const abs = a.resolve(cwd, expandHome(p, d));
   const tail: string[] = [];
@@ -37,25 +43,39 @@ export async function resolveReal(p: string, cwd: string, d: PathDeps): Promise<
   // loop: NOT-WORTH — one async realpath per missing path level [bounded: the path's depth]
   for (;;) {
     try {
-      return a.join(await d.realpath(cur), ...tail.reverse());
+      return { real: await d.realpath(cur), tail: tail.reverse() };
     } catch (e) {
       // error: SHOWN — only "not there (yet)" walks up; anything else (no permission) is the caller's refusal
       const code = (e as NodeJS.ErrnoException).code;
       if (code !== "ENOENT" && code !== "ENOTDIR") throw e;
       const parent = a.dirname(cur);
-      if (parent === cur) return abs;
+      if (parent === cur) return { real: abs, tail: [] };
       tail.push(a.basename(cur));
       cur = parent;
     }
   }
 }
 
-/** Whether `child` is `root` or inside it (both absolute and resolved). */
-export function isInside(child: string, root: string, platform: NodeJS.Platform): boolean {
+/** A normalized absolute path as its root (`/`, `C:\`, `\\host\share\`) then its names. */
+function components(p: string, platform: NodeJS.Platform): string[] {
   const a = api(platform);
-  const fold = (s: string) => (foldsCase(platform) ? s.toLowerCase() : s);
-  const rel = a.relative(fold(a.normalize(root)), fold(a.normalize(child)));
-  return rel === "" || (rel !== ".." && !rel.startsWith(".." + a.sep) && !a.isAbsolute(rel));
+  const n = a.normalize(p);
+  const root = a.parse(n).root;
+  // loop: NOT-WORTH — one path's names
+  return [root, ...n.slice(root.length).split(a.sep).filter(Boolean)];
+}
+
+/**
+ * Whether `child` is `root` or inside it (both absolute and resolved). Windows and macOS compare names without case,
+ * but only the first `foldUpTo` names (root included): the part realpath returned for both. A name below that was
+ * typed for a folder not there yet, so it is compared as typed: on a case-sensitive volume `results` isn't `Results`
+ * (senior review 2026-10-26 N3).
+ */
+export function isInside(child: string, root: string, platform: NodeJS.Platform, foldUpTo = Infinity): boolean {
+  const [c, r] = [components(child, platform), components(root, platform)];
+  const same = (x: string, y: string, i: number) => x === y || (foldsCase(platform) && i < foldUpTo && x.toLowerCase() === y.toLowerCase());
+  // loop: NOT-WORTH — a root's few names
+  return c.length >= r.length && r.every((x, i) => same(c[i], x, i));
 }
 
 /**
@@ -91,17 +111,25 @@ export type WriteCheck = { ok: true; path: string } | { ok: false; path: string;
 /** May the Console write (or delete) at `p`? Yes only inside one of `roots` (each resolved too). */
 export async function checkWrite(p: string, cwd: string, roots: readonly string[], d: PathDeps): Promise<WriteCheck> {
   let path: string;
+  let parts: { real: string; tail: string[] };
   try {
-    path = await resolveReal(p, cwd, d);
+    parts = await resolveRealParts(p, cwd, d);
+    path = api(d.platform).join(parts.real, ...parts.tail);
   } catch (e) {
     // error: SHOWN — the refusal says why the path couldn't be resolved
     return { ok: false, path: p, reason: `${p} can't be checked: ${fsErrorText(e, p)}` };
   }
   const real: string[] = [];
+  const inside: boolean[] = [];
+  const realNames = components(parts.real, d.platform).length;
   // loop: NOT-WORTH — a few chosen folders (the queue's clips), one async realpath each, per write checked
-  for (const r of roots) real.push(await resolveReal(r, r, d).catch(() => r));
-  // loop: NOT-WORTH — as above
-  if (real.some((r) => isInside(path, r, d.platform))) return { ok: true, path };
+  for (const r of roots) {
+    const rp = await resolveRealParts(r, r, d).catch(() => ({ real: r, tail: [] as string[] }));
+    const root = api(d.platform).join(rp.real, ...rp.tail);
+    real.push(root);
+    inside.push(isInside(path, root, d.platform, Math.min(realNames, components(rp.real, d.platform).length)));
+  }
+  if (inside.includes(true)) return { ok: true, path };
   const allow = `to let the Console write there, type: ${allowLine(await folderFor(p, path, d), d.platform)}`;
   return {
     ok: false,
