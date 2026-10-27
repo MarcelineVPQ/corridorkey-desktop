@@ -73,7 +73,7 @@ from `manifest.json` and refuses portrait clips up front (an `input` error) only
 cd engine-rs
 CARGO_TARGET_DIR=~/.cache/claude-scratch/corridorkey-rust/target cargo test          # CPU, static ORT
 cargo build --release -p ck-engine --no-default-features --features ort-dynamic,tensorrt  # GPU build
-corridorkey-engine --models DIR [--ort libonnxruntime.so] [--device auto|cuda|cpu]
+corridorkey-engine --models DIR [--ort libonnxruntime.so] [--device auto|cuda|cpu|coreml]
 ```
 
 **The copy inside the app:** `npm run build:engine` (`tools/build_engine.sh`, also the first step of
@@ -121,7 +121,7 @@ The engine runs `ffmpeg` / `ffprobe` from the system: they are not bundled.
   `CK_ENGINE_PROFILE=<dir>` (ORT per-node profile; on CUDA it times kernel launches, not GPU work),
   `CK_ENGINE_THREADS`; TensorRT: `CK_ENGINE_TRT_CACHE` (engine folder; the app passes its cache folder + `tensorrt`, else the system cache folder: `~/.cache`, `%LOCALAPPDATA%\corridorkey-desktop\cache`, `~/Library/Caches`), `CK_ENGINE_TRT_BUILD` (ck-trt-build,
   else next to the engine binary), `CK_ENGINE_TRT_BUILD_TIMEOUT_S` (one engine build's deadline, default 1800 s).
-  Also `CK_ENGINE_DEVICE` (auto | cuda | cpu, = `--device`), `CK_ENGINE_PRECISION` (fp16 | fp32), `CK_ENGINE_MODELS`,
+  Also `CK_ENGINE_DEVICE` (auto | cuda | cpu | coreml, = `--device`), `CK_ENGINE_PRECISION` (fp16 | fp32), `CK_ENGINE_MODELS`,
   `CK_ENGINE_ORT` / `ORT_DYLIB_PATH`. All are read once at startup (`ck-core/src/config.rs`, `EngineConfig`; flags win
   over the environment, an empty value is unset); an unknown value stops the engine with an error naming the
   variable (it used to fall back to the default silently). The settings go to stderr at startup and into the pong

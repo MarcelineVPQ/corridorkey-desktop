@@ -46,9 +46,12 @@ body:
     id: engine
     attributes:
       label: Engine
+      description: 'The job page''s "Ran on" line.'
       options:
-        - Rust + ONNX (the default)
-        - Rust + ONNX with TensorRT
+        - CUDA (the default on NVIDIA)
+        - TensorRT
+        - Core ML (macOS)
+        - CPU
   - type: textarea
     id: log
     attributes:
