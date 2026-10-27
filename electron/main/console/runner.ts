@@ -25,7 +25,7 @@ import { folderRange, frameToken, groupSequences, isFrameFile, sequenceOf, type 
 import { commands, globRegExp, isCompound, parseProgram, type CmdNode, type List } from "../../../src/shared/console/script";
 import { tokenize } from "../../../src/shared/console/parse";
 import { BOOKMARK_NAME, BOOKMARKS_MAX, VARIABLES_MAX, WRITE_FOLDERS_MAX } from "../settings";
-import { expandVars, READ_ONLY, VALUE_MAX, VAR_NAME } from "../../../src/shared/console/vars";
+import { expandVars, forWords, READ_ONLY, VALUE_MAX, VAR_NAME } from "../../../src/shared/console/vars";
 import { matches, rankFolders } from "../../../src/shared/console/frecency";
 import { fileSizeText, gibBytes } from "../../../src/shared/units";
 
@@ -1542,7 +1542,7 @@ export class Console {
         continue;
       }
       if (node.kind === "for") {
-        const items = await this.forItems(node.items);
+        const items = await this.forItems(node.items, ctx.scope, ctx.b);
         if ("error" in items) {
           this.note(ctx.b, "err", `${ctx.name === null ? "" : `${ctx.name}:${node.line}: `}for ${node.name}: ${items.error}`);
           status = 2;
@@ -1604,27 +1604,37 @@ export class Console {
   }
 
   /**
-   * A for loop's words, filled in: a word with * ? or [ in its file name (unquoted) is the files it matches there,
-   * by name; a frame pattern (plate.####.exr, unquoted) is its frames' files; anything else itself. A pattern that
-   * matches nothing is an error (zsh's rule: never the pattern itself).
+   * A for loop's words, filled in (vars.ts forWords): a word with * ? or [ typed in its file name is the files it
+   * matches there, by name; a typed frame pattern (plate.####.exr) is its frames' files; anything else itself. Only
+   * what was typed unquoted counts: a variable's value is never a pattern, but the pattern typed around it still is
+   * (`${show}/*.exr`: SME review 2026-10-27 M3); `${list[@]}` is a value's words (S10). A pattern that matches nothing
+   * is an error (zsh's rule: never the pattern itself).
    */
-  private async forItems(items: string): Promise<string[] | { error: string }> {
-    const v = this.expand(items);
-    if ("error" in v) return v;
+  private async forItems(items: string, scope: ReadonlyMap<string, string>, b: ConsoleBlock): Promise<string[] | { error: string }> {
+    const fw = forWords(items, (name) => scope.get(name) ?? this.lookup(name), this.opts);
+    if ("error" in fw) return fw;
+    // loop: NOT-WORTH — a loop's few notes
+    for (const n of fw.notes) this.note(b, "info", n);
     const a = this.d.paths.platform === "win32" ? win32 : posix;
     const out: string[] = [];
     const tooMany = `more than ${ITEMS_MAX} items: name a smaller set`;
     // loop: NOT-WORTH — the loop's words, one async readdir per pattern
-    for (const w of tokenize(v.line, this.opts).words) {
+    for (const w of fw.words) {
       const cut = Math.max(w.value.lastIndexOf("/"), this.opts.windows ? w.value.lastIndexOf("\\") : -1);
       const [dirPart, namePart] = [w.value.slice(0, cut + 1), w.value.slice(cut + 1)];
-      const glob = !w.quoted && /[*?[]/.test(namePart);
-      if (!w.quoted && /[*?[]/.test(dirPart)) return { error: `${w.value}: a pattern goes in the file's name only (plates/*.exr), not in its folders` };
+      const nameOn = w.active.slice(cut + 1);
+      // the characters typed unquoted (a value's and a quoted one's are NUL here: never a pattern)
+      // loop: NOT-WORTH — one word's characters
+      const typed = (from: number, text: string) => [...text].map((c, i) => (w.active[from + i] ? c : "\0")).join("");
+      const glob = /[*?[]/.test(typed(cut + 1, namePart));
+      if (/[*?[]/.test(typed(0, dirPart))) return { error: `${w.value}: a pattern goes in the file's name only (plates/*.exr), not in its folders` };
+      const token = frameToken(typed(cut + 1, namePart));
+      if (token && frameToken(namePart)?.at !== token.at) return { error: `${w.value}: a variable's value has a frame token before the one typed; write the pattern without it` };
       const base = this.at(dirPart);
       if (base === null) return { error: noBookmark(dirPart) };
       const dir = a.resolve(this.cwd, expandHome(base || ".", this.d.paths));
       if (glob) {
-        const re = globRegExp(namePart, this.d.paths.platform === "win32" || this.d.paths.platform === "darwin");
+        const re = globRegExp(namePart, this.d.paths.platform === "win32" || this.d.paths.platform === "darwin", nameOn);
         // loop: NOT-WORTH — one async readdir per pattern
         const names = await this.d.fs.readdir(dir).catch(() => [] as Dirent[]);
         // loop: NOT-WORTH — one folder's names
@@ -1634,7 +1644,7 @@ export class Console {
         if (out.length + hits.length > ITEMS_MAX) return { error: tooMany };
         // loop: NOT-WORTH — sorts ≤ ITEMS_MAX matches, then adds them one by one
         for (const n of hits.sort(naturalCompare)) out.push(dirPart + n);
-      } else if (!w.quoted && frameToken(namePart)) {
+      } else if (token) {
         const pat = await this.patternAt(a.join(dir, namePart));
         if (pat && !pat.seq) return { error: noFrames(pat, this.opts) };
         const names = pat?.seq ? pat.seq.names : null;

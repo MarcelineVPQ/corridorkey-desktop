@@ -304,12 +304,14 @@ export function commandStart(head: string, opts: ParseOptions): number {
 }
 
 /** A file-name pattern (`*`, `?`, `[a-z]`, `[!a-z]`) as a whole-name regular expression; `fold`: any case. */
-export function globRegExp(pattern: string, fold: boolean): RegExp {
+export function globRegExp(pattern: string, fold: boolean, active?: readonly boolean[]): RegExp {
   let re = "";
   // loop: NOT-WORTH — one short pattern
   for (let i = 0; i < pattern.length; i++) {
     const c = pattern[i];
-    if (c === "*") re += ".*";
+    // a character from a variable's value or quotes (active false) is itself (SME review 2026-10-27 M3)
+    if (active && !active[i]) re += c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    else if (c === "*") re += ".*";
     else if (c === "?") re += ".";
     else if (c === "[") {
       const close = pattern.indexOf("]", i + 2);

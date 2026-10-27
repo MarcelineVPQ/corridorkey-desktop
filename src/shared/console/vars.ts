@@ -25,6 +25,46 @@ function quoted(value: string, opts: ParseOptions): string | null {
   return value.includes("'") ? null : `'${value}'`;
 }
 
+/** A word as the tokenizer reads it, with `${name}` filled in where it counts. `active`: per character of `value`, typed
+ * outside quotes and unescaped (only those can make a glob or a frame pattern: a value's characters never do). */
+type WordValue = { value: string; active: boolean[]; used: boolean };
+
+function readWord(src: string, lookup: (name: string) => string | undefined, opts: ParseOptions): WordValue | { error: string } {
+  let value = "";
+  const active: boolean[] = [];
+  let used = false;
+  let quote: string | null = null;
+  const add = (t: string, on: boolean) => {
+    value += t;
+    // loop: NOT-WORTH — one value's characters
+    for (let k = 0; k < t.length; k++) active.push(on);
+  };
+  // loop: NOT-WORTH — one word's characters
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (quote) {
+      if (c === quote) quote = null;
+      else if (quote === '"' && c === "\\" && !opts.windows && (src[i + 1] === '"' || src[i + 1] === "\\")) add(src[++i], false);
+      else if (quote === '"' && c === "$" && src[i + 1] === "{") {
+        const r = take(src, i, lookup);
+        if ("error" in r) return r;
+        add(r.value, false);
+        [i, used] = [r.end, true];
+      } else add(c, false);
+      continue;
+    }
+    if (c === "'" || c === '"') quote = c;
+    else if (c === "\\" && !opts.windows && i + 1 < src.length) add(src[++i], false);
+    else if (c === "$" && src[i + 1] === "{") {
+      const r = take(src, i, lookup);
+      if ("error" in r) return r;
+      add(r.value, false);
+      [i, used] = [r.end, true];
+    } else add(c, true);
+  }
+  return { value, active, used };
+}
+
 /** The line with each `${name}` replaced by `lookup(name)`, or what is wrong (an unknown name, an unclosed brace). */
 export function expandVars(line: string, lookup: (name: string) => string | undefined, opts: ParseOptions): VarExpansion {
   if (!hasVars(line)) return { line, changed: false };
@@ -36,32 +76,10 @@ export function expandVars(line: string, lookup: (name: string) => string | unde
   for (const w of words) {
     const src = line.slice(w.start, w.end);
     if (!src.includes("${")) continue;
-    // the word's value, read as the tokenizer reads it, with ${name} filled in where it counts
-    let value = "";
-    let used = false;
-    let quote: string | null = null;
-    // loop: NOT-WORTH — one word's characters
-    for (let i = 0; i < src.length; i++) {
-      const c = src[i];
-      if (quote) {
-        if (c === quote) quote = null;
-        else if (quote === '"' && c === "\\" && !opts.windows && (src[i + 1] === '"' || src[i + 1] === "\\")) value += src[++i];
-        else if (quote === '"' && c === "$" && src[i + 1] === "{") {
-          const r = take(src, i, lookup);
-          if ("error" in r) return r;
-          [value, i, used] = [value + r.value, r.end, true];
-        } else value += c;
-        continue;
-      }
-      if (c === "'" || c === '"') quote = c;
-      else if (c === "\\" && !opts.windows && i + 1 < src.length) value += src[++i];
-      else if (c === "$" && src[i + 1] === "{") {
-        const r = take(src, i, lookup);
-        if ("error" in r) return r;
-        [value, i, used] = [value + r.value, r.end, true];
-      } else value += c;
-    }
-    if (!used) continue;
+    const r = readWord(src, lookup, opts);
+    if ("error" in r) return r;
+    if (!r.used) continue;
+    const value = r.value;
     const q = quoted(value, opts);
     if (q === null) return { error: `${src}: its value has both ' and ", which a word can't hold on Windows` };
     out += line.slice(pos, w.start) + q;
@@ -75,8 +93,49 @@ export function expandVars(line: string, lookup: (name: string) => string | unde
 function take(src: string, i: number, lookup: (name: string) => string | undefined): { value: string; end: number } | { error: string } {
   const close = src.indexOf("}", i + 2);
   const name = close < 0 ? null : src.slice(i + 2, close);
+  if (name !== null && LIST.test(`\${${name}}`)) return { error: `\${${name}}: a list splits only as a whole word of a for loop (for s in \${${name}})` };
   if (name === null || !VAR_NAME.test(name)) return { error: `${src}: a variable is \${name} (letters, digits, _); quote a literal \${ with '…'` };
   const v = lookup(name);
   if (v === undefined) return { error: `\${${name}}: no such variable (set lists them; set ${name}=value makes it)` };
   return { value: v, end: close };
+}
+
+/** `${name[@]}`: a variable's value split at white space, as a whole word of a for loop (S10). */
+const LIST = /^\$\{((?!__proto__\])[A-Za-z_][A-Za-z0-9_]*)\[@\]\}$/;
+
+export interface ForWord {
+  value: string;
+  /** per character: typed outside quotes and unescaped (a glob's * ? [ and a frame token count only there) */
+  active: boolean[];
+}
+
+/**
+ * A for loop's words with `${name}` filled in (SME review 2026-10-27 M3): a variable no longer turns off the pattern
+ * typed around it (`${show}/*.exr` is the files there), and its value's own characters are never a pattern. A whole
+ * unquoted word `${name[@]}` is the value split at spaces, tabs and new lines, each piece one item (S10: lists); a
+ * `${name}` with white space in it stays one item, and `notes` says how to split it.
+ */
+export function forWords(line: string, lookup: (name: string) => string | undefined, opts: ParseOptions): { words: ForWord[]; notes: string[] } | { error: string } {
+  const words: ForWord[] = [];
+  const notes: string[] = [];
+  // loop: NOT-WORTH — a for loop's words (≤ 8 KiB)
+  for (const w of tokenize(line, opts).words) {
+    const src = line.slice(w.start, w.end);
+    const list = LIST.exec(src);
+    if (list) {
+      const v = lookup(list[1]);
+      if (v === undefined) return { error: `\${${list[1]}}: no such variable (set lists them; set ${list[1]}="a b c" makes a list)` };
+      // loop: NOT-WORTH — one value's pieces
+      for (const item of v.split(/\s+/).filter(Boolean)) words.push({ value: item, active: Array(item.length).fill(false) });
+      continue;
+    }
+    const r = readWord(src, lookup, opts);
+    if ("error" in r) return r;
+    if (r.used && /\s/.test(r.value) && !/["']/.test(src)) {
+      const name = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/.exec(src)?.[1];
+      notes.push(`${src} is one item (a variable never splits)${name ? `: for s in \${${name}[@]} takes its words one by one` : ""}`);
+    }
+    words.push({ value: r.value, active: r.active });
+  }
+  return { words, notes };
 }

@@ -1,6 +1,6 @@
 // The Console's variables (src/shared/console/vars.ts): ${name} only; a value is one quoted word; frame tokens literal.
 import { describe, expect, it } from "vitest";
-import { expandVars } from "../../src/shared/console/vars";
+import { expandVars, forWords } from "../../src/shared/console/vars";
 import { parse } from "../../src/shared/console/parse";
 import { makeRegistry } from "../../src/shared/console/registry";
 
@@ -36,5 +36,25 @@ describe("expandVars", () => {
     expect(x("dir ${nope}")).toEqual({ error: "${nope}: no such variable (set lists them; set nope=value makes it)" });
     expect(x("dir ${shot")).toMatchObject({ error: expect.stringMatching(/a variable is \$\{name\}/) });
     expect(x("dir ${1x}")).toMatchObject({ error: expect.stringMatching(/a variable is/) });
+  });
+});
+
+describe("forWords (SME review 2026-10-27 M3, S10)", () => {
+  const v: Record<string, string> = { dir: "/mnt/a*b", list: " sh010\tsh020\nsh030 " };
+  const f = (line: string) => forWords(line, (n) => v[n], { windows: false });
+  // loop: NOT-WORTH — a word's few characters
+  const typed = (w: { value: string; active: boolean[] }) => [...w.value].map((c, i) => (w.active[i] ? c : "_")).join("");
+
+  it("marks only what was typed unquoted as a pattern: never a value's characters, never quoted ones", () => {
+    const r = f('${dir}/*.exr "x*"/y.####.exr \\*z') as Exclude<ReturnType<typeof f>, { error: string }>;
+    expect(r.words.map((w) => w.value)).toEqual(["/mnt/a*b/*.exr", "x*/y.####.exr", "*z"]);
+    expect(r.words.map(typed)).toEqual(["________/*.exr", "__/y.####.exr", "_z"]);
+  });
+
+  it("${name[@]} as a whole word splits the value at white space; ${name} is one word and a note says how to split", () => {
+    expect(f("${list[@]} x")).toMatchObject({ words: [{ value: "sh010" }, { value: "sh020" }, { value: "sh030" }, { value: "x" }], notes: [] });
+    expect(f("${list}")).toMatchObject({ words: [{ value: v.list }], notes: [expect.stringMatching(/for s in \$\{list\[@\]\}/)] });
+    expect(f("${nope[@]}")).toMatchObject({ error: expect.stringMatching(/no such variable/) });
+    expect(f("a${list[@]}")).toMatchObject({ error: expect.stringMatching(/a list splits only as a whole word/) });
   });
 });

@@ -1661,6 +1661,50 @@ describe("Phase 4: scripting", () => {
     expect((await c.run("echo ${s}")).lines.at(-1)!.text).toBe("before");
   });
 
+  // SME review 2026-10-27 M3 (probe): `for f in ${od}/sh010/key.####.exr` echoed the pattern itself, once, and ended done:
+  // the whole word was quoted, so the typed pattern never counted
+  it("SME M3: a variable keeps the typed glob and frame pattern around it; its own value is never a pattern", async () => {
+    const { c } = make();
+    const echoes = async (line: string) => {
+      const b = await c.run(line);
+      await settle();
+      return kids(b.id).map((x) => x.lines.at(-1)?.text ?? blocks.get(b.id)!.lines.at(-1)?.text);
+    };
+    await c.run(`set od=${out}`);
+    expect(await echoes("for f in ${od}/sh010/*.exr; do echo ${f}; done")).toEqual([join(out, "sh010", "key.1001.exr"), join(out, "sh010", "key.1002.exr")]);
+    expect(await echoes("for f in ${od}/sh010/key.####.exr; do echo ${f}; done")).toEqual([join(out, "sh010", "key.1001.exr"), join(out, "sh010", "key.1002.exr")]);
+    // inside a loop, the outer loop's variable fills in a pattern's folder too
+    expect(await echoes("for d in sh010; do for f in ../out/${d}/*.exr; do echo ${f}; done; done")).toEqual(["../out/sh010/key.1001.exr", "../out/sh010/key.1002.exr"]);
+    // a value with * (or ####) stays literal: no file has that name, so it is one item, itself
+    await c.run("set star=*.exr hashes=key.####.exr");
+    expect(await echoes("for f in ${star}; do echo ${f}; done")).toEqual(["*.exr"]);
+    expect(await echoes("for f in ../out/sh010/${hashes}; do echo ${f}; done")).toEqual(["../out/sh010/key.####.exr"]);
+    // and a value's * is literal inside a typed pattern: only names with a real * match
+    const lit = await c.run("for f in ../out/sh010/${star}*; do echo ${f}; done");
+    await settle();
+    expect(blocks.get(lit.id)!.lines.at(-1)!.text).toBe("for f: no file matches ../out/sh010/*.exr*");
+  });
+
+  // SME review 2026-10-27 S10 (probe): set shots="sh010 sh020"; for s in ${shots} ran once with "sh010 sh020"
+  it("SME S10: ${name[@]} splits a value into a loop's items; ${name} stays one item and says how to split it", async () => {
+    const { c } = make();
+    await c.run('set shots="sh010 sh020  sh030"');
+    const b = await c.run("for s in ${shots[@]}; do echo ${s}; done");
+    await settle();
+    expect(kids(b.id).map((x) => x.lines.at(-1)?.text)).toEqual(["sh010", "sh020", "sh030"]);
+    // each item is one word, never a flag or a pattern: a value of "--overwrite *.exr" is two plain items
+    await c.run('set odd="--overwrite *.exr"');
+    const o = await c.run("for s in ${odd[@]}; do echo ${s}; done");
+    await settle();
+    expect(kids(o.id).map((x) => x.lines.at(-1)?.text)).toEqual(["--overwrite", "*.exr"]);
+    const one = await c.run("for s in ${shots}; do echo ${s}; done");
+    await settle();
+    expect(kids(one.id).map((x) => x.lines.at(-1)?.text)).toEqual(["sh010 sh020  sh030"]);
+    expect(blocks.get(one.id)!.lines.map((l) => l.text)).toContain("${shots} is one item (a variable never splits): for s in ${shots[@]} takes its words one by one");
+    // [@] is only a for loop's whole word
+    expect((await c.run("echo ${shots[@]}")).lines.at(-1)!.text).toBe("${shots[@]}: a list splits only as a whole word of a for loop (for s in ${shots[@]})");
+  });
+
   it("if on the last exit status; else; nested in for", async () => {
     const { c } = make();
     const b = await c.run("if cd nowhere; then echo yes; else echo no; fi");
