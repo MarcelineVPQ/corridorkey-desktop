@@ -162,4 +162,13 @@ Marcy approved the MUST and all eight SHOULDs (2026-10-26); the NICE items went 
 | S6 | c481677 | MSVC quoting (`subprocess.list2cmdline`) on Windows; `farm/deadline10/test_quote.py` in `npm run check` |
 | S7 | e0be24f | the handler waits up to 4.5 s for the run's own stop on close / log-off / shut-down; docs say what a longer stop means |
 | S8 | bb57d30 | a lock file per run folder; `render` sweeps folders with no live lock whose process is gone on this host, or untouched for 7 days |
-| N1-N10 | BACKLOG rows 96-105 | ideas, not fixed |
+| N1-N4 | BACKLOG rows 96-99 | ideas, not fixed |
+| N5 | 3b92a18 | docs/CLI.md: the claim holds by construction (only corridorkey-engine calls `end_with_parent`); the test says it only shows an orphaned task runs to its end |
+| N6 | not built (row 101, "to measure") | an `-ss` seek changes the frame-exact decode: a byte-for-byte check against `trim` on real movies first, a run for Marcy's OK |
+| N7 | 9d649c5 | "Linux and macOS hosts" in the submitter, farm/README.md and the Console's export notes; Windows quoting left for Marcy |
+| N8 | 60a3126 | the plugin sets `CUDA_DEVICE_ORDER=PCI_BUS_ID` with `--gpu`; `farm/deadline10/test_plugin.py` (stand-in Deadline modules) |
+| N9 | 3fc627b | farm/README.md "Getting corridorkey onto a worker" (`--appimage-extract`, the paths in each install) |
+| N10 | 961cf1d | an output pattern in the input folder is exit 2 before anything is written; `tests/cli.rs` test |
+
+N5-N10 were built on branch `senior-nices` (2026-10-27, Marcy: "when a senior dev gives you recommendations, you
+implement the recommendations").

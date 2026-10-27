@@ -366,3 +366,18 @@ code; each probe is a regression test (P7-P9 pin the open rows' behaviour today:
 | S8 `role="log"` | 95829b7: plain region + one polite `role="status"` | `consoleBlocks.test.ts` |
 | P10 parse speed | — | `consoleParse.test.ts` (< 100 ms per 8 KiB line) |
 | N1-N12 | docs/BACKLOG.md rows 106-117 (idea) | P7 → row 106, P8 → row 107, P9 → row 108 |
+
+The NICE items, 2026-10-27: N2, N5 and N8 came with the SME review's S11 and S10; the others on branch `senior-nices`
+(Marcy: "when a senior dev gives you recommendations, you implement the recommendations").
+
+| Finding | Done in | Test |
+|---|---|---|
+| N1 a value starting with `-` | 7026f2b: such a value goes as `--flag=value`; other values stay two words | P7 flipped |
+| N3 case folding per volume | 9bc433b: only the names realpath returned fold, a missing tail compares as typed | P9 flipped, plus a case-insensitive volume |
+| N4 derived paths and symlinks | 637dcf0: documented (docs/CONSOLE.md file scope); the CLI refusing a symlinked subfolder is left for Marcy (it would change corridorkey for every farm) | none (a doc) |
+| N6 output memory | b12f3a3: lines keyed by number, pushes carry appended lines (`linesFrom`), 256 000 characters per block | the push/merge round trip, the character cap |
+| N7 `aria-controls` to nothing | 8874b10 | the editor rendered without its list |
+| N9 wait for the engines it stops | c95e8d7: takeGpu waits (≤ 5 s) for the estimate's and the build's engines, the slot checked again after; `info` refused while the queue runs | engineEnding (estimate, build), untilEnded, info, a slot taken during the wait |
+| N10 cliSpec drift check | 5b2c723: a bad `CK_CLI_BIN` throws; `npm run check` ends with a loud SKIPPED banner | both bad `CK_CLI_BIN`s |
+| N11 deadlines for Tab and dir | 71cd2a8: readdir / stat / lstat / realpath answer within 3 s | dir, cd and Tab on a share that never answers |
+| N12 Ctrl+R / Ctrl+W vs the menu | 6e0a5ce: the editor half (handled in every state); the real-window check in `tools/isolated.sh` waits for Marcy's OK | `consoleEditor.test.ts` |
