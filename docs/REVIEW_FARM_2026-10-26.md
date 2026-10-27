@@ -145,3 +145,21 @@ The real problems are at the edges of the contract:
 
 MUST 1 · SHOULD 8 · NICE 10. Proved by a run: M1, S3, N1, plus the existing unit/binary/e2e tests passing. The rest
 are code-read; S7 is checked against Microsoft's documentation and N7 against OpenCue's source.
+
+## Status
+
+Marcy approved the MUST and all eight SHOULDs (2026-10-26); the NICE items went to the backlog. Branch
+`fix/farm-review`.
+
+| finding | done in | how |
+|---|---|---|
+| M1 | 84c98a5 | `-s` / `-e` and a job file's `frame_start` / `frame_end` outside the shot are exit 2 with `-F`'s message (render and verify) |
+| S1 | 19e6950 | the code changed, not the doc: a spec keys to the end of its ranges (`1001-1100x2` keys 1001-1100), so its frames are bit for bit a `1001-1100` run's (e2e test) |
+| S2 | 3128453 | all-or-nothing placement: old frames moved aside first, each rename retried, everything undone on a failure (exit 4); staging kept only if the undo fails |
+| S3 | dcdb64e | `saturating_add` in select_range; `preroll` / `tail` above 100000 are a bad-request |
+| S4 | cf24ff1 | a stop point before each TensorRT network's build; `prepare` exits 143 / 130 without `ready` |
+| S5 | bb57d30 | run ids `<host>-<pid>-<64 random bits>`; both run folders made with create_dir, a new id when taken |
+| S6 | c481677 | MSVC quoting (`subprocess.list2cmdline`) on Windows; `farm/deadline10/test_quote.py` in `npm run check` |
+| S7 | e0be24f | the handler waits up to 4.5 s for the run's own stop on close / log-off / shut-down; docs say what a longer stop means |
+| S8 | bb57d30 | a lock file per run folder; `render` sweeps folders with no live lock whose process is gone on this host, or untouched for 7 days |
+| N1-N10 | BACKLOG rows 96-105 | ideas, not fixed |
