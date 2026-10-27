@@ -36,13 +36,12 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   requeue (`missing frames: 1012-1015, 1040 (re-render them: -F 1012-1015,1040)`, docs/CLI.md); the block shows
   them as its last lines. (`@` is the Console's: corridorkey itself reads `####`, `%04d` and `$F4`.)
   `history [N|term]` (`--audit`: the elevated log), `version` (also `corridorkey --version`, `render --version`: the app's
-  version, which its corridorkey shares; answered without running it), `run <file.ckcmd>` (a script of Console lines, one per line, `#` comments;
-  each line through the same checks; stops at the first that fails; no script inside a script; its elevation: Security
-  rules below). Several lines pasted at once are never joined: the page offers them as a script (Enter runs them in
+  version, which its corridorkey shares; answered without running it), `run [--keep-going] <file.ckcmd>` (a script: Scripting, below; no script
+  inside a script; its elevation: Security rules below). Several lines pasted at once are never joined: the page offers them as a script (Enter runs them in
   order through `consoleRunLines`, the same path as `run`; Esc keeps the first line; Ctrl+C drops them), `sudo <command>`,
   `sudo -k`, `farm export` (below), and `corridorkey render | verify | prepare | info` (also bare `render` …). Other command lines' names get
   an answer instead of "unknown command" (`ANSWERS` in registry.ts): `exit` / `quit` (the Console stays open), `rm` /
-  `del` / `rmdir` (the Console never deletes files), `cp` / `mv`, `cat` / `type` (a later version, Phase 4),
+  `del` / `rmdir` (the Console never deletes files), `cp` / `mv`, `more` / `less` (`cat`, `head`, `tail`),
   `which`. Built-ins say a file system error in words with what to type (`fsErrorText` in paths.ts), never Node's
   `ENOENT: …, stat '…'`.
 - **Running corridorkey.** The shipped binary (`engineFind.ts findCli`) is spawned with an argv, `shell: false`, its own
@@ -113,6 +112,39 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   surprises in a script); `set -p` also keeps it in settings (`consoleVariables`: valid names, never a read-only one,
   strings without NUL up to 4096 characters, at most 200; checked on load), and a kept one stays kept when `set`
   again; `unset` removes it from both. At most 500 in a session.
+- **Scripting** (`src/shared/console/script.ts`; SME review item 7: "a small language, not a shell"). A typed line or a
+  script's text is a list of commands joined by `;` (or a new line), `&&` (the next runs only if this one ended 0) and
+  `||` (only if it didn't); `for NAME in WORDS; do …; done`; `if LIST; then …; [else …;] fi` on the last exit status;
+  `time COMMAND`. Nothing else: no subshells, no pipes (an unquoted `|` is refused with the reason), no redirections,
+  no background jobs, no `elif`, `while` or functions. The separators are found with the tokenizer's own quote and
+  escape rules (`"a;b"`, `'x||y'`, `d\;e` are words); keywords count only as a command's first word, unquoted; `#` at
+  a line's start is a comment; a new line after `&&` / `||` continues it. A mistake in the program (a `for` without
+  `done`, a stray `fi`) refuses it before anything runs, with where. Each command is one Console line: filled in
+  (`${name}`, the loop's variable over the session's) and parsed and checked by the one parser when it runs, as its own
+  block under the program's. **for**'s words: an unquoted word with `*`, `?` or `[…]` in its file name is the files
+  that match there (by name; dot files only for a pattern starting with `.`; a pattern in a folder name is refused),
+  an unquoted frame pattern (`plates/sh010.####.exr`, `%04d`, `$F4`, `@@@@`) its frames' files, anything else itself;
+  a pattern that matches nothing is an error (zsh's rule, never the pattern itself); at most 10 000 items; a variable's
+  value is never a pattern. The loop's variable is gone after the loop (one set before comes back). **Exit status:**
+  each command's (`statusOf`: its exit code, else 0 done, 2 refused, 130 stopped, 1 failed) is `${status}` and what
+  `&&`, `||` and `if` read; the program ends as its last command did. **Stopping:** a typed line goes on after a
+  failure, as bash does; a script (`run`, pasted lines) stops at a command that fails at the end of its `&&`/`||`
+  chain (bash's `set -e`: never one on the left of `&&` / `||`, never an `if`'s condition) and says
+  `stopped at line N`; `run --keep-going` goes on, counts them and still ends failed. **One job:** a program takes the
+  Console's one slot for all of it (a typed `cd a; dir` while a render runs is refused as busy); Ctrl+C stops it after
+  the command it is in (a running corridorkey as usual). **time** prints `time: 2.0 s` after the command, with a
+  render's frames and frames per second from its own JSON events (`· 50 frames · 25.00 fps`); `time` goes first
+  (`sudo time …` says so). A program's elevation is a script's (Security rules): the commands that replace files say
+  `sudo`, all listed in one dialog up front (for a typed line: "the line typed"), never the session's elevation.
+  The page colours each command in place and Tab completes the command the cursor is in (`parseLine`,
+  `commandStart`), a `for`'s words as files.
+- **File built-ins** (read-only, read anywhere; `electron/main/console/files.ts`): `cat` / `type FILE…` a text file's
+  first 2000 lines (at most 1 MiB read; a file with a NUL in its first 8 KiB is binary and refused; several: each
+  under `==> name <==`), `head` / `tail [-n N] FILE` (default 10, at most 2000; `tail` reads only the file's last MiB),
+  `wc FILE…` (lines, words, bytes; read 1 MiB at a time, up to 256 MiB; several: a total), `du [FOLDER…]` (each folder
+  inside with its size, human, then the total; links not followed; past 200 000 entries the sizes say `≥`), `tree
+  [FOLDER] [-L N] [-a]` (depth 2 by default, at most 6; sequences as one row with their frames; at most 1000 rows;
+  dot files with `-a`). Bytes come through `ConsoleFs.readRange` (one bounded read; never a whole file in memory).
 - **doctor** (`doctor --json`): every check in one go, one row each (✓ ok, ⚠ warning, ✗ problem) and under each problem
   its exact fix (a Console line or an App action): the corridorkey command line (found), the graphics card and driver,
   ONNX Runtime and the models (all three from `corridorkey info --json`: it loads the runtime and asks the driver, never

@@ -63,9 +63,10 @@ App settings → Storage lists what the app keeps on this PC, each with its size
 
 The **Console** (its own icon on the rail) is a command line inside the app for people who live in one: the farm CLI's
 `render`, `verify`, `prepare` and `info` with the same flags, output and exit codes, plus `help`, `apropos`, `doctor`, `farm export`, `cd`, `pwd`,
-`dir` / `ls`, `bookmark`, `j`, `pushd` / `popd` / `dirs`, `allow`, `open` (shows a folder in the file manager), `cls`,
-`history`, `version`, `run` (a `.ckcmd` script of Console lines) and `sudo`. Other shells' words get a straight answer: `man` is `help`, `exit` says the Console stays
-open, `rm` that the Console never deletes files, `cat` that it comes later. Every command and flag comes
+`dir` / `ls`, `bookmark`, `j`, `pushd` / `popd` / `dirs`, `set` / `unset` / `echo`, `cat` / `type`, `head`, `tail`,
+`wc`, `du`, `tree`, `time`, `allow`, `open` (shows a folder in the file manager), `cls`, `history`, `version`, `run` (a
+`.ckcmd` script of Console lines) and `sudo`. Other shells' words get a straight answer: `man` is `help`, `exit` says the Console stays
+open, `rm` that the Console never deletes files, `less` that `cat` and `tail` show a file. Every command and flag comes
 from the `corridorkey` CLI's own definitions, so the Console and the farm never differ. `help` lists the commands,
 `help render` or `render ?` explains one with examples, `help -k overwrite` (or `apropos overwrite`) searches them. The
 shell reflexes work: `ls -la`, `ls -tr`, `dir /o:-d`, `cd -`; `dir` shows a frame sequence as one row with its range
@@ -95,13 +96,28 @@ names stay as they are; inside `'…'` nothing is filled in. A value is always o
 `${status}` (the last command's exit code) are the Console's own. The block shows the line as it ran and what you
 typed.
 
+**Scripting.** Join commands on one line with `;` (one after another), `&&` (the next only if this one worked) and
+`||` (only if it didn't): `cd @sh010 && render plate.mov -o ~/renders/sh010`. Loop over shots, files or a sequence's
+frames: `for s in sh010 sh020; do cd @${s}; render plate.mov -o ~/renders/${s}; done`, `for f in plates/*.exr; do …;
+done` (the files that match, by name; a pattern that matches nothing runs nothing), `for f in plates/sh010.####.exr; do
+…; done` (each frame). `if verify -i … -o …; then echo ok; else echo missing; fi` decides on the last exit code. `time
+render …` says how long it took and the frames per second. Script files (`run nightly.ckcmd`) use the same, over
+several lines; a script stops at the first command that fails (not one on the left of `&&` / `||` or in an `if`),
+`run --keep-going` goes on and still ends failed; a typed line goes on. There are no pipes: the Console's commands
+never pass text to each other or to the system. A line with `;`, `&&`, `||`, `for`, `if` or `time` runs as a script:
+one at a time, and its commands that replace files say `sudo` and are confirmed together before anything runs.
+
+**Files.** `cat notes.txt` (or `type`) prints a text file, `head -n 20` and `tail -n 50 render.log` its start or end,
+`wc` counts lines, words and bytes, `du` shows how much each folder takes, and `tree` (`-L 3` for deeper) draws the
+folders with each frame sequence as one row. They only read; a binary file isn't printed.
+
 **doctor** checks this computer in one go: the corridorkey command line, the graphics card and its driver, ONNX
 Runtime, the models, TensorRT, ffmpeg, and each folder the Console writes to (there, writable, free space), one row
 each with ✓, ⚠ or ✗, and under each problem what to do (a command, or where in the app). It only asks; it never keys
 on the card. `doctor --json` prints the same as JSON.
 
-**Safety.** It is not a system shell: only its own commands, each one parsed and checked (no pipes, globs or other
-programs; its variables are `${name}` only, and a value is always one word, never a flag). It **reads anywhere** you can, and **writes only into the folders you chose**: the results folder
+**Safety.** It is not a system shell: only its own commands, each one parsed and checked (no pipes, subshells or
+other programs; its variables are `${name}` only, and a value is always one word, never a flag). It **reads anywhere** you can, and **writes only into the folders you chose**: the results folder
 (App settings), the cache folder, the queued clips' results folders, and the folders you **allow**; anything else is
 refused with the reason and the line that allows it (`allow "/mnt/show/sq01"`), before anything runs. `allow <folder>`
 asks you to confirm, then the Console may write in that folder and every folder inside it, also after a restart;
@@ -178,6 +194,8 @@ render -i plates/sh010.####.exr -o ~/renders/sh010/sh010_key.####.exr -F 1001-11
 sudo render sh010.mov -o ~/renders/sh010/ --overwrite
 verify -i plates/sh010.####.exr -o ~/renders/sh010/sh010_key.####.exr -F 1001-1100
 run nightly.ckcmd
+for s in sh010 sh020; do cd @${s} && time render plate.mov -o ~/renders/${s}; done
+tree -L 2 ~/shots/sh010
 farm export openjd --queue -o ~/farm/sq01
 doctor
 ```

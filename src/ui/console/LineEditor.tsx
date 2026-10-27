@@ -4,7 +4,7 @@
 // offer to run several pasted lines as a script. What
 // each key does is editor.ts (pure, unit-tested); this component feeds it and carries out its effects.
 import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { parse } from "../../shared/console/parse";
+import { parseLine } from "../../shared/console/script";
 import type { Registry } from "../../shared/console/registry";
 import {
   acceptItem,
@@ -136,7 +136,7 @@ export const LineEditor = forwardRef<LineEditorHandle, Props>(function LineEdito
   // the grey suggestion offers only lines that would run (a typo in the history is never suggested; ↑ and Ctrl+R
   // still find it, to fix)
   // loop: HOT-PATH-OK — ≤ 200 lines parsed once per history change
-  const runnable = useMemo(() => history.filter((l) => parse(l, registry, { windows }).errors.length === 0), [history, registry, windows]);
+  const runnable = useMemo(() => history.filter((l) => parseLine(l, registry, { windows }).errors.length === 0), [history, registry, windows]);
 
   const onKeyDown = async (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.nativeEvent.isComposing) return;
@@ -164,7 +164,7 @@ export const LineEditor = forwardRef<LineEditorHandle, Props>(function LineEdito
     else if (fx?.kind === "mode") props.onMode(fx.mode);
   };
 
-  const parsed = useMemo(() => parse(s.line, registry, { windows }), [s.line, registry, windows]);
+  const parsed = useMemo(() => parseLine(s.line, registry, { windows }), [s.line, registry, windows]);
   const expansion = useMemo(() => expansionHint(s.line, props.past, windows), [s.line, props.past, windows]);
   // a history shortcut isn't a command: the line reads plain, the hint says what Enter runs
   const spans = useMemo(() => (expansion ? [{ text: s.line, kind: "plain" as const }] : highlight(s.line, parsed)), [s.line, parsed, expansion]);

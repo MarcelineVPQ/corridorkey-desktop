@@ -7,6 +7,7 @@ import { naturalCompare } from "../media";
 import { parse, quoteArg, tokenize, type ParseOptions } from "../../../src/shared/console/parse";
 import { commandNames, findCommand, type ConsoleArg, type ConsoleCommand, type Registry } from "../../../src/shared/console/registry";
 import { groupSequences } from "../../../src/shared/console/sequences";
+import { commandStart } from "../../../src/shared/console/script";
 import type { ConsoleCompletion, ConsoleCompletionItem } from "../../../src/shared/types";
 import { expandHome } from "./paths";
 
@@ -29,6 +30,12 @@ const flagNames = (a: ConsoleArg) => [a.long ? `--${a.long}` : null, a.short ? `
 export async function complete(line: string, cursor: number, cwd: string, d: CompleteDeps): Promise<ConsoleCompletion> {
   const opts: ParseOptions = { windows: d.platform === "win32" };
   const head = line.slice(0, Math.max(0, Math.min(cursor, line.length)));
+  // a line with ; && || do then else time: the command the cursor is in, completed on its own
+  const at = commandStart(head, opts);
+  if (at > 0) {
+    const r = await complete(line.slice(at), cursor - at, cwd, d);
+    return { ...r, start: r.start + at, end: r.end + at };
+  }
   const { words } = tokenize(head, opts);
   const last = words[words.length - 1];
   // the cursor right after a word (no space): that word is completed; else a new, empty one
@@ -40,6 +47,8 @@ export async function complete(line: string, cursor: number, cwd: string, d: Com
   const done = (items: ConsoleCompletionItem[], from = start): ConsoleCompletion => ({ start: from, end: head.length, items: items.slice(0, COMPLETIONS_MAX) });
   const starts = (s: string) => s.startsWith(prefix);
 
+  // for NAME in WORDS: the words are files (or patterns)
+  if (before.length >= 3 && !before[0].quoted && before[0].value === "for" && before[2].value === "in") return done(await paths(prefix, cwd, d, opts));
   // the command word (after an optional sudo)
   const lead = before.length && !before[0].quoted && before[0].value === "sudo" ? 1 : 0;
   if (before.length === lead) {

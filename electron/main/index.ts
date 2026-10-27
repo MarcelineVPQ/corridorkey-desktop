@@ -3,7 +3,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, net, power
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
-import { access, constants as fsConstants, mkdir, readdir, readFile, stat, statfs, writeFile } from "node:fs/promises";
+import { access, constants as fsConstants, mkdir, open, readdir, readFile, stat, statfs, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { EngineProcess, rustEngineEnv, type EngineReply } from "./engine";
@@ -373,6 +373,17 @@ const appConsole = new Console({
       if (s.size > max) throw new Error(`larger than ${max} bytes`);
       // loop: NOT-WORTH — one async read of a small file
       return readFile(p, "utf8");
+    },
+    readRange: async (p, start, length) => {
+      // loop: NOT-WORTH — one open + read + close per cat, head, tail, or wc chunk [bounded: TEXT_MAX bytes]
+      const fh = await open(p, "r");
+      try {
+        const buf = Buffer.alloc(length);
+        const { bytesRead } = await fh.read(buf, 0, length, start);
+        return buf.subarray(0, bytesRead);
+      } finally {
+        await fh.close();
+      }
     },
     mkdir: async (p) => {
       // loop: NOT-WORTH — one async mkdir per render

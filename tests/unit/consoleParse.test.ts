@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parse, quoteArg, tokenize, valueProblem } from "../../src/shared/console/parse";
 import { makeRegistry, MEANINGS, suggest } from "../../src/shared/console/registry";
+import { parseLine } from "../../src/shared/console/script";
 
 const reg = makeRegistry();
 const posix = { windows: false };
@@ -268,7 +269,9 @@ describe("SME review 2026-10-26: foreign commands (S5)", () => {
     expect(first("quit")).toMatch(/stays open/);
     // echo is a command now (Phase 4: variables)
     expect(parse("echo hi", reg, posix).command?.name).toBe("echo");
-    expect([first("cat a.txt"), first("type a.txt")]).toEqual(Array(2).fill(expect.stringMatching(/later version \(the Console's Phase 4\)/)));
+    // cat / type, head, tail are commands now (Phase 4 step 7); more and less point to them
+    expect([parse("cat a.txt", reg, posix).command?.name, parse("type a.txt", reg, posix).command?.name]).toEqual(["cat", "cat"]);
+    expect(first("less a.txt")).toMatch(/^cat <file> \(or type\) prints a text file/);
     expect(first("cp a b")).toMatch(/doesn't copy or move/);
   });
 
@@ -378,6 +381,6 @@ describe("docs/GUIDE.md's Console examples", () => {
     const lines = block.split("\n").filter((l) => l.trim());
     expect(lines.length).toBeGreaterThanOrEqual(5);
     // loop: NOT-WORTH — as above
-    for (const l of lines) expect(parse(l, reg, posix).errors, l).toEqual([]);
+    for (const l of lines) expect(parseLine(l, reg, posix).errors, l).toEqual([]);
   });
 });

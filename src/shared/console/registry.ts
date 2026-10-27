@@ -287,9 +287,65 @@ const BUILTINS: ConsoleCommand[] = [
   ),
   builtin(
     "run",
-    "run a script of Console commands (.ckcmd), one per line; stops at the first that fails",
-    [arg({ id: "file", kind: "path", positional: true, required: true, valueName: "FILE.ckcmd", help: "the script" })],
-    ["run nightly.ckcmd"],
+    "run a script of Console commands (.ckcmd): one per line (or joined with ; && ||), for and if; stops at the first that fails",
+    [
+      arg({ id: "file", kind: "path", positional: true, required: true, valueName: "FILE.ckcmd", help: "the script" }),
+      arg({ id: "keep-going", long: "keep-going", kind: "switch", help: "go on after a command fails (the script still ends failed)" }),
+    ],
+    ["run nightly.ckcmd", "run --keep-going nightly.ckcmd"],
+  ),
+  builtin(
+    "time",
+    "run a command and say how long it took (a render's frames per second too)",
+    [arg({ id: "command", kind: "string", positional: true, multiple: true, required: true, valueName: "COMMAND", help: "the command line" })],
+    ["time render shot.mov -o ~/renders/sh010", "time verify -i plates/sh010.####.exr -o out/key.####.exr"],
+  ),
+  builtin(
+    "cat",
+    "print a text file (its first 2000 lines; a binary file is refused)",
+    [arg({ id: "files", kind: "path", positional: true, multiple: true, required: true, valueName: "FILE", help: "the file" })],
+    ["cat notes.txt", "type nightly.ckcmd"],
+    ["type"],
+  ),
+  builtin(
+    "head",
+    "print a text file's first lines",
+    [
+      arg({ id: "lines", short: "n", kind: "number", integer: true, valueName: "N", help: "how many (default 10, at most 2000)" }),
+      arg({ id: "file", kind: "path", positional: true, required: true, valueName: "FILE", help: "the file" }),
+    ],
+    ["head report.json", "head -n 40 notes.txt"],
+  ),
+  builtin(
+    "tail",
+    "print a text file's last lines (a long log's end)",
+    [
+      arg({ id: "lines", short: "n", kind: "number", integer: true, valueName: "N", help: "how many (default 10, at most 2000)" }),
+      arg({ id: "file", kind: "path", positional: true, required: true, valueName: "FILE", help: "the file" }),
+    ],
+    ["tail render.log", "tail -n 100 render.log"],
+  ),
+  builtin(
+    "wc",
+    "count a text file's lines, words and bytes",
+    [arg({ id: "files", kind: "path", positional: true, multiple: true, required: true, valueName: "FILE", help: "the file" })],
+    ["wc shots.txt", "wc notes.txt shots.txt"],
+  ),
+  builtin(
+    "du",
+    "how much the folders take on disk: each folder inside, then the total",
+    [arg({ id: "folders", kind: "path", positional: true, multiple: true, valueName: "FOLDER", help: "the folder (default: the current one)" })],
+    ["du", "du ~/renders"],
+  ),
+  builtin(
+    "tree",
+    "a folder and the folders inside it, as a tree (sequences as one row)",
+    [
+      arg({ id: "folder", kind: "path", positional: true, valueName: "FOLDER", help: "the folder (default: the current one)" }),
+      arg({ id: "level", short: "L", kind: "number", integer: true, valueName: "N", help: "how deep (default 2, at most 6)" }),
+      arg({ id: "all", short: "a", kind: "switch", help: "dot files too" }),
+    ],
+    ["tree", "tree -L 3 ~/shots/sh010"],
   ),
   builtin(
     "doctor",
@@ -348,7 +404,7 @@ export function makeRegistry(spec: CliSpec = cliSpec as CliSpec): Registry {
  */
 const NEVER_DELETES = "the Console never deletes files (render's --overwrite replaces only its own outputs, as sudo); delete them in your file manager (open . shows this folder there)";
 const NO_COPY = "the Console doesn't copy or move files; render -o writes its outputs where you say";
-const SHOW_FILE = "showing a file's text (cat, type) comes in a later version (the Console's Phase 4); open <file> shows it in the file manager";
+const SHOW_FILE = "cat <file> (or type) prints a text file, head and tail its start or end; the output block scrolls";
 const STAYS_OPEN = "the Console stays open (it is a tab: the rail leaves it); cls or Ctrl+L clears the screen";
 export const ANSWERS: Readonly<Record<string, string>> = {
   find: "find (a file search) comes in a later version; to search the commands and their options: help -k <term> (or apropos <term>)",
@@ -367,12 +423,8 @@ export const ANSWERS: Readonly<Record<string, string>> = {
   move: NO_COPY,
   ren: NO_COPY,
   rename: NO_COPY,
-  cat: SHOW_FILE,
-  type: SHOW_FILE,
   more: SHOW_FILE,
   less: SHOW_FILE,
-  head: SHOW_FILE,
-  tail: SHOW_FILE,
   which: "corridorkey is the app's own: version prints its version, corridorkey info checks its engine",
   where: "corridorkey is the app's own: version prints its version, corridorkey info checks its engine",
 };

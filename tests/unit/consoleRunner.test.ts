@@ -2,7 +2,7 @@
 // JSON events into blocks, the file scope and the sudo flow end to end. Real files only in a temp folder of its own.
 import { EventEmitter } from "node:events";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -32,6 +32,18 @@ writeFileSync(join(out, "sh010", "key.1002.exr"), "12345");
 symlinkSync(elsewhere, join(out, "escape"));
 writeFileSync(join(root, "job-out.json"), JSON.stringify({ input: "a.mov", output_dir: elsewhere }));
 writeFileSync(join(root, "job-in.json"), JSON.stringify({ input: "a.mov", output_dir: join(out, "j") }));
+
+/** index.ts's bounded read */
+async function readRange(p: string, start: number, length: number): Promise<Buffer> {
+  const fh = await open(p, "r");
+  try {
+    const buf = Buffer.alloc(length);
+    const { bytesRead } = await fh.read(buf, 0, length, start);
+    return buf.subarray(0, bytesRead);
+  } finally {
+    await fh.close();
+  }
+}
 
 interface FakeChild extends ChildProcess {
   signals: (string | undefined)[];
@@ -82,6 +94,7 @@ function make(over: Partial<ConsoleDeps> = {}, files = mkdtempSync(join(root, "u
     fs: {
       readdir: (p) => readdir(p, { withFileTypes: true }),
       stat: (p) => stat(p),
+      readRange,
       readFile: (p) => readFile(p, "utf8"),
       mkdir: async (p) => void (await mkdir(p, { recursive: true })),
       writeFile: (p, text) => writeFile(p, text),
@@ -537,7 +550,7 @@ describe("run <script>", () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(blocks.get(b.id)!.state).toBe("failed");
     // loop: NOT-WORTH — the script's blocks
-    expect([...blocks.values()].find((x) => x.line === "run b.ckcmd" && x.parent === b.id)!.lines[0].text).toBe("A script can't run another script.");
+    expect([...blocks.values()].find((x) => x.line === "run b.ckcmd" && x.parent === b.id)!.lines[0].text).toMatch(/^A script can't run another script/);
   });
 
   it("stops the script on cancel", async () => {
@@ -691,6 +704,7 @@ describe("review 2026-10-26 probes", () => {
       fs: {
         readdir: (p) => readdir(p, { withFileTypes: true }),
         stat: (p) => stat(p),
+        readRange,
         readFile: async (p, max) => {
           if ((await stat(p)).size > max) throw new Error(`larger than ${max} bytes`);
           return readFile(p, "utf8");
@@ -757,6 +771,7 @@ describe("review 2026-10-26 probes", () => {
       fs: {
         readdir: (p) => readdir(p, { withFileTypes: true }),
         stat: (p) => stat(p),
+        readRange,
         // a slow disk: the script's file arrives after the render has been typed
         readFile: async (p) => (await slow, readFile(p, "utf8")),
         mkdir: async (p) => void (await mkdir(p, { recursive: true })),
@@ -1019,6 +1034,7 @@ describe("Phase 4: doctor", () => {
   const fs4 = (free: number, writable = true) => ({
     readdir: (p: string) => readdir(p, { withFileTypes: true }),
     stat: (p: string) => stat(p),
+    readRange,
     readFile: (p: string) => readFile(p, "utf8"),
     mkdir: async (p: string) => void (await mkdir(p, { recursive: true })),
     writeFile: (p: string, text: string) => writeFile(p, text),
@@ -1477,5 +1493,149 @@ describe("Phase 4: variables", () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(blocks.get(b.id)!.state).toBe("done");
     expect([...blocks.values()].find((x) => x.parent === b.id && x.line.startsWith("dir"))!.line).toBe('dir "../out/sh010"');
+  });
+});
+
+describe("Phase 4: scripting", () => {
+  const kids = (id: number) => [...blocks.values()].filter((x) => x.parent === id);
+  const settle = () => new Promise((r) => setTimeout(r, 20));
+
+  it("; && || on a typed line: each command its own block, run as the operator says; the line ends as its last", async () => {
+    const { c } = make();
+    const b = await c.run("cd nowhere && pwd || echo fallback; version");
+    await settle();
+    expect(kids(b.id).map((x) => [x.line, x.state])).toEqual([
+      ["cd nowhere", "failed"],
+      ["echo fallback", "done"],
+      ["version", "done"],
+    ]);
+    expect(blocks.get(b.id)!.state).toBe("done");
+    // a typed line goes on after a failure (bash), and ends as its last command did
+    const f = await c.run("pwd; cd nowhere");
+    await settle();
+    expect([kids(f.id).length, blocks.get(f.id)!.state, blocks.get(f.id)!.exitCode]).toEqual([2, "failed", 1]);
+    expect(c.history("")[0].line).toBe("pwd; cd nowhere");
+    // a pipe is refused, nothing runs
+    const p = await c.run("dir | wc");
+    expect([p.state, p.lines.at(-1)!.text]).toEqual(["refused", expect.stringMatching(/^\| \(a pipe\) isn't part of the Console/)]);
+  });
+
+  it("for over words, a frame sequence's frames and a pattern's files (by name); a pattern matching nothing runs nothing", async () => {
+    const { c } = make();
+    const echoes = async (line: string) => {
+      const b = await c.run(line);
+      await settle();
+      return kids(b.id).map((x) => x.lines.at(-1)?.text);
+    };
+    expect(await echoes("for s in sh010 sh020; do echo ${s}; done")).toEqual(["sh010", "sh020"]);
+    expect(await echoes("for f in ../out/sh010/key.####.exr; do echo ${f}; done")).toEqual(["../out/sh010/key.1001.exr", "../out/sh010/key.1002.exr"]);
+    expect(await echoes("for f in *.exr; do echo ${f}; done")).toEqual(["plate 9.exr", "plate 10.exr"]);
+    expect(await echoes("for f in '*.exr'; do echo ${f}; done")).toEqual(["*.exr"]);
+    const none = await c.run("for f in *.nope; do echo ${f}; done");
+    await settle();
+    expect([kids(none.id).length, blocks.get(none.id)!.lines.at(-1)!.text]).toEqual([0, "for f: no file matches *.nope"]);
+    // the loop's variable is gone after it; one set before comes back
+    await c.run("set s=before");
+    await echoes("for s in x; do echo ${s}; done");
+    expect((await c.run("echo ${s}")).lines.at(-1)!.text).toBe("before");
+  });
+
+  it("if on the last exit status; else; nested in for", async () => {
+    const { c } = make();
+    const b = await c.run("if cd nowhere; then echo yes; else echo no; fi");
+    await settle();
+    expect(kids(b.id).map((x) => x.line)).toEqual(["cd nowhere", "echo no"]);
+    expect(blocks.get(b.id)!.state).toBe("done");
+    const n = await c.run("for d in .. nowhere; do if cd ${d}; then pwd; fi; done");
+    await settle();
+    expect(kids(n.id).map((x) => x.line)).toEqual(['cd ".."', "pwd", 'cd "nowhere"']);
+  });
+
+  it("a script stops at a failure at the end of its chain (set -e), not on the left of && or in an if; --keep-going goes on", async () => {
+    const { c } = make();
+    writeFileSync(join(shots, "k.ckcmd"), "cd nowhere && pwd\nif cd nowhere; then pwd; fi\nfor s in a b\ndo\n  echo ${s}\ndone\ncd nowhere\necho never\n");
+    const b = await c.run("run k.ckcmd");
+    await settle();
+    expect(kids(b.id).map((x) => x.line)).toEqual(["cd nowhere", "cd nowhere", 'echo "a"', 'echo "b"', "cd nowhere"]);
+    expect(blocks.get(b.id)!.lines.at(-1)!.text).toBe("stopped at line 7: failed");
+    const k = await c.run("run --keep-going k.ckcmd");
+    await settle();
+    expect(kids(k.id).at(-1)!.line).toBe("echo never");
+    expect([blocks.get(k.id)!.state, blocks.get(k.id)!.lines.at(-1)!.text]).toEqual(["failed", "1 command failed (--keep-going went on)"]);
+    writeFileSync(join(shots, "bad.ckcmd"), "pwd\nfor x in a; do pwd\n");
+    const bad = await c.run("run bad.ckcmd");
+    expect([bad.state, bad.lines.at(-1)!.text]).toEqual(["refused", "bad.ckcmd:2: for x: done is missing (for … ; do … ; done); nothing ran."]);
+  });
+
+  it("elevation as for scripts: a typed line's commands that replace files say sudo, all in one confirmation up front", async () => {
+    const { c } = make();
+    const bare = await c.run("pwd && render shot.mov -o ../out/e/ --overwrite");
+    expect([bare.state, bare.lines[0].text]).toEqual(["refused", "replaces files: a line with ; && || for or if says so with sudo (sudo render shot.mov -o ../out/e/ --overwrite); nothing ran."]);
+    const b = await c.run("for s in e f; do sudo render shot.mov -o ../out/${s}/ --overwrite; done");
+    expect(scriptAsks).toEqual([{ script: "the line typed", lines: ["sudo render shot.mov -o ../out/${s}/ --overwrite"] }]);
+    await settle();
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0].args).toContain(join(out, "e"));
+    await finish(spawned[0].child, [], 0);
+    await settle();
+    expect(spawned).toHaveLength(2);
+    await finish(spawned[1].child, [], 0);
+    await settle();
+    expect(blocks.get(b.id)!.state).toBe("done");
+    // the session was never elevated
+    expect(c.session().elevatedUntil).toBeNull();
+  });
+
+  it("time: how long a command took; a render's frames per second from its own events", async () => {
+    const { c } = make();
+    const b = await c.run("time render shot.mov -o ../out/t");
+    await settle();
+    (spawned[0].child.stdout as PassThrough).write('{"event":"progress","percent":100,"done":50,"total":50}\n');
+    t += 2000;
+    await finish(spawned[0].child, [], 0);
+    await settle();
+    expect(blocks.get(b.id)!.lines.at(-1)!.text).toBe("time: 2.0 s · 50 frames · 25.00 fps (render shot.mov -o ../out/t)");
+    expect((await c.run("sudo time pwd")).lines.at(-1)!.text).toMatch(/time goes first/);
+  });
+
+  it("Tab completes the command the cursor is in, and a for's words as files", async () => {
+    const { c } = make();
+    expect((await c.complete("pwd && ren", 10)).items.map((i) => i.insert)).toEqual(["render"]);
+    const r = await c.complete("for f in sh", 11);
+    expect([r.start, r.items.map((i) => i.insert)]).toEqual([9, ["shot.mov"]]);
+  });
+});
+
+describe("Phase 4: file built-ins (read-only)", () => {
+  const dir = join(root, "texts");
+  mkdirSync(join(dir, "sub", "deep"), { recursive: true });
+  writeFileSync(join(dir, "notes.txt"), "one two\nthree\n\nfour five six\n");
+  writeFileSync(join(dir, "bin.dat"), Buffer.from([1, 0, 2, 3]));
+  writeFileSync(join(dir, "sub", "a.1001.exr"), "1234");
+  writeFileSync(join(dir, "sub", "a.1002.exr"), "1234");
+  writeFileSync(join(dir, "sub", "deep", "x.txt"), "x".repeat(2048));
+  const text = (b: ConsoleBlock) => b.lines.map((l) => l.text);
+
+  it("cat (type) prints a text file, refuses a binary one and a folder; head and tail -n", async () => {
+    const { c } = make({ startDir: dir });
+    expect(text(await c.run("cat notes.txt"))).toEqual(["one two", "three", "", "four five six"]);
+    expect(text(await c.run("type notes.txt"))).toEqual(["one two", "three", "", "four five six"]);
+    expect((await c.run("cat bin.dat")).lines[0].text).toMatch(/^bin.dat isn't text/);
+    expect((await c.run("cat sub")).lines[0].text).toBe("sub isn't a file (it is a folder: dir lists it).");
+    expect(text(await c.run("head -n 2 notes.txt"))).toEqual(["one two", "three"]);
+    expect(text(await c.run("tail -n 2 notes.txt"))).toEqual(["", "four five six"]);
+    expect(text(await c.run("tail notes.txt"))).toHaveLength(4);
+  });
+
+  it("wc counts lines, words and bytes; several files with a total", async () => {
+    const { c } = make({ startDir: dir });
+    expect(text(await c.run("wc notes.txt sub/deep/x.txt"))).toEqual(["lines  words  bytes", "    4      6     29  notes.txt", "    0      1   2048  sub/deep/x.txt", "    4      7   2077  total"]);
+  });
+
+  it("du sizes each folder inside and the total; tree draws folders with sequences as one row, to a depth", async () => {
+    const { c } = make({ startDir: dir });
+    expect(text(await c.run("du"))).toEqual(["     2.0 KiB  sub/", "     2.0 KiB  . (total)"]);
+    expect(text(await c.run("tree"))).toEqual([".", "├── bin.dat", "├── notes.txt", "└── sub/", "    ├── a.####.exr  1001-1002 · 2 frames", "    └── deep/", "2 folders, 3 files or sequences"]);
+    expect(text(await c.run("tree -L 3 sub"))).toEqual(["sub", "├── a.####.exr  1001-1002 · 2 frames", "└── deep/", "    └── x.txt", "1 folder, 2 files or sequences"]);
   });
 });

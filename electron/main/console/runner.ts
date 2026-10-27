@@ -11,6 +11,7 @@ import { createInterface } from "node:readline";
 import { posix, win32 } from "node:path";
 import { naturalCompare } from "../media";
 import { enumValue, parse, quoteArg, type Parsed, type ParseOptions } from "../../../src/shared/console/parse";
+import { isBinary, LINES_MAX, TEXT_MAX, TextCount, textLines, treeLines, WC_MAX, type TreeNode } from "./files";
 import { EXIT_MEANINGS, fullName, type ConsoleArg, type Registry } from "../../../src/shared/console/registry";
 import type { ConsoleBlock, ConsoleEntry, ConsoleHistoryEntry, ConsoleSession, DoctorRow, Job as QueueJob } from "../../../src/shared/types";
 import { farmExport, fileList, type FarmFormat, type FarmJob } from "./farm";
@@ -21,6 +22,8 @@ import type { AuditLog, History } from "./logs";
 import { checkWrite, expandHome, fsErrorText, resolveReal, type PathDeps } from "./paths";
 import { expandHistory, hasExpansion } from "../../../src/shared/console/expand";
 import { frameToken, groupSequences, sequenceOf, type Sequence } from "../../../src/shared/console/sequences";
+import { commands, globRegExp, isCompound, parseProgram, type List } from "../../../src/shared/console/script";
+import { tokenize } from "../../../src/shared/console/parse";
 import { BOOKMARK_NAME, BOOKMARKS_MAX, VARIABLES_MAX, WRITE_FOLDERS_MAX } from "../settings";
 import { expandVars, READ_ONLY, VALUE_MAX, VAR_NAME } from "../../../src/shared/console/vars";
 import { matches, rankFolders } from "../../../src/shared/console/frecency";
@@ -46,6 +49,8 @@ export interface ConsoleFs {
   readdir: (p: string) => Promise<Dirent[]>;
   stat: (p: string) => Promise<Stats>;
   readFile: (p: string, maxBytes: number) => Promise<string>;
+  /** up to `length` bytes of a regular file from `start` (cat, head, tail, wc) */
+  readRange: (p: string, start: number, length: number) => Promise<Buffer>;
   mkdir: (p: string) => Promise<void>;
   writeFile: (p: string, text: string) => Promise<void>;
   /** may this process write in the folder (doctor) */
@@ -193,6 +198,29 @@ export class Console {
     // kept with its folder (a leading space: not kept), and how it ended once it has; with its ${name}s as typed (a
     // later !! fills them in again)
     const n = this.d.history.add(line, this.cwd);
+    const ended = (r: { done: Promise<ConsoleBlock> }) =>
+      // loop: NOT-WORTH — one async history append per line's end [bounded: a local file write]
+      void r.done.then(async (b) => {
+        this.status = statusOf(b);
+        const k = await n;
+        if (k !== null) await this.d.history.ended(k, b.exitCode, b.state);
+      });
+    // ; && || for if time: the line runs as a script (script.ts), each command filled in and checked when it runs
+    const prog = parseProgram(line, this.opts);
+    if ("error" in prog || isCompound(prog.list)) {
+      const b = this.block(line, null);
+      if (typed !== null) this.note(b, "info", `from ${typed}`);
+      const r =
+        "error" in prog
+          ? (() => {
+              b.errors = [prog.error];
+              const x = this.finish(b, "refused", prog.error.message);
+              return { block: x, done: Promise.resolve(x) };
+            })()
+          : await this.program(b, prog.list, null, false);
+      ended(r);
+      return r.block;
+    }
     const v = this.expand(line);
     if ("error" in v) {
       const b = this.finish(this.block(line, null), "refused", v.error);
@@ -205,12 +233,7 @@ export class Console {
     }
     if (v.changed) typed ??= line;
     const r = await this.runLine(v.line, null, typed);
-    // loop: NOT-WORTH — one async history append per line's end [bounded: a local file write]
-    void r.done.then(async (b) => {
-      this.status = statusOf(b);
-      const k = await n;
-      if (k !== null) await this.d.history.ended(k, b.exitCode, b.state);
-    });
+    ended(r);
     // a job's block finishes later (its updates are pushed); a built-in's is finished here
     return r.block;
   }
@@ -294,8 +317,8 @@ export class Console {
   // --- execution ---
 
   /** The line with its `${name}`s filled in (vars.ts): the read-only ones, then the variables set. */
-  private expand(line: string) {
-    return expandVars(line, (name) => this.lookup(name), this.opts);
+  private expand(line: string, scope?: ReadonlyMap<string, string>) {
+    return expandVars(line, (name) => scope?.get(name) ?? this.lookup(name), this.opts);
   }
 
   private lookup(name: string): string | undefined {
@@ -510,7 +533,22 @@ export class Console {
         this.dropElevation("sudo -k");
         return now(this.finish(b, "done", "Not elevated."));
       case "run":
-        return this.script(b, pos("file")[0], parent !== null);
+        return this.script(b, pos("file")[0], parent !== null, has("keep-going"));
+      case "time":
+        return now(this.finish(b, "refused", "time goes first on the line: time sudo render …"));
+      case "cat":
+        return now(await this.cat(b, pos("files")));
+      case "head":
+      case "tail":
+        // loop: NOT-WORTH — the line's few options
+        return now(await this.headTail(b, pos("file")[0], cmd.name === "tail", num(Number(p.options.find((o) => o.arg.id === "lines")?.value ?? 10))));
+      case "wc":
+        return now(await this.wc(b, pos("files")));
+      case "du":
+        return now(await this.du(b, pos("folders")));
+      case "tree":
+        // loop: NOT-WORTH — the line's few options
+        return now(await this.tree(b, pos("folder")[0], num(Number(p.options.find((o) => o.arg.id === "level")?.value ?? 2)), has("all")));
       case "farm":
         return now(await this.farm(b, p, parent !== null));
       case "doctor":
@@ -1021,10 +1059,187 @@ export class Console {
     return this.finish(b, "done", ...(text.length ? text : ["Nothing elevated yet."]));
   }
 
-  /** run <file.ckcmd>: each line through runLine (the same checks), in order, until one fails. */
-  private async script(b: ConsoleBlock, file: string, nested: boolean): Promise<{ block: ConsoleBlock; done: Promise<ConsoleBlock> }> {
+  /** A path a file built-in was given: a bookmark's folder, ~, relative to the Console's folder; null: no such bookmark. */
+  private file(given: string): string | null {
+    const m = this.at(given);
+    return m === null ? null : (this.d.paths.platform === "win32" ? win32 : posix).resolve(this.cwd, expandHome(m, this.d.paths));
+  }
+
+  /** A text file's size, or why it can't be read as one (not there, a folder, binary). */
+  private async textFile(given: string): Promise<{ path: string; size: number } | { error: string }> {
+    const path = this.file(given);
+    if (path === null) return { error: noBookmark(given) };
+    // loop: NOT-WORTH — one async stat per file given
+    const st = await this.d.fs.stat(path).catch((e: unknown) => e as Error);
+    if (st instanceof Error) return { error: `Can't read ${given}: ${fsErrorText(st, path)}. dir lists the files here; Tab completes a name.` };
+    if (!st.isFile()) return { error: `${given} isn't a file${st.isDirectory() ? " (it is a folder: dir lists it)" : ""}.` };
+    return { path, size: st.size };
+  }
+
+  /** cat FILE…: each text file's lines (its first LINES_MAX; a binary file refused); several: each under its name. */
+  private async cat(b: ConsoleBlock, files: string[]): Promise<ConsoleBlock> {
+    // loop: NOT-WORTH — the files named, one bounded read each
+    for (const f of files) {
+      const t = await this.textFile(f);
+      if ("error" in t) return this.finish(b, "failed", t.error);
+      const buf = await this.d.fs.readRange(t.path, 0, Math.min(t.size, TEXT_MAX));
+      if (isBinary(buf)) return this.finish(b, "failed", `${f} isn't text (cat shows text files only; open ${quoteArg(f, this.opts)} shows it in the file manager).`);
+      const lines = textLines(buf, false, t.size > TEXT_MAX);
+      if (files.length > 1) this.note(b, "info", `==> ${f} <==`);
+      // loop: NOT-WORTH — ≤ LINES_MAX lines
+      for (const l of lines.slice(0, LINES_MAX)) this.note(b, "out", l);
+      if (lines.length > LINES_MAX || t.size > TEXT_MAX) this.note(b, "info", `… cat shows a file's first ${LINES_MAX} lines (and 1 MiB): head -n and tail -n show other parts.`);
+    }
+    return this.finish(b, "done");
+  }
+
+  /** head / tail [-n N] FILE: a text file's first or last N lines (read from its start or its end, at most TEXT_MAX). */
+  private async headTail(b: ConsoleBlock, f: string, tail: boolean, n: number): Promise<ConsoleBlock> {
+    n = Math.max(1, Math.min(LINES_MAX, n));
+    const t = await this.textFile(f);
+    if ("error" in t) return this.finish(b, "failed", t.error);
+    const from = tail ? Math.max(0, t.size - TEXT_MAX) : 0;
+    const buf = await this.d.fs.readRange(t.path, from, Math.min(t.size, TEXT_MAX));
+    if (isBinary(tail ? buf.subarray(-8192) : buf)) return this.finish(b, "failed", `${f} isn't text (${tail ? "tail" : "head"} shows text files only).`);
+    const lines = textLines(buf, from > 0, !tail && t.size > TEXT_MAX);
+    return this.finish(b, "done", ...(tail ? lines.slice(-n) : lines.slice(0, n)));
+  }
+
+  /** wc FILE…: lines, words and bytes (each file read in TEXT_MAX chunks, at most WC_MAX); several: a total. */
+  private async wc(b: ConsoleBlock, files: string[]): Promise<ConsoleBlock> {
+    const rows: [number, number, number, string][] = [];
+    // loop: NOT-WORTH — the files named
+    for (const f of files) {
+      const t = await this.textFile(f);
+      if ("error" in t) return this.finish(b, "failed", t.error);
+      if (t.size > WC_MAX) return this.finish(b, "failed", `${f} is larger than ${fileSizeText(WC_MAX)}: wc counts text files up to that.`);
+      const c = new TextCount();
+      // loop: SERIAL-REQUIRED — one file's chunks in order (words span chunks) [bounded: WC_MAX / TEXT_MAX reads]
+      for (let at = 0; at < t.size; at += TEXT_MAX) c.add(await this.d.fs.readRange(t.path, at, Math.min(TEXT_MAX, t.size - at)));
+      rows.push([c.lines, c.words, c.bytes, f]);
+    }
+    // loop: NOT-WORTH — a few rows
+    if (rows.length > 1) rows.push([rows.reduce((s, r) => s + r[0], 0), rows.reduce((s, r) => s + r[1], 0), rows.reduce((s, r) => s + r[2], 0), "total"]);
+    // loop: NOT-WORTH — as above
+    const w = Math.max(5, ...rows.flatMap((r) => [String(r[0]).length, String(r[1]).length, String(r[2]).length]));
+    // loop: NOT-WORTH — as above
+    return this.finish(
+      b,
+      "done",
+      ["lines", "words", "bytes", ""]
+        .map((h, i) => (i < 3 ? h.padStart(w) : h))
+        .join("  ")
+        .trimEnd(),
+      ...rows.map((r) => `${String(r[0]).padStart(w)}  ${String(r[1]).padStart(w)}  ${String(r[2]).padStart(w)}  ${r[3]}`),
+    );
+  }
+
+  /** du [FOLDER…]: each folder inside it with its size, then its total (files counted once; links not followed). */
+  private async du(b: ConsoleBlock, folders: string[]): Promise<ConsoleBlock> {
+    const a = this.d.paths.platform === "win32" ? win32 : posix;
+    const budget = { left: DU_ENTRIES };
+    // loop: NOT-WORTH — the folders named (one by default)
+    for (const f of folders.length ? folders : ["."]) {
+      const dir = this.file(f);
+      if (dir === null) return this.finish(b, "failed", noBookmark(f));
+      let names: Dirent[];
+      try {
+        // loop: NOT-WORTH — one async readdir per folder named
+        names = await this.d.fs.readdir(dir);
+      } catch (e) {
+        // error: SHOWN — the block says why
+        return this.finish(b, "failed", `Can't size ${f}: ${fsErrorText(e, dir)}.`);
+      }
+      let total = 0;
+      const rows: [number, string][] = [];
+      // loop: NOT-WORTH — one folder's entries; each folder walked once [bounded: DU_ENTRIES entries in all]
+      for (const n of names.sort((x, y) => naturalCompare(x.name, y.name))) {
+        if (n.isDirectory()) {
+          const s = await this.walk(a.join(dir, n.name), () => true, true, budget);
+          rows.push([s.bytes, n.name + a.sep]);
+          total += s.bytes;
+        } else if (!n.isSymbolicLink()) total += (await this.d.fs.stat(a.join(dir, n.name)).catch(() => null))?.size ?? 0;
+      }
+      const cut = budget.left <= 0 ? "≥ " : "";
+      // loop: NOT-WORTH — the folder's folders
+      for (const [bytes, name] of rows) this.note(b, "out", `${(cut + fileSizeText(bytes)).padStart(12)}  ${name}`);
+      this.note(b, "out", `${(cut + fileSizeText(total)).padStart(12)}  ${dir === this.cwd ? "." : f} (total)`);
+      if (cut) this.note(b, "info", `… stopped counting after ${DU_ENTRIES.toLocaleString("en-US")} entries: the sizes are at least these.`);
+    }
+    return this.finish(b, "done");
+  }
+
+  /** tree [FOLDER] [-L N] [-a]: folders inside folders to depth N (default 2), sequences as one row, at most TREE_ROWS. */
+  private async tree(b: ConsoleBlock, folder: string | undefined, depth: number, all: boolean): Promise<ConsoleBlock> {
+    const a = this.d.paths.platform === "win32" ? win32 : posix;
+    depth = Math.max(1, Math.min(TREE_DEPTH_MAX, depth));
+    const dir = this.file(folder ?? ".");
+    if (dir === null) return this.finish(b, "failed", noBookmark(folder));
+    let rows = 0;
+    let folders = 0;
+    let files = 0;
+    const read = async (path: string, name: string, level: number): Promise<TreeNode | { error: unknown }> => {
+      let names: Dirent[];
+      try {
+        // loop: NOT-WORTH — one async readdir per folder shown [bounded: TREE_ROWS rows]
+        names = await this.d.fs.readdir(path);
+      } catch (e) {
+        // error: SHOWN — the root's is the block's; a folder inside says so on its row
+        return { error: e };
+      }
+      // loop: NOT-WORTH — one folder's names
+      const shown = names.filter((n) => all || !n.name.startsWith("."));
+      // loop: NOT-WORTH — as above
+      const subs = shown.filter((n) => n.isDirectory()).map((n) => n.name);
+      // loop: NOT-WORTH — as above
+      const grouped = groupSequences(shown.filter((n) => !n.isDirectory()).map((n) => n.name));
+      const kids: TreeNode[] = [
+        // loop: NOT-WORTH — the folder's sequences
+        ...grouped.sequences.map((q) => ({ name: q.pattern, folder: false, note: `${q.range} · ${q.count} frames${q.missing ? ` · missing ${q.missing}` : ""}` })),
+        // loop: NOT-WORTH — its other files
+        ...grouped.singles.map((n) => ({ name: n, folder: false })),
+        // loop: NOT-WORTH — its folders
+        ...subs.map((n) => ({ name: n, folder: true })),
+        // loop: NOT-WORTH — sorts one folder's rows
+      ].sort((x, y) => naturalCompare(x.name, y.name));
+      const node: TreeNode = { name, folder: true, children: [] };
+      // loop: NOT-WORTH — one folder's rows, the folders read in turn [bounded: TREE_ROWS rows in all]
+      for (const [i, k] of kids.entries()) {
+        if (rows >= TREE_ROWS) {
+          node.more = kids.length - i;
+          break;
+        }
+        rows++;
+        if (!k.folder) {
+          files++;
+          node.children!.push(k);
+          continue;
+        }
+        folders++;
+        if (level >= depth) {
+          node.children!.push(k);
+          continue;
+        }
+        const sub = await read(a.join(path, k.name), k.name, level + 1);
+        node.children!.push("error" in sub ? { ...k, note: "(can't be read)" } : sub);
+      }
+      return node;
+    };
+    const root = await read(dir, folder ?? ".", 1);
+    if ("error" in root) return this.finish(b, "failed", `Can't list ${folder ?? "."}: ${fsErrorText(root.error, dir)}.`);
+    // loop: NOT-WORTH — ≤ TREE_ROWS lines
+    for (const l of treeLines(root, a.sep)) this.note(b, "out", l);
+    return this.finish(
+      b,
+      "done",
+      `${folders} folder${folders === 1 ? "" : "s"}, ${files} file${files === 1 ? "" : "s"} or sequences${rows >= TREE_ROWS ? ` (the first ${TREE_ROWS} rows; tree -L 1 or a folder inside shows less)` : ""}`,
+    );
+  }
+
+  /** run <file.ckcmd>: its commands through runLine (the same checks), in order, until one fails (--keep-going: on). */
+  private async script(b: ConsoleBlock, file: string, nested: boolean, keepGoing: boolean): Promise<{ block: ConsoleBlock; done: Promise<ConsoleBlock> }> {
     const now = (x: ConsoleBlock) => ({ block: x, done: Promise.resolve(x) });
-    if (nested) return now(this.finish(b, "refused", "A script can't run another script."));
+    if (nested) return now(this.finish(b, "refused", "A script can't run another script (nor can a line with ; && || for, if or time): run it on its own line."));
     if (this.job) return now(this.finish(b, "refused", `Busy with ${this.job.block.line} (one command at a time; Ctrl+C stops it).`));
     const a = this.d.paths.platform === "win32" ? win32 : posix;
     const path = a.resolve(this.cwd, expandHome(file, this.d.paths));
@@ -1041,7 +1256,7 @@ export class Console {
       // error: SHOWN — the block says why
       return now(this.finish(b, "failed", `Can't read the script: ${fsErrorText(e, path)}. dir lists the files here; Tab completes a name.`));
     }
-    return this.runText(b, job, text, a.basename(path));
+    return this.runText(b, job, text, a.basename(path), keepGoing);
   }
 
   /**
@@ -1054,67 +1269,183 @@ export class Console {
     const job: Job = { block: b, child: null, cancels: 0 };
     this.job = job;
     this.d.sessionChanged();
-    return (await this.runText(b, job, lines.join("\n"), "pasted")).block;
+    return (await this.runText(b, job, lines.join("\n"), "pasted", false)).block;
+  }
+
+  /** A script's text: read as a program (script.ts), then run as one; a mistake in it runs nothing. */
+  private runText(b: ConsoleBlock, job: Job, text: string, name: string, keepGoing: boolean): Promise<{ block: ConsoleBlock; done: Promise<ConsoleBlock> }> {
+    const prog = parseProgram(text, this.opts);
+    if ("error" in prog) {
+      this.job = null;
+      this.d.sessionChanged();
+      // loop: NOT-WORTH — counts new lines before the mistake, once
+      const line = text.slice(0, prog.error.start).split("\n").length;
+      const x = this.finish(b, "refused", `${name}:${line}: ${prog.error.message}; nothing ran.`);
+      return Promise.resolve({ block: x, done: Promise.resolve(x) });
+    }
+    return this.program(b, prog.list, name, keepGoing, job);
   }
 
   /**
-   * A script's text, line by line. Before any line runs: a line that replaces files must say `sudo` (else the script is
-   * refused), and all such lines are listed in ONE confirmation (cancelled: nothing runs). A script never uses or
-   * extends the session's elevation, and its confirmation never elevates the session.
+   * A program (a script, or a typed line with ; && || for if time) as one job: the slot taken for all of it. Before any
+   * command runs: a command that replaces files must say `sudo` (else nothing runs), and all such commands are listed in
+   * ONE confirmation (cancelled: nothing runs). A program never uses or extends the session's elevation, and its
+   * confirmation never elevates the session. A script (`name`) stops at the first command that fails (bash's set -e:
+   * not one on the left of && or ||, nor an if's condition) unless `keepGoing`; a typed line goes on, as bash does.
    */
-  private async runText(b: ConsoleBlock, job: Job, text: string, name: string): Promise<{ block: ConsoleBlock; done: Promise<ConsoleBlock> }> {
+  private async program(b: ConsoleBlock, list: List, name: string | null, keepGoing: boolean, held?: Job): Promise<{ block: ConsoleBlock; done: Promise<ConsoleBlock> }> {
     const now = (x: ConsoleBlock) => ({ block: x, done: Promise.resolve(x) });
+    if (!held && this.job) return now(this.finish(b, "refused", `Busy with ${this.job.block.line} (one command at a time; Ctrl+C stops it).`));
+    const job: Job = held ?? { block: b, child: null, cancels: 0 };
+    this.job = job;
+    this.d.sessionChanged();
     const release = (x: ConsoleBlock) => {
       this.job = null;
       this.d.sessionChanged();
       return now(x);
     };
-    // loop: NOT-WORTH — a script's lines (≤ 1 MiB), parsed once before it runs
-    const lines = text
-      .split(/\r?\n/)
-      .map((raw, i) => ({ n: i + 1, line: raw.trim() }))
-      .filter((x) => x.line && !x.line.startsWith("#"));
-    // loop: NOT-WORTH — as above
-    const destructive = lines.map((x) => ({ ...x, p: parse(x.line, this.d.registry, this.opts) })).filter((x) => !x.p.errors.length && x.p.options.some((o) => o.arg.destructive));
+    const where = (n: number) => (name === null ? "" : `${name}:${n}  `);
+    // loop: NOT-WORTH — a program's commands, parsed once before it runs
+    const destructive = commands(list)
+      .map((c) => ({ ...c, p: parse(c.text, this.d.registry, this.opts) }))
+      // loop: NOT-WORTH — one command's options
+      .filter((x) => x.p.options.some((o) => o.arg.destructive));
     // loop: NOT-WORTH — as above
     const bare = destructive.find((x) => !x.p.sudo);
-    if (bare) return release(this.finish(b, "refused", `${name}:${bare.n} replaces files: a script says so with sudo (sudo ${bare.line}); nothing ran.`));
+    if (bare)
+      return release(
+        this.finish(
+          b,
+          "refused",
+          `${name === null ? "" : `${name}:${bare.line} `}replaces files: ${name === null ? "a line with ; && || for or if" : "a script"} says so with sudo (sudo ${bare.text}); nothing ran.`,
+        ),
+      );
     if (destructive.length) {
       // loop: NOT-WORTH — as above
-      const listed = destructive.map((x) => visible(`${name}:${x.n}  ${x.line}`));
-      const ok = await this.d.confirmScript({ script: visible(name), lines: listed });
-      const logged = await this.d.audit.append({ event: ok ? "granted" : "refused", argv: ["run", name], reason: `the script's ${listed.length} line(s) that replace files: ${listed.join(" | ")}` });
+      const listed = destructive.map((x) => visible(`${where(x.line)}${x.text}`));
+      const label = name ?? "the line typed";
+      const ok = await this.d.confirmScript({ script: visible(label), lines: listed });
+      const logged = await this.d.audit.append({ event: ok ? "granted" : "refused", argv: ["run", label], reason: `the script's ${listed.length} line(s) that replace files: ${listed.join(" | ")}` });
       if (!ok) return release(this.finish(b, "refused", "Not run: the confirmation was cancelled (nothing ran)."));
       if (!logged) return release(this.finish(b, "refused", AUDIT_FAILED));
       job.scriptGrant = true;
       b.elevated = true;
     }
+    const ctx: RunCtx = { b, job, name, keepGoing, failed: null, stopped: false, failures: 0, scope: new Map() };
     const done = (async () => {
-      let failed: ConsoleBlock | null = null;
-      // loop: SERIAL-REQUIRED — a script's lines run one after another, each waiting for the last [bounded: the file's lines]
-      for (const { n, line } of lines) {
-        if (job.cancels > 0 || this.closing) break;
-        this.note(b, "info", `${name}:${n}  ${line}`);
-        const v = this.expand(line);
-        const r = "error" in v ? null : await this.runLine(v.line, b.id, v.changed ? line : null);
-        const end = r ? await r.done : this.finish(this.block(line, b.id), "refused", (v as { error: string }).error);
-        this.status = statusOf(end);
-        if (end.state !== "done") {
-          failed = end;
-          this.note(b, "err", `stopped at line ${n}: ${end.state}${end.exitCode !== null ? ` (exit ${end.exitCode})` : ""}`);
-          break;
-        }
-      }
+      const status = await this.runList(list, ctx);
       this.job = null;
       this.d.sessionChanged();
       if (job.cancels > 0) return this.finish(b, "cancelled");
-      if (failed) {
-        b.exitCode = failed.exitCode;
+      if (ctx.failures) this.note(b, "err", `${ctx.failures} command${ctx.failures === 1 ? "" : "s"} failed (--keep-going went on)`);
+      if (ctx.stopped || ctx.failures || status !== 0) {
+        b.exitCode = ctx.failed !== null && (ctx.stopped || ctx.failures) ? ctx.failed : status;
         return this.finish(b, "failed");
       }
       return this.finish(b, "done");
     })();
     return { block: b, done };
+  }
+
+  /** Runs a list: each command after its operator says so (&&: the last ended 0, ||: it didn't); the last status. */
+  private async runList(list: List, ctx: RunCtx, checked = ctx.name !== null): Promise<number> {
+    let status = this.status;
+    // loop: SERIAL-REQUIRED — a program's commands run one after another, each waiting for the last [bounded: the program's commands, a loop's items]
+    for (const [i, { op, node }] of list.items.entries()) {
+      if (ctx.job.cancels > 0 || this.closing || ctx.stopped) break;
+      if ((op === "&&" && status !== 0) || (op === "||" && status === 0)) continue;
+      // the end of an && / || chain: a failure there stops a script (bash's set -e)
+      const next = list.items[i + 1]?.op;
+      const chainEnd = next !== "&&" && next !== "||";
+      if (node.kind === "if") {
+        // an if's condition never stops a script or counts as a failure: it is a question
+        const c = await this.runList(node.cond, ctx, false);
+        const branch = c === 0 ? node.then : node.else;
+        status = branch && !ctx.stopped && ctx.job.cancels === 0 ? await this.runList(branch, ctx, checked) : 0;
+        continue;
+      }
+      if (node.kind === "for") {
+        const items = await this.forItems(node.items);
+        if ("error" in items) {
+          this.note(ctx.b, "err", `${ctx.name === null ? "" : `${ctx.name}:${node.line}: `}for ${node.name}: ${items.error}`);
+          status = 2;
+          if (checked) this.fail(ctx, node.line, status);
+          continue;
+        }
+        status = 0;
+        const had = ctx.scope.get(node.name);
+        // loop: SERIAL-REQUIRED — each item's body runs after the last [bounded: ITEMS_MAX items]
+        for (const v of items) {
+          if (ctx.job.cancels > 0 || this.closing || ctx.stopped) break;
+          ctx.scope.set(node.name, v);
+          status = await this.runList(node.body, ctx, checked);
+        }
+        if (had === undefined) ctx.scope.delete(node.name);
+        else ctx.scope.set(node.name, had);
+        continue;
+      }
+      if (ctx.name !== null) this.note(ctx.b, "info", `${ctx.name}:${node.line}  ${node.time ? "time " : ""}${node.text}`);
+      const v = this.expand(node.text, ctx.scope);
+      const started = this.now();
+      const r = "error" in v ? null : await this.runLine(v.line, ctx.b.id, v.changed ? node.text : null);
+      const end = r ? await r.done : this.finish(this.block(node.text, ctx.b.id), "refused", (v as { error: string }).error);
+      status = statusOf(end);
+      this.status = status;
+      if (node.time) this.note(ctx.b, "out", timeLine(end, this.now() - started));
+      if (status !== 0 && chainEnd && checked && end.state !== "cancelled") this.fail(ctx, node.line, status, end);
+    }
+    return status;
+  }
+
+  /** A command failed at the end of its chain: a script stops there (set -e), or --keep-going counts it and goes on. */
+  private fail(ctx: RunCtx, line: number, status: number, end?: ConsoleBlock): void {
+    if (ctx.keepGoing) {
+      ctx.failures++;
+      ctx.failed = status;
+      return;
+    }
+    ctx.stopped = true;
+    ctx.failed = status;
+    this.note(ctx.b, "err", `stopped at line ${line}: ${end?.state ?? "failed"}${end?.exitCode !== null && end?.exitCode !== undefined ? ` (exit ${end.exitCode})` : ""}`);
+  }
+
+  /**
+   * A for loop's words, filled in: a word with * ? or [ in its file name (unquoted) is the files it matches there,
+   * by name; a frame pattern (plate.####.exr, unquoted) is its frames' files; anything else itself. A pattern that
+   * matches nothing is an error (zsh's rule: never the pattern itself).
+   */
+  private async forItems(items: string): Promise<string[] | { error: string }> {
+    const v = this.expand(items);
+    if ("error" in v) return v;
+    const a = this.d.paths.platform === "win32" ? win32 : posix;
+    const out: string[] = [];
+    // loop: NOT-WORTH — the loop's words, one async readdir per pattern
+    for (const w of tokenize(v.line, this.opts).words) {
+      const cut = Math.max(w.value.lastIndexOf("/"), this.opts.windows ? w.value.lastIndexOf("\\") : -1);
+      const [dirPart, namePart] = [w.value.slice(0, cut + 1), w.value.slice(cut + 1)];
+      const glob = !w.quoted && /[*?[]/.test(namePart);
+      if (!w.quoted && /[*?[]/.test(dirPart)) return { error: `${w.value}: a pattern goes in the file's name only (plates/*.exr), not in its folders` };
+      const base = this.at(dirPart);
+      if (base === null) return { error: noBookmark(dirPart) };
+      const dir = a.resolve(this.cwd, expandHome(base || ".", this.d.paths));
+      if (glob) {
+        const re = globRegExp(namePart, this.d.paths.platform === "win32" || this.d.paths.platform === "darwin");
+        // loop: NOT-WORTH — one async readdir per pattern
+        const names = await this.d.fs.readdir(dir).catch(() => [] as Dirent[]);
+        // loop: NOT-WORTH — one folder's names
+        const hits = names.filter((n) => re.test(n.name) && (namePart.startsWith(".") || !n.name.startsWith("."))).map((n) => n.name);
+        if (!hits.length) return { error: `no file matches ${w.value}` };
+        // loop: NOT-WORTH — sorts the matches
+        out.push(...hits.sort(naturalCompare).map((n) => dirPart + n));
+      } else if (!w.quoted && frameToken(namePart)) {
+        const pat = await this.patternAt(a.join(dir, namePart));
+        if (pat && !pat.seq) return { error: noFrames(pat, this.opts) };
+        // loop: NOT-WORTH — the sequence's frames
+        out.push(...(pat?.seq ? pat.seq.names.map((n) => dirPart + n) : [w.value]));
+      } else out.push(w.value);
+      if (out.length > ITEMS_MAX) return { error: `more than ${ITEMS_MAX} items: name a smaller set` };
+    }
+    return out;
   }
 
   // --- corridorkey ---
@@ -1439,6 +1770,37 @@ export class Console {
     if (this.expiryTimer) clearTimeout(this.expiryTimer);
     this.expiryTimer = null;
   }
+}
+
+/** A running program's state (program, runList). */
+interface RunCtx {
+  b: ConsoleBlock;
+  job: Job;
+  /** the script's name (its lines are noted as name:N), null for a typed line */
+  name: string | null;
+  keepGoing: boolean;
+  /** the status of the failure that stopped it (or the last one counted) */
+  failed: number | null;
+  stopped: boolean;
+  failures: number;
+  /** the loops' variables, over the session's */
+  scope: Map<string, string>;
+}
+
+/** du's entries counted, at most (then its sizes say ≥). */
+const DU_ENTRIES = 200_000;
+/** tree's rows, at most; its depth, at most. */
+const TREE_ROWS = 1000;
+const TREE_DEPTH_MAX = 6;
+
+/** A for loop's items, at most. */
+const ITEMS_MAX = 10_000;
+
+/** time's line: how long it took; a render's frames and frames per second (from its own JSON events). */
+function timeLine(b: ConsoleBlock, ms: number): string {
+  const s = ms / 1000;
+  const frames = b.progress && b.progress.done > 0 ? ` · ${b.progress.done} frames · ${s > 0 ? (b.progress.done / s).toFixed(2) : "?"} fps` : "";
+  return `time: ${s.toFixed(1)} s${frames} (${b.line})`;
 }
 
 /** Variables set in a session, at most. */
