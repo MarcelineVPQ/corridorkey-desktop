@@ -956,7 +956,7 @@ function registerIpc(): void {
     const job = id ? queue.jobs.find((j) => j.id === id) : undefined;
     if (!job || job.status !== "waiting") return { ok: false, reason: "Only for a clip that hasn't run yet." };
     if (!rustEngine.ok) return { ok: false, reason: "The memory estimate comes from the Rust engine (set it up on the Engine page)." };
-    const r = await estimator.ask(job.clip.path, queue.running, job.options.vramLimitGb, job.options.modelScale);
+    const r = await estimator.ask(job.clip.path, queue.running || consoleGpu, job.options.vramLimitGb, job.options.modelScale);
     // the card's memory as this reading saw it, for App settings' limit menu
     if (r.ok && !r.stale && (r.estimate.totalBytes !== null || r.estimate.freeBytes !== null)) {
       card = { totalBytes: r.estimate.totalBytes, freeBytes: r.estimate.freeBytes, at: r.estimate.at };

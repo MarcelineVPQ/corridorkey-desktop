@@ -110,6 +110,11 @@ describe("memory estimate (backlog row 41)", () => {
     expect(h.engines).toHaveLength(1);
   });
 
+  it("is held off while the Console's corridorkey has the card too (index.ts wiring; review 2026-10-26 S3)", () => {
+    const index = readFileSync(new URL("../../electron/main/index.ts", import.meta.url), "utf8");
+    expect(index).toMatch(/estimator\.ask\(job\.clip\.path, queue\.running \|\| consoleGpu,/);
+  });
+
   it("one engine at a time: two clips asked together run one after the other", async () => {
     const h = harness();
     const [a, b] = await Promise.all([h.est.ask("/a.mov", false), h.est.ask("/b.mov", false)]);

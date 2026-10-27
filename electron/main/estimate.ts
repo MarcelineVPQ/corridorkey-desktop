@@ -92,13 +92,14 @@ export class Estimator {
   }
 
   /**
-   * The estimate for a clip under its graphics memory limit (null = Auto). `engineBusy`: the queue runs, so no
-   * engine is started; the last reading (if any) comes back marked stale.
+   * The estimate for a clip under its graphics memory limit (null = Auto). `engineBusy`: the queue or the Console's
+   * corridorkey has the graphics card, so no engine is started; the last reading (if any) comes back marked stale.
    */
   ask(input: string, engineBusy: boolean, limitGb: number | null = null, modelScale = 1): Promise<MemoryEstimateResult> {
     const key = cacheKey(input, limitGb, modelScale);
     const cached = this.cache.get(key);
-    if (engineBusy) return Promise.resolve(cached ? { ok: true, estimate: cached, stale: true } : { ok: false, reason: "Shown when the queue isn't running (the engine is busy keying)." });
+    if (engineBusy)
+      return Promise.resolve(cached ? { ok: true, estimate: cached, stale: true } : { ok: false, reason: "Shown when nothing is keying on the graphics card (the queue or the Console is)." });
     if (cached && this.now() - cached.at < ESTIMATE_FRESH_MS) return Promise.resolve({ ok: true, estimate: cached, stale: false });
     const next = this.chain.then(() => this.read(input, limitGb, modelScale));
     // error: NOT-WORTH — read() resolves with its failure; the chain only orders the asks
