@@ -16,9 +16,9 @@ export interface RailItem {
 
 export const ITEMS: RailItem[] = [
   { id: "queue", label: "Queue", tip: "Your clips, their settings and results" },
-  { id: "engine", label: "Engine", tip: "The CorridorKey engine, its files and the graphics card" },
+  { id: "engine", label: "Engine", tip: "The engine's runtime and models, TensorRT, ffmpeg, its ONNX Runtime files and the graphics card" },
   { id: "console", label: "Console", tip: "A command line for power users: its own commands, never a system shell" },
-  { id: "settings", label: "App settings", tip: "Appearance and where results go" },
+  { id: "settings", label: "App settings", tip: "Appearance, where results go, the Console's folders, graphics memory, updates and storage" },
   { id: "about", label: "About", tip: "Guide, changes, credits and licence" },
 ];
 
