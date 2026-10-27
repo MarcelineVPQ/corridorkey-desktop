@@ -242,3 +242,18 @@ describe("SME review 2026-10-26: the sudo hint (S11)", () => {
     expect(at("sudo render a.mov -o out/ --overwrite")).not.toMatch(/needs sudo/);
   });
 });
+
+describe("teach by echo: a queue job's line", () => {
+  const echo = block(5, { line: "corridorkey render -i a.mov -o /out/a", exitCode: null, exitMeaning: null, echo: "The queue started a.mov; as a command line:" });
+
+  it("reads as where it came from, with no exit code", () => {
+    expect(blockStatus(echo)).toEqual({ word: "from the queue", tone: "ok", exit: null, meaning: null });
+    expect(announcement([echo])).toBe("corridorkey render -i a.mov -o /out/a: from the queue");
+  });
+
+  it("is shown unless Console settings turn GUI jobs as commands off", () => {
+    const list = mergeBlocks({ blocks: [], clearedTo: 0 }, [block(4), echo]);
+    expect(visibleBlocks(list).map((b) => b.id)).toEqual([4, 5]);
+    expect(visibleBlocks(list, false).map((b) => b.id)).toEqual([4]);
+  });
+});

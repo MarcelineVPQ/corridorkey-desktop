@@ -251,6 +251,8 @@ export interface Job {
   logDropped?: number;
   // the whole log saved next to the results as <clip>_log.txt when the job ended (backlog row 55), or why it couldn't be
   logSaved?: { path: string; error: string | null } | null;
+  // the corridorkey line the queue ran it as (src/shared/console/jobCommand.ts), set when it starts; the Console echoes it
+  command?: string | null;
 }
 
 export interface Pong {
@@ -604,6 +606,8 @@ export interface ConsoleBlock {
   errors: { message: string; start: number; end: number }[];
   // cls / clear: the page clears the screen
   clear: boolean;
+  // a queue job's line, echoed (teach by echo): what started it ("the queue started sh010.mov"); never typed or run here
+  echo?: string | null;
 }
 
 export interface ConsoleCompletionItem {

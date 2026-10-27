@@ -245,6 +245,27 @@ const BUILTINS: ConsoleCommand[] = [
     ["run nightly.ckcmd"],
   ),
   builtin(
+    "farm",
+    "write ready-to-submit render farm jobs for clips in the queue, with their settings: OpenJD, Deadline 10, OpenCue, Flamenco or a shell shot list",
+    [
+      arg({ id: "action", kind: "enum", positional: true, required: true, values: ["export"], valueName: "export", help: "export: write the job files" }),
+      arg({
+        id: "format",
+        kind: "enum",
+        positional: true,
+        required: true,
+        values: ["openjd", "deadline", "opencue", "flamenco", "shell"],
+        valueName: "FORMAT",
+        help: "openjd (a job bundle), deadline (job and plugin info), opencue (a submit script), flamenco (a job), shell (a shot list)",
+      }),
+      arg({ id: "clips", kind: "path", positional: true, multiple: true, valueName: "CLIP", help: "clips in the queue (their path or name)" }),
+      arg({ id: "queue", long: "queue", kind: "switch", help: "every clip in the queue" }),
+      arg({ id: "output", short: "o", long: "output", kind: "path", valueName: "FOLDER", writes: true, help: "the folder the job files go in" }),
+      arg({ id: "overwrite", long: "overwrite", kind: "switch", destructive: true, help: "replace job files already there" }),
+    ],
+    ["farm export openjd --queue -o ~/farm/sq01", "farm export deadline sh010.mov -o ~/farm/sh010", "farm export shell --queue -o ~/farm"],
+  ),
+  builtin(
     "sudo",
     "run a command that replaces or deletes files, after you confirm it (elevated for 5 minutes); sudo -k drops it",
     [arg({ id: "drop", short: "k", kind: "switch", help: "drop the elevation now" })],

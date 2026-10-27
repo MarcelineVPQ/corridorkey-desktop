@@ -73,16 +73,21 @@ export function clearScreen(list: BlockList): BlockList {
   return { ...list, clearedTo: last };
 }
 
-/** The blocks on screen: after the last clear (a running one always), never the `cls` lines themselves. */
-export function visibleBlocks(list: BlockList): ConsoleBlock[] {
+/**
+ * The blocks on screen: after the last clear (a running one always), never the `cls` lines themselves; the queue's
+ * echoed jobs only with `echoes` (Console settings → GUI jobs as commands).
+ */
+export function visibleBlocks(list: BlockList, echoes = true): ConsoleBlock[] {
   // loop: HOT-PATH-OK — ≤ BLOCKS_KEPT blocks, per render
-  return list.blocks.filter((b) => !b.clear && (b.id > list.clearedTo || b.state === "running"));
+  return list.blocks.filter((b) => !b.clear && (echoes || !b.echo) && (b.id > list.clearedTo || b.state === "running"));
 }
 
 export type Tone = "running" | "ok" | "error" | "stopped";
 
 /** The block's status: a word, its tone, the exit code, and what a non-zero code means (docs/CLI.md). */
 export function blockStatus(b: ConsoleBlock): { word: string; tone: Tone; exit: string | null; meaning: string | null } {
+  // a queue job's line (teach by echo): where it came from, never an exit code
+  if (b.echo) return { word: "from the queue", tone: "ok", exit: null, meaning: null };
   const exit = b.exitCode === null || b.state === "running" || b.state === "refused" ? null : `exit ${b.exitCode}`;
   const meaning = exit && b.exitCode !== 0 ? b.exitMeaning : null;
   const word = { running: "running", done: "done", failed: "failed", refused: "refused", cancelled: "stopped" }[b.state];

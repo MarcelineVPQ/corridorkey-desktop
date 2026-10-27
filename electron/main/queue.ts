@@ -8,6 +8,8 @@ import type { EngineReply } from "./engine";
 import { LOG_KEPT, type EngineState, type Job, type JobOptions, type JobTech, type OutputName, type Stage } from "../../src/shared/types";
 import { missingInput } from "../../src/shared/tasks";
 import { discard, finalPath, PARTIAL_DIR as PARTIAL_NAME, prepare, promote } from "./partial";
+import { jobCommand } from "../../src/shared/console/jobCommand";
+import { PLATFORM } from "./platform";
 
 // Frames per second is shown once this many frames and seconds are measured.
 const RATE_MIN_FRAMES = 3;
@@ -34,6 +36,8 @@ export interface QueueDeps {
   tensorrt?: () => boolean;
   // why a job doesn't ask for TensorRT (install.ts tensorrtWhyNot), shown on its page
   tensorrtWhyNot?: () => string | null;
+  // a job was handed to the engine: its corridorkey line is set (the Console echoes it)
+  started?: (job: Job) => void;
   now?: () => number;
 }
 
@@ -359,6 +363,8 @@ export class Queue {
     const trt = this.deps.tensorrt?.() ?? false;
     // what ran it comes from the engine's provider reply; the app's own part is why it didn't ask for TensorRT
     job.tech = { ...NO_TECH, notAsked: trt ? null : (this.deps.tensorrtWhyNot?.() ?? null) };
+    // the same job as a corridorkey line (teach by echo): its settings, and TensorRT as asked here
+    job.command = jobCommand(job, trt, PLATFORM === "win32");
     this.proc!.send({
       cmd: "run",
       id: job.id,
@@ -367,6 +373,7 @@ export class Queue {
       temp_dir: this.deps.tempDirFor(job.id),
       options: engineOptions(job.options, job.clip.kind, trt),
     });
+    this.deps.started?.(job);
   }
 
   private reply(r: EngineReply): void {

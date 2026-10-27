@@ -2,7 +2,7 @@
 // JSON events into blocks, the file scope and the sudo flow end to end. Real files only in a temp folder of its own.
 import { EventEmitter } from "node:events";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
-import { mkdir, readdir, readFile, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -14,7 +14,7 @@ import { AuditLog, History } from "../../electron/main/console/logs";
 import { BlockPusher, PUSH_EVERY_MS } from "../../electron/main/console/push";
 import { consoleLineArg, consoleLinesArg, cursorArg, fromAppPage } from "../../electron/main/validate";
 import { makeRegistry } from "../../src/shared/console/registry";
-import type { ConsoleBlock } from "../../src/shared/types";
+import { DEFAULT_OPTIONS, type ConsoleBlock, type Job } from "../../src/shared/types";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "ck-console-run-")));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -71,6 +71,7 @@ let allowedFolders: string[];
 let allowAsked: string[];
 let allowAnswer: boolean;
 let shown: string[];
+let queued: readonly Job[];
 
 function make(over: Partial<ConsoleDeps> = {}, files = mkdtempSync(join(root, "user-"))) {
   const deps: ConsoleDeps = {
@@ -81,6 +82,7 @@ function make(over: Partial<ConsoleDeps> = {}, files = mkdtempSync(join(root, "u
       stat: (p) => stat(p),
       readFile: (p) => readFile(p, "utf8"),
       mkdir: async (p) => void (await mkdir(p, { recursive: true })),
+      writeFile: (p, text) => writeFile(p, text),
     },
     startDir: shots,
     cli: () => cli,
@@ -112,6 +114,7 @@ function make(over: Partial<ConsoleDeps> = {}, files = mkdtempSync(join(root, "u
     },
     killTree: (pid) => void killed.push(pid),
     now: () => t,
+    jobs: () => queued,
     version: "1.0.0-dev.9",
     ...over,
   };
@@ -127,6 +130,7 @@ beforeEach(() => {
   allowAsked = [];
   allowAnswer = true;
   shown = [];
+  queued = [];
   gpuTaken = 0;
   gpuReleased = 0;
   gpuRefusal = null;
@@ -681,6 +685,7 @@ describe("review 2026-10-26 probes", () => {
           return readFile(p, "utf8");
         },
         mkdir: async (p) => void (await mkdir(p, { recursive: true })),
+        writeFile: (p, text) => writeFile(p, text),
       },
     });
     // loop: NOT-WORTH — three job files
@@ -742,6 +747,7 @@ describe("review 2026-10-26 probes", () => {
         // a slow disk: the script's file arrives after the render has been typed
         readFile: async (p) => (await slow, readFile(p, "utf8")),
         mkdir: async (p) => void (await mkdir(p, { recursive: true })),
+        writeFile: (p, text) => writeFile(p, text),
       },
     });
     const script = c.run("run s.ckcmd");
@@ -972,6 +978,88 @@ describe("SME review 2026-10-26: sequences (M4, S1)", () => {
     const f = await c.run("dir -f");
     expect(f.entries!.filter((e) => e.name.startsWith("sh010_plate.1"))).toHaveLength(11);
     expect((await c.run("ls -1")).lines.map((l) => l.text)).toContain("sh010_plate.####.exr");
+  });
+});
+
+describe("Phase 4: teach by echo", () => {
+  it("a queue job's line is an informational block: done, no exit code, never run, never in the history", async () => {
+    const { c } = make();
+    c.echo("corridorkey render -i a.mov -o /out/a", "The queue started a.mov; as a command line:");
+    const b = [...blocks.values()].at(-1)!;
+    expect(b).toMatchObject({ line: "corridorkey render -i a.mov -o /out/a", state: "done", exitCode: null, echo: "The queue started a.mov; as a command line:", argv: null });
+    expect(spawned).toEqual([]);
+    expect(c.history("")).toEqual([]);
+  });
+});
+
+describe("Phase 4: farm export", () => {
+  const qjob = (name: string, over: Partial<Job> = {}): Job =>
+    ({
+      id: name,
+      clip: {
+        path: join(shots, `${name}.mov`),
+        name: `${name}.mov`,
+        kind: "video",
+        width: 64,
+        height: 64,
+        fps: 24,
+        frames: 24,
+        thumb: null,
+        companionFirstFrame: null,
+        companionHintVideo: null,
+        probeError: null,
+      },
+      options: { ...DEFAULT_OPTIONS, outputs: ["alpha"] },
+      outputDir: join(out, name),
+      status: "waiting",
+      ...over,
+    }) as Job;
+
+  it("writes the queue's clips as farm jobs into a folder it may write to, and lists them", async () => {
+    queued = [qjob("sh010"), qjob("sh020")];
+    const { c } = make();
+    const b = await c.run(`farm export deadline --queue -o ${join(out, "farm1")}`);
+    expect(b.state, b.lines.map((l) => l.text).join("\n")).toBe("done");
+    expect(b.lines[0].text).toBe(`Wrote 7 files in ${join(out, "farm1")}:`);
+    expect(readFileSync(join(out, "farm1", "sh010_job_info.txt"), "utf8")).toContain("Frames=1001-1024");
+    expect(readFileSync(join(out, "farm1", "sh020_plugin_info.txt"), "utf8")).toContain(`OutputPath=${join(out, "sh020")}/sh020.####.exr`);
+    // one clip by name or path
+    const one = await c.run(`farm export flamenco sh020.mov -o ${join(out, "farm2")}`);
+    expect(one.state).toBe("done");
+    expect(await readdir(join(out, "farm2"))).toEqual(["scripts", "sh020.flamenco.json"]);
+  });
+
+  it("refuses: no -o, a clip not in the queue, an empty queue, a folder outside the write scope", async () => {
+    const { c } = make();
+    expect((await c.run(`farm export shell --queue -o ${join(out, "f")}`)).lines[0].text).toMatch(/The queue is empty/);
+    queued = [qjob("sh010")];
+    expect((await c.run("farm export shell --queue")).lines[0].text).toMatch(/needs -o <folder>/);
+    expect((await c.run("farm export shell")).state).toBe("refused");
+    expect((await c.run(`farm export shell sh099.mov -o ${join(out, "f")}`)).lines[0].text).toMatch(/sh099.mov isn't in the queue/);
+    const outside = await c.run(`farm export shell --queue -o ${elsewhere}`);
+    expect([outside.state, outside.lines[0].text]).toEqual(["refused", expect.stringMatching(/outside the folders the Console may write to.*allow/)]);
+    expect((await c.run("farm export maya --queue -o x")).state).toBe("refused");
+  });
+
+  it("never replaces its files without sudo … --overwrite, which asks once and is audited", async () => {
+    queued = [qjob("sh010")];
+    const { c, files } = make();
+    const dir = join(out, "farm3");
+    expect((await c.run(`farm export openjd --queue -o ${dir}`)).state).toBe("done");
+    const again = await c.run(`farm export openjd --queue -o ${dir}`);
+    expect([again.state, again.lines[0].text]).toEqual([
+      "refused",
+      `2 of its files are already there (${join(dir, "sh010", "template.yaml")}, …): sudo farm export openjd --queue -o ${dir} --overwrite replaces them.`,
+    ]);
+    expect((await c.run(`farm export openjd --queue -o ${dir} --overwrite`)).lines[0].text).toMatch(/replaces files that are already there: run it as sudo/);
+    confirmAnswer = false;
+    expect((await c.run(`sudo farm export openjd --queue -o ${dir} --overwrite`)).state).toBe("refused");
+    confirmAnswer = true;
+    const ok = await c.run(`sudo farm export openjd --queue -o ${dir} --overwrite`);
+    expect([ok.state, ok.elevated]).toEqual(["done", true]);
+    expect(confirms.at(-1)!.targets.map((t) => t.files)).toEqual([1, 1]);
+    const audit = readFileSync(join(files, "console-audit.jsonl"), "utf8");
+    expect(audit).toMatch(/"event":"run","argv":\["farm","export","openjd"/);
   });
 });
 

@@ -15,7 +15,9 @@ afterAll(() => rmSync(OUT, { recursive: true, force: true }));
 // a waiting job (fixtures.ts) whose results go into a real folder under OUT
 const job = (id: string, extra: Partial<Job> = {}): Job => fixtureJob(id, { outputDir: join(OUT, `out_${id}`), ...extra });
 
-function harness(opts: { pongProtocol?: number; failStart?: boolean; slowStart?: boolean; tempRoot?: string; tensorrt?: () => boolean; tensorrtWhyNot?: () => string | null } = {}) {
+function harness(
+  opts: { pongProtocol?: number; failStart?: boolean; slowStart?: boolean; tempRoot?: string; tensorrt?: () => boolean; tensorrtWhyNot?: () => string | null; started?: (j: Job) => void } = {},
+) {
   const sent: Record<string, unknown>[] = [];
   let reply: (r: EngineReply) => void = () => {};
   let exit: (c: number | null, s: NodeJS.Signals | null, t: string[]) => void = () => {};
@@ -53,6 +55,7 @@ function harness(opts: { pongProtocol?: number; failStart?: boolean; slowStart?:
     tempDirFor: (id) => join(opts.tempRoot ?? "/nonexistent-ck-test", id),
     tensorrt: opts.tensorrt,
     tensorrtWhyNot: opts.tensorrtWhyNot,
+    started: opts.started,
     changed: () => changes++,
     finished: () => {},
     now: () => clock,
@@ -94,6 +97,17 @@ describe("Queue", () => {
     await h.flush();
     expect(h.quits()).toBe(1);
     expect(h.q.running).toBe(false);
+  });
+
+  it("a started job carries its corridorkey line (TensorRT as asked), and says it started (teach by echo)", async () => {
+    const started: string[] = [];
+    const h = harness({ tensorrt: () => true, started: (j) => started.push(j.command!) });
+    h.q.add(job("a"));
+    await h.q.start();
+    await h.flush();
+    expect(started).toHaveLength(1);
+    expect(started[0]).toMatch(/^corridorkey render -i \S+ -o \S*out_a .*--tensorrt --no-tensorrt-build$/);
+    expect(h.q.jobs[0].command).toBe(started[0]);
   });
 
   it("takes progress only from engine replies and measures the rate", async () => {

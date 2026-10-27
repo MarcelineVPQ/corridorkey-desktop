@@ -58,6 +58,7 @@ export const OutputBlock = memo(function OutputBlock({ b, registry, onReinsert }
           {took && <span className="cb-took">{took}</span>}
         </span>
         {st.meaning && <span className={`cb-why ${st.tone}`}>{st.meaning}</span>}
+        {b.echo && <span className="cb-why ok">{b.echo}</span>}
         <span className="cb-actions">
           <CopyButton label="Copy command" text={b.line} />
           {out && <CopyButton label="Copy output" text={out} />}

@@ -62,6 +62,7 @@ export function ConsolePage(props: {
   const windows = state.system.platform === "win32";
   const [mode, setMode] = usePref<SuggestMode>("ck.console.mode", "inline");
   const [autosuggest, setAutosuggest] = usePref<boolean>("ck.console.autosuggest", true);
+  const [echoes, setEchoes] = usePref<boolean>("ck.console.echo", true);
   const [history, setHistory] = useState<string[]>([]);
   const [now, setNow] = useState(Date.now());
   const editor = useRef<LineEditorHandle>(null);
@@ -87,7 +88,7 @@ export function ConsolePage(props: {
   }, [session.elevatedUntil]);
   const elevated = session.elevatedUntil !== null && elevatedFor > 0;
 
-  const shown = useMemo(() => visibleBlocks(blocks), [blocks]);
+  const shown = useMemo(() => visibleBlocks(blocks, echoes), [blocks, echoes]);
   // the log follows new output while you are at its end; scrolled up, it stays where you are
   useEffect(() => {
     const el = out.current;
@@ -247,7 +248,12 @@ export function ConsolePage(props: {
           </table>
         )}
       </Section>
-      <Section id="settings" icon={SlidersHorizontal} title="Console settings" status={`suggestions ${autosuggest ? "on" : "off"} · ${mode === "inline" ? "inline" : "list"} completions`}>
+      <Section
+        id="settings"
+        icon={SlidersHorizontal}
+        title="Console settings"
+        status={`suggestions ${autosuggest ? "on" : "off"} · ${mode === "inline" ? "inline" : "list"} completions · GUI jobs ${echoes ? "shown" : "hidden"}`}
+      >
         {() => (
           <>
             <Row label="Grey suggestions" hint="From your history, then the commands; → takes one">
@@ -270,6 +276,17 @@ export function ConsolePage(props: {
                   ["list", "List"],
                 ]}
                 onChange={setMode}
+              />
+            </Row>
+            <Row label="Show GUI jobs as commands" hint="Each job the queue starts appears here as its corridorkey render line, to copy or learn from">
+              <Segmented
+                label="Show GUI jobs as commands"
+                value={echoes ? "on" : "off"}
+                options={[
+                  ["on", "On"],
+                  ["off", "Off"],
+                ]}
+                onChange={(v) => setEchoes(v === "on")}
               />
             </Row>
           </>

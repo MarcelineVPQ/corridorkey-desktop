@@ -3,7 +3,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, net, power
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { EngineProcess, rustEngineEnv, type EngineReply } from "./engine";
@@ -237,6 +237,10 @@ const queue = new Queue({
   makeEngine: rustEngineProcess,
   // job temp files stay on the system's local cache folder whatever the chosen location (Marcy 2026-10-26)
   tempDirFor: (id) => jobTempDir(appFolders.cache, id),
+  // teach by echo: the job's corridorkey line in the Console (its page shows it unless Console settings turn it off)
+  started: (job) => {
+    if (job.command) appConsole.echo(job.command, `The queue started ${job.clip.name}; as a command line:`);
+  },
   tensorrt: () => useTensorrt({ platform: PLATFORM, setting: settings.tensorrt, ready: trtReady(enginePaths().ort, enginePaths().models) }),
   tensorrtWhyNot: () => tensorrtWhyNot({ platform: PLATFORM, setting: settings.tensorrt, ready: trtReady(enginePaths().ort, enginePaths().models) }),
   changed: () => {
@@ -373,6 +377,8 @@ const appConsole = new Console({
       // loop: NOT-WORTH — one async mkdir per render
       await mkdir(p, { recursive: true });
     },
+    // loop: NOT-WORTH — one async write per farm export file
+    writeFile: (p, text) => writeFile(p, text, "utf8"),
   },
   startDir: settings.outputRoot ?? homedir(),
   cli: () => findCli(enginePaths().binary, app.isPackaged ? null : resolve(app.getAppPath(), "engine-rs", "target", "dist")),
@@ -420,6 +426,7 @@ const appConsole = new Console({
   history: new History(join(userData, "console-history.jsonl")),
   changed: (b) => consolePush.mark(b),
   sessionChanged: () => scheduleSend(),
+  jobs: () => queue.jobs,
   version: app.getVersion(),
 });
 

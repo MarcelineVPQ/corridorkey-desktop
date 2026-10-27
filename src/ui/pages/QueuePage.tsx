@@ -2,7 +2,8 @@
 // settings in the panel. Start/Stop and Add clips sit in the page's own bar.
 import { memo, useEffect, useState } from "react";
 import { ProgressBar } from "../ProgressBar";
-import { Check, ClipboardCopy, FolderPlus, Play, Plus, Square, Trash2 } from "lucide-react";
+import { Check, ClipboardCopy, FolderPlus, Play, Plus, Square, SquareTerminal, Trash2 } from "lucide-react";
+import { jobCommand } from "../../shared/console/jobCommand";
 import { OTHER_GPU_USER_MB, type AppState, type Job, type TrtPrebuild } from "../../shared/types";
 import { missingInput, startBlocked } from "../../shared/tasks";
 import { AS_USED, CANT_READ_CLIP } from "../../shared/texts";
@@ -69,7 +70,9 @@ export function QueuePage(props: {
             state.jobs.map((j) => <JobRow key={j.id} job={j} selected={j.id === selected} onSelect={() => onSelect(j.id)} />)
           )}
         </nav>
-        <section className="detail">{job ? <Detail job={job} prebuild={state.tensorrt.prebuild} /> : <div className="detail-empty">Add a clip to start.</div>}</section>
+        <section className="detail">
+          {job ? <Detail job={job} prebuild={state.tensorrt.prebuild} windows={state.system.platform === "win32"} /> : <div className="detail-empty">Add a clip to start.</div>}
+        </section>
       </div>
     </div>
   );
@@ -153,7 +156,7 @@ function JobRowView({ job, selected, onSelect }: { job: Job; selected: boolean; 
   );
 }
 
-function Detail({ job, prebuild }: { job: Job; prebuild: TrtPrebuild }) {
+function Detail({ job, prebuild, windows }: { job: Job; prebuild: TrtPrebuild; windows: boolean }) {
   return (
     <>
       <div className="detail-head">
@@ -168,6 +171,7 @@ function Detail({ job, prebuild }: { job: Job; prebuild: TrtPrebuild }) {
             Results: <PathText path={job.outputDir} />
           </div>
           {job.status !== "waiting" && <LogLine job={job} />}
+          <CopyCommand job={job} windows={windows} />
           {(job.clip.companionFirstFrame || job.clip.companionHintVideo) && job.status === "waiting" && <div className="hint-text">Found a hint next to the clip and selected it.</div>}
         </div>
       </div>
@@ -222,6 +226,30 @@ function LogLine({ job }: { job: Job }) {
         </button>
       </div>
     </>
+  );
+}
+
+/**
+ * Copy as command (teach by echo): the job as its corridorkey render line, for the Console or a farm. Once it has
+ * started, the line it ran as (TensorRT as the queue asked); before, its settings (TensorRT is chosen when it starts).
+ */
+function CopyCommand({ job, windows }: { job: Job; windows: boolean }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    // lifetime: OK — one timer per copy, cleared on unmount or the next copy
+    // loop: NOT-WORTH — one 1.5 s timer per Copy press
+    const t = setTimeout(() => setCopied(false), COPIED_MS);
+    return () => clearTimeout(t);
+  }, [copied]);
+  const line = job.command ?? jobCommand(job, false, windows);
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button type="button" className="btn small" title={line} onClick={() => void window.ck.copyText(line).then(setCopied)}>
+        {copied ? <Check size={14} aria-hidden /> : <SquareTerminal size={14} aria-hidden />}
+        <span aria-live="polite">{copied ? "Copied" : "Copy as command"}</span>
+      </button>
+    </div>
   );
 }
 

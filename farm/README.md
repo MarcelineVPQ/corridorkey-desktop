@@ -9,6 +9,9 @@ chunking is opt-in and its warm-up defaults to 0.
 Every submitter needs, on each worker: the `corridorkey` command, the model set's folder (`--models`), ONNX
 Runtime's library (`--ort`), ffmpeg for movie inputs, and an NVIDIA card. `corridorkey prepare` checks a worker.
 
+The app's Console writes these for the clips in its queue, with their settings: `farm export <openjd|deadline|opencue|flamenco|shell>
+--queue -o <folder>` (docs/CONSOLE.md "Farm export").
+
 ## OpenJD
 
 AWS Deadline Cloud, or any Open Job Description runtime. Two job bundles, `jobtemplate-2023-09`:

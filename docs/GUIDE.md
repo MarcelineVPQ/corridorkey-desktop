@@ -73,6 +73,14 @@ and gaps (`dir -f` lists the frames). A frame pattern is one item everywhere: `d
 `%04d`, `$F4`, `@@@@`) lists that sequence, `open` shows its first frame, `cd` goes to its folder, and `verify` ends
 with the missing frames as ranges you can paste into `-F` (`missing frames: 1012-1015, 1040`).
 
+**From the queue to the command line.** Every job the queue starts appears in the Console as its exact
+`corridorkey render …` line, marked "from the queue" (turn it off in **Console settings → Show GUI jobs as
+commands**); **Copy as command** on a clip in the Queue copies it. `farm export` writes the queue's clips as farm
+jobs, with their settings: `farm export openjd --queue -o ~/farm/sq01` (an OpenJD job bundle per clip), `deadline` (job
+and plugin info, with the plugin), `opencue` (a submit script), `flamenco` (a job and the job type) or `shell` (shot
+lists and the line that runs them); name clips instead of `--queue` for some of them. It never replaces its files
+unless you say `sudo … --overwrite`.
+
 **Safety.** It is not a system shell: only its own commands, each one parsed and checked (no variables, pipes, globs
 or other programs). It **reads anywhere** you can, and **writes only into the folders you chose**: the results folder
 (App settings), the cache folder, the queued clips' results folders, and the folders you **allow**; anything else is
@@ -145,4 +153,5 @@ render -i plates/sh010.####.exr -o ~/renders/sh010/sh010_key.####.exr -F 1001-11
 sudo render sh010.mov -o ~/renders/sh010/ --overwrite
 verify -i plates/sh010.####.exr -o ~/renders/sh010/sh010_key.####.exr -F 1001-1100
 run nightly.ckcmd
+farm export openjd --queue -o ~/farm/sq01
 ```

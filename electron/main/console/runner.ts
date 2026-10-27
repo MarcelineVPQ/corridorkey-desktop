@@ -12,7 +12,8 @@ import { posix, win32 } from "node:path";
 import { naturalCompare } from "../media";
 import { enumValue, parse, quoteArg, type Parsed, type ParseOptions } from "../../../src/shared/console/parse";
 import { EXIT_MEANINGS, fullName, type ConsoleArg, type Registry } from "../../../src/shared/console/registry";
-import type { ConsoleBlock, ConsoleEntry, ConsoleHistoryEntry, ConsoleSession } from "../../../src/shared/types";
+import type { ConsoleBlock, ConsoleEntry, ConsoleHistoryEntry, ConsoleSession, Job as QueueJob } from "../../../src/shared/types";
+import { farmExport, fileList, type FarmFormat, type FarmJob } from "./farm";
 import { complete } from "./complete";
 import type { Elevation } from "./elevation";
 import { commandHelp, findLines, overview } from "./help";
@@ -43,6 +44,7 @@ export interface ConsoleFs {
   stat: (p: string) => Promise<Stats>;
   readFile: (p: string, maxBytes: number) => Promise<string>;
   mkdir: (p: string) => Promise<void>;
+  writeFile: (p: string, text: string) => Promise<void>;
 }
 
 /**
@@ -98,6 +100,8 @@ export interface ConsoleDeps {
   /** the second Ctrl+C / the quit: the child's whole process group (tree on Windows) */
   killTree?: (pid: number) => void;
   now?: () => number;
+  /** the queue's jobs (farm export writes them with their settings) */
+  jobs: () => readonly QueueJob[];
   /** the app's version: its corridorkey's too (built together, one number: ck-cli lib.rs VERSION) */
   version: string;
 }
@@ -157,6 +161,18 @@ export class Console {
     });
     // a job's block finishes later (its updates are pushed); a built-in's is finished here
     return r.block;
+  }
+
+  /**
+   * A queue job started (teach by echo): its corridorkey line as an informational block, saying where it came from.
+   * Nothing runs, and it isn't kept in the history (it wasn't typed).
+   */
+  echo(line: string, what: string): void {
+    const b = this.block(line, null);
+    b.echo = what;
+    b.state = "done";
+    b.finishedAt = b.startedAt;
+    this.d.changed(b);
   }
 
   /** Ctrl+C: SIGTERM (the CLI stops after the frame it is on, cleanly, 143); again: the whole group at once. */
@@ -334,6 +350,8 @@ export class Console {
         return now(this.finish(b, "done", "Not elevated."));
       case "run":
         return this.script(b, pos("file")[0], parent !== null);
+      case "farm":
+        return now(await this.farm(b, p, parent !== null));
     }
     return now(this.finish(b, "refused", `${cmd.name} isn't a command this Console runs.`));
   }
@@ -501,6 +519,94 @@ export class Console {
       return this.finish(b, "done", ...entries.map((e) => e.name + (e.folder ? a.sep : "")));
     }
     return this.finish(b, "done", summary);
+  }
+
+  /**
+   * farm export <format> [clips…|--queue] -o <folder>: the queued clips as farm jobs (farm.ts), written into a folder the
+   * Console may write to; files already there only with sudo … --overwrite (the same elevation as render's).
+   */
+  private async farm(b: ConsoleBlock, p: Parsed, inScript: boolean): Promise<ConsoleBlock> {
+    const a = this.d.paths.platform === "win32" ? win32 : posix;
+    // loop: NOT-WORTH — the line's few arguments
+    const pos = (id: string) => p.positionals.filter((x) => x.arg.id === id).map((x) => x.value);
+    // loop: NOT-WORTH — as above
+    const out = p.options.find((o) => o.arg.id === "output")?.value;
+    // loop: NOT-WORTH — as above
+    const all = p.options.some((o) => o.arg.id === "queue");
+    const format = pos("format")[0] as FarmFormat;
+    const clips = pos("clips");
+    if (!out) return this.finish(b, "refused", `farm export needs -o <folder>: where the job files go (farm export ${format} --queue -o ~/farm).`);
+    if (all && clips.length) return this.finish(b, "refused", "Name clips or give --queue, not both.");
+    if (!all && !clips.length) return this.finish(b, "refused", `Which clips? Name clips in the queue, or --queue for all of them (farm export ${format} --queue -o ${quoteArg(out, this.opts)}).`);
+    const queued = this.d.jobs();
+    if (!queued.length) return this.finish(b, "refused", "The queue is empty: farm export writes the queue's clips with their settings (add clips on the Queue page).");
+    let jobs: QueueJob[] = [...queued];
+    if (!all) {
+      jobs = [];
+      // loop: NOT-WORTH — the clips named, each looked up in the queue
+      for (const c of clips) {
+        const abs = a.resolve(this.cwd, expandHome(c, this.d.paths));
+        // loop: NOT-WORTH — the queue's jobs
+        const j = queued.find((q) => q.clip.path === abs || q.clip.name === c);
+        if (!j) return this.finish(b, "refused", `${c} isn't in the queue: add it on the Queue page first (its settings come from there), or farm export ${format} --queue.`);
+        if (!jobs.includes(j)) jobs.push(j);
+      }
+    }
+    const w = await checkWrite(out, this.cwd, this.d.writeRoots(), this.d.paths);
+    if (!w.ok) return this.finish(b, "refused", `-o: ${w.reason}`);
+    const farmJobs: FarmJob[] = [];
+    // loop: NOT-WORTH — the exported jobs, one async range read each
+    for (const j of jobs) farmJobs.push({ ...j, name: clipName(j.clip.path, this.d.paths.platform), range: await this.shotRange(j) });
+    const env = this.d.cliEnv();
+    const exp = farmExport(format, farmJobs, { models: env.CK_ENGINE_MODELS ?? null, ort: env.CK_ENGINE_ORT ?? null });
+    // loop: NOT-WORTH — the files to write
+    const paths = exp.files.map((f) => a.join(w.path, ...f.path.split("/")));
+    const there: string[] = [];
+    // loop: NOT-WORTH — one async stat per file to write
+    for (const f of paths) if (await this.d.fs.stat(f).catch(() => null)) there.push(f);
+    // loop: NOT-WORTH — the line's options
+    const overwrite = p.options.some((o) => o.arg.destructive);
+    if (there.length && !overwrite)
+      return this.finish(
+        b,
+        "refused",
+        `${there.length} of its files are already there (${there[0]}${there.length > 1 ? ", …" : ""}): sudo ${b.line.trim().replace(/^sudo\s+/, "")} --overwrite replaces them.`,
+      );
+    // loop: NOT-WORTH — the line's few words
+    const argv = ["farm", ...p.words.slice(p.sudo ? 2 : 1).map((x) => x.value)];
+    const refusal = await this.elevate(b, p, argv.slice(1), argv, there, inScript, null);
+    if (refusal) return refusal;
+    if (b.elevated && !(await this.d.audit.append({ event: "run", argv, targets: there }))) {
+      b.elevated = false;
+      return this.finish(b, "refused", AUDIT_FAILED);
+    }
+    let failed: string | null = null;
+    try {
+      // loop: NOT-WORTH — the export's few files, one async write each
+      for (const [i, f] of exp.files.entries()) {
+        await this.d.fs.mkdir(a.dirname(paths[i]));
+        await this.d.fs.writeFile(paths[i], f.text);
+      }
+    } catch (e) {
+      // error: SHOWN — the block says which file and why
+      failed = `Can't write the job files: ${fsErrorText(e, w.path)}.`;
+    }
+    // loop: NOT-WORTH — one async append per elevated export [bounded: a local file write]
+    if (b.elevated) await this.d.audit.append({ event: "exit", argv, exit: failed ? 1 : 0 });
+    if (failed) return this.finish(b, "failed", failed);
+    if (!exp.files.length) return this.finish(b, "failed", ...exp.notes);
+    return this.finish(b, "done", `Wrote ${exp.files.length} files in ${w.path}:`, ...fileList(exp.files, this.opts.windows), ...exp.notes);
+  }
+
+  /** A queued clip's frame numbers as corridorkey numbers them (ck-core clip.rs FrameNumbers): a video from 1001, a frame folder by its files. */
+  private async shotRange(j: QueueJob): Promise<[number, number] | null> {
+    if (j.clip.kind === "video") return j.clip.frames ? [1001, 1000 + j.clip.frames] : null;
+    // loop: NOT-WORTH — one async readdir per frame folder exported
+    const names = await this.d.fs.readdir(j.clip.path).catch(() => [] as Dirent[]);
+    // loop: NOT-WORTH — the folder's names
+    const seq = groupSequences(names.filter((n) => !n.isDirectory() && /\.(exr|png|jpe?g)$/i.test(n.name)).map((n) => n.name)).sequences[0];
+    // loop: NOT-WORTH — two numbers
+    return seq ? (seq.range.split("-").map(Number) as [number, number]) : null;
   }
 
   /** A path whose file name is a frame pattern (####, %04d, $F4, @@@@) and that isn't a file or folder itself: its folder. */
@@ -708,38 +814,11 @@ export class Console {
     if (refusals.length) return now(this.finish(b, "refused", ...refusals));
 
     // destructive: only as sudo, and confirmed (or already elevated)
-    // loop: NOT-WORTH — the line's options
-    const destructive = p.options.filter((o) => o.arg.destructive);
-    // loop: NOT-WORTH — one or two flags
-    if (destructive.length && !p.sudo) return now(this.finish(b, "refused", `${destructive.map((o) => o.name).join(", ")} replaces files that are already there: run it as sudo ${b.line.trim()}`));
-    if (p.sudo && destructive.length && inScript) {
-      // a script's line: covered only by its own confirmation up front, never by (or extending) the session's elevation
-      if (!this.job?.scriptGrant) return now(this.finish(b, "refused", "Not run: a script's line that replaces files runs only after the script's own confirmation."));
-      b.elevated = true;
-    } else if (p.sudo && destructive.length) {
-      if (!this.d.elevation.active) {
-        // the clip's name (render's own naming: docs/CLI.md "Outputs"): the files the run writes start with it
-        // loop: NOT-WORTH — the line's few arguments
-        const input = p.positionals.find((x) => x.arg.id === "clip")?.value ?? p.options.find((o) => o.arg.id === "input")?.value ?? job.input;
-        const req: ElevationRequest = {
-          line: visible(b.line.trim()),
-          // loop: NOT-WORTH — the command's few words
-          command: visible(`sudo ${fullName(this.d.registry, cmd)} ${asked.map((w) => (w === "--" ? w : quoteArg(w, this.opts))).join(" ")}`),
-          targets: await this.measureTargets(targets, input ? clipName(input, this.d.paths.platform) : null),
-        };
-        const ok = await this.d.confirm(req);
-        const logged = await this.d.audit.append({ event: ok ? "granted" : "refused", argv, targets });
-        if (!ok) return now(this.finish(b, "refused", "Not run: the confirmation was cancelled."));
-        if (!logged) return now(this.finish(b, "refused", AUDIT_FAILED));
-        this.d.elevation.grant();
-        this.armExpiry();
-      } else {
-        this.d.elevation.extend();
-        this.armExpiry();
-      }
-      b.elevated = true;
-      this.d.sessionChanged();
-    }
+    // the clip's name (render's own naming: docs/CLI.md "Outputs"): the files the run writes start with it
+    // loop: NOT-WORTH — the line's few arguments
+    const input = p.positionals.find((x) => x.arg.id === "clip")?.value ?? p.options.find((o) => o.arg.id === "input")?.value ?? job.input;
+    const refusal = await this.elevate(b, p, asked, argv, targets, inScript, input ? clipName(input, this.d.paths.platform) : null);
+    if (refusal) return now(refusal);
     if (temp) {
       try {
         // loop: NOT-WORTH — one async mkdir per render
@@ -762,6 +841,44 @@ export class Console {
     const gpuRefusal = cmd.gpu ? this.d.takeGpu() : null;
     if (gpuRefusal) return now(this.finish(b, "refused", gpuRefusal));
     return this.spawnCli(b, bin, argv, cmd.gpu, inScript, targets);
+  }
+
+  /**
+   * A line with a flag that replaces files: refused unless it says sudo; a script's line only under the script's own
+   * confirmation; else the session's elevation, asked for with a native dialog naming the line, the command (`asked`:
+   * its words as the user gave them) and what it replaces (`targets`; `clip`: the run's own names in a folder), audited.
+   * Null: it may run (b.elevated says whether it is elevated); else the refused block.
+   */
+  private async elevate(b: ConsoleBlock, p: Parsed, asked: string[], argv: string[], targets: string[], inScript: boolean, clip: string | null): Promise<ConsoleBlock | null> {
+    const cmd = p.command!;
+    // loop: NOT-WORTH — the line's options
+    const destructive = p.options.filter((o) => o.arg.destructive);
+    if (!destructive.length) return null;
+    // loop: NOT-WORTH — one or two flags
+    if (!p.sudo) return this.finish(b, "refused", `${destructive.map((o) => o.name).join(", ")} replaces files that are already there: run it as sudo ${b.line.trim()}`);
+    if (inScript) {
+      // a script's line: covered only by its own confirmation up front, never by (or extending) the session's elevation
+      if (!this.job?.scriptGrant) return this.finish(b, "refused", "Not run: a script's line that replaces files runs only after the script's own confirmation.");
+      b.elevated = true;
+      return null;
+    }
+    if (!this.d.elevation.active) {
+      const req: ElevationRequest = {
+        line: visible(b.line.trim()),
+        // loop: NOT-WORTH — the command's few words
+        command: visible(`sudo ${fullName(this.d.registry, cmd)} ${asked.map((w) => (w === "--" ? w : quoteArg(w, this.opts))).join(" ")}`),
+        targets: await this.measureTargets(targets, clip),
+      };
+      const ok = await this.d.confirm(req);
+      const logged = await this.d.audit.append({ event: ok ? "granted" : "refused", argv, targets });
+      if (!ok) return this.finish(b, "refused", "Not run: the confirmation was cancelled.");
+      if (!logged) return this.finish(b, "refused", AUDIT_FAILED);
+      this.d.elevation.grant();
+    } else this.d.elevation.extend();
+    this.armExpiry();
+    b.elevated = true;
+    this.d.sessionChanged();
+    return null;
   }
 
   /**

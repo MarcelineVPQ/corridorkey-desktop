@@ -40,7 +40,7 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   each line through the same checks; stops at the first that fails; no script inside a script; its elevation: Security
   rules below). Several lines pasted at once are never joined: the page offers them as a script (Enter runs them in
   order through `consoleRunLines`, the same path as `run`; Esc keeps the first line; Ctrl+C drops them), `sudo <command>`,
-  `sudo -k`, and `corridorkey render | verify | prepare | info` (also bare `render` …). Other command lines' names get
+  `sudo -k`, `farm export` (below), and `corridorkey render | verify | prepare | info` (also bare `render` …). Other command lines' names get
   an answer instead of "unknown command" (`ANSWERS` in registry.ts): `exit` / `quit` (the Console stays open), `rm` /
   `del` / `rmdir` (the Console never deletes files), `cp` / `mv`, `cat` / `type` / `echo` (a later version, Phase 4),
   `which`. Built-ins say a file system error in words with what to type (`fsErrorText` in paths.ts), never Node's
@@ -59,6 +59,31 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   while the queue runs; while they run the queue doesn't start, the memory estimate stops and the background TensorRT
   build waits. The app's quit stops a running corridorkey (SIGTERM, killed after 7 s): the CLI doesn't end with its
   parent on its own. Once the quit has begun nothing starts: a command still in its checks is refused.
+- **Teach by echo.** Every job the queue starts carries its exact `corridorkey render …` line (`Job.command`, built by
+  `src/shared/console/jobCommand.ts` from the job's settings with the mapping queue.ts sends the engine, and
+  `--tensorrt --no-tensorrt-build` when the queue asked for TensorRT; a flag only where the job differs from the CLI's
+  default). The queue's `started` hook hands it to `Console.echo`: an informational block (`echo`: where it came from;
+  state done, no exit code, never run, not in the history), shown unless **Console settings → Show GUI jobs as
+  commands** is off (a page setting, default on; the page filters, `visibleBlocks`). The Queue page's **Copy as
+  command** copies the same line (before the job starts: its settings, TensorRT being chosen when it starts).
+  `tests/unit/jobCommand.test.ts` parses the line with the Console's parser, maps it with ck-cli's own `RUN_OPTIONS`
+  (read from args.rs) and checks the engine gets exactly the options the queue sends.
+- **Farm export.** `farm export <openjd|deadline|opencue|flamenco|shell> [clips…|--queue] -o <folder>` writes the
+  queued clips (named by path or file name; a clip not in the queue is refused: its settings come from the queue) as
+  ready-to-submit jobs from the farm/ templates (bundled at build time, `electron/main/console/farm.ts`): an OpenJD job
+  bundle per clip (`<clip>/template.yaml` with the clip's other flags in its Key step, `parameter_values.yaml`), Deadline
+  10's job and plugin info (and the `CorridorKey/` plugin), an OpenCue `<clip>_opencue.sh` calling
+  `corridorkey_submit.py` (beside it) with the shot's range and the booking from the job's `--max-vram`, a Flamenco job
+  (`<clip>.flamenco.json` for `POST /api/v3/jobs`, and `scripts/corridorkey.js`), or shot lists for the shell farm (one
+  per set of flags) with `run-shots.sh`. One task per shot (the app's matte); the farm writes EXR frames
+  (`<results folder>/<clip>.####.exr`; a clip set to video says so); the models and ONNX Runtime are this computer's
+  (the block says to change them for the workers); Deadline and OpenCue need the shot's frame range (a video from
+  1001, a frame folder by its files): a clip without one is left out, and said. The folder goes through the write scope
+  (`-o` is a written path); files already there are refused unless `sudo farm export … --overwrite` (the same
+  elevation, dialog and audit as render's). Tests: `tests/unit/farmExport.test.ts` (each format parsed as its farm
+  reads it: YAML, key=value, JSON, shell words), the runner's scope and sudo. `openjd check` and `openjd summary`
+  passed on a generated bundle (openjd-cli in a scratch venv, 2026-10-27; it isn't installed for the tests, which
+  check the bundle structurally).
 - **Output** goes to the page as blocks (`ConsoleBlock` in `src/shared/types.ts`): the line, its state and exit code,
   progress, the last 2000 lines, `dir`'s rows. The page keeps them quiet: a block's actions show on hover and on
   keyboard focus (`:focus-within`; opacity only, so Tab always reaches them; always shown without hover), a built-in's
