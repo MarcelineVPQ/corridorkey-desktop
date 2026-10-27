@@ -494,10 +494,20 @@ describe("built-ins", () => {
   });
 
   it("cls clears; history lists what was typed; history --audit the elevated log", async () => {
-    const { c } = make();
+    // pwd's end (its ✓) is kept after its line's append: awaited, never a guessed sleep (it flaked under load)
+    const files = mkdtempSync(join(root, "user-"));
+    const history = new History(join(files, "console-history.jsonl"));
+    const ended = history.ended.bind(history);
+    let pwdEnded!: () => void;
+    const pwdKept = new Promise<void>((r) => (pwdEnded = r));
+    history.ended = async (n, exit, state) => {
+      await ended(n, exit, state);
+      if (n === 2) pwdEnded();
+    };
+    const { c } = make({ history }, files);
     expect((await c.run("cls")).clear).toBe(true);
     await c.run("pwd");
-    await new Promise((r) => setTimeout(r, 5));
+    await pwdKept;
     expect((await c.run("history")).lines.map((l) => l.text)).toEqual([
       expect.stringMatching(new RegExp(`^   1  \\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d  ✓    cls   \\[${shots}\\]$`)),
       expect.stringMatching(/^   2  .*  ✓    pwd   \[/),
