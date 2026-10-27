@@ -41,8 +41,8 @@ pub trait Sink {
         self.send(json!({"type": "log", "text": text}));
     }
     /// Whether the job should stop now (`corridorkey render` on SIGTERM / SIGINT; the app kills the engine instead).
-    /// Asked before each RVM step, foundation chunk, stage-1 window and stage-2 frame: the job then ends `cancelled`,
-    /// its temporary files removed, the frames already written left whole.
+    /// Asked before each TensorRT network build, RVM step, foundation chunk, stage-1 window and stage-2 frame: the job
+    /// then ends `cancelled`, its temporary files removed, the frames already written left whole.
     fn stop_requested(&mut self) -> bool {
         false
     }
@@ -1177,6 +1177,8 @@ impl Pipeline<OrtLoader> {
         }
         // loop: NOT-WORTH — five networks
         for (i, piece) in crate::runtime::PIECES.iter().copied().enumerate() {
+            // a stop asked during a build (minutes each) ends it here, before the next network (farm review S4)
+            keying::stop_point(sink)?;
             let pdir = dir.join(piece);
             let (Some(onnx), Some(stub)) = (self.models.trt_file(piece, key.precision), self.models.trt_stub(piece, key.precision)) else {
                 self.trt_fallbacks.insert(piece, format!("no TensorRT-ready export of {piece} in the models folder"));

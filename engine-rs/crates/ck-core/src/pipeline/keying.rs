@@ -713,7 +713,7 @@ impl<L: Loader> Pipeline<L> {
 }
 
 /// A job's stop point (`Sink::stop_requested`): `cancelled` when the sink asks the job to stop.
-fn stop_point(sink: &mut dyn Sink) -> Result<(), Error> {
+pub(super) fn stop_point(sink: &mut dyn Sink) -> Result<(), Error> {
     if sink.stop_requested() {
         return Err(Error::new(crate::ErrorCode::Cancelled, "stopped on request".into()));
     }

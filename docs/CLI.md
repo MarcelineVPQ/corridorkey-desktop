@@ -187,7 +187,9 @@ specific, never 33 or 137 (OpenCue's retry codes).
 | 143 | stopped by SIGTERM (the farm's cancel), cleanly | |
 
 **Signals.** SIGTERM and SIGINT stop the run after the frame (or window) it is on: no frame goes to a final name, the
-run's folders are removed, then exit 143 / 130. A second signal ends it at once. On Windows Ctrl+C is SIGINT and
+run's folders are removed, then exit 143 / 130. A TensorRT build (`prepare --tensorrt-size`, or a job's own) stops
+before the next network's build (one takes minutes; the engines already built are kept), and `prepare` then exits
+143 / 130 without printing `ready`. A second signal ends it at once. On Windows Ctrl+C is SIGINT and
 Ctrl+Break, closing the console, log-off and shut-down are SIGTERM. Farms send SIGKILL after their grace time: the
 output stays safe (above), only the hidden folders are left.
 

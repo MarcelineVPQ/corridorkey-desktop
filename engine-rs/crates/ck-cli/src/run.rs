@@ -450,6 +450,17 @@ fn render(m: &ArgMatches, verify: bool, sink: &mut CliSink, report: &mut Report)
     Ok(())
 }
 
+/// Err (exit 143 / 130) when signal `sig` asked the command to stop: for a step without stop points of its own.
+fn stopped(sig: Option<i32>) -> Result<(), Fail> {
+    match sig {
+        Some(sig) => Err(fail(
+            exit::for_error(ck_core::ErrorCode::Cancelled, Some(sig)),
+            format!("stopped by {}; not ready", if sig == 2 { "SIGINT" } else { "SIGTERM" }),
+        )),
+        None => Ok(()),
+    }
+}
+
 /// `prepare`: what a farm task needs, checked before tasks start (and TensorRT built for a size).
 fn prepare(m: &ArgMatches, sink: &mut CliSink) -> Result<(), Fail> {
     let cfg = engine_config(m)?;
@@ -498,6 +509,8 @@ fn prepare(m: &ArgMatches, sink: &mut CliSink) -> Result<(), Fail> {
         crate::signals::install();
         let mut pipeline = ck_core::pipeline::Pipeline::new(rt, set);
         let built = pipeline.trt_build(w, h, 1000, cap, sink)?;
+        // a stop during the last network's build: the engines built are kept, but nothing claims ready
+        stopped(crate::signals::stopped_by())?;
         println!("tensorrt: {built}");
     }
     println!("ready");
@@ -535,4 +548,19 @@ fn info(m: &ArgMatches) -> Result<(), Fail> {
         println!("{k}: {}", if let Value::String(s) = val { s.clone() } else { val.to_string() });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stop_during_the_tensorrt_build_ends_prepare_with_its_signal() {
+        // farm review 2026-10-26 S4: prepare --tensorrt-size caught SIGTERM, built on and printed "ready" (exit 0)
+        assert!(stopped(None).is_ok());
+        let f = stopped(Some(15)).unwrap_err();
+        assert_eq!(f.exit, 143);
+        assert!(f.message.contains("SIGTERM") && f.message.contains("not ready"), "{}", f.message);
+        assert_eq!(stopped(Some(2)).unwrap_err().exit, 130);
+    }
 }
