@@ -262,7 +262,7 @@ export const LineEditor = forwardRef<LineEditorHandle, Props>(function LineEdito
             role="combobox"
             aria-autocomplete="both"
             aria-expanded={Boolean(shown)}
-            aria-controls={listId}
+            aria-controls={shown ? listId : undefined}
             aria-activedescendant={shown && shown.index >= 0 ? `${listId}-${shown.index}` : undefined}
             aria-describedby={`${hintId} ${sugId}`}
             value={s.line}

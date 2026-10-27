@@ -35,6 +35,7 @@ import type { Registry } from "../../src/shared/console/registry";
 const { OutputBlock } = (await import("../../src/ui/console/OutputBlock" as string)) as {
   OutputBlock: ComponentType<{ b: ConsoleBlock; registry: Registry; onReinsert: (line: string) => void }>;
 };
+const { LineEditor } = (await import("../../src/ui/console/LineEditor" as string)) as { LineEditor: ComponentType<Record<string, unknown>> };
 import { fileSizeText as sizeText } from "../../src/shared/units";
 
 const reg = makeRegistry();
@@ -191,6 +192,31 @@ describe("screen readers (review 2026-10-26 S8)", () => {
       "render a.mov --overwrite: refused: --overwrite replaces files",
     );
     expect(announcement([block(4, { line: "ls", entries: [{ name: "a", folder: false, bytes: 1, modified: 1, sequence: null }] })])).toBe("ls: done, exit 0");
+  });
+
+  it("the input names the completion list only while it is shown (review 2026-10-26 N7, BACKLOG row 112)", () => {
+    const noop = () => {};
+    const html = renderToStaticMarkup(
+      createElement(LineEditor, {
+        registry: reg,
+        windows: false,
+        history: [],
+        past: [],
+        running: false,
+        elevated: false,
+        folder: "m",
+        mode: "list",
+        autosuggest: false,
+        onMode: noop,
+        onRun: noop,
+        onRunLines: noop,
+        onCancel: noop,
+        onClear: noop,
+      }),
+    );
+    expect(html).toMatch(/role="combobox"/);
+    expect(html).not.toMatch(/aria-controls=/);
+    expect(html).not.toMatch(/role="listbox"/);
   });
 
   it("the output isn't a live region; one polite status region carries the announcements", () => {
