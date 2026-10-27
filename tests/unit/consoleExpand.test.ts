@@ -22,6 +22,12 @@ describe("history expansion", () => {
     expect(x("!ren")).toEqual({ line: past[3].line, changed: true });
   });
 
+  it("!prefix ends at a script separator: ;, & and | aren't part of it (P4 senior review N2, BACKLOG row 132)", () => {
+    expect(x("!dir;pwd")).toEqual({ line: `${past[2].line};pwd`, changed: true });
+    expect(x("!dir&&pwd")).toEqual({ line: `${past[2].line}&&pwd`, changed: true });
+    expect(x("!dir||pwd")).toEqual({ line: `${past[2].line}||pwd`, changed: true });
+  });
+
   it("!$ is the last word of the line before, as typed (its quotes kept)", () => {
     expect(x("dir !$")).toEqual({ line: "dir --overwrite", changed: true });
     expect(expandHistory("cd !$", [{ n: 1, line: `dir "my out/"` }], { windows: false })).toEqual({ line: `cd "my out/"`, changed: true });

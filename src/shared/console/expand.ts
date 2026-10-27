@@ -32,7 +32,8 @@ function designators(line: string, opts: ParseOptions): { start: number; end: nu
     else if (c === "\\" && !opts.windows) i++;
     else if (c === "!" && (i === 0 || SPACE.test(line[i - 1]))) {
       const rest = line.slice(i + 1);
-      const m = /^(!|\d+|-\d+|\$(?!F)|[A-Za-z][^\s'"]*)/.exec(rest);
+      // a prefix ends at a script separator (;, &, |: P4 senior review N2)
+      const m = /^(!|\d+|-\d+|\$(?!F)|[A-Za-z][^\s'";&|]*)/.exec(rest);
       if (m) {
         out.push({ start: i, end: i + 1 + m[0].length, spec: "!" + m[0] });
         i += m[0].length;

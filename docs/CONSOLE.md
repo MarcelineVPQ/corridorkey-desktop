@@ -240,7 +240,8 @@ inner loop's words);
   what the block shows (its first line `from <what was typed>`) and what the history keeps, as in bash. Frame tokens
   and file names stay literal (SME review): a `!` expands only at a word's start, outside quotes, not escaped (`\!`),
   and only before `!`, a digit, `-` and a digit, `$` (not `$F`) or a letter; so `sh010!.mov`, `'take!!'`, `!####`,
-  `!%04d`, `!@@@@`, `!$F4` and `!=` are as typed, and `^` counts only at the line's start. The page previews it from
+  `!%04d`, `!@@@@`, `!$F4` and `!=` are as typed, and `^` counts only at the line's start. A `!prefix` ends at a
+  script separator (`!ren;pwd` is the newest line starting `ren`, then `pwd`). The page previews it from
   its history (the hint says "Enter runs: …", the line reads plain). Alt+. inserts the line before's last word.
 - **History** (`userData/console-history.jsonl`): the lines typed, across restarts, the newest 5000, consecutive
   duplicates once, a line typed with a leading space not at all (bash's ignorespace). Each line has a stable number
