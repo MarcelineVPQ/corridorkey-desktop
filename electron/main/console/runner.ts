@@ -137,6 +137,8 @@ interface Job {
   cancels: number;
   /** a script whose lines that replace files were confirmed up front (its own, never the session's elevation) */
   scriptGrant?: boolean;
+  /** a long built-in (du, tree, wc, j): Ctrl+C stops it at its next entry, chunk or folder */
+  builtin?: boolean;
 }
 
 /** A script's lines that replace files, as its one confirmation lists them (control and bidi characters shown). */
@@ -260,7 +262,7 @@ export class Console {
     job.cancels++;
     const pid = job.child?.pid;
     if (job.cancels === 1) {
-      this.note(job.block, "info", job.child ? "Stopping after the current frame (Ctrl+C again stops it at once)…" : "Stopping the script after this command…");
+      this.note(job.block, "info", job.child ? "Stopping after the current frame (Ctrl+C again stops it at once)…" : job.builtin ? "Stopping…" : "Stopping the script after this command…");
       // Windows has no SIGTERM for a console program: the tree is ended (the output stays safe: docs/CLI.md)
       if (pid && this.d.paths.platform === "win32") this.killTree(pid);
       else job.child?.kill("SIGTERM");
@@ -503,7 +505,7 @@ export class Console {
       case "bookmarks":
         return now(this.bookmark(b, undefined, undefined, false) as ConsoleBlock);
       case "j":
-        return now(await this.jump(b, pos("parts")));
+        return now(await this.slotted(b, parent !== null, (stop) => this.jump(b, pos("parts"), stop)));
       case "pushd":
         return now(await this.pushd(b, pos("folder")[0]));
       case "popd": {
@@ -562,18 +564,40 @@ export class Console {
         // loop: NOT-WORTH — the line's few options
         return now(await this.headTail(b, pos("file")[0], cmd.name === "tail", num(Number(p.options.find((o) => o.arg.id === "lines")?.value ?? 10))));
       case "wc":
-        return now(await this.wc(b, pos("files")));
+        return now(await this.slotted(b, parent !== null, (stop) => this.wc(b, pos("files"), stop)));
       case "du":
-        return now(await this.du(b, pos("folders")));
+        return now(await this.slotted(b, parent !== null, (stop) => this.du(b, pos("folders"), stop)));
       case "tree":
         // loop: NOT-WORTH — the line's few options
-        return now(await this.tree(b, pos("folder")[0], num(Number(p.options.find((o) => o.arg.id === "level")?.value ?? 2)), has("all")));
+        return now(await this.slotted(b, parent !== null, (stop) => this.tree(b, pos("folder")[0], num(Number(p.options.find((o) => o.arg.id === "level")?.value ?? 2)), has("all"), stop)));
       case "farm":
         return now(await this.farm(b, p, parent !== null));
       case "doctor":
         return now(await this.doctor(b, has("json")));
     }
     return now(this.finish(b, "refused", `${cmd.name} isn't a command this Console runs.`));
+  }
+
+  /**
+   * A long built-in (du, tree, wc, j) as a job (senior review 2026-10-27 S6): the one slot (in a program: the program's),
+   * so nothing else starts while it reads, and `stop` says Ctrl+C was pressed (it checks at each entry, chunk or folder).
+   */
+  private async slotted(b: ConsoleBlock, inScript: boolean, run: (stop: () => boolean) => Promise<ConsoleBlock>): Promise<ConsoleBlock> {
+    const held = this.job;
+    if (held && !(inScript && held.block.id === b.parent)) return this.finish(b, "refused", `Busy with ${held.block.line} (one command at a time; Ctrl+C stops it).`);
+    const job: Job = held ?? { block: b, child: null, cancels: 0, builtin: true };
+    if (!held) {
+      this.job = job;
+      this.d.sessionChanged();
+    }
+    try {
+      return await run(() => job.cancels > 0);
+    } finally {
+      if (!held) {
+        this.job = null;
+        this.d.sessionChanged();
+      }
+    }
   }
 
   private async cd(b: ConsoleBlock, to: string | undefined, back = false): Promise<ConsoleBlock> {
@@ -710,7 +734,7 @@ export class Console {
   }
 
   /** j <part…>: the best-ranked folder of the history's that matches and is still a folder; alone: the ranking. */
-  private async jump(b: ConsoleBlock, parts: string[]): Promise<ConsoleBlock> {
+  private async jump(b: ConsoleBlock, parts: string[], stop: () => boolean): Promise<ConsoleBlock> {
     await this.d.history.loaded;
     // loop: NOT-WORTH — the history's lines (≤ its cap), once per j
     const ranked = rankFolders(this.d.history.entries("", Number.MAX_SAFE_INTEGER), this.now());
@@ -725,7 +749,9 @@ export class Console {
     // loop: NOT-WORTH — the history's folders, best first; one async stat per match until one is a folder
     for (const r of ranked) {
       if (r.folder === this.cwd || !matches(r.folder, parts)) continue;
-      if (!(await this.d.fs.stat(r.folder).catch(() => null))?.isDirectory()) continue;
+      const st = await this.d.fs.stat(r.folder).catch(() => null);
+      if (stop()) return this.finish(b, "cancelled");
+      if (!st?.isDirectory()) continue;
       const to = await this.go(r.folder);
       if (typeof to === "string") b.paths = [to];
       return typeof to === "string" ? this.finish(b, "done", to) : this.finish(b, "failed", to.error);
@@ -1148,7 +1174,7 @@ export class Console {
   }
 
   /** wc FILE…: lines, words and bytes (each file read in TEXT_MAX chunks, at most WC_MAX); several: a total. */
-  private async wc(b: ConsoleBlock, files: string[]): Promise<ConsoleBlock> {
+  private async wc(b: ConsoleBlock, files: string[], stop: () => boolean): Promise<ConsoleBlock> {
     const rows: [number, number, number, string][] = [];
     // loop: NOT-WORTH — the files named
     for (const f of files) {
@@ -1156,8 +1182,11 @@ export class Console {
       if ("error" in t) return this.finish(b, "failed", t.error);
       if (t.size > WC_MAX) return this.finish(b, "failed", `${f} is larger than ${fileSizeText(WC_MAX)}: wc counts text files up to that.`);
       const c = new TextCount();
-      // loop: SERIAL-REQUIRED — one file's chunks in order (words span chunks) [bounded: WC_MAX / TEXT_MAX reads]
-      for (let at = 0; at < t.size; at += TEXT_MAX) c.add(await this.d.fs.readRange(t.path, at, Math.min(TEXT_MAX, t.size - at)));
+      // loop: SERIAL-REQUIRED — one file's chunks in order (words span chunks) [bounded: WC_MAX / TEXT_MAX reads; Ctrl+C between them]
+      for (let at = 0; at < t.size; at += TEXT_MAX) {
+        c.add(await this.d.fs.readRange(t.path, at, Math.min(TEXT_MAX, t.size - at)));
+        if (stop()) return this.finish(b, "cancelled");
+      }
       rows.push([c.lines, c.words, c.bytes, f]);
     }
     // loop: NOT-WORTH — a few rows
@@ -1177,9 +1206,9 @@ export class Console {
   }
 
   /** du [FOLDER…]: each folder inside it with its size, then its total (files counted once; links not followed). */
-  private async du(b: ConsoleBlock, folders: string[]): Promise<ConsoleBlock> {
+  private async du(b: ConsoleBlock, folders: string[], stop: () => boolean): Promise<ConsoleBlock> {
     const a = this.d.paths.platform === "win32" ? win32 : posix;
-    const budget = { left: DU_ENTRIES };
+    const budget = { left: DU_ENTRIES, stop };
     // loop: NOT-WORTH — the folders named (one by default)
     for (const f of folders.length ? folders : ["."]) {
       const dir = this.file(f);
@@ -1192,16 +1221,19 @@ export class Console {
         // error: SHOWN — the block says why
         return this.finish(b, "failed", `Can't size ${f}: ${fsErrorText(e, dir)}.`);
       }
+      if (stop()) return this.finish(b, "cancelled");
       let total = 0;
       const rows: [number, string][] = [];
-      // loop: NOT-WORTH — one folder's entries; each folder walked once [bounded: DU_ENTRIES entries in all]
+      // loop: NOT-WORTH — one folder's entries; each folder walked once [bounded: DU_ENTRIES entries in all; Ctrl+C at each]
       for (const n of names.sort((x, y) => naturalCompare(x.name, y.name))) {
+        if (stop()) return this.finish(b, "cancelled");
         if (n.isDirectory()) {
           const s = await this.walk(a.join(dir, n.name), () => true, true, budget);
           rows.push([s.bytes, n.name + a.sep]);
           total += s.bytes;
         } else if (!n.isSymbolicLink()) total += (await this.d.fs.stat(a.join(dir, n.name)).catch(() => null))?.size ?? 0;
       }
+      if (stop()) return this.finish(b, "cancelled");
       const cut = budget.left <= 0 ? "≥ " : "";
       // loop: NOT-WORTH — the folder's folders
       for (const [bytes, name] of rows) this.note(b, "out", `${(cut + fileSizeText(bytes)).padStart(12)}  ${name}`);
@@ -1212,7 +1244,7 @@ export class Console {
   }
 
   /** tree [FOLDER] [-L N] [-a]: folders inside folders to depth N (default 2), sequences as one row, at most TREE_ROWS. */
-  private async tree(b: ConsoleBlock, folder: string | undefined, depth: number, all: boolean): Promise<ConsoleBlock> {
+  private async tree(b: ConsoleBlock, folder: string | undefined, depth: number, all: boolean, stop: () => boolean): Promise<ConsoleBlock> {
     const a = this.d.paths.platform === "win32" ? win32 : posix;
     depth = Math.max(1, Math.min(TREE_DEPTH_MAX, depth));
     const dir = this.file(folder ?? ".");
@@ -1247,6 +1279,7 @@ export class Console {
       const node: TreeNode = { name, folder: true, children: [] };
       // loop: NOT-WORTH — one folder's rows, the folders read in turn [bounded: TREE_ROWS rows in all]
       for (const [i, k] of kids.entries()) {
+        if (stop()) break;
         if (rows >= TREE_ROWS) {
           node.more = kids.length - i;
           break;
@@ -1268,6 +1301,7 @@ export class Console {
       return node;
     };
     const root = await read(dir, folder ?? ".", 1);
+    if (stop()) return this.finish(b, "cancelled");
     if ("error" in root) return this.finish(b, "failed", `Can't list ${folder ?? "."}: ${fsErrorText(root.error, dir)}.`);
     b.nowrap = true;
     // loop: NOT-WORTH — ≤ TREE_ROWS lines
@@ -1719,7 +1753,13 @@ export class Console {
     return out;
   }
 
-  private async walk(dir: string, keep: (name: string) => boolean, deep = true, budget = { left: 200_000 }, enter: (name: string) => boolean = () => true): Promise<{ files: number; bytes: number }> {
+  private async walk(
+    dir: string,
+    keep: (name: string) => boolean,
+    deep = true,
+    budget: { left: number; stop?: () => boolean } = { left: 200_000 },
+    enter: (name: string) => boolean = () => true,
+  ): Promise<{ files: number; bytes: number }> {
     const a = this.d.paths.platform === "win32" ? win32 : posix;
     let files = 0;
     let bytes = 0;
@@ -1733,7 +1773,7 @@ export class Console {
     }
     // loop: NOT-WORTH — one async stat per entry, once per sudo confirmation [bounded: 200 000 entries]
     for (const n of names) {
-      if (budget.left-- <= 0) break;
+      if (budget.left-- <= 0 || budget.stop?.()) break;
       if (n.isDirectory()) {
         if (!deep || !enter(n.name)) continue;
         const sub = await this.walk(a.join(dir, n.name), keep, deep, budget, enter);

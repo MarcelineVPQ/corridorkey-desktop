@@ -113,7 +113,8 @@ in.
 
 **Files.** `cat notes.txt` (or `type`) prints a text file, `head -n 20` and `tail -n 50 render.log` its start or end,
 `wc` counts lines, words and bytes, `du` shows how much each folder takes, and `tree` (`-L 3` for deeper) draws the
-folders with each frame sequence as one row. They only read; a binary file isn't printed.
+folders with each frame sequence as one row. They only read; a binary file isn't printed. On a big share `du`, `tree`,
+`wc` and `j` can take a while: Ctrl+C stops them.
 
 **doctor** checks this computer in one go: the corridorkey command line, the graphics card and its driver, ONNX
 Runtime, the models, TensorRT, ffmpeg, and each folder the Console writes to (there, writable, free space), one row

@@ -1800,3 +1800,43 @@ describe("review 2026-10-27 M4: a program's throws, budget and Ctrl+C", () => {
     expect(kids(b.id).length).toBeLessThan(10_000);
   }, 60_000);
 });
+
+// senior review 2026-10-27 S6: du (200 000 stats), tree, wc (256 MiB) and j (a stat per remembered folder) held no slot
+// and Ctrl+C couldn't stop them
+describe("review 2026-10-27 S6: the long built-ins take the slot and stop on Ctrl+C", () => {
+  it("du, tree, wc and j: another command is busy while they run; Ctrl+C ends them cancelled", async () => {
+    const d = mkdtempSync(join(root, "s6-"));
+    mkdirSync(join(d, "a"));
+    writeFileSync(join(d, "a", "x"), "x");
+    writeFileSync(join(d, "big.txt"), "x ".repeat(1536 * 1024));
+    let open!: () => void;
+    let gate = Promise.resolve();
+    const base = make().deps.fs;
+    /** a slow disk under d: each read waits for the gate */
+    const slow = async <T>(p: string, f: () => Promise<T>) => {
+      if (p.startsWith(d)) await gate;
+      return f();
+    };
+    const { c } = make({
+      startDir: d,
+      fs: { ...base, readdir: (p) => slow(p, () => base.readdir(p)), stat: (p) => slow(p, () => base.stat(p)), readRange: (p, s, l) => slow(p, () => base.readRange(p, s, l)) },
+    });
+    // j needs d in the history, typed from elsewhere
+    await c.run("pwd");
+    await c.run(`cd ${root}`);
+    // loop: NOT-WORTH — four commands
+    for (const line of [`du ${d}`, `tree ${d}`, `wc ${join(d, "big.txt")}`, "j s6"]) {
+      gate = new Promise<void>((r) => (open = r));
+      const running = c.run(line);
+      await new Promise((r) => setTimeout(r, 10));
+      const other = await c.run("pwd; pwd");
+      expect([line, other.state, other.lines.at(-1)!.text]).toEqual([line, "refused", expect.stringMatching(new RegExp(`^Busy with ${line.split(" ")[0]}`))]);
+      c.cancel();
+      open();
+      const b = await running;
+      expect([line, b.state]).toEqual([line, "cancelled"]);
+      // the slot is free again
+      expect((await c.run("version")).state).toBe("done");
+    }
+  });
+});
