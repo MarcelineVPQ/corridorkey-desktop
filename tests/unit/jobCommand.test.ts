@@ -2,60 +2,12 @@
 // mapped by the CLI's own table (ck-cli args.rs RUN_OPTIONS, read from the source), gives the engine exactly the options
 // the queue sends it (queue.ts engineOptions).
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { engineOptions } from "../../electron/main/queue";
 import { CLI_DEFAULTS, jobCommand, type JobLike } from "../../src/shared/console/jobCommand";
-import { parse } from "../../src/shared/console/parse";
-import { makeRegistry } from "../../src/shared/console/registry";
 import cliSpec from "../../src/shared/console/cliSpec.json";
 import { DEFAULT_OPTIONS, type JobOptions } from "../../src/shared/types";
-
-const reg = makeRegistry();
-const args = readFileSync(new URL("../../engine-rs/crates/ck-cli/src/args.rs", import.meta.url), "utf8");
-/** flag → [run option, kind], as the CLI maps them */
-// loop: NOT-WORTH — the CLI's ~30 run options, once
-const RUN = new Map([...args.matchAll(/\("([a-z-]+)", "([a-z_]+)", Kind::(\w+),/g)].map((m) => [m[1], [m[2], m[3]] as const]));
-
-/**
- * What the CLI hands the engine for a parsed line (run.rs render: RUN_OPTIONS, --outputs, --window, exr by default; a
- * frame folder whose first frame is EXR read scene-linear unless --no-linear).
- */
-function cliOptions(line: string, exrFrames = false): { input: string; output: string; options: Record<string, unknown> } {
-  const p = parse(line, reg, { windows: false });
-  expect(p.errors, line).toEqual([]);
-  const o: Record<string, unknown> = {};
-  let input = "";
-  let output = "";
-  // loop: NOT-WORTH — a line's few options
-  for (const { arg, value } of p.options) {
-    if (arg.id === "input") input = value!;
-    else if (arg.id === "output") output = value!;
-    else if (arg.id === "outputs") o.outputs = value!.split(",");
-    else if (arg.id === "window") [o.hann_chunk, o.hann_stride] = value!.split("/").map(Number);
-    else {
-      const [key, kind] = RUN.get(arg.id)!;
-      o[key] = kind === "On" ? true : kind === "Off" ? false : kind === "Number" ? Number(value) : value;
-    }
-  }
-  o.output_format ??= "exr";
-  if (exrFrames) o.frame_dir_linear ??= true;
-  return { input, output, options: o };
-}
-
-/** The engine's own defaults for what a line leaves out (a switch not given, a flag at the CLI's default). */
-const ENGINE_DEFAULTS: Record<string, unknown> = {
-  outputs: ["alpha", "fg"],
-  exr_dtype: "half",
-  despill_strength: 0.5,
-  hint_quality: 0.95,
-  carry_hint: true,
-  cutout_linear: false,
-  frame_dir_fps: 24,
-  frame_dir_linear: false,
-  low_vram: false,
-  video_codec: "h264-crf12",
-};
+import { cliOptions, REPRESENTATIVE, sameOptions } from "./cliOptions";
 
 /** the line (a test fails on a job that has none) */
 function lineOf(job: JobLike, trt: boolean, windows = false): string {
@@ -68,9 +20,7 @@ function same(job: JobLike, trt: boolean) {
   const line = lineOf(job, trt);
   const got = cliOptions(line, job.clip.kind === "frames" && job.clip.exrFrames);
   expect([got.input, got.output]).toEqual([job.clip.path, job.outputDir]);
-  const want = engineOptions(job.options, job.clip.kind, trt);
-  // loop: NOT-WORTH — the options of one job
-  for (const k of new Set([...Object.keys(want), ...Object.keys(got.options)])) expect(got.options[k] ?? ENGINE_DEFAULTS[k], `${k} in ${line}`).toEqual(want[k] ?? ENGINE_DEFAULTS[k]);
+  sameOptions(got.options, engineOptions(job.options, job.clip.kind, trt), line);
   return line;
 }
 
@@ -125,6 +75,20 @@ describe("a queue job as its corridorkey line (teach by echo)", () => {
     expect(same(job({ frameDirLinear: true }, "frames", "/shots/sh010/pngs"), false)).toContain(" --linear");
     // a video clip has no frame folder setting
     expect(same(job({ frameDirLinear: true }), false)).not.toMatch(/linear/);
+  });
+
+  // the CLI gate's behaviour half (tools/check_cli_parity.mjs checks the tables; this checks what they do)
+  it("the CLI reproduces the app's job exactly: representative jobs, with and without TensorRT", () => {
+    // loop: NOT-WORTH — six jobs, two ways
+    for (const r of REPRESENTATIVE) for (const trt of [false, true]) same(job(r.options, r.kind, r.kind === "video" ? `/shots/${r.name}.mov` : `/shots/${r.name}/plates`, r.exrFrames), trt);
+  });
+
+  it("the representative jobs set every job setting off its default (a new setting joins one)", () => {
+    // loop: NOT-WORTH — ~20 settings over six jobs
+    const unset = Object.keys(DEFAULT_OPTIONS).filter(
+      (k) => !REPRESENTATIVE.some((r) => k in r.options && JSON.stringify(r.options[k as keyof JobOptions]) !== JSON.stringify(DEFAULT_OPTIONS[k as keyof JobOptions])),
+    );
+    expect(unset, "add these to REPRESENTATIVE in tests/unit/cliOptions.ts").toEqual([]);
   });
 
   it("its defaults are the CLI's own (the help's [default: …])", () => {

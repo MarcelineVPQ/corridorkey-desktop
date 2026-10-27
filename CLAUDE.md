@@ -27,6 +27,8 @@ Built to **Marcy's 17 basic rules for programming applications** (memory
   also runs inside one shared budget, the user slice `claude-work.slice` (24 GB total, throttled above 20 GB):
   `--slice=claude-work.slice` on direct runs, `CK_SLICE=claude-work.slice` for the repo's scripts (their own
   systemd-run joins it), and one memory-heavy job at a time (`flock ~/.cache/claude-scratch/heavy.lock`).
+- **Command line keeps up:** every engine job option has a verdict in `docs/cli-parity.json` and reaches the CLI,
+  Copy as command and farm export; gate `tools/check_cli_parity.mjs` (docs/CLI.md "Adding an option").
 - **Backlog (rule 8):** `docs/BACKLOG.md`; ideas wait for Marcy's "now".
 - **Licence:** CorridorKey licence (LICENSE, a CC BY-NC-SA 4.0 variant). The app stays free,
   keeps the CorridorKey name, credits Corridor Digital. No paywall, ever.

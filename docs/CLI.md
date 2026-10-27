@@ -289,6 +289,26 @@ say where it is (`loading the models`, `reading the clip`, `building TensorRT`, 
 | `skipped` | `--skip-existing` found every frame whole |
 | `missing` | `verify`: the files missing or not whole |
 
+## Adding an option
+
+A new job setting reaches the command line in four places, and `npm run gates` fails until each is there
+(`tools/check_cli_parity.mjs`, its own gate; the wiki has another, `tools/check_wiki.mjs`):
+
+1. **The engine** reads it from the run request (ck-core `job.rs` `parse`; docs/ENGINE_PROTOCOL.md).
+2. **The CLI** gives it a flag (ck-cli `args.rs` `RUN_OPTIONS`), then `node tools/gen_cli_spec.mjs` refreshes
+   `src/shared/console/cliSpec.json`.
+3. **The manifest**, `docs/cli-parity.json`: the field with its flags, or `"not-on-cli"` and why; a new flag that sets
+   no field goes under `"cli-only"` with what it is for.
+4. **Copy as command** writes it (`jobFlags` in `src/shared/console/jobCommand.ts`) when the app sends it
+   (`engineOptions` in `electron/main/queue.ts`); farm export takes its flags from the same table.
+
+The gate fails when the engine reads a field the manifest doesn't list (a), a manifest flag isn't the CLI's or a
+render flag isn't in the manifest, or the manifest and `RUN_OPTIONS` disagree (b), a field the app sends has no flag
+or Copy as command doesn't write it, or farm export stops using `jobFlags` (c), and when an entry is stale (d). The
+behaviour is tested too: representative jobs (every setting off its default) as Copy as command lines and as each
+farm format's command, read back by the Console's parser, give the engine the app's own request
+(tests/unit/jobCommand.test.ts, farmExport.test.ts).
+
 ## Tests
 
 `cargo test -p ck-cli` (no models or card): frame specs and patterns, flags, exit codes, progress lines, the report,

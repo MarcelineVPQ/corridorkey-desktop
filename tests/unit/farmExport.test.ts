@@ -12,6 +12,8 @@ import { farmExport, type FarmJob } from "../../electron/main/console/farm";
 import { jobArgs } from "../../src/shared/console/jobCommand";
 import { tokenize } from "../../src/shared/console/parse";
 import { DEFAULT_OPTIONS, type JobOptions } from "../../src/shared/types";
+import { engineOptions } from "../../electron/main/queue";
+import { cliOptions, lineOf, REPRESENTATIVE, sameOptions } from "./cliOptions";
 
 // js-yaml comes with the build tools (electron-builder); it has no types of its own
 const yaml = (await import("js-yaml" as string)) as { load: (s: string) => unknown };
@@ -482,5 +484,113 @@ describe("farm export for a wrangler (review 2026-10-27 S3-S7)", () => {
     expect([input("sh020").objectType, input("sh020").userInterface?.control]).toEqual(["DIRECTORY", "CHOOSE_DIRECTORY"]);
     expect([input("sh010").objectType, input("sh010").userInterface?.control]).toEqual(["FILE", "CHOOSE_INPUT_FILE"]);
     expect(e.notes.join(" ")).toMatch(/A frame folder goes in as a DIRECTORY input .* isn't run on Deadline Cloud yet/);
+  });
+});
+
+// The CLI gate's behaviour half for the farm (tools/check_cli_parity.mjs checks that farm.ts takes Copy as command's
+// table): each format's corridorkey line, put together as its submitter puts it (the shell farm script, OpenCue's
+// corridorkey_submit.py, Deadline's CorridorKey.py, Flamenco's job type, the OpenJD template), gives the engine the
+// app's own request for the clip as EXR (the farm writes EXR; TensorRT is each worker's own choice). Differences on
+// purpose: Deadline and OpenCue key the shot's range (-s/-e); OpenCue's task gets --max-vram of its booking (the
+// queue's limit rounded up, else 12 GiB).
+describe("farm export: the CLI reproduces the app's job (round trip)", () => {
+  const jobs: FarmJob[] = REPRESENTATIVE.map((r) => ({
+    name: r.name,
+    clip: { path: r.kind === "video" ? `/shots/${r.name}.mov` : `/shots/${r.name}/plates`, kind: r.kind, exrFrames: r.exrFrames },
+    outputDir: `/renders/${r.name}`,
+    options: { ...DEFAULT_OPTIONS, ...r.options },
+    range: [1001, 1024],
+  }));
+  // loop: NOT-WORTH — a file's few lines
+  const kv = (t: string) =>
+    Object.fromEntries(
+      t
+        .trim()
+        .split("\n")
+        .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]),
+    );
+  /** what the queue sends for the clip, as EXR and without TensorRT, plus what the format adds on purpose */
+  const want = (j: FarmJob, extra: Record<string, unknown> = {}) => ({ ...engineOptions({ ...j.options, outputFormat: "exr" }, j.clip.kind, false), ...extra });
+  const check = (j: FarmJob, words: string[], extra: Record<string, unknown>, what: string, jobFile: Record<string, unknown> = {}) => {
+    const got = cliOptions(lineOf(words), j.clip.kind === "frames" && j.clip.exrFrames && jobFile.frame_dir_linear === undefined);
+    expect([got.input, got.output], what).toEqual([j.clip.path, j.outputDir]);
+    // a --job file's options, under the flags (flags win)
+    sameOptions({ ...jobFile, ...got.options }, want(j, extra), `${what}: ${lineOf(words)}`);
+  };
+
+  it("shell", () => {
+    const e = farmExport("shell", jobs, env);
+    // loop: NOT-WORTH — the run lines and their shot lists
+    for (const run of file(e, "run-shots.sh")
+      .split("\n")
+      .filter((l) => l.startsWith("bash"))) {
+      const w = words(run.replace(/ \|\| status=1$/, ""));
+      const list = w[w.indexOf("--logs") + 2].replace(/^.*\//, "");
+      // loop: NOT-WORTH — the list's shots
+      for (const [input, output] of file(e, list)
+        .split("\n")
+        .filter((l) => l && !l.startsWith("#"))
+        .map((l) => l.split("\t"))) {
+        const j = jobs.find((x) => x.clip.path === input)!;
+        check(j, ["render", "-i", input, "-o", output, "--overwrite", ...w.slice(w.indexOf("--") + 1)], {}, `shell ${j.name}`);
+      }
+    }
+  });
+
+  it("opencue", () => {
+    const e = farmExport("opencue", jobs, env);
+    // loop: NOT-WORTH — six clips
+    for (const j of jobs) {
+      const w = words(
+        file(e, `${j.name}_opencue.sh`)
+          .split("\n")
+          .find((l) => l.startsWith("exec "))!,
+      );
+      const at = (f: string) => w[w.indexOf(f) + 1];
+      const booking = w.includes("--gpu-memory") ? at("--gpu-memory") : "12";
+      const cmd = ["render", "-i", at("-i"), "-o", at("-o"), ...w.slice(w.indexOf("--") + 1), "-s", "1001", "-e", "1024", "--overwrite", "--max-vram", booking];
+      check(j, cmd, { frame_start: 1001, frame_end: 1024, vram_budget_gb: j.options.vramLimitGb === null ? 12 : Math.ceil(j.options.vramLimitGb) }, `opencue ${j.name}`);
+    }
+  });
+
+  it("deadline", () => {
+    const e = farmExport("deadline", jobs, env);
+    // loop: NOT-WORTH — six clips
+    for (const j of jobs) {
+      const p = kv(file(e, `${j.name}_plugin_info.txt`));
+      const f = kv(file(e, `${j.name}_job_info.txt`)).Frames.split("-");
+      const cmd = ["render", "-i", p.InputPath, "-o", p.OutputPath, "-s", f[0], "-e", f[1], "--overwrite", "--outputs", p.Outputs];
+      if (p.MaxVram) cmd.push("--max-vram", p.MaxVram);
+      // loop: NOT-WORTH — the extra arguments (no spaces inside a value here)
+      cmd.push(...p.ExtraArguments.split(" ").filter(Boolean));
+      check(j, cmd, { frame_start: 1001, frame_end: 1024 }, `deadline ${j.name}`);
+    }
+  });
+
+  it("flamenco", () => {
+    const e = farmExport("flamenco", jobs, env);
+    // loop: NOT-WORTH — six clips
+    for (const j of jobs) {
+      const s = (JSON.parse(file(e, `${j.name}.flamenco.json`)) as { settings: Record<string, string> }).settings;
+      const linear = s.linear === "scene-linear" ? ["--linear"] : s.linear === "display-coded" ? ["--no-linear"] : [];
+      check(j, ["render", "-i", s.input, "-o", s.output, "--outputs", s.outputs, ...linear, "--overwrite", ...words(s.extra_args)], {}, `flamenco ${j.name}`);
+    }
+  });
+
+  it("openjd", () => {
+    const e = farmExport("openjd", jobs, env);
+    // loop: NOT-WORTH — six clips
+    for (const j of jobs) {
+      const t = yaml.load(file(e, `${j.name}/template.yaml`)) as { steps: { name: string; script: { actions: { onRun: { args: string[] } } } }[] };
+      // loop: NOT-WORTH — the values
+      const v = Object.fromEntries((yaml.load(file(e, `${j.name}/parameter_values.yaml`)) as { parameterValues: { name: string; value: string }[] }).parameterValues.map((p) => [p.name, p.value]));
+      // loop: NOT-WORTH — the Key step's words
+      const args = t.steps.find((s) => s.name === "Key")!.script.actions.onRun.args.map((a) => a.replace(/\{\{Param\.(\w+)\}\}/g, (_, n: string) => v[n] ?? ""));
+      args.splice(args.indexOf("--job"), 2);
+      // the embedded options.json: {"frame_dir_linear": Linear, "low_vram": LowVram}, null = absent
+      const jobFile: Record<string, unknown> = { low_vram: v.LowVram === "true" };
+      if (v.Linear !== "null") jobFile.frame_dir_linear = v.Linear === "true";
+      check(j, args, {}, `openjd ${j.name}`, jobFile);
+    }
   });
 });
