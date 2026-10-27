@@ -621,4 +621,37 @@ describe("review 2026-10-26 probes", () => {
       kill.mockRestore();
     }
   });
+
+  it("P4 (S1): a run script and a command can't both take the one job slot", async () => {
+    let release!: () => void;
+    const slow = new Promise<void>((r) => (release = r));
+    writeFileSync(join(shots, "s.ckcmd"), "pwd\n");
+    const { c } = make({
+      fs: {
+        readdir: (p) => readdir(p, { withFileTypes: true }),
+        stat: (p) => stat(p),
+        // a slow disk: the script's file arrives after the render has been typed
+        readFile: async (p) => (await slow, readFile(p, "utf8")),
+        mkdir: async (p) => void (await mkdir(p, { recursive: true })),
+      },
+    });
+    const script = c.run("run s.ckcmd");
+    const render = await c.run("render shot.mov -o ../out/a/");
+    expect([render.state, render.lines[0].text]).toEqual(["refused", expect.stringMatching(/^Busy with run s.ckcmd/)]);
+    release();
+    await script;
+    await new Promise((r) => setTimeout(r, 10));
+    expect(spawned).toEqual([]);
+    expect(c.session().running).toBeNull();
+  });
+
+  it("P11 (S2): a command still in its checks when the app quits never starts", async () => {
+    const { c } = make();
+    const pending = c.run("render shot.mov -o ../out/q/");
+    await c.shutdown(50);
+    const b = await pending;
+    expect([b.state, b.lines[0]?.text]).toEqual(["refused", "Not run: the app is quitting."]);
+    expect(spawned).toEqual([]);
+    expect(gpuTaken).toBe(0);
+  });
 });

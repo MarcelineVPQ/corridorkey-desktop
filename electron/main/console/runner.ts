@@ -97,6 +97,8 @@ export class Console {
   private readonly spawnFn: SpawnFn;
   private readonly now: () => number;
   private readonly opts: ParseOptions;
+  /** set by shutdown(): from then on nothing spawns */
+  private closing = false;
 
   constructor(private readonly d: ConsoleDeps) {
     this.cwd = d.startDir;
@@ -157,6 +159,7 @@ export class Console {
 
   /** The app quits: elevation dropped, a running corridorkey stopped (SIGTERM, then killed after `graceMs`). */
   shutdown(graceMs = QUIT_GRACE_MS): Promise<void> {
+    this.closing = true;
     this.dropElevation("the app quit");
     const child = this.job?.child;
     if (!child) {
@@ -332,23 +335,26 @@ export class Console {
     if (this.job) return now(this.finish(b, "refused", `Busy with ${this.job.block.line} (one command at a time; Ctrl+C stops it).`));
     const a = this.d.paths.platform === "win32" ? win32 : posix;
     const path = a.resolve(this.cwd, expandHome(file, this.d.paths));
+    // the slot is taken before the first await: a command typed while the file is read is refused, never overwritten
+    const job: Job = { block: b, child: null, cancels: 0 };
+    this.job = job;
+    this.d.sessionChanged();
     let text: string;
     try {
       text = await this.d.fs.readFile(path, FILE_MAX);
     } catch (e) {
+      this.job = null;
+      this.d.sessionChanged();
       // error: SHOWN — the block says why
       return now(this.finish(b, "failed", `Can't read ${path}: ${(e as Error).message}`));
     }
-    const job: Job = { block: b, child: null, cancels: 0 };
-    this.job = job;
-    this.d.sessionChanged();
     const done = (async () => {
       let failed: ConsoleBlock | null = null;
       // loop: SERIAL-REQUIRED — a script's lines run one after another, each waiting for the last [bounded: the file's lines]
       for (const [i, raw] of text.split(/\r?\n/).entries()) {
         const line = raw.trim();
         if (!line || line.startsWith("#")) continue;
-        if (job.cancels > 0) break;
+        if (job.cancels > 0 || this.closing) break;
         this.note(b, "info", `${a.basename(path)}:${i + 1}  ${line}`);
         const r = await this.runLine(line, b.id);
         const end = await r.done;
@@ -464,6 +470,8 @@ export class Console {
     // the dialog (and the folder) took time: another command may have started meanwhile; from here to the spawn
     // nothing awaits, so the slot can't be taken twice
     if (this.job && !(inScript && this.job.block.id === b.parent)) return now(this.finish(b, "refused", `Busy with ${this.job.block.line} (one command at a time).`));
+    // a command still in its checks when the app quits never starts (shutdown() stops only what runs)
+    if (this.closing) return now(this.finish(b, "refused", "Not run: the app is quitting."));
     const gpuRefusal = cmd.gpu ? this.d.takeGpu() : null;
     if (gpuRefusal) return now(this.finish(b, "refused", gpuRefusal));
     return this.spawnCli(b, bin, argv, cmd.gpu, inScript, targets);
