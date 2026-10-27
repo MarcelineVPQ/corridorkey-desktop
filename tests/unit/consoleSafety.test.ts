@@ -1,10 +1,11 @@
 // The Console's safety pieces (docs/CONSOLE.md): the file scope, the elevation, the append-only audit log, the history.
+import { EventEmitter } from "node:events";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { checkWrite, expandHome, isInside, realPathDeps, resolveReal, type PathDeps } from "../../electron/main/console/paths";
-import { Elevation, ELEVATION_CAP_MS, ELEVATION_TTL_MS } from "../../electron/main/console/elevation";
+import { dropOnLockAndSleep, Elevation, ELEVATION_CAP_MS, ELEVATION_TTL_MS } from "../../electron/main/console/elevation";
 import { AuditLog, History } from "../../electron/main/console/logs";
 
 // a temp folder of its own: never / or $HOME
@@ -150,7 +151,7 @@ describe("elevation", () => {
     expect(e.active).toBe(false);
   });
 
-  it("expires by itself and is dropped by sudo -k / blur / quit", () => {
+  it("expires by itself and is dropped by sudo -k / a screen lock / quit", () => {
     let t = 0;
     const e = new Elevation(() => t);
     e.grant();
@@ -225,5 +226,25 @@ describe("history", () => {
     const again = new History(f, 10);
     await again.loaded;
     expect(again.recent(100)).toEqual(h.recent(100));
+  });
+});
+
+describe("SME review 2026-10-26: elevation and the look-dev loop (M2)", () => {
+  it("drops on a screen lock and on sleep, never on a window's blur (Alt+Tab to Nuke and back keeps it)", () => {
+    const monitor = new EventEmitter();
+    const why: string[] = [];
+    dropOnLockAndSleep(monitor, (r) => why.push(r));
+    monitor.emit("blur");
+    monitor.emit("unlock-screen");
+    expect(why).toEqual([]);
+    monitor.emit("lock-screen");
+    monitor.emit("suspend");
+    expect(why).toEqual(["the screen was locked", "the computer went to sleep"]);
+  });
+
+  it("the app wires it to Electron's powerMonitor, and the window's blur drops nothing", () => {
+    const main = readFileSync(new URL("../../electron/main/index.ts", import.meta.url), "utf8");
+    expect(main).toMatch(/dropOnLockAndSleep\(powerMonitor,/);
+    expect(main).not.toMatch(/on\("blur"[^\n]*dropElevation/);
   });
 });

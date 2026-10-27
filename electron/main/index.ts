@@ -1,5 +1,5 @@
 // CorridorKey desktop: main process. One window, one queue, one engine.
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, net, protocol, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, net, powerMonitor, protocol, shell } from "electron";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
@@ -58,7 +58,7 @@ import type { DesktopPalette } from "../../src/ui/theme/palette";
 import { IPC } from "./ipc";
 import { consoleLineArg, cursorArg, fromAppPage, idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir, vramLimit } from "./validate";
 import { Console, LINE_MAX, type ElevationRequest } from "./console/runner";
-import { Elevation, ELEVATION_CAP_MS, ELEVATION_TTL_MS } from "./console/elevation";
+import { dropOnLockAndSleep, Elevation, ELEVATION_CAP_MS, ELEVATION_TTL_MS } from "./console/elevation";
 import { AuditLog, History } from "./console/logs";
 import { BlockPusher } from "./console/push";
 import { realPathDeps } from "./console/paths";
@@ -319,7 +319,7 @@ async function confirmElevation(req: ElevationRequest): Promise<boolean> {
     message: "Run this command elevated?",
     detail:
       `You typed: ${req.line}\nIt runs: ${req.command}\n\n${targets.join("\n")}\n\n` +
-      `The Console stays elevated for ${ELEVATION_TTL_MS / 60_000} minutes (each elevated command extends it, at most ${ELEVATION_CAP_MS / 60_000}); sudo -k, leaving the window or quitting ends it. Every elevated command is logged.`,
+      `The Console stays elevated for ${ELEVATION_TTL_MS / 60_000} minutes (each elevated command extends it, at most ${ELEVATION_CAP_MS / 60_000}); sudo -k, locking the screen, sleep or quitting ends it. Every elevated command is logged.`,
   });
   return r.response === 0;
 }
@@ -1099,8 +1099,6 @@ function createWindow(): void {
   mainWindow.on("restore", shown(true));
   mainWindow.on("hide", shown(false));
   mainWindow.on("minimize", shown(false));
-  // the Console's elevation ends when the window loses focus (the sudo dialog itself comes before the grant)
-  mainWindow.on("blur", () => appConsole.dropElevation("the window lost focus"));
   mainWindow.on("closed", () => {
     mainWindow = null;
     setShown(false);
@@ -1138,6 +1136,9 @@ app.whenReady().then(() => {
     return;
   }
   void recheckFfmpeg();
+  // the Console's elevation ends when the screen locks or the computer sleeps (never on the window's blur: Alt+Tab
+  // to Nuke and back is the look-dev loop sudo exists for); powerMonitor works only once the app is ready
+  dropOnLockAndSleep(powerMonitor, (why) => appConsole.dropElevation(why));
   protocol.handle(MEDIA_SCHEME, (req) => {
     const file = decodeURIComponent(new URL(req.url).pathname.slice(1));
     if (!resolve(file).startsWith(mediaDir + sep)) return new Response("not found", { status: 404 });

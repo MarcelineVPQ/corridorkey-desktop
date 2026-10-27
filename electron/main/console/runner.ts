@@ -164,7 +164,7 @@ export class Console {
     return this.d.history.search(query);
   }
 
-  /** sudo -k, the window's blur, quit: elevation ends (and the audit log says why). */
+  /** sudo -k, a screen lock, sleep, quit: elevation ends (and the audit log says why). */
   dropElevation(reason: string): void {
     if (!this.d.elevation.drop()) return;
     void this.d.audit.append({ event: "dropped", reason });

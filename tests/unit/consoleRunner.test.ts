@@ -9,7 +9,7 @@ import { PassThrough } from "node:stream";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { clipName, Console, type ConsoleDeps, type ElevationRequest } from "../../electron/main/console/runner";
-import { Elevation } from "../../electron/main/console/elevation";
+import { dropOnLockAndSleep, Elevation } from "../../electron/main/console/elevation";
 import { AuditLog, History } from "../../electron/main/console/logs";
 import { BlockPusher, PUSH_EVERY_MS } from "../../electron/main/console/push";
 import { consoleLineArg, cursorArg, fromAppPage } from "../../electron/main/validate";
@@ -311,7 +311,7 @@ describe("sudo", () => {
     expect(confirms).toEqual([]);
   });
 
-  it("is dropped by sudo -k and by the window's blur (audited), and asks again after", async () => {
+  it("is dropped by sudo -k and by a screen lock (audited), and asks again after", async () => {
     const { c, files } = make();
     await c.run("sudo render shot.mov -o ../out/sh010 --overwrite");
     await finish(spawned[0].child, [], 0);
@@ -320,14 +320,16 @@ describe("sudo", () => {
     await c.run("sudo render shot.mov -o ../out/sh010 --overwrite");
     expect(confirms).toHaveLength(2);
     await finish(spawned[1].child, [], 0);
-    c.dropElevation("the window lost focus");
+    const monitor = new EventEmitter();
+    dropOnLockAndSleep(monitor, (why) => c.dropElevation(why));
+    monitor.emit("lock-screen");
     await new Promise((r) => setTimeout(r, 5));
     const events = readFileSync(join(files, "console-audit.jsonl"), "utf8")
       .trim()
       .split("\n")
       .map((l) => JSON.parse(l));
     // loop: NOT-WORTH — a few entries
-    expect(events.filter((e) => e.event === "dropped").map((e) => e.reason)).toEqual(["sudo -k", "the window lost focus"]);
+    expect(events.filter((e) => e.event === "dropped").map((e) => e.reason)).toEqual(["sudo -k", "the screen was locked"]);
   });
 
   it("runs a non-destructive command under sudo as usual, without asking", async () => {

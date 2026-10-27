@@ -187,7 +187,7 @@ export function ConsolePage(props: {
                   </button>
                 </div>
               ) : (
-                <span className="hint-text">Not elevated. It also ends when the window loses focus, and at quit.</span>
+                <span className="hint-text">Not elevated. Elevation also ends when the screen locks, the computer sleeps, and at quit.</span>
               )}
             </Row>
             <Row label="corridorkey">

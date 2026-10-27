@@ -76,7 +76,8 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   characters as `\u{…}`) and its targets: the files at the run's names there now (`<clip>_…` and inside its
   `<clip>_…_exr` folders, the clip named as ck-core's `raw_clip_name` does; a pattern's frames; a file) and their
   bytes; confirmed, the Console stays elevated for 5 minutes, each elevated command extending it, never past 15
-  minutes after the confirmation. Dropped by `sudo -k` (or the panel), the window losing focus, quit and restart; it lives in memory
+  minutes after the confirmation. Dropped by `sudo -k` (or the panel), a screen lock or sleep (Electron's `powerMonitor` `lock-screen` / `suspend`),
+  quit and restart, never by the window losing focus (Alt+Tab to Nuke and back is the look-dev loop sudo is for); it lives in memory
   only, never on disk. A line the file scope refuses is refused before any dialog. (A typed folder name for bulk
   deletes comes with the first command that deletes in bulk; none does yet. A native message box has no text field,
   so it needs a dialog of the main process's own.)
