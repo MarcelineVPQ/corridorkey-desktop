@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { farmExport, type FarmJob } from "../../electron/main/console/farm";
+import { jobArgs } from "../../src/shared/console/jobCommand";
 import { tokenize } from "../../src/shared/console/parse";
 import { DEFAULT_OPTIONS, type JobOptions } from "../../src/shared/types";
 
@@ -53,7 +54,6 @@ describe("farm export", () => {
     expect(values).toEqual({
       Input: "/shots/sh010.mov",
       OutputDir: "/renders/sh010",
-      OutputPattern: "sh010.####.exr",
       Outputs: "alpha",
       Linear: "false",
       LowVram: "true",
@@ -79,11 +79,11 @@ describe("farm export", () => {
       Name: "sh010 key",
       Frames: "1001-1024",
       ChunkSize: "24",
-      OutputDirectory0: "/renders/sh010",
-      OutputFilename0: "sh010.####.exr",
+      OutputDirectory0: "/renders/sh010/sh010_alpha_exr",
+      OutputFilename0: "sh010_alpha.####.exr",
     });
     const plugin = kv(file(e, "sh010_plugin_info.txt"));
-    expect(plugin).toMatchObject({ Command: "render", InputPath: "/shots/sh010.mov", OutputPath: "/renders/sh010/sh010.####.exr", Outputs: "alpha", MaxVram: "10" });
+    expect(plugin).toMatchObject({ Command: "render", InputPath: "/shots/sh010.mov", OutputPath: "/renders/sh010", Outputs: "alpha", MaxVram: "10" });
     expect(words(plugin.ExtraArguments)).toEqual(["--despill", "0.3", "--window", "8/4", "--low-vram"]);
     // the plugin's own file names (Deadline reads them by the plugin's name)
     expect(e.files.map((f) => f.path)).toContain("CorridorKey/CorridorKey.param");
@@ -97,14 +97,7 @@ describe("farm export", () => {
     const w = words(line);
     expect(w.slice(0, 2)).toEqual(["exec", "python3"]);
     const at = (f: string) => w[w.indexOf(f) + 1];
-    expect([at("--shot"), at("-i"), at("-o"), at("--range"), at("--gpu-memory"), at("--models")]).toEqual([
-      "sh010",
-      "/shots/sh010.mov",
-      "/renders/sh010/sh010.####.exr",
-      "1001-1024",
-      "10",
-      "/opt/ck/models",
-    ]);
+    expect([at("--shot"), at("-i"), at("-o"), at("--range"), at("--gpu-memory"), at("--models")]).toEqual(["sh010", "/shots/sh010.mov", "/renders/sh010", "1001-1024", "10", "/opt/ck/models"]);
     expect(w.slice(w.indexOf("--") + 1)).toEqual(["--outputs", "alpha", "--despill", "0.3", "--window", "8/4", "--low-vram"]);
     expect(e.files.map((f) => f.path)).toContain("corridorkey_submit.py");
   });
@@ -122,7 +115,7 @@ describe("farm export", () => {
     const keys = [...readFileSync(new URL("../../farm/flamenco/corridorkey.js", import.meta.url), "utf8").matchAll(/\{ key: "(\w+)"|key: "(\w+)"/g)].map((m) => m[1] ?? m[2]);
     expect(job.type).toBe("corridorkey");
     expect(Object.keys(job.settings).sort()).toEqual([...new Set(keys)].sort());
-    expect(job.settings).toMatchObject({ input: "/shots/sh020/plates", output: "/renders/sh020/sh020.####.exr", outputs: "alpha,fg", linear: true, frames: "", chunk_size: 0 });
+    expect(job.settings).toMatchObject({ input: "/shots/sh020/plates", output: "/renders/sh020", outputs: "alpha,fg", linear: true, frames: "", chunk_size: 0 });
   });
 
   it("shell: shot lists by their flags (tab-separated INPUT OUTPUT) and the lines that run them", () => {
@@ -134,8 +127,8 @@ describe("farm export", () => {
       .filter((l) => l && !l.startsWith("#"))
       .map((l) => l.split("\t"));
     expect(shots).toEqual([
-      ["/shots/sh010.mov", "/renders/sh010/sh010.####.exr"],
-      ["/shots/sh030.mov", "/renders/sh030/sh030.####.exr"],
+      ["/shots/sh010.mov", "/renders/sh010"],
+      ["/shots/sh030.mov", "/renders/sh030"],
     ]);
     const run = file(e, "run-shots.sh")
       .split("\n")
@@ -197,7 +190,7 @@ describe("farm export: hostile names (review 2026-10-27 M1)", () => {
     const name = `it's "a" $(touch P) %PATH% \`id\` x`;
     const j = hostile(name);
     const path = `/shots/${name}.mov`;
-    const out = "/renders/x/" + name + ".####.exr";
+    const out = "/renders/x";
     const jj = { ...j, outputDir: "/renders/x" };
     // OpenJD: YAML values
     const o = farmExport("openjd", [jj], env);
@@ -272,5 +265,61 @@ describe("farm export: Deadline's ExtraArguments (review 2026-10-27 S4)", () => 
         .slice("ExtraArguments=".length);
       expect(msvcArgv(extra), extra).toEqual(["--despill", "0.3", "--hint-video", hint]);
     }
+  });
+});
+
+// SME review 2026-10-27 M1 (probe): the farm rendered -o <results>/<clip>.####.exr, so its frames were
+// key/sh010_alpha.1001.exr while the queue's (and Copy as command's) are key/sh010_alpha_exr/sh010_alpha.1001.exr; and
+// Deadline's OutputFilename0 named sh010_plate.####.exr where the files were sh010_plate_alpha.####.exr
+describe("farm export: the queue's output layout (review 2026-10-27 M1)", () => {
+  const j = { ...fj("sh010_plate", { outputs: ["alpha", "fg", "checker"], despillStrength: 0.5 }, "frames"), range: [1, 120] as [number, number], pad: 1 };
+  const queueO = jobArgs(j, false)[jobArgs(j, false).indexOf("-o") + 1];
+
+  it("every format gives corridorkey the queue's own -o folder", () => {
+    expect(queueO).toBe("/renders/sh010_plate");
+    const kv = (t: string) =>
+      Object.fromEntries(
+        t
+          .trim()
+          .split("\n")
+          .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]),
+      );
+    const o = farmExport("openjd", [j], env);
+    const t = file(o, "sh010_plate/template.yaml");
+    expect(t).not.toContain("OutputPattern");
+    // a PATH parameter in the job's name is RawParam (openjd check: Param.OutputDir "does not exist at this location")
+    expect((yaml.load(t) as { name: string }).name).toBe("CorridorKey: {{RawParam.OutputDir}}");
+    // loop: NOT-WORTH — the template's two steps
+    for (const step of (yaml.load(t) as { steps: { script: { actions: { onRun: { args: string[] } } } }[] }).steps) {
+      const a = step.script.actions.onRun.args;
+      expect(a[a.indexOf("--output") + 1]).toBe("{{Param.OutputDir}}");
+    }
+    expect((yaml.load(file(o, "sh010_plate/parameter_values.yaml")) as { parameterValues: { name: string; value: string }[] }).parameterValues.find((p) => p.name === "OutputDir")!.value).toBe(queueO);
+    expect(kv(file(farmExport("deadline", [j], env), "sh010_plate_plugin_info.txt")).OutputPath).toBe(queueO);
+    const cue = words(
+      file(farmExport("opencue", [j], env), "sh010_plate_opencue.sh")
+        .split("\n")
+        .find((l) => l.startsWith("exec "))!,
+    );
+    expect(cue[cue.indexOf("-o") + 1]).toBe(queueO);
+    expect((JSON.parse(file(farmExport("flamenco", [j], env), "sh010_plate.flamenco.json")) as { settings: { output: string } }).settings.output).toBe(queueO);
+    expect(file(farmExport("shell", [j], env), "shots.txt")).toContain(`\t${queueO}\n`);
+  });
+
+  it("Deadline names each output's real folder and frames (ck-cli run.rs: <clip>_<suffix>_exr/<clip>_<suffix>.<n>.exr)", () => {
+    const d = farmExport("deadline", [j], env);
+    expect(file(d, "sh010_plate_job_info.txt")).toContain(
+      [
+        "OutputDirectory0=/renders/sh010_plate/sh010_plate_alpha_exr",
+        "OutputFilename0=sh010_plate_alpha.####.exr",
+        "OutputDirectory1=/renders/sh010_plate/sh010_plate_fg_exr",
+        "OutputFilename1=sh010_plate_fg.####.exr",
+        "OutputDirectory2=/renders/sh010_plate/sh010_plate_checker_comp_despill050_exr",
+        "OutputFilename2=sh010_plate_checker_comp_despill050.####.exr",
+      ].join("\n"),
+    );
+    // a shot past 9999 pads wider, as corridorkey does; each export's notes say where the frames land
+    expect(file(farmExport("deadline", [{ ...j, range: [9997, 10002], pad: 4 }], env), "sh010_plate_job_info.txt")).toContain("OutputFilename0=sh010_plate_alpha.#####.exr");
+    expect(d.notes.join(" ")).toContain("The frames land where the queue writes them: /renders/sh010_plate/sh010_plate_alpha_exr/sh010_plate_alpha.####.exr");
   });
 });

@@ -1223,7 +1223,7 @@ describe("Phase 4: farm export", () => {
     expect(b.state, b.lines.map((l) => l.text).join("\n")).toBe("done");
     expect(b.lines[0].text).toBe(`Wrote 7 files in ${join(out, "farm1")}:`);
     expect(readFileSync(join(out, "farm1", "sh010_job_info.txt"), "utf8")).toContain("Frames=1001-1024");
-    expect(readFileSync(join(out, "farm1", "sh020_plugin_info.txt"), "utf8")).toContain(`OutputPath=${join(out, "sh020")}/sh020.####.exr`);
+    expect(readFileSync(join(out, "farm1", "sh020_plugin_info.txt"), "utf8")).toContain(`OutputPath=${join(out, "sh020")}\n`);
     // one clip by name or path
     const one = await c.run(`farm export flamenco sh020.mov -o ${join(out, "farm2")}`);
     expect(one.state).toBe("done");

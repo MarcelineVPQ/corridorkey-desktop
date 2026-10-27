@@ -1,7 +1,8 @@
 // farm export (Phase 4, docs/CONSOLE.md): queued clips as ready-to-submit render farm jobs, from the farm/ templates
 // (farm/README.md), with each clip's settings as the queue would run them (src/shared/console/jobCommand.ts). Pure: the
 // runner checks the folder, the files already there and sudo, and writes what this returns. The farm writes EXR frames
-// (a video output can't be split into tasks), at <the clip's results folder>/<clip>.####.exr.
+// (a video output can't be split into tasks) where the queue and Copy as command write them: `-o <the clip's results
+// folder>`, the CLI's folder layout, <folder>/<clip>_<output>_exr/<clip>_<output>.####.exr (SME review 2026-10-27 M1).
 import openjdTemplate from "../../../farm/openjd/corridorkey/template.yaml?raw";
 import deadlinePlugin from "../../../farm/deadline10/CorridorKey/CorridorKey.py?raw";
 import deadlineParam from "../../../farm/deadline10/CorridorKey/CorridorKey.param?raw";
@@ -20,6 +21,8 @@ export interface FarmJob extends JobLike {
   name: string;
   /** the shot's first and last frame numbers (as corridorkey numbers them), when known */
   range: [number, number] | null;
+  /** a frame folder's own zero padding (its widest frame number's digits); corridorkey pads to at least 4 */
+  pad?: number;
 }
 
 export interface FarmEnv {
@@ -41,7 +44,29 @@ export interface FarmExport {
 // loop: NOT-WORTH — a job's few flags
 const farmFlags = (j: FarmJob): Flag[] => jobFlags({ ...j.options, outputFormat: "exr" }, j.clip.kind, false).filter(([n]) => n !== "outputs");
 const outputs = (j: FarmJob) => j.options.outputs.join(",");
-const pattern = (j: FarmJob) => `${j.outputDir.replace(/[\\/]+$/, "")}/${j.name}.####.exr`;
+/**
+ * Where corridorkey writes each output's frames for `-o <folder>` (ck-cli run.rs: `<clip>_<suffix>_exr/<clip>_<suffix>.<n>.exr`,
+ * the suffix ck-core job.rs suffix(): checker is checker_comp_despill<despill×100, 3 digits>; the number padded as the
+ * shot's frames, at least 4): one folder and file pattern per output, in the queue's order.
+ */
+export function outputPaths(j: FarmJob): { dir: string; file: string }[] {
+  const sep = j.outputDir.includes("\\") && !j.outputDir.includes("/") ? "\\" : "/";
+  const folder = j.outputDir.replace(/[\\/]+$/, "");
+  const width = Math.max(4, j.pad ?? 0, j.range ? String(j.range[1]).length : 0);
+  // loop: NOT-WORTH — ≤ four outputs
+  return j.options.outputs.map((o) => {
+    const sfx = o === "checker" ? `checker_comp_despill${String(Math.trunc(j.options.despillStrength * 100)).padStart(3, "0")}` : o;
+    return { dir: `${folder}${sep}${j.name}_${sfx}_exr`, file: `${j.name}_${sfx}.${"#".repeat(width)}.exr` };
+  });
+}
+/** The note naming where the frames land (the queue's layout). */
+// loop: NOT-WORTH — the exported jobs' outputs
+const LAYOUT_NOTE = (jobs: readonly FarmJob[]) =>
+  jobs.length
+    ? `The frames land where the queue writes them: ${outputPaths(jobs[0])
+        .map((p) => `${p.dir}/${p.file}`)
+        .join(", ")}${jobs.length > 1 ? " (and so on for each clip)" : ""}.`
+    : "";
 /** POSIX shell words (the scripts and the extra-argument fields are read as a shell would). */
 // loop: NOT-WORTH — a command's few words
 const sh = (words: readonly string[]) => words.map((w) => (/^[\w@%+=:,./-]+$/.test(w) ? w : `'${w.replace(/'/g, `'\\''`)}'`)).join(" ");
@@ -154,6 +179,7 @@ export function farmExport(format: FarmFormat, jobs: readonly FarmJob[], env: Fa
       notes.push(`Run: bash run-shots.sh (one shot per graphics card at a time; --gpus 0,1 in it for more cards). ${RUNTIME_NOTE}`);
       break;
   }
+  if (files.length) notes.push(LAYOUT_NOTE(ranged));
   return { files, notes };
 }
 
@@ -165,11 +191,10 @@ function openjd(j: FarmJob, env: FarmEnv): FarmExport["files"] {
   const anchor = '            - "{{Param.Outputs}}"\n';
   const at = openjdTemplate.indexOf(anchor) + anchor.length;
   // loop: NOT-WORTH — a job's few words
-  const template = openjdTemplate.slice(0, at) + extra.map((w) => `            - ${y(w)}\n`).join("") + openjdTemplate.slice(at);
+  const template = folderOutput(openjdTemplate.slice(0, at) + extra.map((w) => `            - ${y(w)}\n`).join("") + openjdTemplate.slice(at));
   const values: [string, string | null][] = [
     ["Input", j.clip.path],
     ["OutputDir", j.outputDir],
-    ["OutputPattern", `${j.name}.####.exr`],
     ["Outputs", outputs(j)],
     ["Linear", String(j.clip.kind === "frames" && j.options.frameDirLinear)],
     ["LowVram", String(!j.options.memory.auto && j.options.memory.lowVram)],
@@ -182,6 +207,18 @@ function openjd(j: FarmJob, env: FarmEnv): FarmExport["files"] {
     { path: `${j.name}/template.yaml`, text: template },
     { path: `${j.name}/parameter_values.yaml`, text: `# corridorkey farm export: ${j.name}\nparameterValues:\n${params.join("")}` },
   ];
+}
+
+/**
+ * The template with `--output {{Param.OutputDir}}` (the queue's folder layout) instead of OutputDir/OutputPattern, and
+ * the OutputPattern parameter gone (M1).
+ */
+function folderOutput(t: string): string {
+  const def = t.slice(t.indexOf("  - name: OutputPattern\n"), t.indexOf("  - name: Outputs\n"));
+  return t
+    .replace(def, "")
+    .replaceAll('"{{Param.OutputDir}}/{{Param.OutputPattern}}"', '"{{Param.OutputDir}}"')
+    .replace('name: "CorridorKey: {{Param.OutputPattern}}"', 'name: "CorridorKey: {{RawParam.OutputDir}}"');
 }
 
 /** Deadline 10: the job info and the plugin info (farm/deadline10), one task over the whole shot. */
@@ -201,8 +238,11 @@ function deadline(j: FarmJob): FarmExport["files"] {
         ["Name", `${j.name} key`],
         ["Frames", `${a}-${b}`],
         ["ChunkSize", String(b - a + 1)],
-        ["OutputDirectory0", j.outputDir],
-        ["OutputFilename0", `${j.name}.####.exr`],
+        // loop: NOT-WORTH — ≤ four outputs
+        ...outputPaths(j).flatMap((p, i): [string, string][] => [
+          [`OutputDirectory${i}`, p.dir],
+          [`OutputFilename${i}`, p.file],
+        ]),
       ]),
     },
     {
@@ -210,7 +250,7 @@ function deadline(j: FarmJob): FarmExport["files"] {
       text: lines([
         ["Command", "render"],
         ["InputPath", j.clip.path],
-        ["OutputPath", pattern(j)],
+        ["OutputPath", j.outputDir],
         ["Outputs", outputs(j)],
         ["Preroll", "0"],
         ...(maxVram ? [["MaxVram", maxVram] as [string, string]] : []),
@@ -234,7 +274,7 @@ function opencue(j: FarmJob, env: FarmEnv): FarmExport["files"][number] {
     "-i",
     j.clip.path,
     "-o",
-    pattern(j),
+    j.outputDir,
     "--range",
     `${a}-${b}`,
     ...runtimeWords(env),
@@ -264,7 +304,7 @@ function flamenco(j: FarmJob, env: FarmEnv): FarmExport["files"][number] {
     settings: {
       corridorkey: "corridorkey",
       input: j.clip.path,
-      output: pattern(j),
+      output: j.outputDir,
       outputs: outputs(j),
       linear: j.clip.kind === "frames" && j.options.frameDirLinear,
       frames: "",
@@ -295,7 +335,7 @@ function shell(jobs: readonly FarmJob[], env: FarmEnv): FarmExport["files"] {
   for (const [i, [flags, list]] of [...lists].entries()) {
     const name = lists.size === 1 ? "shots.txt" : `shots-${i + 1}.txt`;
     // loop: NOT-WORTH — the list's shots
-    files.push({ path: name, text: `# corridorkey farm export: INPUT<tab>OUTPUT per shot (the whole shot)\n${list.map((j) => `${j.clip.path}\t${pattern(j)}\n`).join("")}` });
+    files.push({ path: name, text: `# corridorkey farm export: INPUT<tab>OUTPUT per shot (the whole shot)\n${list.map((j) => `${j.clip.path}\t${j.outputDir}\n`).join("")}` });
     runs.push(`bash "$here/corridorkey-farm.sh" --logs "$here/logs" "$here/${name}" -- ${flags}${env.models || env.ort ? ` ${sh(runtimeWords(env))}` : ""}`);
   }
   files.push({ path: "run-shots.sh", text: `#!/bin/sh\n# corridorkey farm export: every shot list, one after the other\nhere="$(dirname "$0")"\n${runs.join(" &&\n")}\n` });

@@ -171,19 +171,20 @@ export const isFrameFile = (name: string): boolean => !name.startsWith(".") && /
  * sequences (or a sequence and other frames) is an error that says which: the CLI would key them all as one clip
  * (SME review 2026-10-27 M2). `names`: the folder's frame files (isFrameFile).
  */
-export function folderRange(names: readonly string[]): { range: [number, number] } | { error: string } {
+export function folderRange(names: readonly string[]): { range: [number, number]; pad: number } | { error: string } {
   if (!names.length) return { error: "no frames (.exr, .png, .jpg) in it" };
   const { sequences, singles } = groupSequences(names);
   if (sequences.length === 1 && !singles.length) {
     const [a, b] = sequences[0].range.split("-").map(Number);
-    return { range: [a, b] };
+    // loop: NOT-WORTH — the pattern's # run
+    return { range: [a, b], pad: sequences[0].pattern.split("").filter((c) => c === "#").length };
   }
   if (!sequences.length && names.length === 1) {
     const m = NUMBERED.exec(names[0]);
-    return { range: m ? [Number(m[2]), Number(m[2])] : [1001, 1001] };
+    return m ? { range: [Number(m[2]), Number(m[2])], pad: m[2].length } : { range: [1001, 1001], pad: 4 };
   }
   // loop: NOT-WORTH — the folder's frame names
-  if (!sequences.length && names.every((n) => !NUMBERED.test(n))) return { range: [1001, 1000 + names.length] };
+  if (!sequences.length && names.every((n) => !NUMBERED.test(n))) return { range: [1001, 1000 + names.length], pad: 4 };
   // loop: NOT-WORTH — the few sequences named
   const what = [...sequences.map((s) => `${s.pattern} ${s.range}`), ...singles.slice(0, 3)];
   const more = sequences.length + singles.length - what.length;
