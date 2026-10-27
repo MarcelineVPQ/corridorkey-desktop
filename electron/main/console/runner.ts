@@ -19,6 +19,7 @@ import { commandHelp, findLines, overview } from "./help";
 import type { AuditLog, History } from "./logs";
 import { checkWrite, expandHome, resolveReal, type PathDeps } from "./paths";
 import { groupSequences } from "../../../src/shared/console/sequences";
+import { WRITE_FOLDERS_MAX } from "../settings";
 import { fileSizeText } from "../../../src/shared/units";
 
 /** Lines a block keeps (the newest); a long render's log can't grow the page or the pushes without bound. */
@@ -69,8 +70,14 @@ export interface ConsoleDeps {
   cliTemp: () => string;
   /** --models / --ort: only what the Engine page lists (a library is code: never one the page names freely) */
   runtimeAllowed: (what: "models" | "ort", path: string) => boolean;
-  /** the folders the Console may write to */
+  /** the folders the Console may write to (the allowed ones among them) */
   writeRoots: () => string[];
+  /** the folders allowed with `allow` (settings.consoleWriteFolders) */
+  allowed: () => readonly string[];
+  /** saves them (index.ts: settings, persisted) */
+  setAllowed: (folders: string[]) => void;
+  /** `allow`'s native confirmation, naming the folder; true: confirmed */
+  confirmAllow: (folder: string) => Promise<boolean>;
   /** take the graphics card for a job: null when taken, else why not (the queue runs) */
   takeGpu: () => string | null;
   releaseGpu: () => void;
@@ -278,6 +285,8 @@ export class Console {
       }
       case "dir":
         return now(await this.dir(b, pos("folder")[0], p));
+      case "allow":
+        return now(await this.allow(b, pos("folder")[0]));
       case "version":
         return now(this.finish(b, "done", `CorridorKey ${this.d.version} (the app and its corridorkey command line: one version)`));
       case "cls":
@@ -314,6 +323,45 @@ export class Console {
     return this.finish(b, "done", dir);
   }
 
+  /**
+   * allow <folder>: the Console may write there from now on (across restarts), once the native confirmation says yes
+   * and the audit log has it; a folder it may already write to needs none. allow alone: the folders allowed.
+   */
+  private async allow(b: ConsoleBlock, folder: string | undefined): Promise<ConsoleBlock> {
+    const list = this.d.allowed();
+    if (folder === undefined) {
+      if (!list.length) return this.finish(b, "done", "No folder allowed yet: allow <folder> lets the Console write in one (after you confirm).");
+      // loop: NOT-WORTH — ≤ 100 folders
+      return this.finish(b, "done", "The Console may also write in (App settings → Console removes them):", ...list.map((f) => `  ${f}`));
+    }
+    let dir: string;
+    try {
+      dir = await resolveReal(folder, this.cwd, this.d.paths);
+      // loop: NOT-WORTH — one async stat per allow
+      if (!(await this.d.fs.stat(dir)).isDirectory()) return this.finish(b, "failed", `${dir} isn't a folder: allow takes a folder (it covers every folder inside it).`);
+    } catch (e) {
+      // error: SHOWN — the block says why
+      return this.finish(b, "failed", `Can't allow ${folder}: ${(e as Error).message}`);
+    }
+    if ((await checkWrite(dir, this.cwd, this.d.writeRoots(), this.d.paths)).ok) return this.finish(b, "done", `The Console may already write in ${dir}.`);
+    if (list.length >= WRITE_FOLDERS_MAX) return this.finish(b, "refused", `${WRITE_FOLDERS_MAX} folders are allowed already: remove one in App settings → Console first.`);
+    if (!(await this.d.confirmAllow(visible(dir)))) return this.finish(b, "refused", "Not allowed: the confirmation was cancelled.");
+    if (!(await this.d.audit.append({ event: "allowed", targets: [dir] }))) return this.finish(b, "refused", "Not allowed: the audit log couldn't record it (see the app's log for why).");
+    this.d.setAllowed([...list, dir]);
+    return this.finish(b, "done", `The Console may now write in ${dir} and every folder inside it (App settings → Console lists it and removes it).`);
+  }
+
+  /** App settings → Console's Remove: the folder is no longer writable (no confirmation: it only narrows), audited. */
+  async disallow(folder: string): Promise<boolean> {
+    const list = this.d.allowed();
+    if (!list.includes(folder)) return false;
+    // loop: NOT-WORTH — ≤ 100 folders
+    this.d.setAllowed(list.filter((f) => f !== folder));
+    // loop: NOT-WORTH — one async append per removal [bounded: a local file write]
+    await this.d.audit.append({ event: "removed", targets: [folder] });
+    return true;
+  }
+
   private async dir(b: ConsoleBlock, folder: string | undefined, p: Parsed): Promise<ConsoleBlock> {
     // loop: NOT-WORTH — the line's few options
     const has = (id: string) => p.options.some((o) => o.arg.id === id);
@@ -348,6 +396,7 @@ export class Console {
     // a sequence is one row (lsseq: sh010_plate.####.exr  1001-1100, its gaps), unless -f asks for the frames
     // loop: NOT-WORTH — one folder's names
     const grouped = has("frames") ? { sequences: [], singles: names.map((n) => n.name) } : groupSequences(names.filter((n) => !n.isDirectory()).map((n) => n.name));
+    // loop: NOT-WORTH — as above
     const inSequence = new Set(grouped.sequences.flatMap((q) => q.names));
     // loop: NOT-WORTH — one folder's names
     const rows = [...grouped.sequences.map((q) => ({ name: q.pattern, seq: q })), ...names.filter((n) => !inSequence.has(n.name)).map((n) => ({ name: n.name, seq: null, dirent: n }))];

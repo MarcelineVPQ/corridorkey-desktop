@@ -31,7 +31,17 @@ export function loadSettings(file: string): Settings {
     trtSizes: sanitizeTrtSizes(saved.trtSizes),
     // an absolute folder only (anything else: the system's cache folder)
     cacheRoot: typeof saved.cacheRoot === "string" && isAbsolute(saved.cacheRoot) ? saved.cacheRoot : null,
+    consoleWriteFolders: writeFolders(saved.consoleWriteFolders),
   };
+}
+
+/** The Console's allowed folders as saved: absolute paths only, each once, at most WRITE_FOLDERS_MAX (a hand-edited
+ * file can't widen the scope with a relative path or a non-string). */
+export const WRITE_FOLDERS_MAX = 100;
+function writeFolders(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  // loop: NOT-WORTH — ≤ a hundred folders, once at start
+  return [...new Set(v.filter((p): p is string => typeof p === "string" && p !== "" && !p.includes("\0") && isAbsolute(p)))].slice(0, WRITE_FOLDERS_MAX);
 }
 
 /** The five networks the Rust engine runs (engine-rs runtime.rs PIECES). */

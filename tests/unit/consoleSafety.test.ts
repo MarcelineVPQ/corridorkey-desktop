@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { checkWrite, expandHome, isInside, realPathDeps, resolveReal, type PathDeps } from "../../electron/main/console/paths";
+import { allowLine, checkWrite, expandHome, isInside, realPathDeps, resolveReal, type PathDeps } from "../../electron/main/console/paths";
 import { dropOnLockAndSleep, Elevation, ELEVATION_CAP_MS, ELEVATION_TTL_MS } from "../../electron/main/console/elevation";
 import { AuditLog, History } from "../../electron/main/console/logs";
 
@@ -48,6 +48,18 @@ describe("path policy (real files)", () => {
   it("says when no folder is chosen yet", async () => {
     const r = await checkWrite("x", out, [], real);
     expect(!r.ok && r.reason).toMatch(/none is chosen yet/);
+  });
+
+  it("ends every refusal with the allow line to type (SME review M1)", async () => {
+    // a file: its folder; a folder typed with a slash: itself; a missing tail: the nearest folder that exists
+    const file = await checkWrite(join(elsewhere, "r.json"), out, [out], real);
+    expect(!file.ok && file.reason.endsWith(`type: allow "${elsewhere}"`)).toBe(true);
+    const typedDir = await checkWrite(`${elsewhere}/`, out, [out], real);
+    expect(!typedDir.ok && typedDir.reason.endsWith(`allow "${elsewhere}"`)).toBe(true);
+    const missing = await checkWrite(join(elsewhere, "a", "b", "k.####.exr"), out, [], real);
+    expect(!missing.ok && missing.reason.endsWith(`allow "${elsewhere}"`)).toBe(true);
+    expect(allowLine('/m/a "b"\\c', "linux")).toBe('allow "/m/a \\"b\\"\\\\c"');
+    expect(allowLine("D:\\show", "win32")).toBe('allow "D:\\show"');
   });
 
   it("resolves a missing path through its nearest existing parent", async () => {

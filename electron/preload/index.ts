@@ -53,6 +53,7 @@ const api: CorridorKeyApi = {
   consoleComplete: (line, cursor) => ipcRenderer.invoke(IPC.consoleComplete, line, cursor),
   consoleHistory: (query) => ipcRenderer.invoke(IPC.consoleHistory, query),
   consoleElevationDrop: () => ipcRenderer.invoke(IPC.consoleElevationDrop),
+  consoleDisallow: (folder) => ipcRenderer.invoke(IPC.consoleDisallow, folder),
   onConsoleBlocks: (listener) => {
     const handler = (_e: IpcRendererEvent, blocks: ConsoleBlock[]) => listener(blocks);
     // lifetime: OK — removed by the unsubscribe it returns

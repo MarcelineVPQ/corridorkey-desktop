@@ -323,6 +323,9 @@ export interface Settings {
   // the cache folder's parent chosen in App settings, Storage (the app keeps its own folder inside it); null = the
   // system's cache folder (platform.ts appDirs), backlog row 44
   cacheRoot: string | null;
+  // the folders the Console may also write to (its `allow` command, after a confirmation; App settings, Console
+  // removes them), absolute; docs/CONSOLE.md "File scope"
+  consoleWriteFolders: string[];
 }
 
 // The app's own updates (electron/main/updater). null feed = no release
@@ -669,6 +672,8 @@ export interface CorridorKeyApi {
   consoleHistory(query: string): Promise<string[]>;
   // sudo -k from the panel: elevation dropped now
   consoleElevationDrop(): Promise<void>;
+  // App settings → Console: the Console may no longer write in this allowed folder (false: it wasn't one)
+  consoleDisallow(folder: string): Promise<boolean>;
   // block updates (a running command's output and progress), at most 10 a second, while the window is shown
   onConsoleBlocks(listener: (blocks: ConsoleBlock[]) => void): () => void;
 }

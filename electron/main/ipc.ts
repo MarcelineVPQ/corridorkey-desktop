@@ -42,5 +42,6 @@ export const IPC = {
   consoleComplete: "ck:console-complete",
   consoleHistory: "ck:console-history",
   consoleElevationDrop: "ck:console-elevation-drop",
+  consoleDisallow: "ck:console-disallow",
   consoleBlocks: "ck:console-blocks",
 } as const;

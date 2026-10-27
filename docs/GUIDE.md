@@ -63,15 +63,17 @@ App settings → Storage lists what the app keeps on this PC, each with its size
 
 The **Console** (its own icon on the rail) is a command line inside the app for people who live in one: the farm CLI's
 `render`, `verify`, `prepare` and `info` with the same flags, output and exit codes, plus `help`, `apropos`, `cd`, `pwd`,
-`dir` / `ls`, `cls`, `history`, `version`, `run` (a `.ckcmd` script of Console lines) and `sudo`. Every command and flag comes
+`dir` / `ls`, `allow`, `cls`, `history`, `version`, `run` (a `.ckcmd` script of Console lines) and `sudo`. Every command and flag comes
 from the `corridorkey` CLI's own definitions, so the Console and the farm never differ. `help` lists the commands,
 The shell reflexes work: `ls -la`, `ls -tr`, `dir /o:-d`, `cd -`; `dir` shows a frame sequence as one row with its range
 and gaps (`dir -f` lists the frames). `help render` or `render ?` explains one with examples, `help -k overwrite` (or `apropos overwrite`) searches them.
 
 **Safety.** It is not a system shell: only its own commands, each one parsed and checked (no variables, pipes, globs
 or other programs). It **reads anywhere** you can, and **writes only into the folders you chose**: the results folder
-(App settings), the cache folder, and the queued clips' results folders; anything else is refused with the reason,
-before anything runs. A command that **replaces files** (`render … --overwrite`, and `render … --skip-existing`, which
+(App settings), the cache folder, the queued clips' results folders, and the folders you **allow**; anything else is
+refused with the reason and the line that allows it (`allow "/mnt/show/sq01"`), before anything runs. `allow <folder>`
+asks you to confirm, then the Console may write in that folder and every folder inside it, also after a restart;
+`allow` alone lists them, and **App settings → Console** removes each one. A command that **replaces files** (`render … --overwrite`, and `render … --skip-existing`, which
 keys the whole set again unless every frame is already there and whole) runs only as `sudo render …`: a dialog shows
 the line as you typed it, the command as it runs (each word quoted) and how many files at the run's names are there
 now; confirmed, the Console stays elevated for 5 minutes (each

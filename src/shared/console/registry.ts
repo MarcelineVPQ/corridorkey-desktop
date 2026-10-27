@@ -212,6 +212,13 @@ const BUILTINS: ConsoleCommand[] = [
     ["dir", "ls plates", "ls -la", "ls -tr", "dir /o:-d"],
     ["ls"],
   ),
+  builtin(
+    "allow",
+    "let the Console write in a folder (and every folder inside it), after you confirm; none: the folders allowed",
+    [arg({ id: "folder", kind: "path", positional: true, valueName: "FOLDER", help: "the folder (App settings → Console removes it again)" })],
+    ["allow /mnt/show/sq01", "allow"],
+    ["trust"],
+  ),
   builtin("cls", "clear the screen", [], ["cls"], ["clear"]),
   builtin("version", "the app's version, which is its corridorkey command line's (also corridorkey --version)", [], ["version", "corridorkey --version"]),
   builtin(

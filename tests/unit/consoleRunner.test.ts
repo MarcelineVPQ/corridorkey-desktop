@@ -66,6 +66,9 @@ let t: number;
 let blocks: Map<number, ConsoleBlock>;
 let cli: string | null;
 let runtimeOk: boolean;
+let allowedFolders: string[];
+let allowAsked: string[];
+let allowAnswer: boolean;
 
 function make(over: Partial<ConsoleDeps> = {}, files = mkdtempSync(join(root, "user-"))) {
   const deps: ConsoleDeps = {
@@ -82,7 +85,10 @@ function make(over: Partial<ConsoleDeps> = {}, files = mkdtempSync(join(root, "u
     cliEnv: () => ({ CK_TEST: "1" }),
     cliTemp: () => join(out, ".console-temp"),
     runtimeAllowed: (_w, p) => runtimeOk || p === "/models/listed",
-    writeRoots: () => [out],
+    writeRoots: () => [out, ...allowedFolders],
+    allowed: () => allowedFolders,
+    setAllowed: (f) => void (allowedFolders = f),
+    confirmAllow: async (f) => (allowAsked.push(f), allowAnswer),
     takeGpu: () => {
       if (gpuRefusal) return gpuRefusal;
       gpuTaken++;
@@ -112,6 +118,9 @@ beforeEach(() => {
   spawned = [];
   confirms = [];
   confirmAnswer = true;
+  allowedFolders = [];
+  allowAsked = [];
+  allowAnswer = true;
   gpuTaken = 0;
   gpuReleased = 0;
   gpuRefusal = null;
@@ -219,6 +228,44 @@ describe("corridorkey from the Console", () => {
       expect(b.lines.map((x) => x.text).join(" "), l).toMatch(/outside the folders the Console may write to/);
     }
     expect(spawned).toEqual([]);
+  });
+
+  it("SME M1: a refusal ends with the exact allow line; allow asks, remembers, audits, and the write then runs", async () => {
+    const { c, files } = make();
+    const show = join(elsewhere, "show");
+    mkdirSync(join(show, "sq01"), { recursive: true });
+    const refused = await c.run(`render shot.mov -o ${join(show, "sq01", "v003")}/key.####.exr`);
+    expect(refused.state).toBe("refused");
+    // the nearest folder that exists above the missing v003/
+    expect(refused.lines[0].text.endsWith(`type: allow "${join(show, "sq01")}"`)).toBe(true);
+    // cancelled: nothing allowed, nothing audited
+    allowAnswer = false;
+    expect((await c.run(`allow "${show}"`)).state).toBe("refused");
+    expect([allowAsked, allowedFolders]).toEqual([[show], []]);
+    allowAnswer = true;
+    const ok = await c.run(`trust ${show}`);
+    expect([ok.state, allowedFolders]).toEqual(["done", [show]]);
+    expect(JSON.parse(readFileSync(join(files, "console-audit.jsonl"), "utf8").trim())).toMatchObject({ event: "allowed", targets: [show] });
+    // a folder inside it: no second dialog, nothing added
+    expect((await c.run(`allow ${join(show, "sq01")}`)).lines[0].text).toMatch(/may already write/);
+    expect(allowAsked).toHaveLength(2);
+    expect((await c.run("allow")).lines.map((l) => l.text)).toEqual(["The Console may also write in (App settings → Console removes them):", `  ${show}`]);
+    await c.run(`render shot.mov -o ${join(show, "sq01", "v003")}/key.####.exr`);
+    expect(spawned).toHaveLength(1);
+    await finish(spawned[0].child, [], 0);
+    // removed (App settings): no confirmation, audited, and the write is refused again
+    expect(await c.disallow(show)).toBe(true);
+    expect(await c.disallow(show)).toBe(false);
+    expect(allowedFolders).toEqual([]);
+    expect(readFileSync(join(files, "console-audit.jsonl"), "utf8")).toMatch(/"event":"removed"/);
+    expect((await c.run(`render shot.mov -o ${join(show, "sq01")}/k.####.exr`)).state).toBe("refused");
+  });
+
+  it("SME M1: allow takes only a folder that exists", async () => {
+    const { c } = make();
+    expect((await c.run(`allow "${join(shots, "shot.mov")}"`)).lines[0].text).toMatch(/isn't a folder/);
+    expect((await c.run(`allow ${join(elsewhere, "nope")}`)).state).toBe("failed");
+    expect(allowAsked).toEqual([]);
   });
 
   it("checks a --job file's own output folder", async () => {

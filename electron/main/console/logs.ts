@@ -1,6 +1,6 @@
 // The Console's two files in userData (docs/CONSOLE.md):
-//   console-audit.jsonl    append-only: every elevation (granted, refused, dropped) and every elevated command (its
-//                          argv, the resolved targets, its exit). Only ever opened to append (flag "a"); never
+//   console-audit.jsonl    append-only: every elevation (granted, refused, dropped), every elevated command (its
+//                          argv, the resolved targets, its exit) and every write folder allowed or removed. Only ever opened to append (flag "a"); never
 //                          rewritten, truncated or pruned by the app.
 //   console-history.jsonl  the lines typed, per user, across restarts: the newest HISTORY_CAP, consecutive
 //                          duplicates kept once; compacted (temp file + rename) when it grows past the cap by a tenth.
@@ -13,7 +13,8 @@ const AUDIT_TAIL_BYTES = 256 * 1024;
 
 export interface AuditEntry {
   time: string;
-  event: "granted" | "refused" | "dropped" | "run" | "exit";
+  /** allowed / removed: a folder added to (after its confirmation) or taken from the Console's write folders */
+  event: "granted" | "refused" | "dropped" | "run" | "exit" | "allowed" | "removed";
   argv?: string[];
   targets?: string[];
   exit?: number | null;

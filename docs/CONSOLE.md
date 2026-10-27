@@ -19,7 +19,7 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   safety") are marked destructive, each argument carries the CLI's own `conflicts_with` (the parser marks `-F` with
   `-s`/`-e`, `-q` with `-v`, `--overwrite` with `--skip-existing`, `-i` with INPUT before Enter), `render`'s `-o`, `--report`, `--temp` (and `verify`'s and `prepare`'s `--report`) as written paths.
 - **Commands.** `help [command]` (also `command ?`), `help -k <term>` / `apropos <term>` (search the help; `find` is
-  kept free for a file search and says so), `cd` (`cd -`: the folder before), `pwd`, `dir` / `ls` (`-l -a -t -S -r -1`,
+  kept free for a file search and says so), `cd` (`cd -`: the folder before), `pwd`, `allow [folder]` (File scope, below), `dir` / `ls` (`-l -a -t -S -r -1`,
   combined like `-la`, and DOS's `/w /b /a /o:d` on every system; dot files only with `-a`; a frame sequence is one row,
   `sh010_plate.####.exr  1001-1100 · 96 frames · missing 1047`, `-f` lists its frames: `src/shared/console/sequences.ts`,
   which Tab completion uses too: one candidate per sequence, never one per frame), `cls` / `clear`,
@@ -61,7 +61,14 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
 - **File scope: read anywhere, write only into chosen folders.** Reading (inputs, hints, `dir`, `cd`, Tab completion,
   scripts) goes wherever the user can read. A path a command writes to (`-o`, `--report`, `--temp`, a `--job` file's
   `output_dir` / `temp_dir`) must be inside the results folder (App settings), the cache folder (the chosen one and the
-  system's), or a queued clip's results folder. It is resolved with realpath first (symlinks and `..`; a path that
+  system's), a queued clip's results folder, or a folder allowed with `allow <folder>` (alias `trust`): a native
+  confirmation in the main process names the folder and says the Console may then write there and in every folder
+  inside it; confirmed, it is audited (`allowed`) and saved in settings (`consoleWriteFolders`: absolute paths only,
+  each once, at most 100, checked on load), and App settings → Console lists each with **Remove** (no confirmation and
+  no sudo: removing only narrows the scope; audited as `removed`). `allow` alone lists them. A folder the Console may
+  already write to needs no dialog; nothing adds one without it. Every "outside the folders the Console may write to"
+  refusal ends with the exact line to type, `allow "<folder>"` (the folder typed with a trailing separator, else the
+  nearest existing folder above the path). It is resolved with realpath first (symlinks and `..`; a path that
   doesn't exist yet through its nearest existing parent; without case on Windows and macOS), and the resolved path is
   what corridorkey is given. Anything else is refused with the reason. Only `--ocio`'s `ocio://` names pass unchecked
   (they name a built-in config); any other value is a path (`C://…` is one on Windows). A `--job` file is read and
@@ -81,8 +88,8 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   only, never on disk. A line the file scope refuses is refused before any dialog. (A typed folder name for bulk
   deletes comes with the first command that deletes in bulk; none does yet. A native message box has no text field,
   so it needs a dialog of the main process's own.)
-- **Audit log** (`userData/console-audit.jsonl`): every elevation granted, refused or dropped (and why), and every
-  elevated command's argv, resolved targets and exit code. The `granted` and `run` entries are written before the
+- **Audit log** (`userData/console-audit.jsonl`): every elevation granted, refused or dropped (and why), every
+  elevated command's argv, resolved targets and exit code, and every write folder allowed or removed. The `granted` and `run` entries are written before the
   command runs; when either can't be written the command is refused (never elevated unlogged). Only ever opened to append; the app never rewrites or
   prunes it. `history --audit` shows its end.
 

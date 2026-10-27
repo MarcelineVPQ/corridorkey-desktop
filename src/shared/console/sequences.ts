@@ -23,6 +23,7 @@ const GAPS_SHOWN = 8;
 
 /** 1001-1003, 1005, 1007-1008 (sorted, unique frames in). */
 export function frameRanges(frames: readonly number[]): string {
+  // loop: NOT-WORTH — one sequence's runs, per listing row
   return runs(frames)
     .map(([a, b]) => (a === b ? `${a}` : `${a}-${b}`))
     .join(", ");

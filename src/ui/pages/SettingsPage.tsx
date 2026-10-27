@@ -1,9 +1,9 @@
 // App settings: this PC's choices, saved as you change them (no save bar).
 // Main view: what they add up to (readouts). Panel: Appearance, Results,
-// Updates, Storage (what the app keeps on disk, each folder removable). Every
+// Console (the folders it may also write in), Updates, Storage (what the app keeps on disk, each folder removable). Every
 // control changes something you can see (rule 4).
 import { useEffect } from "react";
-import { Download, FolderInput, FolderOpen, FolderOutput, HardDrive, MemoryStick, Palette, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import { Download, FolderInput, FolderOpen, FolderOutput, HardDrive, MemoryStick, Palette, RefreshCw, RotateCcw, SquareTerminal, Trash2, X } from "lucide-react";
 import type { Appearance, AppState, CacheInfo, UpdateState } from "../../shared/types";
 import { gibBytes, mbOrGbBytes } from "../../shared/units";
 import { VramLimitRow } from "../JobSettings";
@@ -35,6 +35,7 @@ export function SettingsPage(props: { state: AppState; panelShown: boolean; narr
         : "Your desktop's accent color"
       : "The desktop's colors couldn't be read; the built-in theme is used";
   const u = state.update;
+  const allowed = state.settings.consoleWriteFolders;
   // Storage is measured when this page opens (walking the folders), and again after a removal
   useEffect(() => void window.ck.measureStorage(), []);
   const storage = state.storage;
@@ -122,6 +123,29 @@ export function SettingsPage(props: { state: AppState; panelShown: boolean; narr
               )}
             </div>
           </Row>
+        )}
+      </Section>
+
+      <Section
+        id="console"
+        icon={SquareTerminal}
+        title="Console"
+        status={allowed.length ? `writes in ${allowed.length} more folder${allowed.length === 1 ? "" : "s"}` : "writes only in the results and cache folders"}
+      >
+        {() => (
+          <>
+            {/* loop: NOT-WORTH — ≤ 100 folders per render */}
+            {allowed.map((f) => (
+              <Row key={f} label="May write in" hint={<PathText path={f} />}>
+                <button type="button" className="btn small" onClick={() => void window.ck.consoleDisallow(f)}>
+                  <X size={14} /> Remove
+                </button>
+              </Row>
+            ))}
+            <p className="hint-text">
+              {allowed.length ? "Removing takes effect at once; the files there stay." : "None yet."} The Console&apos;s <code>allow &lt;folder&gt;</code> adds one, after you confirm it.
+            </p>
+          </>
         )}
       </Section>
 

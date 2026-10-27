@@ -323,6 +323,21 @@ async function confirmElevation(req: ElevationRequest): Promise<boolean> {
   });
   return r.response === 0;
 }
+/** allow <folder>: the native confirmation names the folder and what the Console may then do there. */
+async function confirmAllow(folder: string): Promise<boolean> {
+  if (!mainWindow) return false;
+  const r = await dialog.showMessageBox(mainWindow, {
+    type: "question",
+    buttons: ["Allow", "Cancel"],
+    defaultId: 1,
+    cancelId: 1,
+    message: "Let the Console write in this folder?",
+    detail:
+      `${folder}\n\nThe Console may then write there and in every folder inside it (render's outputs, reports and temporary files), ` +
+      "from now on, also after a restart. Replacing files that are already there still needs sudo. App settings → Console lists it and removes it.",
+  });
+  return r.response === 0;
+}
 const appConsole = new Console({
   registry: makeRegistry(),
   paths: realPathDeps(homedir()),
@@ -361,7 +376,14 @@ const appConsole = new Console({
     return [p[what], ...engineFiles[what].map((f) => f.path)].some((x) => !!x && resolve(x) === path);
   },
   // loop: NOT-WORTH — the queue's jobs, once per written path checked
-  writeRoots: () => [settings.outputRoot, cacheDir, appFolders.cache, ...queue.jobs.map((j) => j.outputDir)].filter((x): x is string => !!x),
+  writeRoots: () => [settings.outputRoot, cacheDir, appFolders.cache, ...settings.consoleWriteFolders, ...queue.jobs.map((j) => j.outputDir)].filter((x): x is string => !!x),
+  allowed: () => settings.consoleWriteFolders,
+  setAllowed: (folders) => {
+    settings = { ...settings, consoleWriteFolders: folders };
+    persist();
+    scheduleSend();
+  },
+  confirmAllow,
   takeGpu: () => {
     if (queue.running || queue.engineEnding) return "The queue is keying on the graphics card: wait for it, or stop it, then run this.";
     if (cacheMoving) return "The cache folder is moving: wait for it, then run this.";
@@ -1068,6 +1090,11 @@ function registerIpc(): void {
   });
   ipcMain.handle(IPC.consoleElevationDrop, (e) => {
     if (page(e)) appConsole.dropElevation("dropped from the Console's panel");
+  });
+  // App settings → Console's Remove: only a folder in the list (it narrows the scope: no confirmation)
+  ipcMain.handle(IPC.consoleDisallow, (e, folderIn: unknown) => {
+    const folder = pathArg(folderIn);
+    return page(e) && folder !== null ? appConsole.disallow(folder) : false;
   });
 }
 

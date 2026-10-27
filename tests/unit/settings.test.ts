@@ -46,6 +46,21 @@ describe("Rust engine setup", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("keeps only absolute, distinct Console write folders (SME review M1: validated on load)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ck-settings-"));
+    try {
+      const f = join(dir, "settings.json");
+      writeFileSync(f, JSON.stringify({ consoleWriteFolders: ["/mnt/show", "relative/x", 7, "", "/mnt/show", null, "/a\u0000b", "/srv/sh020"] }));
+      expect(loadSettings(f).consoleWriteFolders).toEqual(["/mnt/show", "/srv/sh020"]);
+      writeFileSync(f, JSON.stringify({ consoleWriteFolders: "/mnt/show" }));
+      expect(loadSettings(f).consoleWriteFolders).toEqual([]);
+      writeFileSync(f, JSON.stringify({ consoleWriteFolders: Array.from({ length: 150 }, (_, i) => `/f${i}`) }));
+      expect(loadSettings(f).consoleWriteFolders).toHaveLength(100);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("loads a settings file that still names the removed PyTorch engine's checkout, and drops the key", () => {
     const dir = mkdtempSync(join(tmpdir(), "ck-settings-"));
     try {

@@ -1,5 +1,6 @@
 // The Console's file scope (docs/CONSOLE.md): read anywhere the user can read; write and delete only inside the folders
-// the user chose (the results folder, the cache folder, each queued clip's results folder). A path is resolved with
+// the user chose (the results folder, the cache folder, each queued clip's results folder, the folders allowed with
+// `allow`). A path is resolved with
 // realpath before any check (symlinks and `..` resolved; a path that doesn't exist yet resolves through its nearest
 // existing parent), and the resolved path is what the command is then given, so what was checked is what is used.
 // The platform is a parameter so Windows' rules (case-insensitive, backslashes, drive letters) are tested on Linux.
@@ -72,11 +73,38 @@ export async function checkWrite(p: string, cwd: string, roots: readonly string[
   for (const r of roots) real.push(await resolveReal(r, r, d).catch(() => r));
   // loop: NOT-WORTH — as above
   if (real.some((r) => isInside(path, r, d.platform))) return { ok: true, path };
+  const allow = `to let the Console write there, type: ${allowLine(await folderFor(p, path, d), d.platform)}`;
   return {
     ok: false,
     path,
     reason: roots.length
-      ? `${path} is outside the folders the Console may write to: ${[...new Set(real)].join(", ")} (the results folder, the cache folder, the queued clips' results folders)`
-      : `${path}: the Console writes only into chosen folders, and none is chosen yet (choose a results folder in App settings, or add the clip to the queue)`,
+      ? `${path} is outside the folders the Console may write to: ${[...new Set(real)].join(", ")} (the results folder, the cache folder, the queued clips' results folders, the folders you allowed); ${allow}`
+      : `${path}: the Console writes only into chosen folders, and none is chosen yet; ${allow}`,
   };
+}
+
+/**
+ * The folder `allow` would be offered for a refused write: the path itself when it was typed as a folder (ends with a
+ * separator), else the nearest folder that exists above it (a missing `v003/` is covered by its parent).
+ */
+async function folderFor(typed: string, path: string, d: PathDeps): Promise<string> {
+  const a = api(d.platform);
+  if (/[/\\]$/.test(typed)) return path;
+  let cur = a.dirname(path);
+  // loop: NOT-WORTH — one async realpath per missing level of one refused path [bounded: the path's depth]
+  for (;;) {
+    try {
+      return await d.realpath(cur);
+    } catch {
+      // error: NOT-WORTH — not there (yet): its parent is the folder offered
+      const parent = a.dirname(cur);
+      if (parent === cur) return cur;
+      cur = parent;
+    }
+  }
+}
+
+/** The exact line that allows `folder` (always quoted: it is copied as is). */
+export function allowLine(folder: string, platform: NodeJS.Platform): string {
+  return `allow ${platform === "win32" ? `"${folder}"` : `"${folder.replace(/[\\"]/g, "\\$&")}"`}`;
 }
