@@ -26,7 +26,7 @@ missing there).
   safety") are marked destructive, each argument carries the CLI's own `conflicts_with` (the parser marks `-F` with
   `-s`/`-e`, `-q` with `-v`, `--overwrite` with `--skip-existing`, `-i` with INPUT before Enter), `render`'s `-o`, `--report`, `--temp` (and `verify`'s and `prepare`'s `--report`) as written paths.
 - **Commands.** `help [command]` (also `command ?` and `man <command>`), `help -k <term>` / `apropos <term>` (search the help; `find` is
-  kept free for a file search and says so), `cd` (`cd -`: the folder before), `pwd`, `allow [folder]` (File scope, below), `open [path]` / `start` (the file
+  kept free for a file search and says so), `cd` (`cd -`: the folder before), `pwd`, `allow [folder]` and `allow-server [server]` (File scope, below), `open [path]` / `start` (the file
   manager shows it, as Show in folder does: `shell.showItemInFolder`, which never opens or runs a file), `dir` / `ls` (`-l -a -t -S -r -1`,
   combined like `-la`, `-h` taken as GNU's human sizes, which it always shows (`ls -lh`, `-ltrh`; `-h` alone is help), and
   DOS's `/w /b /a /o:d` on every system; dot files only with `-a`; a file-name pattern typed unquoted, `ls *.exr`,
@@ -139,10 +139,16 @@ missing there).
   every part in order with the last one in its last folder's name, still there, and not the current one; it prints
   where it went; `j` alone prints the ranking. `pushd <folder>` goes there and remembers the folder before, `pushd`
   alone swaps with the newest remembered, `popd` goes back, `dirs` lists them (0 is the current folder; at most 50,
-  this session only); each prints the list, as bash does. On Windows `open`, `cd`, `j` and bookmarks take UNC paths
-  (`\\host\share`) as any other folder: a stat there, or Show in folder, makes Windows send the user's NTLM
-  credentials to that host, so a bookmark or a history line's folder edited in the user's files to name another host
-  would do it on `cd @name` or `j` (P4 senior review 2026-10-27 N9; low: it needs write access to those files).
+  this session only); each prints the list, as bash does. On Windows a network path (`\\host\share`, `//host/…`,
+  `\\?\UNC\host\…`; a mapped drive too if Windows' realpath names its server: not yet tried) is opened only for a server allowed this
+  session: any other command that would read or write there (`cd`, `dir`, `open`, `j`, `cat`, Tab, a path given to
+  corridorkey, a `--job` file's input, corridorkey started in such a folder) is refused before anything opens it,
+  with the line to type, `allow-server <host>`. Windows sends the user's NTLM sign-in to every server it opens, so a
+  bookmark or a history line's folder edited to name another host gets a refusal, not a sign-in (P4 senior review
+  2026-10-27 N9; backlog row 139, Marcy 2026-10-27). `allow-server <host>` (case-insensitive; `allow-server` alone
+  lists them) lasts until the app quits, is never saved, and the Session panel lists the servers allowed
+  (`paths.ts` `uncServer`, the runner's file system wrapper; `consoleSafety.test.ts`, `consoleRunner.test.ts`).
+  On Linux and macOS a mounted share is a folder like any other, and `allow-server` says so.
 - **Variables** (`src/shared/console/vars.ts`; SME review item 6). `set name=value` (several at once; a name alone
   prints it; `set` alone lists them and the Console's own), `unset name…`, `echo …` prints its words. `${name}` is the
   only syntax, braces required: in this world `$F`, `$F4`, `$HIP`, `%04d`, `####`, `@@@@` and `!` are parts of file
@@ -282,7 +288,14 @@ inner loop's words);
   already write to needs no dialog; nothing in the app adds one without it. The settings file itself is trusted as
   the user's own: an allowed folder loaded from it is checked for shape on load (absolute, no NUL, at most 100), not
   resolved or confirmed, so whoever can edit the user's settings file can widen the scope (P4 senior review
-  2026-10-27 N6). `allow /`, `allow ~` or a system folder take the same one confirmation as any other folder. Every "outside the folders the Console may write to"
+  2026-10-27 N6). `allow` refuses a root (`/`, a drive's root, a share's root), the system's folders and every folder inside them,
+  after realpath (a link to `/` is refused too): on Linux /bin /boot /dev /etc /lib /lib32 /lib64 /libx32 /proc /root
+  /run /sbin /sys /usr /var (except /run/media, where removable drives are mounted), on macOS /System /Library /usr
+  /bin /sbin /dev /etc /var /private/etc /private/var, on Windows %SystemRoot%, %ProgramFiles%,
+  %ProgramFiles(x86)% and %ProgramData%, each also by its realpath. The home folder itself is allowed only after a
+  warning in the confirmation ("This lets the Console replace files anywhere in your home folder"); a folder inside
+  home is an ordinary one, also where home lives below a system folder (/var/home). Backlog row 136, Marcy 2026-10-27
+  (`paths.ts` `allowVerdict`, `systemFolders`). Every "outside the folders the Console may write to"
   refusal ends with the exact line to type, `allow "<folder>"` (the folder typed with a trailing separator, else the
   nearest existing folder above the path). It is resolved with realpath first (symlinks and `..`; a path that
   doesn't exist yet through its nearest existing parent; on Windows and macOS the names realpath returned compare
@@ -358,8 +371,10 @@ block rendered to markup) and the CLI's fallback (ck-cli `appinstall.rs` and `te
 The page (`consoleBlocks.test.ts`): the output is a plain region; one polite `role="status"` says each command's
 start and end (`announcement()`), never its streamed lines.
 
-The app sets no application menu, so Electron's default keeps Ctrl+R (reload), Ctrl+W (close) and Ctrl+Shift+I. In the
-input the editor handles Ctrl+R and Ctrl+W (with or without Shift) in every state of the line and calls
-`preventDefault` synchronously, which on Linux and Windows keeps them from the menu (`consoleEditor.test.ts`, senior
-review 2026-10-26 N12). Not yet checked in a real window: once, in `tools/isolated.sh`, Ctrl+R and Ctrl+W in the
-input, the page neither reloading nor closing. Ctrl+Shift+I isn't the editor's: it opens the developer tools.
+A shipped copy has no application menu on Linux and Windows and only the app and Edit menus on macOS
+(`electron/main/appMenu.ts`, `appMenu.test.ts`; backlog row 117, Marcy 2026-10-27), so no developer tools and none
+of Electron's default reload or close shortcuts. `npm run dev` keeps Electron's default menu, with Ctrl+R (reload),
+Ctrl+W (close) and Ctrl+Shift+I: there, in the input, the editor handles Ctrl+R and Ctrl+W (with or without Shift) in
+every state of the line and calls `preventDefault` synchronously, which on Linux and Windows keeps them from the menu
+(`consoleEditor.test.ts`, senior review 2026-10-26 N12). Not yet checked in a real window: once, in
+`tools/isolated.sh`, Ctrl+R and Ctrl+W in the input, the page neither reloading nor closing.

@@ -269,6 +269,12 @@ const BUILTINS: ConsoleCommand[] = [
     ["trust"],
   ),
   builtin(
+    "allow-server",
+    "Windows: let the Console open a network server's paths (\\\\server\\…) until the app quits; none: the servers allowed",
+    [arg({ id: "server", kind: "string", positional: true, valueName: "SERVER", help: "the server's name (nas for \\\\nas\\show)" })],
+    ["allow-server nas", "allow-server"],
+  ),
+  builtin(
     "open",
     "show a folder (or a file) in the file manager, as Show in folder does; it never opens or runs a file",
     [arg({ id: "path", kind: "path", positional: true, valueName: "PATH", help: "what to show (default: the current folder)" })],

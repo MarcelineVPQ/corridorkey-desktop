@@ -19,7 +19,7 @@ import { complete } from "./complete";
 import type { Elevation } from "./elevation";
 import { commandHelp, findLines, overview } from "./help";
 import type { AuditLog, History } from "./logs";
-import { answerWithin, checkWrite, expandHome, FS_ANSWER_MS, fsErrorText, nextVersion, resolveReal, type PathDeps } from "./paths";
+import { allowVerdict, answerWithin, checkWrite, expandHome, FS_ANSWER_MS, fsErrorText, nextVersion, resolveReal, serverNotAllowed, systemFolders, uncServer, type PathDeps } from "./paths";
 import { expandHistory, hasExpansion } from "../../../src/shared/console/expand";
 import { folderRange, frameToken, groupSequences, isFrameFile, sequenceOf, type Sequence } from "../../../src/shared/console/sequences";
 import { commands, globRegExp, isCompound, leavesQuoteOpen, parseProgram, type CmdNode, type List } from "../../../src/shared/console/script";
@@ -110,8 +110,8 @@ export interface ConsoleDeps {
   setVariables: (v: Record<string, string>) => void;
   /** open / start: the file manager shows the path (index.ts: shell.showItemInFolder; it never opens or runs a file) */
   showInFolder: (path: string) => void;
-  /** `allow`'s native confirmation, naming the folder; true: confirmed */
-  confirmAllow: (folder: string) => Promise<boolean>;
+  /** `allow`'s native confirmation, naming the folder (`home`: it is the home folder itself, said as a warning); true: confirmed */
+  confirmAllow: (folder: string, home: boolean) => Promise<boolean>;
   /**
    * take the graphics card for a job: null when taken, else why not (the queue runs); resolves once the engines it
    * stopped (the memory estimate's, the background TensorRT build's) have exited, so their memory is free
@@ -193,6 +193,8 @@ export class Console {
   private readonly opts: ParseOptions;
   /** set by shutdown(): from then on nothing spawns */
   private closing = false;
+  /** the network servers allowed this session (allow-server; Windows only, never saved) */
+  private readonly servers = new Set<string>();
 
   constructor(private readonly d: ConsoleDeps) {
     // every read of the file system answers in time, or says the drive or share didn't (senior review 2026-10-26 N11)
@@ -201,7 +203,29 @@ export class Console {
       <A extends unknown[], R>(f: (...a: A) => Promise<R>) =>
       (...a: A) =>
         answerWithin(f(...a), ms);
-    this.d = { ...d, fs: { ...d.fs, readdir: timed(d.fs.readdir), stat: timed(d.fs.stat), lstat: timed(d.fs.lstat) }, paths: { ...d.paths, realpath: timed(d.paths.realpath) } };
+    // and never opens a network server not allowed this session (backlog row 139): Windows would send it the user's sign-in
+    const own =
+      <A extends [string, ...unknown[]], R>(f: (...a: A) => Promise<R>) =>
+      (...a: A) => {
+        const server = this.notAllowed(a[0]);
+        return server ? Promise.reject(serverNotAllowed(server)) : f(...a);
+      };
+    this.d = {
+      ...d,
+      fs: {
+        ...d.fs,
+        readdir: own(timed(d.fs.readdir)),
+        stat: own(timed(d.fs.stat)),
+        lstat: own(timed(d.fs.lstat)),
+        readFile: own(d.fs.readFile),
+        readRange: own(d.fs.readRange),
+        mkdir: own(d.fs.mkdir),
+        writeFile: own(d.fs.writeFile),
+        writable: own(d.fs.writable),
+        freeBytes: own(d.fs.freeBytes),
+      },
+      paths: { ...d.paths, realpath: own(timed(d.paths.realpath)) },
+    };
     this.cwd = d.startDir;
     this.spawnFn = d.spawn ?? nodeSpawn;
     this.now = d.now ?? Date.now;
@@ -211,7 +235,13 @@ export class Console {
   }
 
   session(): ConsoleSession {
-    return { cwd: this.cwd, elevatedUntil: this.d.elevation.expiresAt, running: this.job?.block.line ?? null, cliFound: this.d.cli() !== null };
+    return { cwd: this.cwd, elevatedUntil: this.d.elevation.expiresAt, running: this.job?.block.line ?? null, cliFound: this.d.cli() !== null, servers: [...this.servers] };
+  }
+
+  /** The network server `p` (absolute) opens when it isn't allowed this session, else null (uncServer: Windows only). */
+  private notAllowed(p: string): string | null {
+    const server = uncServer(p, this.d.paths.platform);
+    return server !== null && !this.servers.has(server) ? server : null;
   }
 
   /**
@@ -579,6 +609,8 @@ export class Console {
       }
       case "allow":
         return now(await this.allow(b, pos("folder")[0]));
+      case "allow-server":
+        return now(this.allowServer(b, pos("server")[0]));
       case "version":
         return now(this.finish(b, "done", `CorridorKey ${this.d.version} (the app and its corridorkey command line: one version)`));
       case "cls":
@@ -695,12 +727,36 @@ export class Console {
       // error: SHOWN — the block says why
       return this.finish(b, "failed", `Can't allow ${folder}: ${fsErrorText(e, dir || folder)}. Tab completes a folder's name.`);
     }
+    // `/`, a drive's root and the system's folders: never (row 136); the home folder itself: a warning in the confirmation
+    const real = (p: string) => this.d.paths.realpath(p).catch(() => p);
+    const system = systemFolders(this.d.paths.platform, process.env);
+    // loop: NOT-WORTH — ≤ 15 system folders, one async realpath each, per allow
+    const verdict = allowVerdict(dir, await real(this.d.paths.home), [...system, ...(await Promise.all(system.map(real)))], this.d.paths.platform);
+    if (verdict === "refuse")
+      return this.finish(b, "refused", `${dir} is a drive's root or a system folder: the Console never writes there. Allow a folder of your own instead (a show or shot folder).`);
     if ((await checkWrite(dir, this.cwd, this.d.writeRoots(), this.d.paths)).ok) return this.finish(b, "done", `The Console may already write in ${dir}.`);
     if (list.length >= WRITE_FOLDERS_MAX) return this.finish(b, "refused", `${WRITE_FOLDERS_MAX} folders are allowed already: remove one in App settings → Console first.`);
-    if (!(await this.d.confirmAllow(visible(dir)))) return this.finish(b, "refused", "Not allowed: the confirmation was cancelled.");
+    if (!(await this.d.confirmAllow(visible(dir), verdict === "home"))) return this.finish(b, "refused", "Not allowed: the confirmation was cancelled.");
     if (!(await this.d.audit.append({ event: "allowed", targets: [dir] }))) return this.finish(b, "refused", "Not allowed: the audit log couldn't record it (see the app's log for why).");
     this.d.setAllowed([...list, dir]);
     return this.finish(b, "done", `The Console may now write in ${dir} and every folder inside it (App settings → Console lists it and removes it).`);
+  }
+
+  /**
+   * allow-server <server>: the Console may open \\server\… until the app quits (backlog row 139; never saved): Windows
+   * sends the user's sign-in to every server it opens, so a server is opened only after it is named. Alone: the list.
+   */
+  private allowServer(b: ConsoleBlock, server: string | undefined): ConsoleBlock {
+    if (this.d.paths.platform !== "win32") return this.finish(b, "refused", "allow-server is for Windows' network paths (\\\\server\\share); here a mounted share is a folder like any other.");
+    if (server === undefined) {
+      if (!this.servers.size) return this.finish(b, "done", "No network server allowed this session: allow-server <server> lets the Console open \\\\server\\… until the app quits.");
+      return this.finish(b, "done", `Allowed this session: ${[...this.servers].join(", ")}`);
+    }
+    const name = server.replace(/^[\\/]+/, "").toLowerCase();
+    if (!/^[a-z0-9._-]+$/.test(name)) return this.finish(b, "failed", `${server} isn't a server's name: allow-server takes the name alone (allow-server nas for \\\\nas\\show).`);
+    this.servers.add(name);
+    this.d.sessionChanged();
+    return this.finish(b, "done", `The Console may now open \\\\${name}\\… until the app quits (Windows sends your sign-in to it).`);
   }
 
   /** App settings → Console's Remove: the folder is no longer writable (no confirmation: it only narrows), audited. */
@@ -1762,8 +1818,13 @@ export class Console {
         targets.push(w.path);
         return w.path;
       }
+      // a path corridorkey reads: never on a network server not allowed this session (row 139)
+      const server = this.notAllowed(abs(v));
+      if (server) refusals.push(`${a.long ? `--${a.long}` : a.id}: ${fsErrorText(serverNotAllowed(server), v)}`);
       return expandHome(v, this.d.paths);
     };
+    const cwdServer = this.notAllowed(this.cwd);
+    if (cwdServer) refusals.push(`corridorkey would start in ${fsErrorText(serverNotAllowed(cwdServer), this.cwd)}`);
     // loop: NOT-WORTH — the line's options, one async realpath per written path
     for (const o of p.options) {
       const flag = o.arg.long ? `--${o.arg.long}` : `-${o.arg.short}`;
@@ -1905,6 +1966,8 @@ export class Console {
     }
     const fields = job && typeof job === "object" ? (job as { input?: unknown; output_dir?: unknown; temp_dir?: unknown }) : {};
     if (typeof fields.input === "string") seen.input = fields.input;
+    const server = typeof fields.input === "string" ? this.notAllowed(fields.input) : null;
+    if (server) refusals.push(`--job's input: ${fsErrorText(serverNotAllowed(server), fields.input as string)}`);
     const flags: string[] = [];
     // loop: NOT-WORTH — two fields, one async realpath each
     for (const [flag, v, key] of [

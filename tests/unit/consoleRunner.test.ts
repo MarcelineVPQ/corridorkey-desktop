@@ -347,6 +347,64 @@ describe("corridorkey from the Console", () => {
     expect(allowAsked).toEqual([]);
   });
 
+  it("row 136: allow refuses / and system folders (a link to / too), warns on the home folder itself, not on a folder inside it", async () => {
+    const asked: [string, boolean][] = [];
+    const { c } = make({ confirmAllow: async (f, home) => (asked.push([f, home]), true) });
+    const slash = join(elsewhere, "to-root");
+    symlinkSync("/", slash);
+    // loop: NOT-WORTH — four lines
+    for (const l of ["allow /", "allow /etc", "allow /usr/share", `allow ${slash}`]) {
+      const b = await c.run(l);
+      expect([b.state, b.lines[0].text], l).toEqual(["refused", expect.stringMatching(/a drive's root or a system folder/)]);
+    }
+    expect([asked, allowedFolders]).toEqual([[], []]);
+    // home (the tests' home is root): allowed after a confirmation that warns; a folder inside it: the plain one
+    expect((await c.run("allow ~")).state).toBe("done");
+    expect(asked).toEqual([[root, true]]);
+    allowedFolders = [];
+    const show = join(elsewhere, "show136");
+    mkdirSync(show);
+    expect((await c.run(`allow ${show}`)).state).toBe("done");
+    expect(asked[1]).toEqual([show, false]);
+  });
+
+  it("row 139: on Windows a network server is opened only after allow-server, this session only", async () => {
+    // the network paths the fake file system was asked about (a drive path answers as a folder, unrecorded)
+    const touched: string[] = [];
+    const seen = (p: string) => void (/^[\\/]{2}/.test(p) && touched.push(p));
+    const dirStat = async (p: string) => (seen(p), { isDirectory: () => true, isFile: () => false, size: 0 }) as unknown as import("node:fs").Stats;
+    const { c } = make({
+      paths: { realpath: async (p) => (seen(p), p), platform: "win32", home: "C:\\Users\\M" },
+      fs: { ...make().deps.fs, stat: dirStat, readdir: async (p) => (seen(p), [] as Dirent[]) },
+      startDir: "C:\\shots",
+      writeRoots: () => ["C:\\out"],
+    });
+    // refused before anything opens it: cd, dir, open, a read path given to corridorkey, //host and \\?\UNC\host too
+    // loop: NOT-WORTH — five lines
+    for (const l of ["cd \\\\nas\\show", "dir \\\\NAS\\show", "open //nas/show/a.exr", "cd \\\\?\\UNC\\nas\\show", "render \\\\nas\\show\\shot.mov -o C:\\out\\a"]) {
+      const b = await c.run(l);
+      expect([b.state === "done", b.lines.map((x) => x.text).join(" ")], l).toEqual([false, expect.stringMatching(/network server nas.*type: allow-server nas/)]);
+    }
+    expect([touched, spawned, c.session().servers]).toEqual([[], [], []]);
+    // a drive path is no server
+    expect((await c.run("cd D:\\plates")).state).toBe("done");
+    expect((await c.run("allow-server")).lines[0].text).toMatch(/No network server allowed/);
+    expect((await c.run("allow-server \\\\NAS")).state).toBe("done");
+    expect(c.session().servers).toEqual(["nas"]);
+    expect((await c.run("cd \\\\nas\\show")).state).toBe("done");
+    expect(touched).toContain("\\\\nas\\show");
+    // another server still asks
+    expect((await c.run("cd \\\\other\\show")).lines[0].text).toMatch(/allow-server other/);
+    // a fresh session (the app started again): nothing allowed
+    expect(make().c.session().servers).toEqual([]);
+  });
+
+  it("row 139: allow-server is Windows' alone", async () => {
+    const { c } = make();
+    expect((await c.run("allow-server nas")).state).toBe("refused");
+    expect(c.session().servers).toEqual([]);
+  });
+
   it("checks a --job file's own output folder", async () => {
     const { c } = make();
     const bad = await c.run(`render --job ${join(root, "job-out.json")}`);

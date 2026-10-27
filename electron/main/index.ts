@@ -1,6 +1,6 @@
 // CorridorKey desktop: main process. One window, one queue, one engine.
 import { execFile } from "node:child_process";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, net, powerMonitor, powerSaveBlocker, protocol, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net, powerMonitor, powerSaveBlocker, protocol, shell } from "electron";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
@@ -58,6 +58,7 @@ import {
 import { NOT_WHILE_BUSY } from "../../src/shared/texts";
 import type { DesktopPalette } from "../../src/ui/theme/palette";
 import { IPC } from "./ipc";
+import { appMenu } from "./appMenu";
 import { consoleLineArg, consoleLinesArg, cursorArg, fromAppPageOnly, idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir, vramLimit } from "./validate";
 import { Console, LINE_MAX, type ElevationRequest, type ScriptElevationRequest } from "./console/runner";
 import { dropOnLockAndSleep, Elevation, ELEVATION_CAP_MS, ELEVATION_TTL_MS, LinuxLockWatch, parseLockedHint } from "./console/elevation";
@@ -378,16 +379,20 @@ async function confirmScript(req: ScriptElevationRequest): Promise<boolean> {
   });
   return r.response === 0;
 }
-/** allow <folder>: the native confirmation names the folder and what the Console may then do there. */
-async function confirmAllow(folder: string): Promise<boolean> {
+/**
+ * allow <folder>: the native confirmation names the folder and what the Console may then do there; the home folder
+ * itself (`home`) as a warning (backlog row 136).
+ */
+async function confirmAllow(folder: string, home: boolean): Promise<boolean> {
   if (!mainWindow) return false;
   const r = await dialog.showMessageBox(mainWindow, {
-    type: "question",
+    type: home ? "warning" : "question",
     buttons: ["Allow", "Cancel"],
     defaultId: 1,
     cancelId: 1,
-    message: "Let the Console write in this folder?",
+    message: home ? "Let the Console write anywhere in your home folder?" : "Let the Console write in this folder?",
     detail:
+      (home ? "This lets the Console replace files anywhere in your home folder (with sudo). A folder inside it, such as a show or shot folder, is safer.\n\n" : "") +
       `${folder}\n\nThe Console may then write there and in every folder inside it (render's outputs, reports and temporary files), ` +
       "from now on, also after a restart. Replacing files that are already there still needs sudo. App settings → Console lists it and removes it.",
   });
@@ -1328,6 +1333,9 @@ app.whenReady().then(() => {
   nativeTheme.themeSource = settings.appearance.theme === "light" ? "light" : settings.appearance.theme === "dark" ? "dark" : "system";
   updatePaletteWatch();
   registerIpc();
+  // a shipped copy: no developer tools, no default reload/close shortcuts (appMenu.ts, backlog row 117)
+  const menu = appMenu(app.isPackaged, PLATFORM);
+  if (menu !== "default") Menu.setApplicationMenu(menu && Menu.buildFromTemplate(menu));
   createWindow();
   updater.start();
 });

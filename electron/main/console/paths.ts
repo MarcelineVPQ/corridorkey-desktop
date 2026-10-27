@@ -115,6 +115,10 @@ export function fsErrorText(e: unknown, path: string): string {
     case "EIO":
     case "ETIMEDOUT":
       return `${path} didn't answer (a drive or network share that is busy or gone)`;
+    case "ESERVER": {
+      const server = (e as { server: string }).server;
+      return `${path} is on the network server ${server}, which the Console hasn't opened this session (Windows sends your sign-in to every server it opens); if you trust it, type: allow-server ${server}`;
+    }
   }
   // an error of the app's own ("not a file", "larger than …") is plain already; Node's keep their text after the code
   return `${path}: ${String((e as Error)?.message ?? e).replace(/^[A-Z]+: /, "")}`;
@@ -178,6 +182,53 @@ async function folderFor(typed: string, path: string, d: PathDeps): Promise<stri
 /** The exact line that allows `folder` (always quoted: it is copied as is). */
 export function allowLine(folder: string, platform: NodeJS.Platform): string {
   return `allow ${platform === "win32" ? `"${folder}"` : `"${folder.replace(/[\\"]/g, "\\$&")}"`}`;
+}
+
+/**
+ * The system folders `allow` refuses, and everything inside them (backlog row 136, Marcy 2026-10-27): on Windows the
+ * system's folders from the environment (%SystemRoot%, %ProgramFiles%, %ProgramFiles(x86)%, %ProgramData%; a drive's
+ * root is refused as every root is). The caller adds their realpaths (/bin → /usr/bin, /etc → /private/etc). Pure.
+ */
+export function systemFolders(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): string[] {
+  if (platform === "win32")
+    // loop: NOT-WORTH — four variables
+    return ["SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "ProgramData"].flatMap((k) => (env[k] && win32.isAbsolute(env[k]) ? [env[k]] : []));
+  if (platform === "darwin") return ["/System", "/Library", "/usr", "/bin", "/sbin", "/dev", "/etc", "/var", "/private/etc", "/private/var"];
+  return ["/bin", "/boot", "/dev", "/etc", "/lib", "/lib32", "/lib64", "/libx32", "/proc", "/root", "/run", "/sbin", "/sys", "/usr", "/var"];
+}
+
+/**
+ * What `allow` does with `dir` (resolved; `home` and `system` resolved too): "refuse" a root (`/`, `C:\`, a share's
+ * root) or a system folder or a folder inside one; "home" the home folder itself (a warning in the confirmation);
+ * "ok" anything else. A folder inside home is "ok" even where home lives below a system folder (/var/home on Fedora
+ * Silverblue), and so is /run/media on Linux (where removable drives are mounted). Pure.
+ */
+export function allowVerdict(dir: string, home: string, system: readonly string[], platform: NodeJS.Platform): "refuse" | "home" | "ok" {
+  if (isInside(dir, home, platform)) return isInside(home, dir, platform) ? "home" : "ok";
+  if (components(dir, platform).length === 1) return "refuse";
+  if (platform === "linux" && isInside(dir, "/run/media", platform)) return "ok";
+  // loop: NOT-WORTH — ≤ 15 system folders and their realpaths
+  return system.some((s) => isInside(dir, s, platform)) ? "refuse" : "ok";
+}
+
+/**
+ * The network server a Windows path opens (backlog row 139), lower case: `\\host\share\…`, `//host/…` and
+ * `\\?\UNC\host\…` → host. A device path other than a drive (`\\.\pipe\…`, `\\?\GLOBALROOT\…`) → its first name, so
+ * it too needs allow-server. A drive path, and every path on Linux and macOS → null. Pure.
+ */
+export function uncServer(p: string, platform: NodeJS.Platform): string | null {
+  if (platform !== "win32") return null;
+  const m = /^[\\/]{2}([^\\/]+)(?:[\\/]+([^\\/]*))?(?:[\\/]+([^\\/]*))?/.exec(p);
+  if (!m) return null;
+  const [, first, second, third] = m;
+  if (first !== "?" && first !== ".") return first.toLowerCase();
+  if (!second || /^[a-z]:$/i.test(second)) return null;
+  return (second.toUpperCase() === "UNC" && third ? third : second).toLowerCase();
+}
+
+/** The error a Console read or write of a server not allowed this session gets (fsErrorText says what to type). */
+export function serverNotAllowed(server: string): Error {
+  return Object.assign(new Error(`the network server ${server} isn't allowed this session`), { code: "ESERVER", server });
 }
 
 /**

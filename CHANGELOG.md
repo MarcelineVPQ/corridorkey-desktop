@@ -53,6 +53,8 @@ on its own rail icon. Not a system shell: its own commands only, each parsed and
   for 5 minutes (each elevated command extends it, never past 15), dropped on sleep or quit and meant to drop on a
   screen lock too (on Linux it reads systemd-logind's lock state; not yet tried with a real lock); every elevated command is logged before it runs. The renderer's security policy is
   stricter, and a gate forbids shells and `exec` in the app's code.
+- `allow` refuses `/`, a drive's root and the system's folders (also through a link), and warns before allowing the whole home folder.
+- On Windows the Console opens a network path (`\\server\…`) only after `allow-server <server>`, until the app quits (Windows sends your sign-in to every server it opens).
 - For the pipeline: frame sequences shown and completed as one item (`sh010.####.exr 1001-1100 · missing 1047`);
   every job the queue starts appears as its exact `corridorkey render …` line, and the Queue's **Copy as command**
   copies it, quoted for a terminal; `farm export` writes the queued clips as OpenJD, Deadline 10, OpenCue, Flamenco
@@ -68,6 +70,7 @@ on its own rail icon. Not a system shell: its own commands only, each parsed and
 
 **Changed**
 
+- A shipped copy has no developer tools and none of Electron's default reload and close shortcuts (Ctrl+Shift+I, Ctrl+R, F5, Ctrl+W); `npm run dev` keeps them.
 - The app runs only its Rust + ONNX Runtime engine: the PyTorch engine is gone from it (the Engine page's
   "Benchmark reference" section, its CorridorKey2.0 folder setting, and the PyTorch-only limits on a clip's codec,
   internal resolution and input precision). A settings file that still names the folder loads as before; the key is

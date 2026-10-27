@@ -46,6 +46,14 @@ allow "/mnt/show/sq01"
 
 `allow <folder>` asks you to confirm, then the Console may write in that folder and every folder inside it, also
 after a restart. `allow` alone lists them; **App settings → Console** removes each one (`trust` is the same command).
+`allow` never takes `/`, a drive's root or a system folder (`/etc`, `/usr`, `C:\Windows`, `C:\Program Files`…, also
+through a link); allow a show or shot folder instead. Allowing your whole home folder (`allow ~`) asks with a warning:
+it lets the Console replace files anywhere in your home folder.
+
+**Network servers on Windows.** Windows sends your sign-in to every server it opens, so the Console opens a network
+path (`\\nas\show\…`) only after you name its server once: `allow-server nas`. It lasts until the app quits and is
+never saved; **Session** lists the servers allowed, and `allow-server` alone too. Until then a command that would
+open one is refused with the line to type.
 
 **Replacing files needs `sudo`.** A command that replaces files, `render … --overwrite`, and `render …
 --skip-existing` (which keys the whole set again unless every frame is already there and whole), runs only as
@@ -89,6 +97,7 @@ files must say `sudo`, and one dialog lists them all, with their `${…}` filled
 | `run [--keep-going] <file.ckcmd>` | run a script ([below](#scripting)) |
 | `history [N or term]` | the lines typed before, numbered, with when and how each ended; `history --audit` the elevation log |
 | `allow [folder]` | let the Console write in a folder ([above](#safety)) |
+| `allow-server [server]` | Windows: let the Console open a network server's paths until the app quits ([above](#safety)) |
 | `open [path]` | show a folder or file in the file manager (as Show in folder does: it never opens or runs a file; `start` too) |
 | `sudo <command>`, `sudo -k` | run a command that replaces files, after you confirm it; drop the elevation |
 | `version` | the app's version, which is its command line's |

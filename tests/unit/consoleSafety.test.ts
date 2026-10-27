@@ -4,7 +4,20 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { allowLine, checkWrite, expandHome, isInside, realPathDeps, resolveReal, type PathDeps } from "../../electron/main/console/paths";
+import {
+  allowLine,
+  allowVerdict,
+  checkWrite,
+  expandHome,
+  fsErrorText,
+  isInside,
+  realPathDeps,
+  resolveReal,
+  serverNotAllowed,
+  systemFolders,
+  uncServer,
+  type PathDeps,
+} from "../../electron/main/console/paths";
 import { dropOnLockAndSleep, Elevation, ELEVATION_CAP_MS, ELEVATION_TTL_MS } from "../../electron/main/console/elevation";
 import { AuditLog, History } from "../../electron/main/console/logs";
 
@@ -131,6 +144,71 @@ describe("path policy (logic, Windows and macOS rules)", () => {
     const d: PathDeps = { platform: "linux", home: "/h", realpath: async () => Promise.reject(Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })) };
     const r = await checkWrite("/x/y", "/", ["/x"], d);
     expect(!r.ok && r.reason).toMatch(/can't be checked: you have no permission to open/);
+  });
+});
+
+describe("allow's refusals and warning (backlog row 136, Marcy 2026-10-27)", () => {
+  it("Linux: the root and the system folders (and inside them) refused, home warned, a folder inside home and /run/media fine", () => {
+    const sys = systemFolders("linux", {});
+    // loop: NOT-WORTH — a few folders
+    for (const d of ["/", "/etc", "/usr", "/usr/local/share", "/var/lib/x", "/lib64", "/libx32", "/boot", "/root", "/run/user/1000", "/proc", "/sys"])
+      expect(allowVerdict(d, "/home/m", sys, "linux"), d).toBe("refuse");
+    expect(allowVerdict("/home/m", "/home/m", sys, "linux")).toBe("home");
+    expect(allowVerdict("/home/m/shows", "/home/m", sys, "linux")).toBe("ok");
+    expect(allowVerdict("/mnt/show/sq01", "/home/m", sys, "linux")).toBe("ok");
+    expect(allowVerdict("/run/media/m/drive/show", "/home/m", sys, "linux")).toBe("ok");
+    expect(allowVerdict("/home", "/home/m", sys, "linux")).toBe("ok");
+    // home below a system folder (Fedora Silverblue's /var/home): home and inside it as anywhere else
+    expect(allowVerdict("/var/home/m", "/var/home/m", sys, "linux")).toBe("home");
+    expect(allowVerdict("/var/home/m/shots", "/var/home/m", sys, "linux")).toBe("ok");
+    // the caller adds the realpaths: merged /usr's /bin → /usr/bin is inside /usr anyway; a made-up one counts
+    expect(allowVerdict("/sysroot/x", "/home/m", [...sys, "/sysroot"], "linux")).toBe("refuse");
+  });
+
+  it("macOS: /System, /Library, /usr, /private/etc, /private/var refused (any case), ~/Library and /Volumes fine", () => {
+    const sys = systemFolders("darwin", {});
+    // loop: NOT-WORTH — a few folders
+    for (const d of ["/", "/System/Library", "/Library/Preferences", "/usr/local", "/bin", "/sbin", "/private/etc", "/private/var/folders/x", "/LIBRARY"])
+      expect(allowVerdict(d, "/Users/m", sys, "darwin"), d).toBe("refuse");
+    expect(allowVerdict("/users/M", "/Users/m", sys, "darwin")).toBe("home");
+    expect(allowVerdict("/Users/m/Library/show", "/Users/m", sys, "darwin")).toBe("ok");
+    expect(allowVerdict("/Volumes/Show/sq01", "/Users/m", sys, "darwin")).toBe("ok");
+  });
+
+  it("Windows: every drive's root, %SystemRoot%, %ProgramFiles%, %ProgramFiles(x86)%, %ProgramData% refused (any case)", () => {
+    const env = { SystemRoot: "C:\\Windows", ProgramFiles: "C:\\Program Files", "ProgramFiles(x86)": "C:\\Program Files (x86)", ProgramData: "C:\\ProgramData", TEMP: "relative" };
+    const sys = systemFolders("win32", env);
+    expect(sys).toEqual(["C:\\Windows", "C:\\Program Files", "C:\\Program Files (x86)", "C:\\ProgramData"]);
+    // loop: NOT-WORTH — a few folders
+    for (const d of ["C:\\", "D:\\", "c:\\windows\\system32", "C:\\Program Files\\x", "C:\\Program Files (x86)", "C:\\ProgramData\\y", "\\\\nas\\show\\"])
+      expect(allowVerdict(d, "C:\\Users\\M", sys, "win32"), d).toBe("refuse");
+    expect(allowVerdict("c:\\users\\m", "C:\\Users\\M", sys, "win32")).toBe("home");
+    expect(allowVerdict("C:\\Users\\M\\shots", "C:\\Users\\M", sys, "win32")).toBe("ok");
+    expect(allowVerdict("D:\\show\\sq01", "C:\\Users\\M", sys, "win32")).toBe("ok");
+    expect(allowVerdict("\\\\nas\\show\\sq01", "C:\\Users\\M", sys, "win32")).toBe("ok");
+    // a variable not set, or not absolute: not a folder to refuse
+    expect(systemFolders("win32", { SystemRoot: "C:\\Windows", ProgramData: "x" })).toEqual(["C:\\Windows"]);
+  });
+});
+
+describe("network servers on Windows (backlog row 139, Marcy 2026-10-27)", () => {
+  it("names the server a path opens: \\\\host, //host, \\\\?\\UNC\\host, a device path; never a drive or Linux/macOS", () => {
+    expect(uncServer("\\\\NAS\\show\\a.exr", "win32")).toBe("nas");
+    expect(uncServer("//nas/show", "win32")).toBe("nas");
+    expect(uncServer("\\\\10.0.0.5\\s", "win32")).toBe("10.0.0.5");
+    expect(uncServer("\\\\?\\UNC\\nas\\show", "win32")).toBe("nas");
+    expect(uncServer("\\\\.\\UNC\\Nas\\show", "win32")).toBe("nas");
+    expect(uncServer("\\\\.\\pipe\\x", "win32")).toBe("pipe");
+    expect(uncServer("\\\\?\\GLOBALROOT\\Device\\Mup\\nas", "win32")).toBe("globalroot");
+    expect(uncServer("\\\\?\\C:\\shots", "win32")).toBeNull();
+    expect(uncServer("C:\\shots", "win32")).toBeNull();
+    expect(uncServer("\\shots", "win32")).toBeNull();
+    expect(uncServer("//nas/show", "linux")).toBeNull();
+    expect(uncServer("//nas/show", "darwin")).toBeNull();
+  });
+
+  it("the refusal says what to type", () => {
+    expect(fsErrorText(serverNotAllowed("nas"), "\\\\nas\\show")).toMatch(/^\\\\nas\\show is on the network server nas, .*type: allow-server nas$/);
   });
 });
 

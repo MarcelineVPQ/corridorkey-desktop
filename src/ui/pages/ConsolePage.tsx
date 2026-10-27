@@ -224,6 +224,11 @@ export function ConsolePage(props: {
                 <span className="hint-text">Not elevated. Elevation also ends when the screen locks, the computer sleeps, and at quit.</span>
               )}
             </Row>
+            {state.system.platform === "win32" && (
+              <Row label="Network servers" hint="allow-server <name>: the Console opens \\name\… only after it, until the app quits">
+                <span className="hint-text">{session.servers.length ? session.servers.join(", ") : "None allowed this session."}</span>
+              </Row>
+            )}
             <Row label="corridorkey">
               {session.cliFound ? (
                 <div className="check-line ok">
