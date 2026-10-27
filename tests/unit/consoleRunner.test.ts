@@ -362,7 +362,7 @@ describe("built-ins", () => {
     expect((await c.run("dir ..")).entries!.some((e) => e.name === "out" && e.folder)).toBe(true);
   });
 
-  it("help, <command> ?, find", async () => {
+  it("help, <command> ?, help -k, apropos", async () => {
     const { c } = make();
     expect((await c.run("help")).lines.map((l) => l.text).join("\n")).toMatch(/render .*uses the graphics card/);
     const h = (await c.run("render ?")).lines.map((l) => l.text);
@@ -371,8 +371,11 @@ describe("built-ins", () => {
     expect(h.join("\n")).toMatch(/-o, --output DIR\|PATTERN .*\(only into chosen folders\)/);
     expect(h).not.toContain(expect.stringMatching(/progress-format/));
     expect((await c.run("help ls")).lines[0].text).toBe("usage: dir [FOLDER]");
-    expect((await c.run("find overwrite")).lines.map((l) => l.text).join("\n")).toMatch(/corridorkey render --overwrite/);
-    expect((await c.run("find zzzz")).lines[0].text).toMatch(/Nothing matches/);
+    expect((await c.run("help -k overwrite")).lines.map((l) => l.text).join("\n")).toMatch(/corridorkey render --overwrite/);
+    expect((await c.run("apropos overwrite")).lines.map((l) => l.text).join("\n")).toMatch(/corridorkey render --overwrite/);
+    expect((await c.run("apropos zzzz")).lines[0].text).toMatch(/Nothing matches/);
+    const f = await c.run("find . -name x.exr");
+    expect([f.state, f.lines[0].text]).toEqual(["refused", expect.stringMatching(/help -k <term>/)]);
   });
 
   it("cls clears; history lists what was typed; history --audit the elevated log", async () => {

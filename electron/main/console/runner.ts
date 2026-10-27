@@ -252,9 +252,12 @@ export class Console {
         const name = pos("command")[0];
         const c = name ? parse(name, this.d.registry, this.opts).command : null;
         if (name && !c) return now(this.finish(b, "refused", `No command ${name}. help lists them.`));
+        // loop: NOT-WORTH — the line's few options
+        const keyword = p.options.find((o) => o.arg.id === "keyword")?.value;
+        if (keyword) return now(this.finish(b, "done", ...findLines(this.d.registry, [keyword])));
         return now(this.finish(b, "done", ...(c ? commandHelp(this.d.registry, c) : overview(this.d.registry))));
       }
-      case "find":
+      case "apropos":
         return now(this.finish(b, "done", ...findLines(this.d.registry, pos("term"))));
       case "pwd":
         return now(this.finish(b, "done", this.cwd));

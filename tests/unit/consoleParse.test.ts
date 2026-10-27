@@ -122,7 +122,7 @@ describe("parse", () => {
     }
     expect(parse("corridorkey", reg, posix).help).toBe(true);
     // a quoted ? is a value
-    expect(parse("find '?'", reg, posix).help).toBe(false);
+    expect(parse("apropos '?'", reg, posix).help).toBe(false);
   });
 
   it("reads sudo as a prefix, and sudo -k as sudo's own", () => {
@@ -174,8 +174,8 @@ describe("parse", () => {
 
   it("requires a builtin's required argument", () => {
     expect(parse("run", reg, posix).errors[0].message).toBe("run needs FILE.ckcmd");
-    expect(parse("find", reg, posix).errors[0]).toEqual({ message: "find needs TERM", start: 4, end: 4 });
-    expect(parse("find frame range", reg, posix).positionals.map((x) => x.value)).toEqual(["frame", "range"]);
+    expect(parse("apropos", reg, posix).errors[0]).toEqual({ message: "apropos needs TERM", start: 7, end: 7 });
+    expect(parse("apropos frame range", reg, posix).positionals.map((x) => x.value)).toEqual(["frame", "range"]);
   });
 
   it("knows aliases (ls, clear)", () => {
@@ -195,7 +195,7 @@ describe("parse", () => {
 
   it("never treats a quoted word as a command or flag", () => {
     expect(parse("'render' a", reg, posix).errors[0].message).toMatch(/unknown command 'render'/);
-    expect(parse("find '--overwrite'", reg, posix).positionals[0].value).toBe("--overwrite");
+    expect(parse("apropos '--overwrite'", reg, posix).positionals[0].value).toBe("--overwrite");
   });
 });
 
@@ -237,6 +237,23 @@ describe("review 2026-10-26 probe P10", () => {
       parse(line, reg, posix);
       // a generous bound (a busy test machine): a regression to quadratic work takes seconds
       expect(performance.now() - t0).toBeLessThan(100);
+    }
+  });
+});
+
+describe("SME review 2026-10-26", () => {
+  it("M5: help -k and apropos search the help; find is reserved for files, and says what to type", () => {
+    const k = parse("help -k overwrite", reg, posix);
+    expect([k.errors, k.command?.name, k.options[0]?.arg.id, k.options[0]?.value]).toEqual([[], "help", "keyword", "overwrite"]);
+    expect(parse("apropos frame range", reg, posix).errors).toEqual([]);
+    // loop: NOT-WORTH — three spellings
+    for (const l of ["find overwrite", 'find . -name "*.exr"', "find"]) {
+      const p = parse(l, reg, posix);
+      expect(
+        p.errors.map((e) => e.message),
+        l,
+      ).toEqual(["find (a file search) comes in a later version; to search the commands and their options: help -k <term> (or apropos <term>)"]);
+      expect(p.errors[0].start).toBe(0);
     }
   });
 });

@@ -160,14 +160,17 @@ const BUILTINS: ConsoleCommand[] = [
   builtin(
     "help",
     "the commands, or one command's options and examples (also: <command> ?)",
-    [arg({ id: "command", kind: "command", positional: true, valueName: "COMMAND", help: "the command to explain" })],
-    ["help", "help render", "render ?"],
+    [
+      arg({ id: "command", kind: "command", positional: true, valueName: "COMMAND", help: "the command to explain" }),
+      arg({ id: "keyword", short: "k", kind: "string", valueName: "TERM", help: "search the commands and their options instead (man -k)" }),
+    ],
+    ["help", "help render", "render ?", "help -k overwrite"],
   ),
   builtin(
-    "find",
-    "search the commands and their options by name and description",
+    "apropos",
+    "search the commands and their options by name and description (help -k)",
     [arg({ id: "term", kind: "string", positional: true, required: true, multiple: true, valueName: "TERM", help: "words to look for" })],
-    ["find overwrite", "find frames"],
+    ["apropos overwrite", "apropos frames"],
   ),
   builtin(
     "cd",
@@ -219,6 +222,14 @@ export function makeRegistry(spec: CliSpec = cliSpec as CliSpec): Registry {
   };
   return { commands: [...BUILTINS, cli], cli };
 }
+
+/**
+ * Words a line can't start with, and what to type instead: names other command lines use for something else, kept
+ * free here (find: a file search in a later version).
+ */
+export const ANSWERS: Readonly<Record<string, string>> = {
+  find: "find (a file search) comes in a later version; to search the commands and their options: help -k <term> (or apropos <term>)",
+};
 
 /** A command by name or alias; bare `render` / `verify` / `prepare` / `info` are corridorkey's. */
 export function findCommand(reg: Registry, word: string): ConsoleCommand | null {

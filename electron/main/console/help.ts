@@ -1,4 +1,4 @@
-// The Console's help text: `help`, `help <command>` / `<command> ?`, and `find <term>`. Built from the registry, so it
+// The Console's help text: `help`, `help <command>` / `<command> ?`, and `help -k <term>` / `apropos <term>`. Built from the registry, so it
 // says exactly what the parser accepts.
 import { fullName, type ConsoleArg, type ConsoleCommand, type Registry } from "../../../src/shared/console/registry";
 
@@ -51,14 +51,14 @@ export function commandHelp(reg: Registry, c: ConsoleCommand): string[] {
   return lines;
 }
 
-/** `find <term>`: commands and options whose name or description has every word. */
+/** `help -k <term>` / `apropos <term>`: commands and options whose name or description has every word. */
 export function findLines(reg: Registry, terms: string[]): string[] {
   // loop: NOT-WORTH — a few words
   const words = terms.map((t) => t.toLowerCase()).filter(Boolean);
   // loop: NOT-WORTH — a few words per text
   const has = (text: string) => words.every((w) => text.toLowerCase().includes(w));
   const out: string[] = [];
-  // loop: NOT-WORTH — a dozen commands and their ~50 flags, once per find
+  // loop: NOT-WORTH — a dozen commands and their ~50 flags, once per search
   for (const c of [...reg.commands, ...reg.cli.subcommands]) {
     const name = fullName(reg, c);
     if (has(`${name} ${c.aliases.join(" ")} ${c.about}`)) out.push(`  ${name.padEnd(20)} ${c.about}`);

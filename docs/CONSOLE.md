@@ -17,7 +17,8 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   path / enum / number / frames / string, value names, values), description, examples; `render --overwrite` and
   `render --skip-existing` (it keys the whole set again unless every frame is there and whole: docs/CLI.md "Output
   safety") are marked destructive, `render`'s `-o`, `--report`, `--temp` (and `verify`'s and `prepare`'s `--report`) as written paths.
-- **Commands.** `help [command]` (also `command ?`), `find <term>`, `cd`, `pwd`, `dir` / `ls`, `cls` / `clear`,
+- **Commands.** `help [command]` (also `command ?`), `help -k <term>` / `apropos <term>` (search the help; `find` is
+  kept free for a file search and says so), `cd`, `pwd`, `dir` / `ls`, `cls` / `clear`,
   `history` (`--audit`: the elevated log), `run <file.ckcmd>` (a script of Console lines, one per line, `#` comments;
   each line through the same checks; stops at the first that fails; no script inside a script), `sudo <command>`,
   `sudo -k`, and `corridorkey render | verify | prepare | info` (also bare `render` …).
