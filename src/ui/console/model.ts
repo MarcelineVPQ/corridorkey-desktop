@@ -89,6 +89,18 @@ export function blockStatus(b: ConsoleBlock): { word: string; tone: Tone; exit: 
   return { word, tone, exit, meaning };
 }
 
+/**
+ * What a screen reader hears (the page's one polite status region): the newest command's start and end, as a word and
+ * its exit, never the streamed lines, the progress or a listing's rows (the output itself isn't a live region).
+ */
+export function announcement(blocks: readonly ConsoleBlock[]): string {
+  const b = blocks.at(-1);
+  if (!b) return "";
+  const { word, exit, meaning } = blockStatus(b);
+  if (b.state === "refused") return `${b.line}: refused${b.lines[0] ? `: ${b.lines[0].text}` : ""}`;
+  return `${b.line}: ${word}${exit ? `, ${exit}` : ""}${meaning ? ` (${meaning})` : ""}`;
+}
+
 /** How long it took ("0.4 s", "2 min 05 s"); null while it runs. */
 export function duration(b: ConsoleBlock): string | null {
   if (b.finishedAt === null) return null;

@@ -1,8 +1,9 @@
 // The Console page's view model (src/ui/console/model.ts): the line's colours, the blocks as shown.
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parse } from "../../src/shared/console/parse";
 import { makeRegistry } from "../../src/shared/console/registry";
-import { blockStatus, blockText, clearScreen, duration, errorSpans, highlight, mergeBlocks, sizeText, visibleBlocks, writtenPaths, BLOCKS_KEPT } from "../../src/ui/console/model";
+import { announcement, blockStatus, blockText, clearScreen, duration, errorSpans, highlight, mergeBlocks, sizeText, visibleBlocks, writtenPaths, BLOCKS_KEPT } from "../../src/ui/console/model";
 import type { ConsoleBlock } from "../../src/shared/types";
 
 const reg = makeRegistry();
@@ -141,5 +142,29 @@ describe("the blocks", () => {
     expect(sizeText(1536)).toBe("1.5 KiB");
     expect(sizeText(5 * 1024 ** 3)).toBe("5.0 GiB");
     expect(sizeText(300 * 1024 ** 2)).toBe("300 MiB");
+  });
+});
+
+describe("screen readers (review 2026-10-26 S8)", () => {
+  it("announce only a command's start and end, never its streamed lines or a listing's rows", () => {
+    expect(announcement([])).toBe("");
+    expect(announcement([block(1, { line: "render shot.mov", state: "running", exitCode: null, lines: [{ kind: "out", text: "frame 1" }] })])).toBe("render shot.mov: running");
+    // a new line of output or progress doesn't change what is said
+    expect(announcement([block(1, { line: "render shot.mov", state: "running", exitCode: null, progress: { percent: 40, done: 4, total: 10 }, lines: [{ kind: "out", text: "frame 2" }] })])).toBe(
+      "render shot.mov: running",
+    );
+    expect(announcement([block(1), block(2, { line: "render a.mov", state: "failed", exitCode: 6, exitMeaning: "out of graphics memory" })])).toBe(
+      "render a.mov: failed, exit 6 (out of graphics memory)",
+    );
+    expect(announcement([block(3, { line: "render a.mov --overwrite", state: "refused", exitCode: null, lines: [{ kind: "err", text: "--overwrite replaces files" }] })])).toBe(
+      "render a.mov --overwrite: refused: --overwrite replaces files",
+    );
+    expect(announcement([block(4, { line: "ls", entries: [{ name: "a", folder: false, bytes: 1, modified: 1 }] })])).toBe("ls: done, exit 0");
+  });
+
+  it("the output isn't a live region; one polite status region carries the announcements", () => {
+    const page = readFileSync(new URL("../../src/ui/pages/ConsolePage.tsx", import.meta.url), "utf8");
+    expect(page).not.toMatch(/role="log"|aria-live="(polite|assertive)"[^>]*console-out/);
+    expect(page).toMatch(/role="status"[^>]*>\s*\{announcement\(/);
   });
 });

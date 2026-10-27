@@ -15,7 +15,7 @@ import { usePref } from "../prefs";
 import { LineEditor, type LineEditorHandle } from "../console/LineEditor";
 import { OutputBlock } from "../console/OutputBlock";
 import { uniqueHistory, type SuggestMode } from "../console/editor";
-import { clearScreen, mergeBlocks, visibleBlocks, type BlockList } from "../console/model";
+import { announcement, clearScreen, mergeBlocks, visibleBlocks, type BlockList } from "../console/model";
 
 const registry = makeRegistry();
 
@@ -123,7 +123,7 @@ export function ConsolePage(props: {
       <div
         ref={out}
         className="console-out"
-        role="log"
+        role="region"
         aria-label="Console output"
         onScroll={(e) => {
           const el = e.currentTarget;
@@ -141,6 +141,10 @@ export function ConsolePage(props: {
           <OutputBlock key={b.id} b={b} registry={registry} onReinsert={reinsert} />
         ))}
       </div>
+      {/* the output isn't live (every streamed line and listed row would be read out): this says each command's start and end */}
+      <span className="sr-only" role="status">
+        {announcement(shown)}
+      </span>
       <LineEditor
         ref={editor}
         registry={registry}
