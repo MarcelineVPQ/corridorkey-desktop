@@ -1242,13 +1242,22 @@ describe("Phase 4: farm export", () => {
     const { c } = make();
     const b = await c.run(`farm export deadline --queue -o ${join(out, "farm1")}`);
     expect(b.state, b.lines.map((l) => l.text).join("\n")).toBe("done");
-    expect(b.lines[0].text).toBe(`Wrote 7 files in ${join(out, "farm1")}:`);
+    expect(b.lines[0].text).toBe(`Wrote 11 files in ${join(out, "farm1")}:`);
+    // the batch is the export folder's name; the Flamenco platform this computer's (linux here)
+    expect(readFileSync(join(out, "farm1", "sh010_job_info.txt"), "utf8")).toContain("BatchName=farm1\n");
     expect(readFileSync(join(out, "farm1", "sh010_job_info.txt"), "utf8")).toContain("Frames=1001-1024");
     expect(readFileSync(join(out, "farm1", "sh020_plugin_info.txt"), "utf8")).toContain(`OutputPath=${join(out, "sh020")}\n`);
     // one clip by name or path
     const one = await c.run(`farm export flamenco sh020.mov -o ${join(out, "farm2")}`);
     expect(one.state).toBe("done");
     expect(await readdir(join(out, "farm2"))).toEqual(["scripts", "sh020.flamenco.json"]);
+    // SME S3, S5: the workers' paths and the submitting platform as flags (a kept variable works the same way)
+    await c.run("set -p farm_models=/farm/models");
+    const w = await c.run(`farm export flamenco sh020.mov -o ${join(out, "farm3")} --models \${farm_models} --ort /farm/lib.so --platform windows`);
+    expect(w.state, w.lines.map((l) => l.text).join("\n")).toBe("done");
+    const job = JSON.parse(readFileSync(join(out, "farm3", "sh020.flamenco.json"), "utf8")) as { submitter_platform: string; settings: { models: string; ort: string } };
+    expect([job.submitter_platform, job.settings.models, job.settings.ort]).toEqual(["windows", "/farm/models", "/farm/lib.so"]);
+    expect((await c.run(`farm export deadline --queue -o ${join(out, "farm4")} --priority 101`)).state).toBe("refused");
   });
 
   // SME review 2026-10-27 M2 (probe): an unpadded folder grouped as 1-9, 10-99, 100-120 and Deadline keyed 9 of 120

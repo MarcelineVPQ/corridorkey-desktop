@@ -3,7 +3,9 @@
 // (js-yaml; the 2023-09 schema's parameter and format-string rules that matter here); the template itself passes
 // `openjd check` (farm/README.md).
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { farmExport, type FarmJob } from "../../electron/main/console/farm";
@@ -56,6 +58,7 @@ describe("farm export", () => {
       OutputDir: "/renders/sh010",
       Outputs: "alpha",
       Linear: "false",
+      ExistingFrames: "--overwrite",
       LowVram: "true",
       Models: "/opt/ck/models",
       OnnxRuntime: "/opt/ck/libonnxruntime.so",
@@ -77,8 +80,10 @@ describe("farm export", () => {
     expect(kv(file(e, "sh010_job_info.txt"))).toEqual({
       Plugin: "CorridorKey",
       Name: "sh010 key",
+      BatchName: "corridorkey",
       Frames: "1001-1024",
       ChunkSize: "24",
+      Priority: "50",
       OutputDirectory0: "/renders/sh010/sh010_alpha_exr",
       OutputFilename0: "sh010_alpha.####.exr",
     });
@@ -134,7 +139,7 @@ describe("farm export", () => {
       .split("\n")
       .filter((l) => l.startsWith("bash"));
     expect(run).toHaveLength(2);
-    const w = words(run[0].replace(/ &&$/, ""));
+    const w = words(run[0].replace(/ \|\| status=1$/, ""));
     expect(w.slice(w.indexOf("--") + 1)).toEqual([
       "--outputs",
       "alpha",
@@ -321,5 +326,90 @@ describe("farm export: the queue's output layout (review 2026-10-27 M1)", () => 
     // a shot past 9999 pads wider, as corridorkey does; each export's notes say where the frames land
     expect(file(farmExport("deadline", [{ ...j, range: [9997, 10002], pad: 4 }], env), "sh010_plate_job_info.txt")).toContain("OutputFilename0=sh010_plate_alpha.#####.exr");
     expect(d.notes.join(" ")).toContain("The frames land where the queue writes them: /renders/sh010_plate/sh010_plate_alpha_exr/sh010_plate_alpha.####.exr");
+  });
+});
+
+// SME review 2026-10-27 S3-S7 (probes): this desktop's runtime paths in every job; a thin Deadline export (no Verify,
+// no Pool/Group/Priority/BatchName); Flamenco's hard-coded "linux" and a frames-already-there policy per format; the
+// shell lists clobbering each other's logs and stopping at one failure; a frame folder as an OpenJD FILE input
+describe("farm export for a wrangler (review 2026-10-27 S3-S7)", () => {
+  const kv = (t: string) =>
+    Object.fromEntries(
+      t
+        .trim()
+        .split("\n")
+        .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]),
+    );
+  const workers = { models: "/farm/models", ort: "/farm/libonnxruntime.so", local: { models: false, ort: false } };
+
+  it("S3: the workers' runtime paths when given; else the notes say plainly they are this computer's", () => {
+    const o = farmExport("openjd", [sh010], workers);
+    const v = yaml.load(file(o, "sh010/parameter_values.yaml")) as { parameterValues: { name: string; value: string }[] };
+    expect(v.parameterValues.filter((p) => p.name === "Models" || p.name === "OnnxRuntime").map((p) => p.value)).toEqual(["/farm/models", "/farm/libonnxruntime.so"]);
+    expect(o.notes.join(" ")).not.toMatch(/this computer's/);
+    expect(farmExport("opencue", [sh010], env).notes.join(" ")).toMatch(
+      /These jobs carry this computer's paths \(the models folder \/opt\/ck\/models and the ONNX Runtime library \/opt\/ck\/libonnxruntime.so\): give the workers' with farm export … --models <folder> --ort <library>/,
+    );
+  });
+
+  it("S4: Deadline gets a Verify job after the render, one batch, Pool/Group/Priority; without a group the notes warn", () => {
+    const e = farmExport("deadline", [sh010], { ...env, deadline: { batch: "sq01", pool: "show", group: "gpu", priority: 70 } });
+    const job = kv(file(e, "sh010_job_info.txt"));
+    const verify = kv(file(e, "sh010_verify_job_info.txt"));
+    expect([job.BatchName, job.Pool, job.Group, job.Priority, verify.BatchName, verify.Name, verify.Frames]).toEqual(["sq01", "show", "gpu", "70", "sq01", "sh010 verify", "1001-1024"]);
+    expect(kv(file(e, "sh010_verify_plugin_info.txt"))).toEqual({ ...kv(file(e, "sh010_plugin_info.txt")), Command: "verify" });
+    expect(e.notes.join(" ")).toContain("-SubmitMultipleJobs -dependent -job <clip>_job_info.txt <clip>_plugin_info.txt -job <clip>_verify_job_info.txt <clip>_verify_plugin_info.txt");
+    expect(e.notes.join(" ")).not.toMatch(/No --group/);
+    expect(farmExport("deadline", [sh010], env).notes.join(" ")).toMatch(/No --group: .*--group <your GPU group>/);
+  });
+
+  it("S5: Flamenco's submitter platform is the one given; every format replaces frames already there, and says so", () => {
+    const f = (platform: "linux" | "windows" | "darwin") =>
+      JSON.parse(file(farmExport("flamenco", [sh020], { ...env, platform }), "sh020.flamenco.json")) as { submitter_platform: string; settings: { existing: string } };
+    expect([f("windows").submitter_platform, f("darwin").submitter_platform, f("linux").settings.existing]).toEqual(["windows", "darwin", "overwrite"]);
+    // loop: NOT-WORTH — five formats
+    for (const fmt of ["openjd", "deadline", "opencue", "flamenco", "shell"] as const)
+      expect(farmExport(fmt, [sh010], env).notes, fmt).toContain(
+        "Frames already at the output's names are replaced (--overwrite in every format: a farm retries a task, and the retry must replace what its first try wrote).",
+      );
+    expect(file(farmExport("shell", [sh010], env), "run-shots.sh")).toContain('corridorkey-farm.sh" --overwrite');
+  });
+
+  it("S6: each shot list logs into its own folder, every list runs, the script's exit status says a failure", () => {
+    const e = farmExport("shell", [sh010, sh020], env);
+    const script = file(e, "run-shots.sh");
+    expect(script).not.toContain("&&");
+    const runs = script.split("\n").filter((l) => l.startsWith("bash"));
+    // loop: NOT-WORTH — two lines
+    expect(runs.map((l) => words(l)[words(l).indexOf("--logs") + 1])).toEqual(["$here/logs/shots-1", "$here/logs/shots-2"]);
+    expect(runs.every((l) => l.endsWith(" || status=1"))).toBe(true);
+    expect(script.trim().split("\n").slice(-1)).toEqual(["exit $status"]);
+    // and as /bin/sh runs it: a failing first list doesn't stop the second, and the script ends 1
+    const dir = mkdtempSync(join(tmpdir(), "ck-farm-sh-"));
+    try {
+      writeFileSync(join(dir, "corridorkey-farm.sh"), 'echo "$@" >> "$(dirname "$0")/ran"; case "$*" in *shots-1*) exit 1;; esac\n');
+      writeFileSync(join(dir, "run-shots.sh"), script);
+      let code = 0;
+      try {
+        execFileSync("/bin/sh", [join(dir, "run-shots.sh")], { timeout: 10_000 });
+      } catch (x) {
+        code = (x as { status: number }).status;
+      }
+      expect(code).toBe(1);
+      expect(readFileSync(join(dir, "ran"), "utf8").trim().split("\n")).toHaveLength(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("S7: a frame folder is an OpenJD DIRECTORY input chosen as a folder; a movie stays a FILE", () => {
+    const e = farmExport("openjd", [sh010, sh020], env);
+    const input = (c: string) =>
+      (yaml.load(file(e, `${c}/template.yaml`)) as { parameterDefinitions: { name: string; objectType?: string; userInterface?: { control?: string } }[] }).parameterDefinitions.find(
+        (p) => p.name === "Input",
+      )!;
+    expect([input("sh020").objectType, input("sh020").userInterface?.control]).toEqual(["DIRECTORY", "CHOOSE_DIRECTORY"]);
+    expect([input("sh010").objectType, input("sh010").userInterface?.control]).toEqual(["FILE", "CHOOSE_INPUT_FILE"]);
+    expect(e.notes.join(" ")).toMatch(/A frame folder goes in as a DIRECTORY input .* isn't run on Deadline Cloud yet/);
   });
 });

@@ -1052,7 +1052,16 @@ export class Console {
       farmJobs.push({ ...j, name: clipName(j.clip.path, this.d.paths.platform), range: range?.range ?? null, pad: range?.pad });
     }
     const env = this.d.cliEnv();
-    const exp = farmExport(format, farmJobs, { models: env.CK_ENGINE_MODELS ?? null, ort: env.CK_ENGINE_ORT ?? null });
+    // loop: NOT-WORTH — the line's few options
+    const opt = (id: string) => p.options.find((o) => o.arg.id === id)?.value ?? null;
+    const platform = opt("platform") ?? (this.d.paths.platform === "win32" ? "windows" : this.d.paths.platform === "darwin" ? "darwin" : "linux");
+    const exp = farmExport(format, farmJobs, {
+      models: opt("models") ?? env.CK_ENGINE_MODELS ?? null,
+      ort: opt("ort") ?? env.CK_ENGINE_ORT ?? null,
+      local: { models: opt("models") === null, ort: opt("ort") === null },
+      deadline: { batch: a.basename(w.path), pool: opt("pool"), group: opt("group"), priority: Number(opt("priority") ?? 50) },
+      platform: platform as "linux" | "windows" | "darwin",
+    });
     if (exp.error) return this.finish(b, "refused", exp.error);
     // loop: NOT-WORTH — the files to write
     const paths = exp.files.map((f) => a.join(w.path, ...f.path.split("/")));

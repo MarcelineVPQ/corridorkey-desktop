@@ -26,10 +26,19 @@ export interface FarmJob extends JobLike {
 }
 
 export interface FarmEnv {
-  /** this computer's model set and ONNX Runtime (the workers' may differ: the notes say so) */
+  /** the model set and ONNX Runtime the workers use (farm export --models / --ort), else this computer's */
   models: string | null;
   ort: string | null;
+  /** which of them are this computer's (not given for the workers): the notes say so (SME review 2026-10-27 S3) */
+  local?: { models: boolean; ort: boolean };
+  /** Deadline's BatchName (the export folder's name), Pool and Group (null: the repository's default), Priority (S4) */
+  deadline?: { batch: string; pool: string | null; group: string | null; priority: number };
+  /** Flamenco's submitter_platform, Go's names: the computer that submits, whose paths its variables translate (S5) */
+  platform?: "linux" | "windows" | "darwin";
 }
+
+/** One policy for frames already at the output's names, in every format (S5): replace them, since a farm retries. */
+const OVERWRITE_NOTE = "Frames already at the output's names are replaced (--overwrite in every format: a farm retries a task, and the retry must replace what its first try wrote).";
 
 export interface FarmExport {
   /** relative to the export folder; `/` separated */
@@ -95,7 +104,14 @@ function msvcWord(w: string): string {
 /** A YAML double-quoted scalar (JSON's string syntax is valid YAML). */
 const y = (s: string) => JSON.stringify(s);
 const runtimeWords = (env: FarmEnv) => [...(env.models ? ["--models", env.models] : []), ...(env.ort ? ["--ort", env.ort] : [])];
-const RUNTIME_NOTE = "The models folder and ONNX Runtime library are this computer's: change them to the workers' paths.";
+/** What the jobs carry for the runtime: the workers' paths, or this computer's, said plainly (S3). */
+function runtimeNote(env: FarmEnv): string {
+  const local = env.local ?? { models: true, ort: true };
+  // loop: NOT-WORTH — two paths
+  const mine = [local.models && env.models ? `the models folder ${env.models}` : null, local.ort && env.ort ? `the ONNX Runtime library ${env.ort}` : null].filter(Boolean);
+  if (!mine.length) return env.models || env.ort ? "The jobs use the workers' paths you gave." : "No runtime paths: the workers' own CK_ENGINE_MODELS and CK_ENGINE_ORT are used.";
+  return `These jobs carry this computer's paths (${mine.join(" and ")}): give the workers' with farm export … --models <folder> --ort <library> (a kept variable works: set -p farm_models=…, then --models \${farm_models}).`;
+}
 
 /** A new line, tab, NUL or other control character: it would start a line or a column of its own in a farm file. */
 const CONTROL = /[\u0000-\u001f\u007f]/;
@@ -125,9 +141,10 @@ function refusal(jobs: readonly FarmJob[], env: FarmEnv): string | null {
     if (other) return `${JSON.stringify(other.clip.path)} and ${JSON.stringify(j.clip.path)} are both named ${j.name}: their job files would replace each other; export them into separate folders.`;
     seen.set(j.name.toLowerCase(), j);
   }
-  // loop: NOT-WORTH — two paths
-  const bad = [env.models, env.ort].find((v) => v !== null && CONTROL.test(v));
-  return bad ? `${JSON.stringify(bad)} (this computer's runtime) has a control character (a new line, a tab); rename it, then export again.` : null;
+  const d = env.deadline;
+  // loop: NOT-WORTH — five values
+  const bad = [env.models, env.ort, d?.batch ?? null, d?.pool ?? null, d?.group ?? null].find((v) => v !== null && CONTROL.test(v));
+  return bad ? `${JSON.stringify(bad)} (a runtime path or a Deadline setting) has a control character (a new line, a tab); rename it, then export again.` : null;
 }
 
 export function farmExport(format: FarmFormat, jobs: readonly FarmJob[], env: FarmEnv): FarmExport {
@@ -148,38 +165,44 @@ export function farmExport(format: FarmFormat, jobs: readonly FarmJob[], env: Fa
     case "openjd":
       // loop: NOT-WORTH — one job bundle per clip
       for (const j of ranged) files.push(...openjd(j, env));
-      notes.push(`One job bundle per clip: openjd check <clip>/template.yaml, then deadline bundle submit <clip>. ${RUNTIME_NOTE}`);
+      notes.push(`One job bundle per clip: openjd check <clip>/template.yaml, then deadline bundle submit <clip>. ${runtimeNote(env)}`);
+      // loop: NOT-WORTH — the exported jobs
+      if (ranged.some((j) => j.clip.kind === "frames"))
+        notes.push("A frame folder goes in as a DIRECTORY input (job attachments upload a folder that way); that combination isn't run on Deadline Cloud yet.");
       break;
     case "deadline":
-      // loop: NOT-WORTH — two files per clip
-      for (const j of ranged) files.push(...deadline(j));
+      // loop: NOT-WORTH — four files per clip
+      for (const j of ranged) files.push(...deadline(j, env));
       files.push(
         { path: "CorridorKey/CorridorKey.py", text: deadlinePlugin },
         { path: "CorridorKey/CorridorKey.param", text: deadlineParam },
         { path: "CorridorKey/CorridorKey.options", text: deadlineOptions },
       );
-      notes.push("Copy the CorridorKey folder to <repository>/custom/plugins/ once and set its paths (Configure Plugins); then deadlinecommand <clip>_job_info.txt <clip>_plugin_info.txt.");
+      notes.push(
+        "Copy the CorridorKey folder to <repository>/custom/plugins/ once and set its paths (Configure Plugins); then per clip, the render and its Verify job after it: deadlinecommand -SubmitMultipleJobs -dependent -job <clip>_job_info.txt <clip>_plugin_info.txt -job <clip>_verify_job_info.txt <clip>_verify_plugin_info.txt.",
+      );
+      if (!env.deadline?.group) notes.push("No --group: Deadline may give the job to a worker without a graphics card; farm export deadline … --group <your GPU group>.");
       break;
     case "opencue":
       // loop: NOT-WORTH — one script per clip
       for (const j of ranged) files.push(opencue(j, env));
       files.push({ path: "corridorkey_submit.py", text: opencueSubmit });
-      notes.push(`Submit with CUE_SHOW=<show> sh <clip>_opencue.sh (PyOutline installed). ${RUNTIME_NOTE}`);
+      notes.push(`Submit with CUE_SHOW=<show> sh <clip>_opencue.sh (PyOutline installed). ${runtimeNote(env)}`);
       break;
     case "flamenco":
       // loop: NOT-WORTH — one job per clip
       for (const j of ranged) files.push(flamenco(j, env));
       files.push({ path: "scripts/corridorkey.js", text: flamencoJobType });
       notes.push(
-        `Put scripts/corridorkey.js in the Manager's scripts folder once; submit each job with curl -X POST <manager>/api/v3/jobs -H 'Content-Type: application/json' -d @<clip>.flamenco.json. ${RUNTIME_NOTE}`,
+        `Put scripts/corridorkey.js in the Manager's scripts folder once; submit each job with curl -X POST <manager>/api/v3/jobs -H 'Content-Type: application/json' -d @<clip>.flamenco.json (submitted from ${env.platform ?? "linux"}: farm export flamenco … --platform for another). ${runtimeNote(env)}`,
       );
       break;
     case "shell":
       files.push(...shell(ranged, env));
-      notes.push(`Run: bash run-shots.sh (one shot per graphics card at a time; --gpus 0,1 in it for more cards). ${RUNTIME_NOTE}`);
+      notes.push(`Run: bash run-shots.sh (each shot list in turn, one shot per graphics card at a time; --gpus 0,1 in it for more cards; logs per list in logs/). ${runtimeNote(env)}`);
       break;
   }
-  if (files.length) notes.push(layoutNote(ranged));
+  if (files.length) notes.push(layoutNote(ranged), OVERWRITE_NOTE);
   return { files, notes };
 }
 
@@ -191,12 +214,14 @@ function openjd(j: FarmJob, env: FarmEnv): FarmExport["files"] {
   const anchor = '            - "{{Param.Outputs}}"\n';
   const at = openjdTemplate.indexOf(anchor) + anchor.length;
   // loop: NOT-WORTH — a job's few words
-  const template = folderOutput(openjdTemplate.slice(0, at) + extra.map((w) => `            - ${y(w)}\n`).join("") + openjdTemplate.slice(at));
+  const withFlags = folderOutput(openjdTemplate.slice(0, at) + extra.map((w) => `            - ${y(w)}\n`).join("") + openjdTemplate.slice(at));
+  const template = j.clip.kind === "frames" ? folderInput(withFlags) : withFlags;
   const values: [string, string | null][] = [
     ["Input", j.clip.path],
     ["OutputDir", j.outputDir],
     ["Outputs", outputs(j)],
     ["Linear", String(j.clip.kind === "frames" && j.options.frameDirLinear)],
+    ["ExistingFrames", "--overwrite"],
     ["LowVram", String(!j.options.memory.auto && j.options.memory.lowVram)],
     ["Models", env.models],
     ["OnnxRuntime", env.ort],
@@ -221,42 +246,71 @@ function folderOutput(t: string): string {
     .replace('name: "CorridorKey: {{Param.OutputPattern}}"', 'name: "CorridorKey: {{RawParam.OutputDir}}"');
 }
 
-/** Deadline 10: the job info and the plugin info (farm/deadline10), one task over the whole shot. */
-function deadline(j: FarmJob): FarmExport["files"] {
+/**
+ * A frame folder's bundle: Input is a DIRECTORY (Deadline Cloud's job attachments read objectType: a folder declared as
+ * a FILE isn't uploaded as one; SME review 2026-10-27 S7), chosen as a folder.
+ */
+function folderInput(t: string): string {
+  const at = t.indexOf("  - name: Input\n");
+  const end = t.indexOf("  - name: OutputDir\n");
+  const def = [
+    "  - name: Input",
+    "    type: PATH",
+    "    objectType: DIRECTORY",
+    "    dataFlow: IN",
+    '    description: "The clip: a folder of frames (one sequence; corridorkey keys the whole folder)."',
+    "    userInterface:",
+    "      control: CHOOSE_DIRECTORY",
+    "      label: Clip",
+    "      groupLabel: Shot",
+    "",
+  ].join("\n");
+  return t.slice(0, at) + def + t.slice(end);
+}
+
+/**
+ * Deadline 10: the render's job and plugin info (farm/deadline10), one task over the whole shot, and a Verify job
+ * (Command=verify, the same arguments) submitted after it with -dependent (S4). Both in one batch, the export folder's
+ * name; Pool and Group when given (the Group is your GPU workers'), the priority.
+ */
+function deadline(j: FarmJob, env: FarmEnv): FarmExport["files"] {
   const [a, b] = j.range!;
   // loop: NOT-WORTH — a job's few flags
   const flags = farmFlags(j).filter(([n]) => n !== "max-vram");
   // loop: NOT-WORTH — as above
   const maxVram = farmFlags(j).find(([n]) => n === "max-vram")?.[1];
+  const d = env.deadline ?? { batch: "corridorkey", pool: null, group: null, priority: 50 };
   // loop: NOT-WORTH — a file's few keys
   const lines = (kv: [string, string][]) => kv.map(([k, v]) => `${k}=${v}`).join("\n") + "\n";
+  const job = (what: string): [string, string][] => [
+    ["Plugin", "CorridorKey"],
+    ["Name", `${j.name} ${what}`],
+    ["BatchName", d.batch],
+    ["Frames", `${a}-${b}`],
+    ["ChunkSize", String(b - a + 1)],
+    ["Priority", String(d.priority)],
+    ...(d.pool ? [["Pool", d.pool] as [string, string]] : []),
+    ...(d.group ? [["Group", d.group] as [string, string]] : []),
+    // loop: NOT-WORTH — ≤ four outputs
+    ...outputPaths(j).flatMap((p, i): [string, string][] => [
+      [`OutputDirectory${i}`, p.dir],
+      [`OutputFilename${i}`, p.file],
+    ]),
+  ];
+  const plugin = (command: string): [string, string][] => [
+    ["Command", command],
+    ["InputPath", j.clip.path],
+    ["OutputPath", j.outputDir],
+    ["Outputs", outputs(j)],
+    ["Preroll", "0"],
+    ...(maxVram ? [["MaxVram", maxVram] as [string, string]] : []),
+    ["ExtraArguments", msvc(flagWords(flags))],
+  ];
   return [
-    {
-      path: `${j.name}_job_info.txt`,
-      text: lines([
-        ["Plugin", "CorridorKey"],
-        ["Name", `${j.name} key`],
-        ["Frames", `${a}-${b}`],
-        ["ChunkSize", String(b - a + 1)],
-        // loop: NOT-WORTH — ≤ four outputs
-        ...outputPaths(j).flatMap((p, i): [string, string][] => [
-          [`OutputDirectory${i}`, p.dir],
-          [`OutputFilename${i}`, p.file],
-        ]),
-      ]),
-    },
-    {
-      path: `${j.name}_plugin_info.txt`,
-      text: lines([
-        ["Command", "render"],
-        ["InputPath", j.clip.path],
-        ["OutputPath", j.outputDir],
-        ["Outputs", outputs(j)],
-        ["Preroll", "0"],
-        ...(maxVram ? [["MaxVram", maxVram] as [string, string]] : []),
-        ["ExtraArguments", msvc(flagWords(flags))],
-      ]),
-    },
+    { path: `${j.name}_job_info.txt`, text: lines(job("key")) },
+    { path: `${j.name}_plugin_info.txt`, text: lines(plugin("render")) },
+    { path: `${j.name}_verify_job_info.txt`, text: lines(job("verify")) },
+    { path: `${j.name}_verify_plugin_info.txt`, text: lines(plugin("verify")) },
   ];
 }
 
@@ -300,7 +354,7 @@ function flamenco(j: FarmJob, env: FarmEnv): FarmExport["files"][number] {
     name: `${j.name} key`,
     type: "corridorkey",
     priority: 50,
-    submitter_platform: "linux",
+    submitter_platform: env.platform ?? "linux",
     settings: {
       corridorkey: "corridorkey",
       input: j.clip.path,
@@ -311,7 +365,7 @@ function flamenco(j: FarmJob, env: FarmEnv): FarmExport["files"][number] {
       chunk_size: 0,
       preroll: 0,
       tail: 0,
-      existing: "refuse",
+      existing: "overwrite",
       models: env.models ?? "",
       ort: env.ort ?? "",
       extra_args: sh(flagWords(flags)),
@@ -321,7 +375,11 @@ function flamenco(j: FarmJob, env: FarmEnv): FarmExport["files"][number] {
   return { path: `${j.name}.flamenco.json`, text: JSON.stringify(job, null, 2) + "\n" };
 }
 
-/** The shell farm: shot lists (one per set of flags: the flags go to every shot of a list) and the line that runs them. */
+/**
+ * The shell farm: shot lists (one per set of flags: the flags go to every shot of a list) and the script that runs
+ * each of them in turn, with logs of its own (corridorkey-farm.sh numbers a list's logs from 0) and every list run
+ * even when one fails; the script's exit status is 1 when any list failed (S6).
+ */
 function shell(jobs: readonly FarmJob[], env: FarmEnv): FarmExport["files"] {
   const lists = new Map<string, FarmJob[]>();
   // loop: NOT-WORTH — the exported jobs
@@ -333,12 +391,15 @@ function shell(jobs: readonly FarmJob[], env: FarmEnv): FarmExport["files"] {
   const runs: string[] = [];
   // loop: NOT-WORTH — one list per set of flags
   for (const [i, [flags, list]] of [...lists].entries()) {
-    const name = lists.size === 1 ? "shots.txt" : `shots-${i + 1}.txt`;
+    const name = lists.size === 1 ? "shots" : `shots-${i + 1}`;
     // loop: NOT-WORTH — the list's shots
-    files.push({ path: name, text: `# corridorkey farm export: INPUT<tab>OUTPUT per shot (the whole shot)\n${list.map((j) => `${j.clip.path}\t${j.outputDir}\n`).join("")}` });
-    runs.push(`bash "$here/corridorkey-farm.sh" --logs "$here/logs" "$here/${name}" -- ${flags}${env.models || env.ort ? ` ${sh(runtimeWords(env))}` : ""}`);
+    files.push({ path: `${name}.txt`, text: `# corridorkey farm export: INPUT<tab>OUTPUT per shot (the whole shot)\n${list.map((j) => `${j.clip.path}\t${j.outputDir}\n`).join("")}` });
+    runs.push(`bash "$here/corridorkey-farm.sh" --overwrite --logs "$here/logs/${name}" "$here/${name}.txt" -- ${flags}${env.models || env.ort ? ` ${sh(runtimeWords(env))}` : ""} || status=1`);
   }
-  files.push({ path: "run-shots.sh", text: `#!/bin/sh\n# corridorkey farm export: every shot list, one after the other\nhere="$(dirname "$0")"\n${runs.join(" &&\n")}\n` });
+  files.push({
+    path: "run-shots.sh",
+    text: `#!/bin/sh\n# corridorkey farm export: every shot list in turn (each with its own logs); exit 1 when any shot failed\nhere="$(dirname "$0")"\nstatus=0\n${runs.join("\n")}\nexit $status\n`,
+  });
   return files;
 }
 
