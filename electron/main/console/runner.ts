@@ -1037,9 +1037,9 @@ export class Console {
     const framed = seqs.reduce((n, e) => n + e.sequence!.count, 0);
     const more = rows.length - entries.length;
     const summary =
-      `${dir}: ${fileCount} files (${fileSizeText(bytes)}${unread ? `; the sizes of ${unread} frames not read` : ""})` +
+      `${dir}: ${plural(fileCount, "file")} (${fileSizeText(bytes)}${unread ? `; the sizes of ${unread} frames not read` : ""})` +
       `${seqs.length ? `, ${framed} of them in ${seqs.length} sequence${seqs.length === 1 ? "" : "s"} (dir -f lists the frames)` : ""}` +
-      `, ${entries.length - files.length} folders${more > 0 ? `; ${more} more not listed` : ""}${hidden > 0 ? `; ${hidden} hidden (dir -a shows them)` : ""}` +
+      `, ${plural(entries.length - files.length, "folder")}${more > 0 ? `; ${more} more not listed` : ""}${hidden > 0 ? `; ${hidden} hidden (dir -a shows them)` : ""}` +
       `${unmatched > 0 ? `; ${unmatched} other${unmatched === 1 ? "" : "s"} not matching the pattern` : ""}`;
     if (has("names")) {
       // names only (ls -1, dir /w /b): one per line, folders with a separator
@@ -2361,6 +2361,9 @@ export function clipName(input: string, platform: NodeJS.Platform): string {
   if (["input", "frames", "rgb"].includes(stem.toLowerCase())) return a.basename(a.dirname(p)) || stem;
   return stem;
 }
+
+/** "1 file", "3 files" (SME review 2026-10-27 N3: "1 files"). */
+const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 

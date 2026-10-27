@@ -2349,3 +2349,16 @@ describe("review 2026-10-27 S9: the next free version", () => {
     expect([no.state, no.lines.at(-1)!.text]).toEqual(["refused", expect.stringMatching(/outside the folders the Console may write to/)]);
   });
 });
+
+// The SME reviews' NICE items (docs/REVIEW_CONSOLE_SME_2026-10-26.md N1-N9, docs/REVIEW_CONSOLE_P4_SME_2026-10-27.md
+// N1-N12; backlog rows 118-130, 140-151), each failing on the code before it.
+describe("SME reviews: the expert suggestions", () => {
+  it("P4 N3 (row 142): dir says 1 file and 1 folder, not 1 files", async () => {
+    const { c } = make();
+    const d = mkdtempSync(join(root, "one-"));
+    writeFileSync(join(d, "a.txt"), "x");
+    mkdirSync(join(d, "sub"));
+    const b = await c.run(`dir ${d}`);
+    expect(b.lines[0].text).toMatch(/: 1 file \(1 B\), 1 folder$/);
+  });
+});
