@@ -557,4 +557,40 @@ describe("review 2026-10-26 probes", () => {
     expect(spawned[0].args).toContain("ocio://studio-config-latest");
     await finish(spawned[0].child, [], 0);
   });
+
+  it("P2 (M2): a --job file the app can't fully read or parse is refused, not passed on unchecked", async () => {
+    const big = join(root, "job-big.json");
+    writeFileSync(big, JSON.stringify({ input: "a.mov", output_dir: elsewhere }) + " ".repeat(1024 * 1024));
+    writeFileSync(join(root, "job-bad.json"), "{ not json");
+    // index.ts's reader: regular files of at most `max` bytes
+    const { c } = make({
+      fs: {
+        readdir: (p) => readdir(p, { withFileTypes: true }),
+        stat: (p) => stat(p),
+        readFile: async (p, max) => {
+          if ((await stat(p)).size > max) throw new Error(`larger than ${max} bytes`);
+          return readFile(p, "utf8");
+        },
+        mkdir: async (p) => void (await mkdir(p, { recursive: true })),
+      },
+    });
+    // loop: NOT-WORTH — three job files
+    for (const f of [big, join(root, "job-bad.json"), join(root, "job-missing.json")]) {
+      const b = await c.run(`render --job ${f}`);
+      expect([b.state, b.lines[0].text], f).toEqual(["refused", expect.stringMatching(/^--job: can't check/)]);
+    }
+    expect(spawned).toEqual([]);
+  });
+
+  it("P2 (M2): the job's checked folders are passed as resolved --output and --temp (flags win over the file)", async () => {
+    const f = join(root, "job-temp.json");
+    writeFileSync(f, JSON.stringify({ input: "a.mov", output_dir: "../out/j", temp_dir: join(out, "jt") }));
+    const { c } = make();
+    await c.run(`render --job ${f}`);
+    expect(spawned[0].args).toEqual(["render", "--progress-format", "json", "--job", f, "--output", join(out, "j"), "--temp", join(out, "jt")]);
+    // the file changing after the check changes nothing: the CLI is given what was checked
+    writeFileSync(f, JSON.stringify({ input: "a.mov", output_dir: elsewhere }));
+    expect(spawned[0].args).toContain(join(out, "j"));
+    await finish(spawned[0].child, [], 0);
+  });
 });

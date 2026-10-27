@@ -388,6 +388,7 @@ export class Console {
     const refusals: string[] = [];
     // loop: NOT-WORTH — the line's few options
     const given = new Set(p.options.map((o) => o.arg.id));
+    const jobFlags: string[] = [];
     const pathValue = async (a: ConsoleArg, v: string): Promise<string> => {
       // --ocio's ocio://… names a built-in config, not a file; any other value is a path (C://… is one on Windows)
       if (a.id === "ocio" && !a.writes && v.startsWith("ocio://")) return v;
@@ -412,9 +413,13 @@ export class Console {
         if (!this.d.runtimeAllowed(o.arg.id, v))
           refusals.push(`${flag}: the Console runs only the ${o.arg.id === "ort" ? "ONNX Runtime" : "model sets"} the Engine page lists (${v} isn't one; add it there first)`);
       }
-      if (o.arg.id === "job") refusals.push(...(await this.jobFileRefusals(v, given, targets)));
       argv.push(flag, v);
+      if (o.arg.id === "job") jobFlags.push(...(await this.jobFileFlags(v, cmd.args, given, targets, refusals)));
     }
+    // the job file's folders, checked and resolved, as flags (flags win over the file): the CLI uses what was checked
+    // loop: NOT-WORTH — at most two flags
+    for (let i = 0; i < jobFlags.length; i += 2) given.add(jobFlags[i].slice(2));
+    argv.push(...jobFlags);
     // loop: NOT-WORTH — the line's positionals (render's clip)
     for (const x of p.positionals) positionals.push(x.arg.kind === "path" ? await pathValue(x.arg, x.value) : x.value);
     // --progress-format json: progress as events (render, verify, prepare); render's temporary files in the app's cache
@@ -464,29 +469,36 @@ export class Console {
     return this.spawnCli(b, bin, argv, cmd.gpu, inScript, targets);
   }
 
-  /** A --job file names its own output and temporary folders: they are checked as -o and --temp are (flags win). */
-  private async jobFileRefusals(path: string, given: Set<string>, targets: string[]): Promise<string[]> {
-    let job: { output_dir?: unknown; temp_dir?: unknown };
+  /**
+   * A --job file names its own output and temporary folders: they are checked as -o and --temp are, and returned as
+   * resolved `--output` / `--temp` flags (flags win over the file, docs/CLI.md), so the CLI uses what was checked even
+   * if the file changes after this. A file the app can't fully read and parse is refused (never passed on unchecked).
+   */
+  private async jobFileFlags(path: string, args: readonly ConsoleArg[], given: Set<string>, targets: string[], refusals: string[]): Promise<string[]> {
+    let job: unknown;
     try {
       const abs = (this.d.paths.platform === "win32" ? win32 : posix).resolve(this.cwd, path);
-      job = JSON.parse(await this.d.fs.readFile(abs, FILE_MAX)) as typeof job;
-    } catch {
-      // error: SHOWN — corridorkey reads it too, and says what is wrong with it (exit 2 / 3)
+      job = JSON.parse(await this.d.fs.readFile(abs, FILE_MAX));
+    } catch (e) {
+      // error: SHOWN — refused with the reason: what isn't checked doesn't run
+      refusals.push(`--job: can't check ${path} (${(e as Error).message}); the Console runs a job file only once it has read and checked it`);
       return [];
     }
-    const out: string[] = [];
-    const checks: [string, unknown, string][] = [
-      ["output", job?.output_dir, "output_dir"],
-      ["temp", job?.temp_dir, "temp_dir"],
-    ];
+    const fields = job && typeof job === "object" ? (job as { output_dir?: unknown; temp_dir?: unknown }) : {};
+    const flags: string[] = [];
     // loop: NOT-WORTH — two fields, one async realpath each
-    for (const [flag, v, key] of checks) {
-      if (given.has(flag) || typeof v !== "string" || !v) continue;
+    for (const [flag, v, key] of [
+      ["output", fields.output_dir, "output_dir"],
+      ["temp", fields.temp_dir, "temp_dir"],
+    ] as const) {
+      // loop: NOT-WORTH — a command's ~50 flags
+      if (given.has(flag) || typeof v !== "string" || !v || !args.some((a) => a.id === flag && a.writes)) continue;
       const w = await checkWrite(v, this.cwd, this.d.writeRoots(), this.d.paths);
-      if (!w.ok) out.push(`--job's ${key}: ${w.reason}`);
+      if (!w.ok) refusals.push(`--job's ${key}: ${w.reason}`);
       targets.push(w.path);
+      flags.push(`--${flag}`, w.path);
     }
-    return out;
+    return flags;
   }
 
   /** The dialog's numbers: what each written target holds now (files and bytes; a frame pattern: its folder's frames). */
