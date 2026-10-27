@@ -404,7 +404,15 @@ ML set, Firefox and the desktop running beside it (about 12 GB available at the 
 
 Per call (12-frame runs): stage 1 3.0 s per 4-frame window, 7-10 s per 8-frame window; stage 2 1.3 s per frame. The
 120-frame runs were slower per call (stage 1 6.1 s per 4-frame window, stage 2 1.9-2.5 s per frame) with the Mac's
-video wallpaper decoding beside them; not separated yet. The ORT cache: a warm load is 3-4x faster than a cold one
+video wallpaper decoding beside them; not separated yet. Again on 2026-10-27 with the wallpaper switched off (WallpaperAerialsExtension and VTDecoderXPCService at
+0 % CPU, sampled every minute) and the published set (`2.0.0-onnx.4-coreml` installed by the app's setup code, the
+stage-1 8-frame file built the same way), cpu-gpu, alpha + fg EXR float, low-memory: 4/2 **160.2 s (0.75 fps)**, peak
+2.36 GB, stage 1 1.35 s per 4-frame window, stage 2 0.56 s per frame; 8/4 **171.9 s (0.70 fps)**, peak 3.33 GB,
+stage 1 2.84 s per 8-frame window, stage 2 0.57 s per frame (against 714 s / 491 s, stage 1 6.1 / 7.7 s, stage 2
+2.5 / 1.9 s before). Two things changed between the runs (the wallpaper, and the set the earlier runs used), so the
+gain isn't attributed to either. 4/2 is now the faster window. The 12-frame job of the published set against the
+engine's CPU provider on the shipped fp16 set (same window, Linux PC): alpha max 0.0024 (under 1/255), MAE 1.1e-5,
+0 % of pixels over 1/255, alpha PSNR 84.1 dB, fg PSNR 77.3 dB. The ORT cache: a warm load is 3-4x faster than a cold one
 (job session loads 1.9 against 7.5 s at 4/2) and the compiled model is reused, not rewritten.
 
 ## Against the PyTorch engine (`tools/engine_bench.mjs`, 12 GB budget, alpha+fg, auto, no hint)
