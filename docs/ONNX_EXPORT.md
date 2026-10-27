@@ -428,7 +428,7 @@ engine-rs/export/coreml/build_coreml_models.sh ~/.local/share/corridorkey-deskto
 tools/upload_model_set.sh OUT/set 2.0.0-onnx.4-coreml   # the release models-2.0.0-onnx.4-coreml (Marcy's OK first)
 ```
 
-**1920×1080 clips** (row 60, built 2026-10-27, not yet published or tried on a Mac): the same six networks at
+**1920×1080 clips** (row 60, built 2026-10-27; on the Mac mini M6 16 GB: peak 3.35 GB at window 4/2, 5.25 GB at 8/4, ~2.1 fps steady, mattes within 1/255 of CUDA): the same six networks at
 1152×1920 (1080 pads to 1152, 1920 is already a multiple of 128: `clip.rs` `SHAPE_QUANTUM`), 1,092,898,613 bytes. The
 same script; C-RADIO's fold peaked at 5.3 GB (memrun). Two builds gave byte-identical files, and the 1152×1280 build
 of the same day reproduced the published files' SHA-256. The engine picks a size's files from `coreml.json` by the

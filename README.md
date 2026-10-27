@@ -115,7 +115,8 @@ instead of CUDA, and that path needs more development before it keys:
 - **The app asks for Core ML** (row 58): built, not yet tried on a real Mac.
 - **1280×1080 and 1920×1080 clips only** (row 60): Core ML compiles for fixed frame sizes, so the set has files for
   1280×1080 clips (padded to 1152×1280) and standard 1920×1080 HD (padded to 1152×1920). The 1920×1080 files are
-  built but not yet tried on a Mac (memory on 16 GB, speed, mattes against CUDA). 4K has no Core ML set yet.
+  tried on the Mac mini M6 16 GB (2026-10-27, 12 frames, CPU + GPU): peak 3.35 GB at window 4/2 and 5.25 GB at 8/4,
+  about 2.1 fps steady, mattes within 1/255 of CUDA (alpha PSNR 81 dB). 4K has no Core ML set yet.
 - **Proven on a real Mac** (row 24): GitHub's runners are virtual Macs without the GPU or the Neural Engine, so Mac
   keying is measured on a real Apple Silicon Mac (an M6 Mac mini, `tools/mac_gate.sh`): mattes within fp16 rounding of
   CUDA on the same clips, and the speed. macOS is in 1.0 only if that gate passes; otherwise 1.0 is Linux and Windows
