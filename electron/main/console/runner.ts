@@ -11,7 +11,7 @@ import { createInterface } from "node:readline";
 import { posix, win32 } from "node:path";
 import { naturalCompare } from "../media";
 import { enumValue, parse, quoteArg, type Parsed, type ParseOptions } from "../../../src/shared/console/parse";
-import { isBinary, LINES_MAX, TEXT_MAX, TextCount, textLines, treeLines, WC_MAX, type TreeNode } from "./files";
+import { isBinary, LINES_MAX, readLength, TEXT_MAX, TextCount, textLines, treeLines, WC_MAX, type TreeNode } from "./files";
 import { EXIT_MEANINGS, fullName, type ConsoleArg, type Registry } from "../../../src/shared/console/registry";
 import type { ConsoleBlock, ConsoleEntry, ConsoleHistoryEntry, ConsoleSession, DoctorRow, Job as QueueJob } from "../../../src/shared/types";
 import { farmExport, fileList, type FarmFormat, type FarmJob } from "./farm";
@@ -1222,9 +1222,9 @@ export class Console {
     for (const f of files) {
       const t = await this.textFile(f);
       if ("error" in t) return this.finish(b, "failed", t.error);
-      const buf = await this.d.fs.readRange(t.path, 0, Math.min(t.size, TEXT_MAX));
+      const buf = await this.d.fs.readRange(t.path, 0, readLength(t.size));
       if (isBinary(buf)) return this.finish(b, "failed", `${f} isn't text (cat shows text files only; open ${quoteArg(f, this.opts)} shows it in the file manager).`);
-      const lines = textLines(buf, false, t.size > TEXT_MAX);
+      const lines = textLines(buf, false, t.size > TEXT_MAX || (t.size === 0 && buf.length === TEXT_MAX));
       if (files.length > 1) this.note(b, "info", `==> ${f} <==`);
       // loop: NOT-WORTH — ≤ LINES_MAX lines
       for (const l of lines.slice(0, LINES_MAX)) this.note(b, "out", l);
@@ -1239,9 +1239,9 @@ export class Console {
     const t = await this.textFile(f);
     if ("error" in t) return this.finish(b, "failed", t.error);
     const from = tail ? Math.max(0, t.size - TEXT_MAX) : 0;
-    const buf = await this.d.fs.readRange(t.path, from, Math.min(t.size, TEXT_MAX));
+    const buf = await this.d.fs.readRange(t.path, from, readLength(t.size));
     if (isBinary(tail ? buf.subarray(-8192) : buf)) return this.finish(b, "failed", `${f} isn't text (${tail ? "tail" : "head"} shows text files only).`);
-    const lines = textLines(buf, from > 0, !tail && t.size > TEXT_MAX);
+    const lines = textLines(buf, from > 0, (!tail && t.size > TEXT_MAX) || (t.size === 0 && buf.length === TEXT_MAX));
     return this.finish(b, "done", ...(tail ? lines.slice(-n) : lines.slice(0, n)));
   }
 

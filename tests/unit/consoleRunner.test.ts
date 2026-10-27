@@ -1,8 +1,9 @@
 // The Console's runner with a fake spawn (as engine.test.ts): the exact argv, never a shell, cancel semantics, the CLI's
 // JSON events into blocks, the file scope and the sudo flow end to end. Real files only in a temp folder of its own.
+import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
-import { lstat, mkdir, open, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +15,7 @@ import { clipName, Console, CONSOLE_CHARS_KEPT, type ConsoleDeps, type Elevation
 import { dropOnLockAndSleep, Elevation, LinuxLockWatch, LOCK_POLL_MS, parseLockedHint } from "../../electron/main/console/elevation";
 import { AuditLog, History } from "../../electron/main/console/logs";
 import { BlockPusher, PUSH_EVERY_MS } from "../../electron/main/console/push";
+import { readRange } from "../../electron/main/console/files";
 import { consoleLineArg, consoleLinesArg, cursorArg, fromAppPage } from "../../electron/main/validate";
 import { makeRegistry } from "../../src/shared/console/registry";
 import { leavesQuoteOpen } from "../../src/shared/console/script";
@@ -42,16 +44,6 @@ writeFileSync(join(root, "job-out.json"), JSON.stringify({ input: "a.mov", outpu
 writeFileSync(join(root, "job-in.json"), JSON.stringify({ input: "a.mov", output_dir: join(out, "j") }));
 
 /** index.ts's bounded read */
-async function readRange(p: string, start: number, length: number): Promise<Buffer> {
-  const fh = await open(p, "r");
-  try {
-    const buf = Buffer.alloc(length);
-    const { bytesRead } = await fh.read(buf, 0, length, start);
-    return buf.subarray(0, bytesRead);
-  } finally {
-    await fh.close();
-  }
-}
 
 interface FakeChild extends ChildProcess {
   signals: (string | undefined)[];
@@ -1280,6 +1272,22 @@ describe("Phase 4: history shortcuts", () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(blocks.get(b.id)!.state).toBe("failed");
     expect([...blocks.values()].find((x) => x.parent === b.id)!.lines[0].text).toMatch(/unknown command '!!'/);
+  });
+});
+
+describe("cat and head on special files (P4 senior review 2026-10-27 N4, BACKLOG row 134)", () => {
+  it.skipIf(process.platform !== "linux")("a /proc file (its size 0) is read to its end, not printed as empty", async () => {
+    const { c } = make();
+    for (const cmd of ["cat", "head -n 1"]) {
+      const b = await c.run(`${cmd} /proc/self/status`);
+      expect([cmd, b.state, b.lines[0]?.text]).toEqual([cmd, "done", expect.stringMatching(/^Name:/)]);
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("readRange refuses a pipe swapped in after the stat, without blocking on it", async () => {
+    const fifo = join(mkdtempSync(join(root, "fifo-")), "p");
+    execFileSync("mkfifo", [fifo]);
+    await expect(readRange(fifo, 0, 10)).rejects.toThrow(/isn't a regular file/);
   });
 });
 

@@ -4,7 +4,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, net, power
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
-import { access, constants as fsConstants, lstat, mkdir, open, readdir, readFile, stat, statfs } from "node:fs/promises";
+import { access, constants as fsConstants, lstat, mkdir, readdir, readFile, stat, statfs } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { EngineProcess, rustEngineEnv, type EngineReply } from "./engine";
@@ -63,6 +63,7 @@ import { Console, LINE_MAX, type ElevationRequest, type ScriptElevationRequest }
 import { dropOnLockAndSleep, Elevation, ELEVATION_CAP_MS, ELEVATION_TTL_MS, LinuxLockWatch, parseLockedHint } from "./console/elevation";
 import { AuditLog, History } from "./console/logs";
 import { BlockPusher } from "./console/push";
+import { readRange } from "./console/files";
 import { realPathDeps, replaceFile } from "./console/paths";
 import { makeRegistry } from "../../src/shared/console/registry";
 import { cacheDirFor, cacheInfo, cacheUnavailable, CACHE_MARKER, clearOldCache, exists, JOBS_DIR, jobTempDir, MEDIA_DIR, moveCache, prepareTarget, remapMedia, targetProblem } from "./cacheFolder";
@@ -410,17 +411,7 @@ const appConsole = new Console({
       // loop: NOT-WORTH — one async read of a small file
       return readFile(p, "utf8");
     },
-    readRange: async (p, start, length) => {
-      // loop: NOT-WORTH — one open + read + close per cat, head, tail, or wc chunk [bounded: TEXT_MAX bytes]
-      const fh = await open(p, "r");
-      try {
-        const buf = Buffer.alloc(length);
-        const { bytesRead } = await fh.read(buf, 0, length, start);
-        return buf.subarray(0, bytesRead);
-      } finally {
-        await fh.close();
-      }
-    },
+    readRange,
     mkdir: async (p) => {
       // loop: NOT-WORTH — one async mkdir per render
       await mkdir(p, { recursive: true });

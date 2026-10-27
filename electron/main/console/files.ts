@@ -1,6 +1,8 @@
 // The Console's read-only file built-ins' pure parts (Phase 4 step 7): text from bytes (a binary file is refused, a
 // cut first or last line dropped), wc's counts across chunks, du's sizes, tree's drawing. Reading is runner.ts's
-// (ConsoleFs.readRange: never more than TEXT_MAX of a file at once).
+// (ConsoleFs.readRange: never more than TEXT_MAX of a file at once; index.ts gives it readRange below).
+import { constants } from "node:fs";
+import { open } from "node:fs/promises";
 
 /** The most of a file cat, head and tail read (from its start or its end). */
 export const TEXT_MAX = 1024 * 1024;
@@ -8,6 +10,33 @@ export const TEXT_MAX = 1024 * 1024;
 export const LINES_MAX = 2000;
 /** wc reads at most this much of a file, TEXT_MAX at a time. */
 export const WC_MAX = 256 * 1024 * 1024;
+
+/**
+ * Up to `length` bytes of a regular file from `start`, read until the end or `length` (one read may return less; a
+ * /proc file says its size is 0). Opened without blocking and checked again on the open file (P4 senior review N4): a
+ * pipe swapped in after the caller's stat would otherwise block a libuv thread on the open or the read.
+ */
+export async function readRange(p: string, start: number, length: number): Promise<Buffer> {
+  // loop: NOT-WORTH — one open + reads + close per cat, head, tail or wc chunk [bounded: length bytes]
+  const fh = await open(p, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
+  try {
+    if (!(await fh.stat()).isFile()) throw new Error("isn't a regular file (a pipe or a device)");
+    const buf = Buffer.alloc(length);
+    let got = 0;
+    // loop: SERIAL-REQUIRED — reads in order until the end [bounded: length bytes]
+    while (got < length) {
+      const { bytesRead } = await fh.read(buf, got, length - got, start + got);
+      if (bytesRead === 0) break;
+      got += bytesRead;
+    }
+    return buf.subarray(0, got);
+  } finally {
+    await fh.close();
+  }
+}
+
+/** How much of a file cat, head and tail read: a size of 0 may be a special file (/proc): read up to TEXT_MAX then. */
+export const readLength = (size: number): number => (size === 0 ? TEXT_MAX : Math.min(size, TEXT_MAX));
 
 /** A file is text unless its first 8 KiB have a NUL (git's and grep's rule). */
 export function isBinary(buf: Buffer): boolean {
