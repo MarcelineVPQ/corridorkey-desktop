@@ -439,11 +439,26 @@ export class Console {
     return b;
   }
 
-  /** One line: parsed, checked, run. `done` settles when it has finished (a script waits on it). */
+  /**
+   * One line: parsed, checked, run. `done` settles when it has finished (a script waits on it). Whatever a built-in
+   * throws (a file whose stat works but whose open doesn't) ends its block failed, in words: never a rejected call
+   * with no block (senior review 2026-10-27 M4).
+   */
   private async runLine(line: string, parent: number | null, typed: string | null = null): Promise<{ block: ConsoleBlock; done: Promise<ConsoleBlock> }> {
     const b = this.block(line, parent);
     // a history expansion: the block shows the line that runs, and what was typed
     if (typed !== null) this.note(b, "info", `from ${typed}`);
+    try {
+      return await this.runParsed(b, line, parent);
+    } catch (e) {
+      // error: SHOWN — the block says what failed, in words (fsErrorText)
+      const path = (e as NodeJS.ErrnoException | null)?.path;
+      const x = this.finish(b, "failed", `${line.trim().split(/\s+/)[0]}: ${path ? fsErrorText(e, path) : String((e as Error)?.message ?? e)}.`);
+      return { block: x, done: Promise.resolve(x) };
+    }
+  }
+
+  private async runParsed(b: ConsoleBlock, line: string, parent: number | null): Promise<{ block: ConsoleBlock; done: Promise<ConsoleBlock> }> {
     const now = (x: ConsoleBlock) => ({ block: x, done: Promise.resolve(x) });
     const p = parse(line, this.d.registry, this.opts);
     if (p.errors.length) {
@@ -1359,11 +1374,21 @@ export class Console {
       job.scriptGrant = true;
       b.elevated = true;
     }
-    const ctx: RunCtx = { b, job, name, keepGoing, failed: null, stopped: false, failures: 0, scope: new Map() };
+    const ctx: RunCtx = { b, job, name, keepGoing, failed: null, stopped: false, failures: 0, scope: new Map(), commands: 0 };
     const done = (async () => {
-      const status = await this.runList(list, ctx);
-      this.job = null;
-      this.d.sessionChanged();
+      let status = 1;
+      try {
+        status = await this.runList(list, ctx);
+      } catch (e) {
+        // error: SHOWN — anything the runner itself throws ends the program failed, in words; the slot is freed below
+        this.note(b, "err", `stopped: ${String((e as Error)?.message ?? e)}`);
+        ctx.stopped = true;
+        ctx.failed = 1;
+      } finally {
+        // the one slot, freed however the program ended (senior review 2026-10-27 M4: a throw kept it until restart)
+        this.job = null;
+        this.d.sessionChanged();
+      }
       if (job.cancels > 0) return this.finish(b, "cancelled");
       if (ctx.failures) this.note(b, "err", `${ctx.failures} command${ctx.failures === 1 ? "" : "s"} failed (--keep-going went on)`);
       if (ctx.stopped || ctx.failures || status !== 0) {
@@ -1412,6 +1437,18 @@ export class Console {
         else ctx.scope.set(node.name, had);
         continue;
       }
+      // one budget for the whole program: loops inside loops multiply their items (senior review 2026-10-27 M4)
+      if (++ctx.commands > PROGRAM_COMMANDS_MAX) {
+        this.note(ctx.b, "err", `stopped: more than ${PROGRAM_COMMANDS_MAX} commands in one program (a loop inside a loop multiplies them): name a smaller set`);
+        ctx.stopped = true;
+        ctx.failed = 1;
+        break;
+      }
+      // a turn of the event loop before each command: Ctrl+C, the block pushes and the window get in between built-ins
+      // that never wait on anything (a loop of echo would otherwise hold the main process until it ends)
+      // loop: NOT-WORTH — one setImmediate per command [bounded: PROGRAM_COMMANDS_MAX commands]
+      await new Promise((r) => setImmediate(r));
+      if (ctx.job.cancels > 0 || this.closing) break;
       if (ctx.name !== null) this.note(ctx.b, "info", `${ctx.name}:${node.line}  ${node.time ? "time " : ""}${node.text}`);
       const v = this.expand(node.text, ctx.scope);
       const started = this.now();
@@ -1447,6 +1484,7 @@ export class Console {
     if ("error" in v) return v;
     const a = this.d.paths.platform === "win32" ? win32 : posix;
     const out: string[] = [];
+    const tooMany = `more than ${ITEMS_MAX} items: name a smaller set`;
     // loop: NOT-WORTH — the loop's words, one async readdir per pattern
     for (const w of tokenize(v.line, this.opts).words) {
       const cut = Math.max(w.value.lastIndexOf("/"), this.opts.windows ? w.value.lastIndexOf("\\") : -1);
@@ -1463,15 +1501,20 @@ export class Console {
         // loop: NOT-WORTH — one folder's names
         const hits = names.filter((n) => re.test(n.name) && (namePart.startsWith(".") || !n.name.startsWith("."))).map((n) => n.name);
         if (!hits.length) return { error: `no file matches ${w.value}` };
-        // loop: NOT-WORTH — sorts the matches
-        out.push(...hits.sort(naturalCompare).map((n) => dirPart + n));
+        // the cap before the items are added (a spread of 130 000 matches overflowed the stack: review 2026-10-27 M4)
+        if (out.length + hits.length > ITEMS_MAX) return { error: tooMany };
+        // loop: NOT-WORTH — sorts ≤ ITEMS_MAX matches, then adds them one by one
+        for (const n of hits.sort(naturalCompare)) out.push(dirPart + n);
       } else if (!w.quoted && frameToken(namePart)) {
         const pat = await this.patternAt(a.join(dir, namePart));
         if (pat && !pat.seq) return { error: noFrames(pat, this.opts) };
-        // loop: NOT-WORTH — the sequence's frames
-        out.push(...(pat?.seq ? pat.seq.names.map((n) => dirPart + n) : [w.value]));
+        const names = pat?.seq ? pat.seq.names : null;
+        if (out.length + (names?.length ?? 1) > ITEMS_MAX) return { error: tooMany };
+        // loop: NOT-WORTH — ≤ ITEMS_MAX frames, added one by one
+        if (names) for (const n of names) out.push(dirPart + n);
+        else out.push(w.value);
       } else out.push(w.value);
-      if (out.length > ITEMS_MAX) return { error: `more than ${ITEMS_MAX} items: name a smaller set` };
+      if (out.length > ITEMS_MAX) return { error: tooMany };
     }
     return out;
   }
@@ -1813,6 +1856,8 @@ interface RunCtx {
   failures: number;
   /** the loops' variables, over the session's */
   scope: Map<string, string>;
+  /** the commands run so far, nested loops' too (at most PROGRAM_COMMANDS_MAX) */
+  commands: number;
 }
 
 /** du's entries counted, at most (then its sizes say ≥). */
@@ -1823,6 +1868,8 @@ const TREE_DEPTH_MAX = 6;
 
 /** A for loop's items, at most. */
 const ITEMS_MAX = 10_000;
+/** A program's commands, at most, loops inside loops included (each command is a block on the page). */
+const PROGRAM_COMMANDS_MAX = 10_000;
 
 /** time's line: how long it took; a render's frames and frames per second (from its own JSON events). */
 function timeLine(b: ConsoleBlock, ms: number): string {

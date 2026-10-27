@@ -43,7 +43,8 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   an answer instead of "unknown command" (`ANSWERS` in registry.ts): `exit` / `quit` (the Console stays open), `rm` /
   `del` / `rmdir` (the Console never deletes files), `cp` / `mv`, `more` / `less` (`cat`, `head`, `tail`),
   `which`. Built-ins say a file system error in words with what to type (`fsErrorText` in paths.ts), never Node's
-  `ENOENT: …, stat '…'`.
+  `ENOENT: …, stat '…'`; one they didn't expect (a file whose stat works but whose open doesn't) ends the block failed
+  in the same words (`cat: you have no permission to open …`), never a call with no block.
 - **Running corridorkey.** The shipped binary (`engineFind.ts findCli`) is spawned with an argv, `shell: false`, its own
   process group, the engine's environment (`rustEngineEnv`, the app's models, runtime and TensorRT cache), in the
   Console's folder (on Windows corridorkey takes the current folder out of its DLL search first, `SetDllDirectoryW("")`
@@ -134,15 +135,18 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   block under the program's. **for**'s words: an unquoted word with `*`, `?` or `[…]` in its file name is the files
   that match there (by name; dot files only for a pattern starting with `.`; a pattern in a folder name is refused),
   an unquoted frame pattern (`plates/sh010.####.exr`, `%04d`, `$F4`, `@@@@`) its frames' files, anything else itself;
-  a pattern that matches nothing is an error (zsh's rule, never the pattern itself); at most 10 000 items; a variable's
-  value is never a pattern. The loop's variable is gone after the loop (one set before comes back). **Exit status:**
+  a pattern that matches nothing is an error (zsh's rule, never the pattern itself); at most 10 000 items (counted
+  before they are added); a variable's value is never a pattern. **At most 10 000 commands in one program**, loops
+  inside loops included (each is a block on the page; past it the program stops, failed, and says so), and the event
+  loop gets a turn before each command, so Ctrl+C, the page's updates and the window reach a loop of built-ins at once
+  (senior review 2026-10-27 M4). The loop's variable is gone after the loop (one set before comes back). **Exit status:**
   each command's (`statusOf`: its exit code, else 0 done, 2 refused, 130 stopped, 1 failed) is `${status}` and what
   `&&`, `||` and `if` read; the program ends as its last command did. **Stopping:** a typed line goes on after a
   failure, as bash does; a script (`run`, pasted lines) stops at a command that fails at the end of its `&&`/`||`
   chain (bash's `set -e`: never one on the left of `&&` / `||`, never an `if`'s condition) and says
   `stopped at line N`; `run --keep-going` goes on, counts them and still ends failed. **One job:** a program takes the
-  Console's one slot for all of it (a typed `cd a; dir` while a render runs is refused as busy); Ctrl+C stops it after
-  the command it is in (a running corridorkey as usual). **time** prints `time: 2.0 s` after the command, with a
+  Console's one slot for all of it (a typed `cd a; dir` while a render runs is refused as busy) and frees it however it
+  ends (an error inside it too); Ctrl+C stops it after the command it is in (a running corridorkey as usual). **time** prints `time: 2.0 s` after the command, with a
   render's frames and frames per second from its own JSON events (`· 50 frames · 25.00 fps`); `time` goes first
   (`sudo time …` says so). A program's elevation is a script's (Security rules): the commands that replace files say
   `sudo`, all listed in one dialog up front (for a typed line: "the line typed"), never the session's elevation.

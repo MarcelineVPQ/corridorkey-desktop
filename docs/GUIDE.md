@@ -107,7 +107,9 @@ render …` says how long it took and the frames per second. Script files (`run 
 several lines; a script stops at the first command that fails (not one on the left of `&&` / `||` or in an `if`),
 `run --keep-going` goes on and still ends failed; a typed line goes on. There are no pipes: the Console's commands
 never pass text to each other or to the system. A line with `;`, `&&`, `||`, `for`, `if` or `time` runs as a script:
-one at a time, and its commands that replace files say `sudo` and are confirmed together before anything runs.
+one at a time, and its commands that replace files say `sudo` and are confirmed together before anything runs. A
+program runs at most 10 000 commands (a loop inside a loop counts them all), and Ctrl+C stops it after the command it is
+in.
 
 **Files.** `cat notes.txt` (or `type`) prints a text file, `head -n 20` and `tail -n 50 render.log` its start or end,
 `wc` counts lines, words and bytes, `du` shows how much each folder takes, and `tree` (`-L 3` for deeper) draws the

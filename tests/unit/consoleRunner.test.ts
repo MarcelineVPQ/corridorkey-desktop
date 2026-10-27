@@ -3,6 +3,7 @@
 import { EventEmitter } from "node:events";
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { lstat, mkdir, open, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -1711,4 +1712,91 @@ describe("Phase 4: file built-ins (read-only)", () => {
     expect((await c.run("tree")).nowrap).toBe(true);
     expect(text(await c.run("tree -L 3 sub"))).toEqual(["sub", "├── a.####.exr  1001-1002 · 2 frames", "└── deep/", "    └── x.txt", "1 folder, 2 files or sequences"]);
   });
+});
+
+// senior review 2026-10-27 M4 (probes P3, P4, P5): a throw inside a program kept the job slot until restart, a thrown
+// single line made no block, a loop of built-ins never yielded (Ctrl+C couldn't arrive) and nested loops multiplied the
+// item cap
+describe("review 2026-10-27 M4: a program's throws, budget and Ctrl+C", () => {
+  const kids = (id: number) => [...blocks.values()].filter((x) => x.parent === id);
+  /** the program's block once it has ended (it runs on after run() resolves) */
+  async function ended(b: ConsoleBlock): Promise<ConsoleBlock> {
+    // loop: NOT-WORTH — a test's wait [bounded: 30 s]
+    for (let i = 0; i < 3000 && b.state === "running"; i++) await new Promise((r) => setTimeout(r, 10));
+    return b;
+  }
+  const eacces = (p: string) => Object.assign(new Error(`EACCES: permission denied, open '${p}'`), { code: "EACCES", path: p });
+  /** a disk where the file's stat works but opening it doesn't (P3: mode 0000) */
+  const unreadable = () => {
+    const base = make().deps.fs;
+    return make({
+      startDir: sdir,
+      fs: {
+        ...base,
+        readRange: async (p) => {
+          throw eacces(p);
+        },
+      },
+    }).c;
+  };
+  const sdir = mkdtempSync(join(root, "m4s-"));
+  writeFileSync(join(sdir, "secret.txt"), "x");
+  writeFileSync(join(sdir, "shot.mov"), "x");
+
+  it("P3: an unreadable file inside a program fails that command, the program goes on, and the slot is free after", async () => {
+    const c = unreadable();
+    const b = await ended(await c.run("cat secret.txt; echo after"));
+    expect(kids(b.id).map((x) => [x.line, x.state])).toEqual([
+      ["cat secret.txt", "failed"],
+      ["echo after", "done"],
+    ]);
+    expect(kids(b.id)[0].lines.at(-1)!.text).toBe(`cat: you have no permission to open ${join(sdir, "secret.txt")}.`);
+    const next = await ended(await c.run("echo a; echo b"));
+    expect(next.state).toBe("done");
+    expect((await c.run("render shot.mov -o ../out/a")).state).toBe("running");
+    await finish(spawned[0].child, [], 0);
+  });
+
+  it("P3: the same throw on a single line is a failed block (never a rejected call with no block)", async () => {
+    const b = await unreadable().run("cat secret.txt");
+    expect([b.state, b.lines.at(-1)!.text]).toEqual(["failed", `cat: you have no permission to open ${join(sdir, "secret.txt")}.`]);
+  });
+
+  it("P4: for over more than 130 000 matches is refused at the item cap (no RangeError), and the slot is free after", async () => {
+    const many = Array.from({ length: 140_001 }, (_, i) => ({ name: `f${i}.exr`, isDirectory: () => false, isFile: () => true, isSymbolicLink: () => false }) as unknown as Dirent);
+    const base = make().deps.fs;
+    const { c } = make({ fs: { ...base, readdir: async (p) => (p.endsWith("big") ? many : base.readdir(p)) } });
+    const b = await ended(await c.run("for f in big/*.exr; do echo ${f}; done; echo after"));
+    expect(b.lines.map((l) => l.text)).toContain("for f: more than 10000 items: name a smaller set");
+    expect((await ended(await c.run("echo a; echo b"))).state).toBe("done");
+  });
+
+  it("P5: nested loops share one budget for the whole program (10 000 commands), then it stops, failed", async () => {
+    const d = mkdtempSync(join(root, "m4-"));
+    // loop: NOT-WORTH — 120 test files
+    for (let i = 0; i < 120; i++) writeFileSync(join(d, `f${i}`), "");
+    const { c } = make({ startDir: d });
+    const b = await ended(await c.run("for a in *; do for b in *; do echo x; done; done"));
+    expect(b.state).toBe("failed");
+    expect(kids(b.id)).toHaveLength(10_000);
+    expect(b.lines.at(-1)!.text).toMatch(/^stopped: more than 10000 commands in one program/);
+  }, 60_000);
+
+  it("P5: Ctrl+C reaches a loop of built-ins within 100 ms (it yields between commands) and stops it", async () => {
+    // words, not patterns: no file is read, so nothing but the runner itself could let the timer in
+    // loop: NOT-WORTH — a test's words
+    const w = (n: number) => Array.from({ length: n }, (_, i) => `w${i}`).join(" ");
+    const { c } = make();
+    const start = performance.now();
+    let fired = 0;
+    setTimeout(() => {
+      fired = performance.now() - start;
+      c.cancel();
+    }, 5);
+    const b = await ended(await c.run(`for a in ${w(300)}; do for b in ${w(100)}; do echo \${a} \${b}; done; done`));
+    expect(fired).toBeGreaterThan(0);
+    expect(fired).toBeLessThan(100);
+    expect(b.state).toBe("cancelled");
+    expect(kids(b.id).length).toBeLessThan(10_000);
+  }, 60_000);
 });
