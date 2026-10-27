@@ -37,4 +37,10 @@ export const IPC = {
   installUpdate: "ck:install-update",
   restartToUpdate: "ck:restart-to-update",
   backToStable: "ck:back-to-stable",
+  consoleRun: "ck:console-run",
+  consoleCancel: "ck:console-cancel",
+  consoleComplete: "ck:console-complete",
+  consoleHistory: "ck:console-history",
+  consoleElevationDrop: "ck:console-elevation-drop",
+  consoleBlocks: "ck:console-blocks",
 } as const;

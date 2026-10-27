@@ -3,15 +3,16 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, net, proto
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
+import { mkdir, readdir, readFile, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { EngineProcess, type EngineReply } from "./engine";
+import { EngineProcess, rustEngineEnv, type EngineReply } from "./engine";
 import { Estimator } from "./estimate";
 import { GPU_POLL_MS, otherGpuUsers, readGpu } from "./gpu";
 import { expandPaths, probeClip, still, STILL_WIDTH, VIDEO_EXT, HINT_IMAGE_EXT } from "./media";
 import { clearJobTemps, Queue } from "./queue";
 import { checkRustEngine, loadSettings, saveSettings } from "./settings";
-import { effectivePath, findEngineFiles, findTrtBuilder, isInsideApp, modelSetVersion, windowTitle } from "./engineFind";
+import { effectivePath, findCli, findEngineFiles, findTrtBuilder, isInsideApp, modelSetVersion, windowTitle } from "./engineFind";
 import { addToPathList, APP_DIR, appDirs, engineBinName, isMac, isWin, ortLibrary, PLATFORM } from "./platform";
 import { HOMEBREW_DIRS, checkFfmpeg, ffmpegState, installFfmpeg, planFor, readOsRelease, wingetFfmpegDirs } from "./ffmpeg";
 import { PROGRESS_EVERY_MS } from "./updateFlow";
@@ -55,7 +56,13 @@ import {
 import { NOT_WHILE_BUSY } from "../../src/shared/texts";
 import type { DesktopPalette } from "../../src/ui/theme/palette";
 import { IPC } from "./ipc";
-import { idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir, vramLimit } from "./validate";
+import { consoleLineArg, cursorArg, fromAppPage, idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir, vramLimit } from "./validate";
+import { Console, LINE_MAX, type ElevationRequest } from "./console/runner";
+import { Elevation, ELEVATION_CAP_MS, ELEVATION_TTL_MS } from "./console/elevation";
+import { AuditLog, History } from "./console/logs";
+import { BlockPusher } from "./console/push";
+import { realPathDeps } from "./console/paths";
+import { makeRegistry } from "../../src/shared/console/registry";
 import { cacheDirFor, cacheInfo, cacheUnavailable, CACHE_MARKER, clearOldCache, exists, JOBS_DIR, jobTempDir, MEDIA_DIR, moveCache, prepareTarget, remapMedia, targetProblem } from "./cacheFolder";
 import { gbBytes, mbOrGbBytes } from "../../src/shared/units";
 import { sanitizeTrtSize, sizeRangeText, sizeText, trtSizeKey } from "../../src/shared/trt";
@@ -224,6 +231,8 @@ function rustEngineProcess(onReply: (r: EngineReply) => void, onExit: (code: num
   return new EngineProcess({ binary: paths.binary!, models: paths.models!, ort: paths.ort, env: process.env, trtCache: join(cacheDir, TRT_ENGINES_DIR), trtBuild }, onReply, onExit);
 }
 
+// the Console's corridorkey has the graphics card (the Console, below)
+let consoleGpu = false;
 const queue = new Queue({
   makeEngine: rustEngineProcess,
   // job temp files stay on the system's local cache folder whatever the chosen location (Marcy 2026-10-26)
@@ -278,7 +287,7 @@ const prebuild: Prebuilder = new Prebuilder({
   allowed: () => !cacheMoving && rustEngine.ok && useTensorrt({ platform: PLATFORM, setting: settings.tensorrt, ready: trtReady(enginePaths().ort, enginePaths().models) }),
   // while the queue runs the build waits for it (paused), and goes on once its engine has exited: a build started while
   // the quitting engine still held its model would pick its window from the memory left (bug hunt 2026-10-26 P6)
-  queueRunning: () => queue.running || queue.engineEnding,
+  queueRunning: () => queue.running || queue.engineEnding || consoleGpu,
   othersOnGpu: async () => {
     try {
       return await otherGpuUsers();
@@ -291,6 +300,88 @@ const prebuild: Prebuilder = new Prebuilder({
   reread: readTrtCache,
 });
 void refreshTrtBuilt();
+
+// The Console (backlog row 95, docs/CONSOLE.md): its own command set in this process, never a system shell. A
+// corridorkey run that uses the graphics card takes it like the queue does (the estimate stops, the background TensorRT
+// build waits), and the queue doesn't start while it runs (consoleGpu, above the queue).
+const userData = app.getPath("userData");
+const consolePush = new BlockPusher((blocks) => mainWindow?.webContents.send(IPC.consoleBlocks, blocks));
+/** The sudo confirmation: the exact command and what it would replace, counted now. */
+async function confirmElevation(req: ElevationRequest): Promise<boolean> {
+  if (!mainWindow) return false;
+  // loop: NOT-WORTH — one or two targets per confirmation
+  const targets = req.targets.map((t) => `${t.path}: ${t.files} file${t.files === 1 ? "" : "s"} there now (${mbOrGbBytes(t.bytes)}); frames at the run's names are replaced.`);
+  const r = await dialog.showMessageBox(mainWindow, {
+    type: "warning",
+    buttons: ["Run it", "Cancel"],
+    defaultId: 1,
+    cancelId: 1,
+    message: "Run this command elevated?",
+    detail:
+      `${req.command}\n\n${targets.join("\n")}\n\n` +
+      `The Console stays elevated for ${ELEVATION_TTL_MS / 60_000} minutes (each elevated command extends it, at most ${ELEVATION_CAP_MS / 60_000}); sudo -k, leaving the window or quitting ends it. Every elevated command is logged.`,
+  });
+  return r.response === 0;
+}
+const appConsole = new Console({
+  registry: makeRegistry(),
+  paths: realPathDeps(homedir()),
+  fs: {
+    // loop: NOT-WORTH — one async readdir per dir / Tab / sudo count
+    readdir: (p) => readdir(p, { withFileTypes: true }),
+    // loop: NOT-WORTH — one async stat per listed entry
+    stat: (p) => stat(p),
+    readFile: async (p, max) => {
+      // loop: NOT-WORTH — one async stat per script or job file read
+      const s = await stat(p);
+      if (!s.isFile()) throw new Error("not a file");
+      if (s.size > max) throw new Error(`larger than ${max} bytes`);
+      // loop: NOT-WORTH — one async read of a small file
+      return readFile(p, "utf8");
+    },
+    mkdir: async (p) => {
+      // loop: NOT-WORTH — one async mkdir per render
+      await mkdir(p, { recursive: true });
+    },
+  },
+  startDir: settings.outputRoot ?? homedir(),
+  cli: () => findCli(enginePaths().binary, app.isPackaged ? null : resolve(app.getAppPath(), "engine-rs", "target", "dist")),
+  cliEnv: () => {
+    const paths = enginePaths();
+    const env = rustEngineEnv(process.env, paths.ort);
+    if (paths.models) env.CK_ENGINE_MODELS = paths.models;
+    // TensorRT's engines in the app's cache folder, as the queue's (engine.ts launchCommand)
+    if (!process.env.CK_ENGINE_TRT_CACHE) env.CK_ENGINE_TRT_CACHE = join(cacheDir, TRT_ENGINES_DIR);
+    return env;
+  },
+  cliTemp: () => join(appFolders.cache, "console"),
+  runtimeAllowed: (what, path) => {
+    const p = enginePaths();
+    // loop: NOT-WORTH — the one or two found copies
+    return [p[what], ...engineFiles[what].map((f) => f.path)].some((x) => !!x && resolve(x) === path);
+  },
+  // loop: NOT-WORTH — the queue's jobs, once per written path checked
+  writeRoots: () => [settings.outputRoot, cacheDir, appFolders.cache, ...queue.jobs.map((j) => j.outputDir)].filter((x): x is string => !!x),
+  takeGpu: () => {
+    if (queue.running || queue.engineEnding) return "The queue is keying on the graphics card: wait for it, or stop it, then run this.";
+    if (cacheMoving) return "The cache folder is moving: wait for it, then run this.";
+    // one engine at a time: an estimate gives way, the background TensorRT build waits (as for the queue)
+    estimator.stop();
+    prebuild.pause();
+    consoleGpu = true;
+    return null;
+  },
+  releaseGpu: () => {
+    consoleGpu = false;
+    prebuild.queueStopped();
+  },
+  confirm: confirmElevation,
+  elevation: new Elevation(),
+  audit: new AuditLog(join(userData, "console-audit.jsonl")),
+  history: new History(join(userData, "console-history.jsonl")),
+  changed: (b) => consolePush.mark(b),
+  sessionChanged: () => scheduleSend(),
+});
 
 function state(): AppState {
   return {
@@ -316,6 +407,7 @@ function state(): AppState {
     desktopPalette,
     update: updater.state,
     system: { engineBin: engineBinName(), ortLib: ortLibrary().display, platform: PLATFORM, home: homedir() },
+    console: appConsole.session(),
   };
 }
 
@@ -342,6 +434,7 @@ function scheduleSend(): void {
 /** The window's shown state changed: the GPU readout follows it, and a state held back while hidden goes out. */
 function setShown(v: boolean): void {
   windowShown = v;
+  consolePush.setShown(v);
   updateGpuPolling();
   if (v && sendPending) scheduleSend();
 }
@@ -885,6 +978,16 @@ function registerIpc(): void {
     await checkCacheDrive();
     // not while the cache folder moves (a job writes its TensorRT engines there; its working files stay in the system's folder)
     if (!rustEngine.ok || !ffmpeg.ok || cacheMoving) return scheduleSend();
+    // the Console's corridorkey has the card (one GPU job at a time)
+    if (consoleGpu) {
+      if (mainWindow)
+        await dialog.showMessageBox(mainWindow, {
+          type: "info",
+          message: NOT_WHILE_BUSY,
+          detail: "The Console is running corridorkey on the graphics card. Wait for it, or stop it (Ctrl+C in the Console), then start the queue.",
+        });
+      return;
+    }
     // one engine at a time: an estimate still asking gives way to the queue
     estimator.stop();
     // the queue has the card: the background TensorRT build pauses, and goes on when the queue stops
@@ -941,6 +1044,28 @@ function registerIpc(): void {
   });
   ipcMain.handle(IPC.backToStable, () => updater.backToStable());
   ipcMain.on(IPC.setVisible, (_e, visible: unknown) => setShown(visible === true));
+  // The Console: only the app's own page (its window's top frame), every argument checked; the line is parsed and
+  // checked again in the runner whatever the page showed
+  const page = (e: Electron.IpcMainInvokeEvent) => fromAppPage(e, mainWindow?.webContents);
+  ipcMain.handle(IPC.consoleRun, (e, lineIn: unknown) => {
+    const line = consoleLineArg(lineIn, LINE_MAX);
+    return page(e) && line !== null ? appConsole.run(line) : null;
+  });
+  ipcMain.handle(IPC.consoleCancel, (e) => {
+    if (page(e)) appConsole.cancel();
+  });
+  ipcMain.handle(IPC.consoleComplete, (e, lineIn: unknown, cursorIn: unknown) => {
+    const line = consoleLineArg(lineIn, LINE_MAX);
+    const cursor = line === null ? null : cursorArg(cursorIn, line);
+    return page(e) && line !== null && cursor !== null ? appConsole.complete(line, cursor) : { start: 0, end: 0, items: [] };
+  });
+  ipcMain.handle(IPC.consoleHistory, (e, queryIn: unknown) => {
+    const q = consoleLineArg(queryIn, 200);
+    return page(e) && q !== null ? appConsole.history(q) : [];
+  });
+  ipcMain.handle(IPC.consoleElevationDrop, (e) => {
+    if (page(e)) appConsole.dropElevation("dropped from the Console's panel");
+  });
 }
 
 function createWindow(): void {
@@ -971,6 +1096,8 @@ function createWindow(): void {
   mainWindow.on("restore", shown(true));
   mainWindow.on("hide", shown(false));
   mainWindow.on("minimize", shown(false));
+  // the Console's elevation ends when the window loses focus (the sudo dialog itself comes before the grant)
+  mainWindow.on("blur", () => appConsole.dropElevation("the window lost focus"));
   mainWindow.on("closed", () => {
     mainWindow = null;
     setShown(false);
@@ -1038,7 +1165,8 @@ app.on("before-quit", (e) => {
   if (quitCleaned) return;
   quitCleaned = true;
   e.preventDefault();
-  const cleanup = queue.shutdown();
+  // a running corridorkey stops cleanly (SIGTERM), or is killed within the grace: it doesn't end with the app on its own
+  const cleanup = Promise.all([queue.shutdown(), appConsole.shutdown()]);
   estimator.stop();
   prebuild.stop();
   stopPaletteWatch?.();

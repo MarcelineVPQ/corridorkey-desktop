@@ -2,7 +2,7 @@
 // per IPC channel; the IPC object itself is never handed to the page.
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from "electron";
 import { IPC } from "../main/ipc";
-import type { AppState, CorridorKeyApi } from "../../src/shared/types";
+import type { AppState, ConsoleBlock, CorridorKeyApi } from "../../src/shared/types";
 
 const api: CorridorKeyApi = {
   getState: () => ipcRenderer.invoke(IPC.getState),
@@ -48,6 +48,17 @@ const api: CorridorKeyApi = {
   installUpdate: () => ipcRenderer.invoke(IPC.installUpdate),
   restartToUpdate: () => ipcRenderer.invoke(IPC.restartToUpdate),
   backToStable: () => ipcRenderer.invoke(IPC.backToStable),
+  consoleRun: (line) => ipcRenderer.invoke(IPC.consoleRun, line),
+  consoleCancel: () => ipcRenderer.invoke(IPC.consoleCancel),
+  consoleComplete: (line, cursor) => ipcRenderer.invoke(IPC.consoleComplete, line, cursor),
+  consoleHistory: (query) => ipcRenderer.invoke(IPC.consoleHistory, query),
+  consoleElevationDrop: () => ipcRenderer.invoke(IPC.consoleElevationDrop),
+  onConsoleBlocks: (listener) => {
+    const handler = (_e: IpcRendererEvent, blocks: ConsoleBlock[]) => listener(blocks);
+    // lifetime: OK — removed by the unsubscribe it returns
+    ipcRenderer.on(IPC.consoleBlocks, handler);
+    return () => ipcRenderer.removeListener(IPC.consoleBlocks, handler);
+  },
 };
 
 contextBridge.exposeInMainWorld("ck", api);
