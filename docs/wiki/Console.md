@@ -114,10 +114,12 @@ asks for help, so a file named `?` goes in quotes (the help says so when it sees
 The Console reads folders as a compositor does. `ls` shows a frame sequence as one row, with its range and gaps:
 
 ```
-sh010_plate.####.exr  1001-1100 · 96 frames · missing 1047
+sh010_plate.####.exr  1001-1100 · 96/100 frames
 ```
 
-`ls -f` lists every frame. Unpadded runs (`frame.1` … `frame.120`, shown `frame.#.exr 1-120`) and runs that outgrow
+A sequence with gaps shows how many frames are there out of its range; hover the row for the missing ones (**Copy
+output** has them too). `ls -f` lists every frame. Houdini's pre-roll, `sim.-010.exr` … `sim.-001.exr`, is part of
+`sim.####.exr`, and the row says how many frames are below 0 (`corridorkey`'s patterns and `-F` start at 0). Unpadded runs (`frame.1` … `frame.120`, shown `frame.#.exr 1-120`) and runs that outgrow
 their padding (`sim.9999`, `sim.10000`) are one sequence. A frame pattern, `plate.####.exr`, `plate.%04d.exr`,
 `plate.$F4.exr` or `plate.@@@@.exr` (one digit per `@`), is one item everywhere: `ls plates/sh010.####.exr` lists that
 sequence, `open` shows its first frame, `cd` goes to its folder. Tab completes a sequence as one pattern. `verify` ends

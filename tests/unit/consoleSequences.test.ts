@@ -1,6 +1,6 @@
 // Frame sequences as a TD reads a folder (src/shared/console/sequences.ts): lsseq-style grouping for dir and Tab.
 import { describe, expect, it } from "vitest";
-import { frameRanges, frameToken, groupSequences, sequenceOf } from "../../src/shared/console/sequences";
+import { folderRange, frameRanges, frameToken, groupSequences, sequenceOf } from "../../src/shared/console/sequences";
 
 const frames = (pre: string, from: number, to: number, ext = ".exr", pad = 4) => Array.from({ length: to - from + 1 }, (_, i) => `${pre}${String(from + i).padStart(pad, "0")}${ext}`);
 
@@ -97,5 +97,26 @@ describe("a typed pattern names one sequence (Phase 4: sequences everywhere)", (
     ]);
     expect(sequenceOf("nothing.####.exr", folder)).toBeNull();
     expect(sequenceOf("plate.mov", folder)).toBeNull();
+  });
+});
+
+describe("SME review 2026-10-27: the expert suggestions", () => {
+  it("N9 (row 148): sim.-010.exr is frame -10 of sim.####.exr (Houdini's pre-roll, as wide as 0001); shot-0010 is frame 10", () => {
+    const names = [...Array.from({ length: 10 }, (_, i) => `sim.-${String(10 - i).padStart(3, "0")}.exr`), ...frames("sim.", 0, 20)];
+    const { sequences, singles } = groupSequences(names);
+    expect(singles).toEqual([]);
+    expect(sequences.map((s) => [s.pattern, s.range, s.count, s.belowZero])).toEqual([["sim.####.exr", "-10-20", 31, 10]]);
+    expect(groupSequences(["shot-0010.exr", "shot-0011.exr"]).sequences.map((s) => [s.pattern, s.range, s.belowZero])).toEqual([["shot-####.exr", "10-11", 0]]);
+    expect(sequenceOf("sim.####.exr", names)!.count).toBe(31);
+    // a folder with a pre-roll: corridorkey numbers it from 1001, so farm export says so instead of a wrong range
+    expect(folderRange(names)).toEqual({ error: expect.stringMatching(/^sim\.####\.exr has 10 frames below 0 .* from 1001/) });
+  });
+
+  it("P4 N5 (row 144): a sequence knows its span and lists more gaps for the hover", () => {
+    const names = frames("p.", 1, 400).filter((n, i) => i % 2 === 0);
+    const s = groupSequences(names).sequences[0];
+    expect([s.count, s.span]).toEqual([200, 399]);
+    expect(s.missing).toMatch(/^2, 4, .* and 191 more$/);
+    expect(s.gaps!.split(", ")).toHaveLength(199);
   });
 });

@@ -1029,7 +1029,13 @@ export class Console {
           modified = Math.max(modified, st?.mtimeMs ?? 0);
         }
         if (bytes === null) unread += r.seq.count;
-        entries.push({ name: r.name, folder: false, bytes, modified: modified || null, sequence: { range: r.seq.range, count: r.seq.count, missing: r.seq.missing } });
+        entries.push({
+          name: r.name,
+          folder: false,
+          bytes,
+          modified: modified || null,
+          sequence: { range: r.seq.range, count: r.seq.count, missing: r.seq.missing, span: r.seq.span, gaps: r.seq.gaps, belowZero: r.seq.belowZero },
+        });
         continue;
       }
       const st = await this.d.fs.stat(a.join(dir, r.name)).catch(() => null);

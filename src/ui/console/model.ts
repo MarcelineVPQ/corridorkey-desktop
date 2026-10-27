@@ -232,9 +232,28 @@ export function shortenKnown(text: string, paths: readonly string[] | null | und
   return text;
 }
 
-/** A sequence row's frames, lsseq-style: "1001-1100 · 96 frames · missing 1047, 1050-1052". */
+/** A sequence row's frames, lsseq-style: "1001-1100 · 96 frames · missing 1047, 1050-1052" (Copy output: all of it). */
 export function sequenceText(q: NonNullable<ConsoleEntry["sequence"]>): string {
-  return `${q.range} · ${q.count} frames${q.missing ? ` · missing ${q.missing}` : ""}`;
+  return `${q.range} · ${q.count} frames${q.missing ? ` · missing ${q.missing}` : ""}${belowZeroText(q)}`;
+}
+
+const belowZeroText = (q: NonNullable<ConsoleEntry["sequence"]>) => (q.belowZero ? ` · ${q.belowZero} below 0 (corridorkey's patterns and -F start at 0)` : "");
+
+/** A listing row's hover: the name whole; a sequence's range and count, and its gaps. */
+export function entryTitle(e: ConsoleEntry): string {
+  if (!e.sequence) return entryName(e);
+  const c = sequenceCell(e.sequence);
+  return `${e.name}\n${c.text}${c.title ? `\n${c.title}` : ""}`;
+}
+
+/**
+ * The listing's cell for a sequence (SME review 2026-10-27 N5: the gaps were cut off with …): the range and the count
+ * of what is there out of the range ("1001-1048 · 43/48 frames"); the gaps go in the hover, `title`.
+ */
+export function sequenceCell(q: NonNullable<ConsoleEntry["sequence"]>): { text: string; title: string | null } {
+  const gaps = q.gaps ?? q.missing;
+  const frames = gaps && q.span ? `${q.count}/${q.span} frames` : `${q.count} frames`;
+  return { text: `${q.range} · ${frames}${belowZeroText(q)}`, title: gaps ? `missing ${gaps}` : null };
 }
 
 /** A refused line cut at its mistakes (the block's command shows where each one is). */

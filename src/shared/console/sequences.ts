@@ -9,8 +9,14 @@ export interface Sequence {
   /** first-last: 1001-1100 */
   range: string;
   count: number;
-  /** the frames missing between the first and last ("1047, 1050-1052"), or null */
+  /** the frames missing between the first and last ("1047, 1050-1052"), or null; the first GAPS_SHOWN gaps */
   missing: string | null;
+  /** the same, the first GAPS_HOVER gaps (dir's row shows the count, these on hover: SME review 2026-10-27 N5) */
+  gaps: string | null;
+  /** frames from the first to the last, missing ones included (count / span: 43/48 frames) */
+  span: number;
+  /** frames numbered below 0 (Houdini's pre-roll, sim.-010.exr): corridorkey's patterns and -F start at 0 */
+  belowZero: number;
   /** the member files' names, by frame */
   names: string[];
 }
@@ -19,8 +25,20 @@ export interface Sequence {
 const VIDEO = new Set([".mp4", ".mov", ".mkv", ".avi", ".mxf", ".webm", ".m4v"]);
 /** The last run of digits, before an optional extension. */
 const NUMBERED = /^(.*?)(\d+)(\.[A-Za-z][A-Za-z0-9]*)?$/;
-/** Gaps listed before "and N more". */
+/** Gaps listed before "and N more" (a row, a Tab item); on hover. */
 const GAPS_SHOWN = 8;
+const GAPS_HOVER = 200;
+
+/**
+ * A numbered name's prefix, digits (with a sign: `sim.-010.exr` is frame -10, Houdini's pre-roll, its `-010` as wide as
+ * `0001`; a `-` counts as a sign only after `.` or `_`, so `shot-0010.exr` is frame 10) and extension, or null.
+ */
+function numbered(name: string): { prefix: string; digits: string; ext: string } | null {
+  const m = NUMBERED.exec(name);
+  if (!m) return null;
+  const neg = /[._]-$/.test(m[1]);
+  return { prefix: neg ? m[1].slice(0, -1) : m[1], digits: (neg ? "-" : "") + m[2], ext: m[3] ?? "" };
+}
 
 /** 1001-1003, 1005, 1007-1008 (sorted, unique frames in). */
 export function frameRanges(frames: readonly number[]): string {
@@ -71,14 +89,23 @@ function makeSequence(prefix: string, pad: number, ext: string, frames: { n: num
   const r = runs(nums);
   // loop: NOT-WORTH — the sequence's runs: the gap after each but the last
   const gaps = r.slice(1).map(([start], i): [number, number] => [r[i][1] + 1, start - 1]);
-  // loop: NOT-WORTH — at most GAPS_SHOWN gaps
-  const shown = gaps.slice(0, GAPS_SHOWN).map(([a, b]) => (a === b ? `${a}` : `${a}-${b}`));
-  const missing = gaps.length ? shown.join(", ") + (gaps.length > GAPS_SHOWN ? ` and ${gaps.length - GAPS_SHOWN} more` : "") : null;
+  const list = (max: number) =>
+    gaps.length
+      ? gaps
+          .slice(0, max)
+          // loop: NOT-WORTH — at most GAPS_HOVER gaps
+          .map(([a, b]) => (a === b ? `${a}` : `${a}-${b}`))
+          .join(", ") + (gaps.length > max ? ` and ${gaps.length - max} more` : "")
+      : null;
   return {
     pattern: `${prefix}${"#".repeat(pad)}${ext}`,
     range: `${nums[0]}-${nums[nums.length - 1]}`,
     count: nums.length,
-    missing,
+    missing: list(GAPS_SHOWN),
+    gaps: list(GAPS_HOVER),
+    span: nums[nums.length - 1] - nums[0] + 1,
+    // loop: NOT-WORTH — the sequence's numbers
+    belowZero: nums.filter((n) => n < 0).length,
     // loop: NOT-WORTH — the sequence's names
     names: frames.map((f) => f.name),
   };
@@ -99,7 +126,9 @@ export function sequenceOf(pattern: string, names: readonly string[]): Sequence 
   for (const name of names) {
     if (!name.startsWith(prefix) || !name.endsWith(suffix) || name.length <= prefix.length + suffix.length) continue;
     const digits = name.slice(prefix.length, name.length - suffix.length);
-    if (/^\d+$/.test(digits) && (digits.length === t.pad || (digits.length > t.pad && !digits.startsWith("0")))) frames.push({ n: Number(digits), name });
+    // a negative frame (sim.-010.exr) after a . or _ is the pattern's too, as wide as its padding with the sign
+    const neg = /^-\d+$/.test(digits) && /[._]$/.test(prefix) && digits.length >= t.pad;
+    if (neg || (/^\d+$/.test(digits) && (digits.length === t.pad || (digits.length > t.pad && !digits.startsWith("0"))))) frames.push({ n: Number(digits), name });
   }
   if (!frames.length) return null;
   // loop: NOT-WORTH — sorts one sequence's frames
@@ -118,12 +147,11 @@ export function groupSequences(names: readonly string[]): { sequences: Sequence[
   const groups = new Map<string, { prefix: string; ext: string; frames: { n: number; name: string; digits: string }[] }>();
   // loop: NOT-WORTH — one pass over a folder's names (≤ the readdir), per dir / Tab
   for (const name of names) {
-    const m = NUMBERED.exec(name);
-    const ext = m?.[3] ?? "";
-    if (!m || VIDEO.has(ext.toLowerCase())) continue;
-    const key = `${m[1]}\0${ext}`;
-    const g = groups.get(key) ?? { prefix: m[1], ext, frames: [] };
-    g.frames.push({ n: Number(m[2]), name, digits: m[2] });
+    const m = numbered(name);
+    if (!m || VIDEO.has(m.ext.toLowerCase())) continue;
+    const key = `${m.prefix}\0${m.ext}`;
+    const g = groups.get(key) ?? { prefix: m.prefix, ext: m.ext, frames: [] };
+    g.frames.push({ n: Number(m.digits), name, digits: m.digits });
     groups.set(key, g);
   }
   const grouped = new Set<string>();
@@ -160,7 +188,7 @@ export function groupSequences(names: readonly string[]): { sequences: Sequence[
 
 /** Whether a name of this width has a leading zero (then that width is a padding of its own, not an overflow). */
 // loop: NOT-WORTH — one group's frames, once per width
-const widthPadded = (frames: readonly { digits: string }[], width: number) => frames.some((f) => f.digits.length === width && f.digits.startsWith("0"));
+const widthPadded = (frames: readonly { digits: string }[], width: number) => frames.some((f) => f.digits.length === width && /^-?0/.test(f.digits));
 
 /** The image files corridorkey reads from a frame folder (ck-core clip.rs frame_paths: .exr .png .jpg .jpeg, any case, not hidden). */
 export const isFrameFile = (name: string): boolean => !name.startsWith(".") && /.\.(exr|png|jpe?g)$/i.test(name);
@@ -174,6 +202,14 @@ export const isFrameFile = (name: string): boolean => !name.startsWith(".") && /
 export function folderRange(names: readonly string[]): { range: [number, number]; pad: number } | { error: string } {
   if (!names.length) return { error: "no frames (.exr, .png, .jpg) in it" };
   const { sequences, singles } = groupSequences(names);
+  // the engine reads a folder's numbers as whole numbers from 0 (ck-core FrameNumbers): a pre-roll below 0 makes it
+  // number the whole folder from 1001 instead (SME review 2026-10-27 N9)
+  // loop: NOT-WORTH — the folder's few sequences
+  const pre = sequences.find((q) => q.belowZero > 0);
+  if (pre)
+    return {
+      error: `${pre.pattern} has ${pre.belowZero} frame${pre.belowZero === 1 ? "" : "s"} below 0 (a pre-roll), and corridorkey numbers a folder holding them from 1001: put the pre-roll in a folder of its own`,
+    };
   if (sequences.length === 1 && !singles.length) {
     // loop: NOT-WORTH — two numbers
     const [a, b] = sequences[0].range.split("-").map(Number);

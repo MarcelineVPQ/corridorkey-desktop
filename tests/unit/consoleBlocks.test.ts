@@ -21,6 +21,7 @@ import {
   mergeBlocks,
   isoTime,
   lineHint,
+  sequenceCell,
   sequenceText,
   visibleBlocks,
   writtenPaths,
@@ -429,5 +430,15 @@ describe("the input line's focus beside the narrow-window drawer", () => {
   });
   it("leaves focus alone when nothing about the drawer changed", () => {
     expect(inputTakesFocus(false, false)).toBe(false);
+  });
+});
+
+describe("SME review 2026-10-27: the expert suggestions", () => {
+  it("P4 N5 (row 144): dir's cell says 43/48 frames, the gaps on hover; Copy output keeps them; a pre-roll is said", () => {
+    const q = { range: "1001-1048", count: 43, missing: "1012-1015, 1040", gaps: "1012-1015, 1040", span: 48 };
+    expect(sequenceCell(q)).toEqual({ text: "1001-1048 · 43/48 frames", title: "missing 1012-1015, 1040" });
+    expect(sequenceCell({ range: "1-2", count: 2, missing: null, span: 2 })).toEqual({ text: "1-2 · 2 frames", title: null });
+    expect(sequenceText(q)).toBe("1001-1048 · 43 frames · missing 1012-1015, 1040");
+    expect(sequenceCell({ range: "-10-20", count: 31, missing: null, span: 31, belowZero: 10 }).text).toBe("-10-20 · 31 frames · 10 below 0 (corridorkey's patterns and -F start at 0)");
   });
 });

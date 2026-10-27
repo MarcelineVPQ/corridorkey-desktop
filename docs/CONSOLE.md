@@ -37,7 +37,11 @@ missing there).
   which Tab completion uses too: one candidate per sequence, never one per frame (a folder-only argument, `cd`, `pushd`,
   `allow`, `bookmark`'s folder, `du`, `tree`, offers folders only: `ConsoleArg.folderOnly`, SME review 2026-10-26 N1); grouped as lsseq and ck-cli's
   `frame_of` read a folder: an unpadded run, `frame.1` … `frame.120` (`frame.#.exr 1-120`), and a run that outgrows its
-  padding, `sim.9999` `sim.10000`, are one sequence, while `a.0001` and `a.01` are two (SME review 2026-10-27 M2)), `cls` / `clear`. **Sequences
+  padding, `sim.9999` `sim.10000`, are one sequence, while `a.0001` and `a.01` are two (SME review 2026-10-27 M2); the row
+  shows `count/span frames` with the gaps (up to 200) in its hover, Copy output keeps `missing …` (SME N5); a negative
+  frame after `.` or `_`, `sim.-010.exr` (Houdini's pre-roll, its sign counted in the width), is the sequence's own and
+  the row says how many are below 0 (the CLI's `frame_of` and `-F` start at 0; `shot-0010` is frame 10); farm export
+  refuses a frame folder with a pre-roll, which ck-core would number from 1001 (SME N9)), `cls` / `clear`. **Sequences
   everywhere:** a path whose file name is a frame pattern, `plate.####.exr`, `plate.%04d.exr`, `plate.$F4.exr` or
   `plate.@@@@.exr` (one digit per `@`; the frames read as ck-cli's `frame_of` reads them), is one item with its frame
   set to every built-in that takes a path: `dir <pattern>` lists that sequence's row (`-f` its frames; the summary counts the

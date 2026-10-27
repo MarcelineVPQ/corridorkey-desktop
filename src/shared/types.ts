@@ -586,7 +586,8 @@ export interface ConsoleEntry {
   bytes: number | null;
   modified: number | null;
   // a frame sequence's row (name is its pattern, sh010_plate.####.exr; bytes its frames'; modified the newest), else null
-  sequence: { range: string; count: number; missing: string | null } | null;
+  // (span: frames first to last, gaps: the missing ones listed further for the hover, belowZero: frames below 0)
+  sequence: { range: string; count: number; missing: string | null; span?: number; gaps?: string | null; belowZero?: number } | null;
 }
 
 // one command and everything it printed (Warp-style output block)

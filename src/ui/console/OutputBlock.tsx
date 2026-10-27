@@ -10,7 +10,7 @@ import type { Registry } from "../../shared/console/registry";
 import type { ConsoleBlock } from "../../shared/types";
 import { ProgressBar } from "../ProgressBar";
 import { fileSizeText } from "../../shared/units";
-import { blockStatus, blockText, childOpens, childRow, compactBlock, DOCTOR_MARK, duration, entryName, errorSpans, isoTime, sequenceText, shortenKnown, writtenPaths } from "./model";
+import { blockStatus, blockText, childOpens, childRow, compactBlock, DOCTOR_MARK, duration, entryTitle, errorSpans, isoTime, sequenceCell, shortenKnown, writtenPaths } from "./model";
 import { HomeContext } from "../PathText";
 
 const COPIED_MS = 1500;
@@ -148,10 +148,10 @@ function FullBlock({ b, registry, onReinsert, onCollapse }: BlockProps & { onCol
             {/* loop: HOT-PATH-OK — ≤ 5000 rows, once per listing (memo) */}
             {b.entries.map((e) => (
               <tr key={e.name} className={e.folder ? "folder" : ""}>
-                {/* one line: a long name or a sequence's gaps end in … (never broken inside a number), whole on hover */}
-                <td title={entryName(e)}>
+                {/* one line: a long name ends in … (never broken inside a number), whole on hover; a sequence's gaps on hover */}
+                <td title={entryTitle(e)}>
                   {e.folder ? `${e.name}/` : e.name}
-                  {e.sequence && <span className="cb-seq">{sequenceText(e.sequence)}</span>}
+                  {e.sequence && <span className="cb-seq">{sequenceCell(e.sequence).text}</span>}
                 </td>
                 <td>{e.folder ? "folder" : fileSizeText(e.bytes)}</td>
                 <td>{isoTime(e.modified)}</td>
