@@ -16,6 +16,7 @@ import { AuditLog, History } from "../../electron/main/console/logs";
 import { BlockPusher, PUSH_EVERY_MS } from "../../electron/main/console/push";
 import { consoleLineArg, consoleLinesArg, cursorArg, fromAppPage } from "../../electron/main/validate";
 import { makeRegistry } from "../../src/shared/console/registry";
+import { leavesQuoteOpen } from "../../src/shared/console/script";
 import { blockText, mergeBlocks } from "../../src/ui/console/model";
 import { DEFAULT_OPTIONS, type ConsoleBlock, type DoctorRow, type Job } from "../../src/shared/types";
 
@@ -1279,6 +1280,17 @@ describe("Phase 4: history shortcuts", () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(blocks.get(b.id)!.state).toBe("failed");
     expect([...blocks.values()].find((x) => x.parent === b.id)!.lines[0].text).toMatch(/unknown command '!!'/);
+  });
+});
+
+describe("pasted lines (P4 senior review 2026-10-27 N3, BACKLOG row 133)", () => {
+  it("a line that leaves a quote open is refused, nothing runs; a quote in a comment or closed on its line is fine", async () => {
+    const { c } = make();
+    const b = await c.runLines(['echo "a', 'pwd"']);
+    expect([b.state, b.lines[0].text]).toEqual(["refused", "pasted:1: a quote isn't closed on this line (each pasted line runs as typed); nothing ran."]);
+    expect(leavesQuoteOpen("# don't", { windows: false })).toBe(false);
+    expect(leavesQuoteOpen(`echo "it's"`, { windows: false })).toBe(false);
+    expect(leavesQuoteOpen(`echo 'a`, { windows: false })).toBe(true);
   });
 });
 

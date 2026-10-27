@@ -48,7 +48,8 @@ missing there).
   `history [N|term]` (`--audit`: the elevated log), `version` (also `corridorkey --version`, `render --version`: the app's
   version, which its corridorkey shares; answered without running it), `run [--keep-going] <file.ckcmd>` (a script: Scripting, below; no script
   inside a script; its elevation: Security rules below). Several lines pasted at once are never joined: the page offers them as a script (Enter runs them in
-  order through `consoleRunLines`, the same path as `run`; Esc keeps the first line; Ctrl+C drops them), `sudo <command>`,
+  order through `consoleRunLines`, the same path as `run`, each line as a typed one: one that leaves a quote open is
+  refused and nothing runs; Esc keeps the first line; Ctrl+C drops them), `sudo <command>`,
   `sudo -k`, `farm export` (below), and `corridorkey render | verify | prepare | info` (also bare `render` …). Other command lines' names get
   an answer instead of "unknown command" (`ANSWERS` in registry.ts): `exit` / `quit` (the Console stays open), `rm` /
   `del` / `rmdir` (the Console never deletes files), `cp` / `mv`, `more` / `less` (`cat`, `head`, `tail`),

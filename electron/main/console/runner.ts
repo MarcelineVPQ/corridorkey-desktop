@@ -22,7 +22,7 @@ import type { AuditLog, History } from "./logs";
 import { answerWithin, checkWrite, expandHome, FS_ANSWER_MS, fsErrorText, nextVersion, resolveReal, type PathDeps } from "./paths";
 import { expandHistory, hasExpansion } from "../../../src/shared/console/expand";
 import { folderRange, frameToken, groupSequences, isFrameFile, sequenceOf, type Sequence } from "../../../src/shared/console/sequences";
-import { commands, globRegExp, isCompound, parseProgram, type CmdNode, type List } from "../../../src/shared/console/script";
+import { commands, globRegExp, isCompound, leavesQuoteOpen, parseProgram, type CmdNode, type List } from "../../../src/shared/console/script";
 import { tokenize } from "../../../src/shared/console/parse";
 import { BOOKMARK_NAME, BOOKMARKS_MAX, VARIABLES_MAX, WRITE_FOLDERS_MAX } from "../settings";
 import { expandVars, forWords, READ_ONLY, VALUE_MAX, VAR_NAME } from "../../../src/shared/console/vars";
@@ -1415,6 +1415,10 @@ export class Console {
   async runLines(lines: readonly string[]): Promise<ConsoleBlock> {
     const b = this.block(lines.join("\n"), null);
     if (this.job) return this.finish(b, "refused", `Busy with ${this.job.block.line} (one command at a time; Ctrl+C stops it).`);
+    // each pasted line runs as a typed one: a quote it leaves open would run into the next (P4 senior review N3)
+    // loop: NOT-WORTH — the pasted lines (≤ the IPC's cap), once per paste
+    const open = lines.findIndex((l) => leavesQuoteOpen(l, this.opts));
+    if (open >= 0) return this.finish(b, "refused", `pasted:${open + 1}: a quote isn't closed on this line (each pasted line runs as typed); nothing ran.`);
     const job: Job = { block: b, child: null, cancels: 0 };
     this.job = job;
     this.d.sessionChanged();

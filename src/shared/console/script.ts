@@ -61,6 +61,21 @@ const SPACE = /[ \t\r]/;
 
 /** The source cut at its separators (outside quotes and escapes); `#` at a line's start is a comment to its end. */
 function pieces(src: string, opts: ParseOptions): Piece[] | ScriptError {
+  const r = scan(src, opts);
+  return "message" in r ? r : r.pieces;
+}
+
+/**
+ * Whether a line leaves a quote open at its end. Pasted lines are refused then: joined into one script, the quote would
+ * run into the next line, which isn't "each line as a typed one" (P4 senior review N3).
+ */
+export function leavesQuoteOpen(line: string, opts: ParseOptions): boolean {
+  const r = scan(line, opts);
+  return !("message" in r) && r.quote !== null;
+}
+
+/** pieces(), and the quote still open at the end (null: none). */
+function scan(src: string, opts: ParseOptions): { pieces: Piece[]; quote: string | null } | ScriptError {
   const out: Piece[] = [];
   let start = 0;
   let quote: string | null = null;
@@ -96,7 +111,7 @@ function pieces(src: string, opts: ParseOptions): Piece[] | ScriptError {
     } else if (c === "|") return { message: "| (a pipe) isn't part of the Console: one command's output never goes to another; quote a name with | in it", start: i, end: i + 1 };
   }
   out.push({ start, end: src.length, sep: null });
-  return out;
+  return { pieces: out, quote };
 }
 
 /** The source line an offset is on (1-based): the new lines found once, then a binary search per command (S5 of the
