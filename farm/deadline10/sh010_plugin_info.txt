@@ -1,0 +1,6 @@
+Command=render
+InputPath=/shows/demo/sh010/plates/sh010.####.exr
+OutputPath=/shows/demo/sh010/key/sh010_key.####.exr
+Outputs=alpha
+Preroll=0
+ExtraArguments=--linear

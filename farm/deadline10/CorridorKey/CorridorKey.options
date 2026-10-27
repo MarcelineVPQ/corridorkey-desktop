@@ -1,0 +1,77 @@
+[Command]
+Type=enum
+Values=render;verify
+Label=Command
+Category=CorridorKey
+CategoryOrder=0
+Index=0
+Default=render
+Description=render keys the frames; verify checks that every frame is there and whole (exit 9 if not), for a job that depends on the render job.
+Required=true
+DisableIfBlank=false
+
+[InputPath]
+Type=filename
+Label=Input
+Category=CorridorKey
+CategoryOrder=0
+Index=1
+Description=The clip: a movie, a frame folder, or a frame pattern such as plates/sh010.####.exr (corridorkey -i).
+Required=true
+DisableIfBlank=false
+
+[OutputPath]
+Type=filenamesave
+Label=Output
+Category=CorridorKey
+CategoryOrder=0
+Index=2
+Description=A folder, or a frame pattern such as key/sh010_key.####.exr (corridorkey -o).
+Required=true
+DisableIfBlank=false
+
+[Outputs]
+Type=string
+Label=Outputs
+Category=CorridorKey
+CategoryOrder=0
+Index=3
+Default=
+Description=alpha, fg, cutout, checker, comma-separated (corridorkey --outputs). Blank: alpha,fg.
+Required=false
+DisableIfBlank=true
+
+[Preroll]
+Type=integer
+Minimum=0
+Maximum=1000
+Label=Warm-up Frames (chunks only)
+Category=CorridorKey
+CategoryOrder=0
+Index=4
+Default=0
+Description=Frames keyed before each task's range and thrown away (corridorkey --preroll). Only for jobs split into chunks: a whole shot per task needs none. How many make the seams invisible is not measured yet.
+Required=false
+DisableIfBlank=true
+
+[MaxVram]
+Type=string
+Label=Graphics Memory Limit (GB)
+Category=CorridorKey
+CategoryOrder=0
+Index=5
+Default=
+Description=Graphics memory a task may use (corridorkey --max-vram). Blank: the card's free memory.
+Required=false
+DisableIfBlank=true
+
+[ExtraArguments]
+Type=string
+Label=Extra Arguments
+Category=CorridorKey
+CategoryOrder=0
+Index=6
+Default=
+Description=More corridorkey flags, as typed (docs/CLI.md), e.g. --linear --tail 8.
+Required=false
+DisableIfBlank=true

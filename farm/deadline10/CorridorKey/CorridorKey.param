@@ -1,0 +1,44 @@
+[About]
+Type=label
+Label=About
+Category=About Plugin
+CategoryOrder=-1
+Index=0
+Default=CorridorKey (corridorkey command line) plugin for Deadline
+Description=Not configurable.
+
+[ConcurrentTasks]
+Type=label
+Label=ConcurrentTasks
+Category=About Plugin
+CategoryOrder=-1
+Index=1
+Default=True
+Description=Not configurable.
+
+[CorridorKey_Executable]
+Type=multilinemultifilename
+Label=corridorkey Executable
+Category=Executables
+CategoryOrder=0
+Index=0
+Default=C:\Program Files\CorridorKey Desktop\resources\engine\corridorkey.exe;/opt/corridorkey/corridorkey;/Applications/CorridorKey Desktop.app/Contents/Resources/engine/corridorkey
+Description=The corridorkey executable; the first path that exists on the worker is used. Enter alternative paths on separate lines.
+
+[ModelsDirectory]
+Type=multilinemultifolder
+Label=Model Set Folder
+Category=Runtime
+CategoryOrder=1
+Index=0
+Default=
+Description=The ONNX model set's folder (corridorkey --models); the first that exists on the worker is used. Blank: the worker's CK_ENGINE_MODELS.
+
+[OnnxRuntimeLibrary]
+Type=multilinemultifilename
+Label=ONNX Runtime Library
+Category=Runtime
+CategoryOrder=1
+Index=1
+Default=
+Description=ONNX Runtime's GPU library, libonnxruntime.so / onnxruntime.dll (corridorkey --ort); the first that exists on the worker is used. Blank: the worker's CK_ENGINE_ORT or ORT_DYLIB_PATH.

@@ -1,0 +1,6 @@
+Plugin=CorridorKey
+Name=sh010 key
+Frames=1001-1100
+ChunkSize=100
+OutputDirectory0=/shows/demo/sh010/key
+OutputFilename0=sh010_key.####.exr
