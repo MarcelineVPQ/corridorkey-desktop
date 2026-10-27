@@ -121,18 +121,19 @@ fn a_whole_shot_and_a_stepped_list_match_the_engine_bit_for_bit() {
     assert_eq!(files(&out), ["sh010_alpha_exr", "sh010_fg_exr", "sh010_settings.txt"]);
     assert_eq!(files(&temp), Vec::<String>::new());
 
-    // a stepped list to a pattern: the span 1002-1004 is keyed as the engine's range job keys it, only 1002 and 1004 kept
+    // a stepped list to a pattern: the spec's whole range 1002-1005 is keyed as the engine's range job keys it, only 1002
+    // and 1004 kept, so they are bit for bit the frames of a 1002-1005 run (farm review S1: it keyed only to 1004)
     let eng2 = d.0.join("engine2");
     engine(
         &input,
         &eng2,
         &d.0.join("etemp2"),
-        serde_json::json!({"output_format": "exr", "outputs": ["alpha"], "hann_chunk": 4, "hann_stride": 2, "frame_start": 1002, "frame_end": 1004}),
+        serde_json::json!({"output_format": "exr", "outputs": ["alpha"], "hann_chunk": 4, "hann_stride": 2, "frame_start": 1002, "frame_end": 1005}),
     );
     let pat = d.0.join("key/key.$F4.exr");
     let report = d.0.join("report.json");
     let o = render()
-        .args(["-i", &format!("{}/sh010.####.exr", input.display()), "-o", pat.to_str().unwrap(), "-F", "1002-1004x2", "--outputs", "alpha", "--window", "4/2"])
+        .args(["-i", &format!("{}/sh010.####.exr", input.display()), "-o", pat.to_str().unwrap(), "-F", "1002-1005x2", "--outputs", "alpha", "--window", "4/2"])
         .args(["--temp", temp.to_str().unwrap(), "--report", report.to_str().unwrap(), "--progress-format", "json"])
         .output()
         .unwrap();
@@ -146,9 +147,9 @@ fn a_whole_shot_and_a_stepped_list_match_the_engine_bit_for_bit() {
     let r: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&report).unwrap()).unwrap();
     assert_eq!((r["exit_code"].as_i64(), r["provider"].as_str()), (Some(0), Some("cpu")));
     assert_eq!(r["window"], serde_json::json!({"chunk": 4, "stride": 2, "low_vram": false, "auto": false}));
-    assert_eq!(r["frames"]["keyed"], serde_json::json!({"first": 1002, "last": 1004}));
+    assert_eq!(r["frames"]["keyed"], serde_json::json!({"first": 1002, "last": 1005}));
     assert_eq!(r["frames"]["written"], serde_json::json!({"first": 1002, "last": 1004, "count": 2}));
-    assert_eq!(r["frame_times"].as_array().unwrap().len(), 3);
+    assert_eq!(r["frame_times"].as_array().unwrap().len(), 4);
 }
 
 #[test]

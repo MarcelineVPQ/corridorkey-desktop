@@ -272,8 +272,12 @@ fn render(m: &ArgMatches, verify: bool, sink: &mut CliSink, report: &mut Report)
         // loop: NOT-WORTH — the shot's numbers, once per run
         Ok(shot.numbers.iter().copied().filter(|n| (a..=b).contains(n)).collect())
     };
+    // a spec keys to the end of its ranges (`1001-1100x2`: to 1100, as `1001-1100` does), clamped to the shot
+    let mut key_end = None;
     let requested: Option<Vec<u64>> = if let Some(spec) = spec {
-        Some(frames::parse_frames(&spec).map_err(|e| fail(exit::USAGE, format!("-F {e}")))?)
+        let (r, end) = frames::parse_frames(&spec).map_err(|e| fail(exit::USAGE, format!("-F {e}")))?;
+        key_end = Some(end.min(last));
+        Some(r)
     } else if start.is_some() || end.is_some() {
         let (a, b) = (start.unwrap_or(first), end.unwrap_or(last));
         Some(in_shot(a, b, ("-s", "-e"))?)
@@ -298,14 +302,16 @@ fn render(m: &ArgMatches, verify: bool, sink: &mut CliSink, report: &mut Report)
         if r.is_empty() {
             return Err(fail(exit::USAGE, format!("no frame of the shot ({first}-{last}) in -s / -e")));
         }
+        let end = key_end.unwrap_or(0).max(r[r.len() - 1]);
         options.insert("frame_start".into(), json!(r[0]));
-        options.insert("frame_end".into(), json!(r[r.len() - 1]));
+        options.insert("frame_end".into(), json!(end));
+        key_end = Some(end);
     }
     // the frames the engine writes (the span), and the ones kept
-    let span: Vec<u64> = match &requested {
+    let span: Vec<u64> = match (&requested, key_end) {
         // loop: NOT-WORTH — the shot's numbers, once per run
-        Some(r) => shot.numbers.iter().copied().filter(|n| (r[0]..=r[r.len() - 1]).contains(n)).collect(),
-        None => shot.numbers.clone(),
+        (Some(r), Some(end)) => shot.numbers.iter().copied().filter(|n| (r[0]..=end).contains(n)).collect(),
+        _ => shot.numbers.clone(),
     };
     let kept = requested.clone().unwrap_or_else(|| span.clone());
     report.requested = requested.clone().unwrap_or_default();

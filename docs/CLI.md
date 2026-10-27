@@ -64,7 +64,9 @@ first frame is 1001), as the outputs are numbered. A frame outside the shot (an 
 folder's gaps inside the range out of the frames, never an end past the shot.
 
 The networks are temporal (RVM runs through every frame; the windows blend neighbours), so a step or a list is keyed
-over its whole span and only the frames asked for are kept: `-F 1001-1100x2` keys 1001-1100 and writes 50 frames.
+over its whole span and only the frames asked for are kept: `-F 1001-1100x2` keys 1001-1100 (to the end of the range,
+even though 1100 isn't written) and writes 50 frames, each bit for bit the frame a `-F 1001-1100` run writes. A list
+keys from its first frame to the end of its last piece (`1001,1050`: 1001-1050).
 
 ### Warm-up (`--preroll`, `--tail`) and chunks
 

@@ -6,10 +6,12 @@ use std::path::{Path, PathBuf};
 /// The most frames one request may name (a typo like 1-100000000 would otherwise allocate a list of them).
 const MAX_FRAMES: u64 = 1_000_000;
 
-/// The frames a spec names, sorted, each once. Pieces are separated by commas or spaces: `N`, `A-B`, `A-BxS` or
-/// `A-B:S` (every S-th frame from A). Err: what is wrong and what to type instead.
-pub fn parse_frames(spec: &str) -> Result<Vec<u64>, String> {
+/// The frames a spec names, sorted, each once, and the end of its ranges (the largest B: `1001-1100x2` names
+/// 1001-1099 and ends at 1100). Pieces are separated by commas or spaces: `N`, `A-B`, `A-BxS` or `A-B:S` (every
+/// S-th frame from A). Err: what is wrong and what to type instead.
+pub fn parse_frames(spec: &str) -> Result<(Vec<u64>, u64), String> {
     let mut out = Vec::new();
+    let mut end = 0;
     // loop: NOT-WORTH — the few pieces of one spec, once per run
     for piece in spec.split([',', ' ']).map(str::trim).filter(|p| !p.is_empty()) {
         let (range, step) = match piece.split_once(['x', ':']) {
@@ -46,13 +48,14 @@ pub fn parse_frames(spec: &str) -> Result<Vec<u64>, String> {
         }
         // loop: NOT-WORTH — the frames of one piece (≤ MAX_FRAMES), once per run
         out.extend((a..=b).step_by(step as usize));
+        end = end.max(b);
     }
     if out.is_empty() {
         return Err("no frames given (write 1001-1100, 1001-1100x2 or 1001,1005)".into());
     }
     out.sort_unstable();
     out.dedup();
-    Ok(out)
+    Ok((out, end))
 }
 
 /// A file pattern with one frame number in its file name: `prefix` + the number zero-padded to `pad` + `suffix`.
@@ -224,14 +227,17 @@ mod tests {
 
     #[test]
     fn nuke_style_frame_specs() {
-        assert_eq!(parse_frames("1001-1005").unwrap(), vec![1001, 1002, 1003, 1004, 1005]);
-        assert_eq!(parse_frames("1001-1009x2").unwrap(), vec![1001, 1003, 1005, 1007, 1009]);
-        assert_eq!(parse_frames("1001-1010:3").unwrap(), vec![1001, 1004, 1007, 1010]);
-        assert_eq!(parse_frames("1001,1005,1010-1012").unwrap(), vec![1001, 1005, 1010, 1011, 1012]);
+        assert_eq!(parse_frames("1001-1005").unwrap().0, vec![1001, 1002, 1003, 1004, 1005]);
+        assert_eq!(parse_frames("1001-1009x2").unwrap().0, vec![1001, 1003, 1005, 1007, 1009]);
+        // the end of the ranges, not the last frame named: a step keys its whole range (farm review S1)
+        assert_eq!(parse_frames("1001-1100x2").unwrap(), ((1001..=1099).step_by(2).collect(), 1100));
+        assert_eq!(parse_frames("1050,1001-1010:4").unwrap().1, 1050);
+        assert_eq!(parse_frames("1001-1010:3").unwrap().0, vec![1001, 1004, 1007, 1010]);
+        assert_eq!(parse_frames("1001,1005,1010-1012").unwrap().0, vec![1001, 1005, 1010, 1011, 1012]);
         // Nuke also takes spaces between pieces; overlaps and repeats count once, in order
-        assert_eq!(parse_frames("1010-1012 1001 1011").unwrap(), vec![1001, 1010, 1011, 1012]);
-        assert_eq!(parse_frames("7").unwrap(), vec![7]);
-        assert_eq!(parse_frames(" 0-2 ").unwrap(), vec![0, 1, 2]);
+        assert_eq!(parse_frames("1010-1012 1001 1011").unwrap().0, vec![1001, 1010, 1011, 1012]);
+        assert_eq!(parse_frames("7").unwrap().0, vec![7]);
+        assert_eq!(parse_frames(" 0-2 ").unwrap().0, vec![0, 1, 2]);
     }
 
     #[test]
