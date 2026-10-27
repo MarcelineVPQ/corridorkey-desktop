@@ -285,3 +285,15 @@ describe("SME review 2026-10-26: the CLI's conflicts", () => {
     expect(render.args.find((a) => a.id === "frames")!.conflicts).toEqual([]);
   });
 });
+
+describe("SME review 2026-10-26: versions", () => {
+  it("S7: corridorkey --version, render --version (-V) and version ask for the version", () => {
+    // loop: NOT-WORTH — a few spellings
+    for (const l of ["corridorkey --version", "corridorkey -V", "render --version", "corridorkey render -V", "verify --version"]) {
+      const p = parse(l, reg, posix);
+      expect([p.errors, p.version], l).toEqual([[], true]);
+    }
+    expect(parse("version", reg, posix).command?.name).toBe("version");
+    expect(parse("render a.mov", reg, posix).version).toBe(false);
+  });
+});

@@ -83,6 +83,8 @@ export interface ConsoleDeps {
   /** the second Ctrl+C / the quit: the child's whole process group (tree on Windows) */
   killTree?: (pid: number) => void;
   now?: () => number;
+  /** the app's version: its corridorkey's too (built together, one number: ck-cli lib.rs VERSION) */
+  version: string;
 }
 
 interface Job {
@@ -241,6 +243,8 @@ export class Console {
     }
     const cmd = p.command;
     if (!cmd) return now(this.finish(b, "done"));
+    // as the CLI prints it (clap: "corridorkey 1.0.0", "corridorkey-render 1.0.0"), without running it
+    if (p.version) return now(this.finish(b, "done", `${cmd === this.d.registry.cli ? "corridorkey" : `corridorkey-${cmd.name}`} ${this.d.version}`));
     if (p.help) return now(this.finish(b, "done", ...(cmd.name === "help" && cmd.kind === "builtin" ? overview(this.d.registry) : commandHelp(this.d.registry, cmd))));
     if (cmd.kind === "cli") return this.cli(b, p, parent !== null);
     // loop: NOT-WORTH — the line's few options
@@ -265,6 +269,8 @@ export class Console {
         return now(await this.cd(b, pos("folder")[0]));
       case "dir":
         return now(await this.dir(b, pos("folder")[0]));
+      case "version":
+        return now(this.finish(b, "done", `CorridorKey ${this.d.version} (the app and its corridorkey command line: one version)`));
       case "cls":
         b.clear = true;
         return now(this.finish(b, "done"));

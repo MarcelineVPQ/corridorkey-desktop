@@ -192,6 +192,7 @@ const BUILTINS: ConsoleCommand[] = [
     ["ls"],
   ),
   builtin("cls", "clear the screen", [], ["cls"], ["clear"]),
+  builtin("version", "the app's version, which is its corridorkey command line's (also corridorkey --version)", [], ["version", "corridorkey --version"]),
   builtin(
     "history",
     "the commands typed before (newest last)",

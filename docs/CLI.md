@@ -35,7 +35,7 @@ corridorkey verify -i plates/sh010.####.exr -o key/sh010_key.####.exr --outputs 
 | `corridorkey verify` | check that every requested frame is there and reads as a whole EXR (exit 0, or 9) |
 | `corridorkey prepare` | check the models, ONNX Runtime, the card, its free memory and ffmpeg before a farm's tasks start; `--tensorrt-size WxH` builds TensorRT's engines for that size (a one-time build of minutes, so no task waits on it) |
 | `corridorkey info` | version, model set, ONNX Runtime, provider, card, OpenColorIO, decoders (`--json`) |
-| `corridorkey help [COMMAND]` | the help; `corridorkey COMMAND -h` too, with examples. `corridorkey --version`: the app release it ships in (package.json's version, e.g. `1.0.0-dev.1`; the engine's pong says the same) |
+| `corridorkey help [COMMAND]` | the help; `corridorkey COMMAND -h` too, with examples. `corridorkey --version` (and `corridorkey render --version`, any command's `-V`): the app release it ships in (package.json's version, e.g. `1.0.0-dev.1`; the engine's pong says the same) |
 
 Options are GNU style: `--frames 1001-1100` or `--frames=1001-1100`, short ones `-F 1001-1100`; `--` ends the options
 (for a clip whose name starts with `-`). A mistake is exit 2 with what to type instead (`--frame` → "a similar

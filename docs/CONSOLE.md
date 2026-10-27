@@ -20,7 +20,8 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   `-s`/`-e`, `-q` with `-v`, `--overwrite` with `--skip-existing`, `-i` with INPUT before Enter), `render`'s `-o`, `--report`, `--temp` (and `verify`'s and `prepare`'s `--report`) as written paths.
 - **Commands.** `help [command]` (also `command ?`), `help -k <term>` / `apropos <term>` (search the help; `find` is
   kept free for a file search and says so), `cd`, `pwd`, `dir` / `ls`, `cls` / `clear`,
-  `history` (`--audit`: the elevated log), `run <file.ckcmd>` (a script of Console lines, one per line, `#` comments;
+  `history` (`--audit`: the elevated log), `version` (also `corridorkey --version`, `render --version`: the app's
+  version, which its corridorkey shares; answered without running it), `run <file.ckcmd>` (a script of Console lines, one per line, `#` comments;
   each line through the same checks; stops at the first that fails; no script inside a script), `sudo <command>`,
   `sudo -k`, and `corridorkey render | verify | prepare | info` (also bare `render` …).
 - **Running corridorkey.** The shipped binary (`engineFind.ts findCli`) is spawned with an argv, `shell: false`, its own

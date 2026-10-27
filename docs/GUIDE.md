@@ -63,7 +63,7 @@ App settings → Storage lists what the app keeps on this PC, each with its size
 
 The **Console** (its own icon on the rail) is a command line inside the app for people who live in one: the farm CLI's
 `render`, `verify`, `prepare` and `info` with the same flags, output and exit codes, plus `help`, `apropos`, `cd`, `pwd`,
-`dir` / `ls`, `cls`, `history`, `run` (a `.ckcmd` script of Console lines) and `sudo`. Every command and flag comes
+`dir` / `ls`, `cls`, `history`, `version`, `run` (a `.ckcmd` script of Console lines) and `sudo`. Every command and flag comes
 from the `corridorkey` CLI's own definitions, so the Console and the farm never differ. `help` lists the commands,
 `help render` or `render ?` explains one with examples, `help -k overwrite` (or `apropos overwrite`) searches them.
 

@@ -69,6 +69,8 @@ export interface Parsed {
   positionals: ParsedPositional[];
   /** the flag whose value the line ends without (completion offers its values) */
   expecting: ConsoleArg | null;
+  /** `corridorkey --version`, `render --version` / `-V`: the version (as the CLI prints it) */
+  version: boolean;
 }
 
 const SPACE = /[ \t\r\n]/;
@@ -139,6 +141,7 @@ export function quoteArg(value: string, opts: ParseOptions): string {
 /** A value-taking flag's next word is its value unless it looks like a flag (-0.5 is a value). */
 const looksLikeFlag = (w: Word) => !w.quoted && /^-[^\d.]/.test(w.value);
 const isHelp = (w: Word) => !w.quoted && ["?", "-h", "--help", "/?"].includes(w.value);
+const isVersion = (w: Word) => !w.quoted && (w.value === "--version" || w.value === "-V");
 const FRAMES = /^\d+(-\d+([x:]\d+)?)?([, ]+\d+(-\d+([x:]\d+)?)?)*$/;
 
 /** What is wrong with a flag's value, or null. */
@@ -165,7 +168,7 @@ const flagName = (a: ConsoleArg) => (a.long ? `--${a.long}` : `-${a.short}`);
 /** Parse a line against the registry. Never throws: every problem is an error with its range. */
 export function parse(line: string, reg: Registry, opts: ParseOptions): Parsed {
   const { words, error } = tokenize(line, opts);
-  const out: Parsed = { words, tokens: [], errors: error ? [error] : [], sudo: false, command: null, help: false, options: [], positionals: [], expecting: null };
+  const out: Parsed = { words, tokens: [], errors: error ? [error] : [], sudo: false, command: null, help: false, options: [], positionals: [], expecting: null, version: false };
   const fail = (message: string, start: number, end: number, arg?: ConsoleArg) => {
     out.errors.push({ message, start, end });
     out.tokens.push({ kind: "error", start, end, arg, error: message });
@@ -211,6 +214,12 @@ export function parse(line: string, reg: Registry, opts: ParseOptions): Parsed {
       }
       return out;
     }
+    if (isVersion(w)) {
+      out.command = cmd;
+      out.version = true;
+      out.tokens.push({ kind: "flag", start: w.start, end: w.end });
+      return out;
+    }
     // loop: NOT-WORTH — four subcommands
     const sub = w.quoted ? undefined : cmd.subcommands.find((c) => c.name === w.value);
     if (!sub) {
@@ -238,6 +247,11 @@ export function parse(line: string, reg: Registry, opts: ParseOptions): Parsed {
     const at = i++;
     if (!endOfOptions && isHelp(w)) {
       out.help = true;
+      out.tokens.push({ kind: "flag", start: w.start, end: w.end });
+      continue;
+    }
+    if (!endOfOptions && cmd.kind === "cli" && isVersion(w)) {
+      out.version = true;
       out.tokens.push({ kind: "flag", start: w.start, end: w.end });
       continue;
     }
@@ -352,7 +366,7 @@ export function parse(line: string, reg: Registry, opts: ParseOptions): Parsed {
   }
   if (!out.help && cmd.name === "sudo" && cmd.kind === "builtin" && !out.options.length)
     fail("sudo needs a command (sudo render … --overwrite), or -k to drop the elevation", line.length, line.length);
-  if (!out.help) {
+  if (!out.help && !out.version) {
     // loop: NOT-WORTH — a command's few positionals
     for (const a of positional) {
       // loop: NOT-WORTH — the line's positionals

@@ -189,6 +189,8 @@ Exit codes: 0 every frame whole, 9 a frame missing or cut, 2 usage, 3 input.";
 pub fn command() -> Command {
     Command::new("corridorkey")
         .version(crate::VERSION)
+        // `corridorkey render --version` too: the first thing a wrangler types on a new box
+        .propagate_version(true)
         .about("CorridorKey 2.0 on the command line: green-screen keys on render farms, offline (docs/CLI.md)")
         .subcommand_required(true)
         .arg_required_else_help(true)
@@ -272,6 +274,11 @@ mod tests {
         assert!(help.contains("Examples:") && help.contains("-F, --frames") && help.contains("--preroll"), "{help}");
         assert_eq!(parse(&["help", "verify"]).unwrap_err().kind(), clap::error::ErrorKind::DisplayHelp);
         assert_eq!(parse(&["--version"]).unwrap_err().kind(), clap::error::ErrorKind::DisplayVersion);
+        // loop: NOT-WORTH — four subcommands
+        for sub in ["render", "verify", "prepare", "info"] {
+            assert_eq!(parse(&[sub, "--version"]).unwrap_err().kind(), clap::error::ErrorKind::DisplayVersion, "{sub} --version");
+            assert_eq!(parse(&[sub, "-V"]).unwrap_err().kind(), clap::error::ErrorKind::DisplayVersion, "{sub} -V");
+        }
     }
 
     #[test]

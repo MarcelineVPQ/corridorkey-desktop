@@ -381,6 +381,7 @@ const appConsole = new Console({
   history: new History(join(userData, "console-history.jsonl")),
   changed: (b) => consolePush.mark(b),
   sessionChanged: () => scheduleSend(),
+  version: app.getVersion(),
 });
 
 function state(): AppState {

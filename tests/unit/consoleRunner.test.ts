@@ -102,6 +102,7 @@ function make(over: Partial<ConsoleDeps> = {}, files = mkdtempSync(join(root, "u
     },
     killTree: (pid) => void killed.push(pid),
     now: () => t,
+    version: "1.0.0-dev.9",
     ...over,
   };
   return { c: new Console(deps), deps, files };
@@ -731,5 +732,15 @@ describe("review 2026-10-26 probes", () => {
     const b = await c.run("sudo render shot.mov -o ../out/d/");
     expect([b.state, b.elevated, confirms.length, b.lines]).toEqual(["running", false, 0, []]);
     await finish(spawned[0].child, [], 0);
+  });
+});
+
+describe("SME review 2026-10-26", () => {
+  it("S7: version, corridorkey --version and render --version answer with the version, without running anything", async () => {
+    const { c } = make();
+    expect((await c.run("corridorkey --version")).lines.map((l) => l.text)).toEqual(["corridorkey 1.0.0-dev.9"]);
+    expect((await c.run("render --version")).lines.map((l) => l.text)).toEqual(["corridorkey-render 1.0.0-dev.9"]);
+    expect((await c.run("version")).lines[0].text).toBe("CorridorKey 1.0.0-dev.9 (the app and its corridorkey command line: one version)");
+    expect(spawned).toHaveLength(0);
   });
 });
