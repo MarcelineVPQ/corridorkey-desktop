@@ -392,7 +392,9 @@ describe("sudo", () => {
 describe("built-ins", () => {
   it("cd / pwd keep the Console's own folder; cd alone goes home; a missing folder is said", async () => {
     const { c } = make();
-    expect((await c.run("cd ..")).lines[0].text).toBe(root);
+    // silent on success (SME S9): the bar and the prompt show the folder
+    const up = await c.run("cd ..");
+    expect([up.state, up.lines]).toEqual(["done", []]);
     expect(c.session().cwd).toBe(root);
     expect((await c.run("cd 'my shots'")).state).toBe("done");
     expect((await c.run("pwd")).lines[0].text).toBe(shots);

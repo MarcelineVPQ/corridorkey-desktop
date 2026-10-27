@@ -338,7 +338,8 @@ export class Console {
     this.prevCwd = this.cwd;
     this.cwd = dir;
     this.d.sessionChanged();
-    return this.finish(b, "done", dir);
+    // silent on success (the bar and the prompt show the folder); cd - prints where it went, as bash does
+    return back ? this.finish(b, "done", dir) : this.finish(b, "done");
   }
 
   /**

@@ -856,6 +856,28 @@ select {
   flex-wrap: wrap;
   gap: 6px;
   font-family: var(--font-ui);
+  /* quiet until wanted: shown on hover and whenever a block's control has keyboard focus (Tab reaches them; never
+     hidden from the keyboard), always on a screen without hover */
+  opacity: 0;
+}
+.cblock:hover .cb-actions,
+.cblock:focus-within .cb-actions {
+  opacity: 1;
+}
+@media (hover: none) {
+  .cb-actions {
+    opacity: 1;
+  }
+}
+/* a built-in's block (dir, pwd, help…): tighter, so the commands that run things stand out */
+.cblock.compact {
+  margin-bottom: 6px;
+}
+.cblock.compact .cb-head {
+  padding: 3px 10px;
+}
+.cblock.compact .cb-out {
+  padding: 3px 10px 5px;
 }
 .cb-progress {
   display: flex;

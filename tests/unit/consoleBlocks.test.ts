@@ -8,6 +8,7 @@ import {
   blockStatus,
   blockText,
   clearScreen,
+  compactBlock,
   duration,
   errorSpans,
   highlight,
@@ -213,5 +214,22 @@ describe("SME review 2026-10-26: dates and sizes for pros (S8)", () => {
       "sh010_plate.####.exr  1001-1100 · 100 frames  2.0 GiB     2026-10-26 22:58",
       "notes.txt                                     12 B        2026-10-26 22:58",
     ]);
+  });
+});
+
+describe("SME review 2026-10-26: quieter blocks (S9)", () => {
+  it("a built-in's block is compact; a corridorkey run's isn't", () => {
+    expect(compactBlock(block(1, { line: "pwd" }))).toBe(true);
+    expect(compactBlock(block(2, { argv: ["render", "--", "a.mov"] }))).toBe(false);
+    expect(compactBlock(block(3, { progress: { percent: 1, done: 1, total: 100 } }))).toBe(false);
+  });
+
+  it("the block's buttons show on hover and on keyboard focus (never hidden from Tab), always without hover", () => {
+    const css = readFileSync(new URL("../../src/styles/app.css", import.meta.url), "utf8");
+    expect(css).toMatch(/\.cb-actions \{[^}]*opacity: 0;/);
+    expect(css).toMatch(/\.cblock:hover \.cb-actions,\s*\.cblock:focus-within \.cb-actions \{\s*opacity: 1;/);
+    expect(css).toMatch(/@media \(hover: none\) \{\s*\.cb-actions \{\s*opacity: 1;/);
+    // display: none / visibility: hidden would take them out of the keyboard's reach
+    expect(css).not.toMatch(/\.cb-actions \{[^}]*(display: none|visibility: hidden)/);
   });
 });

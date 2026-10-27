@@ -102,6 +102,9 @@ export function announcement(blocks: readonly ConsoleBlock[]): string {
   return `${b.line}: ${word}${exit ? `, ${exit}` : ""}${meaning ? ` (${meaning})` : ""}`;
 }
 
+/** A built-in's block (no corridorkey argv, no progress) is drawn compact: the runs stand out in a long session. */
+export const compactBlock = (b: ConsoleBlock): boolean => b.argv === null && b.progress === null;
+
 /** How long it took ("0.4 s", "2 min 05 s"); null while it runs. */
 export function duration(b: ConsoleBlock): string | null {
   if (b.finishedAt === null) return null;

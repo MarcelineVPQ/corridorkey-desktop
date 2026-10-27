@@ -47,7 +47,9 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   build waits. The app's quit stops a running corridorkey (SIGTERM, killed after 7 s): the CLI doesn't end with its
   parent on its own. Once the quit has begun nothing starts: a command still in its checks is refused.
 - **Output** goes to the page as blocks (`ConsoleBlock` in `src/shared/types.ts`): the line, its state and exit code,
-  progress, the last 2000 lines, `dir`'s rows. Updates are pushed on `ck:console-blocks`, at most 10 a second and only
+  progress, the last 2000 lines, `dir`'s rows. The page keeps them quiet: a block's actions show on hover and on
+  keyboard focus (`:focus-within`; opacity only, so Tab always reaches them; always shown without hover), a built-in's
+  block is compact, `cd` prints nothing on success (`cd -` prints where it went). Updates are pushed on `ck:console-blocks`, at most 10 a second and only
   while the window is shown; the session (folder, elevation's end, the running line) rides in the app state.
 - **History** (`userData/console-history.jsonl`): the lines typed, across restarts, the newest 5000, consecutive
   duplicates once, a line typed with a leading space not at all (bash's ignorespace). Each line has a stable number

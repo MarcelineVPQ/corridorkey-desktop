@@ -1,14 +1,15 @@
 // One command's output block (Warp-style): the line as typed (a refused one marked where it is wrong), its status with
 // the exit code and what it means, the CLI's progress (frames handed to the writers, from its own JSON events), what
 // it printed (selectable), a folder listing, the paths it wrote (Show in folder), and Copy command / Copy output /
-// Re-run (which puts the line back in the input, never runs it). An elevated block is marked.
+// Re-run (which puts the line back in the input, never runs it), shown on hover and on keyboard focus. An elevated
+// block is marked; a built-in's is compact.
 import { memo, useEffect, useState } from "react";
 import { Check, Copy, CornerDownLeft, FolderOpen, ShieldAlert } from "lucide-react";
 import type { Registry } from "../../shared/console/registry";
 import type { ConsoleBlock } from "../../shared/types";
 import { ProgressBar } from "../ProgressBar";
 import { fileSizeText } from "../../shared/units";
-import { blockStatus, blockText, duration, errorSpans, isoTime, sequenceText, writtenPaths } from "./model";
+import { blockStatus, blockText, compactBlock, duration, errorSpans, isoTime, sequenceText, writtenPaths } from "./model";
 
 const COPIED_MS = 1500;
 
@@ -36,7 +37,7 @@ export const OutputBlock = memo(function OutputBlock({ b, registry, onReinsert }
   const out = blockText(b);
   return (
     // the line is the user's own input: it labels the block, the live log announces only what the command printed
-    <article className={`cblock tone-${st.tone} ${b.elevated ? "elevated" : ""} ${b.parent !== null ? "child" : ""}`} aria-label={b.line}>
+    <article className={`cblock tone-${st.tone} ${b.elevated ? "elevated" : ""} ${b.parent !== null ? "child" : ""} ${compactBlock(b) ? "compact" : ""}`} aria-label={b.line}>
       <header className="cb-head">
         <code className="cb-line" aria-hidden>
           {b.elevated && (
