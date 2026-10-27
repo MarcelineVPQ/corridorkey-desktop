@@ -226,3 +226,17 @@ describe("registry", () => {
     ).toBe("INPUT needs a value, not an empty one");
   });
 });
+
+describe("review 2026-10-26 probe P10", () => {
+  it("parses a line of the longest size the Console takes (8 KiB) quickly (the review measured 0.15-2.6 ms)", () => {
+    const lines = ["render " + "a".repeat(8180), "render shot.mov " + "--linear ".repeat(900), `render "${"x y ".repeat(2040)}"`, "render " + "-o out/ ".repeat(1020)];
+    // loop: NOT-WORTH — four lines in a test
+    for (const line of lines) {
+      expect(line.length).toBeLessThanOrEqual(8192);
+      const t0 = performance.now();
+      parse(line, reg, posix);
+      // a generous bound (a busy test machine): a regression to quadratic work takes seconds
+      expect(performance.now() - t0).toBeLessThan(100);
+    }
+  });
+});

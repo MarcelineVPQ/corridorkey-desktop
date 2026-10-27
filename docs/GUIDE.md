@@ -70,11 +70,16 @@ from the `corridorkey` CLI's own definitions, so the Console and the farm never 
 **Safety.** It is not a system shell: only its own commands, each one parsed and checked (no variables, pipes, globs
 or other programs). It **reads anywhere** you can, and **writes only into the folders you chose**: the results folder
 (App settings), the cache folder, and the queued clips' results folders; anything else is refused with the reason,
-before anything runs. A command that **replaces files** (`render … --overwrite`) runs only as `sudo render …`: a
-dialog names the exact command and the files there now; confirmed, the Console stays elevated for 5 minutes (each
+before anything runs. A command that **replaces files** (`render … --overwrite`, and `render … --skip-existing`, which
+keys the whole set again unless every frame is already there and whole) runs only as `sudo render …`: a dialog shows
+the line as you typed it, the command as it runs (each word quoted) and how many files at the run's names are there
+now; confirmed, the Console stays elevated for 5 minutes (each
 elevated command extends it, never past 15), shown by a badge with its countdown in the bar and in **Session**,
 where **Drop elevation** ends it (as does `sudo -k`, the window losing focus, or quitting). Elevated commands are
-logged (`history --audit`).
+logged (`history --audit`); one the log can't record doesn't run. A `--job` file runs only once the Console has read
+and checked it, and its output and temporary folders are fixed when it starts. **Stop** (or Ctrl+C) ends a command on
+every system, Windows included; quitting the app stops it too. A screen reader hears each command's start and end, not
+every line it prints.
 
 **Typing.** As you type, the line is coloured: commands, flags, paths, and mistakes underlined before you press
 Enter (an unknown command or flag with its "did you mean", a value out of range), a flag that replaces files in

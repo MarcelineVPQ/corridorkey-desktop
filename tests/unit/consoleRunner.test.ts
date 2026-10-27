@@ -713,4 +713,20 @@ describe("review 2026-10-26 probes", () => {
     ]);
     expect(clipName("D:\\plates\\sh010\\input", "win32")).toBe("sh010");
   });
+
+  // P7 and P8 pin today's behaviour of two open NICE items: flip each when its backlog row is built
+  it("P7 (N1, BACKLOG row 106, open): a value starting with - goes to the CLI as two words (clap then refuses it, exit 2)", async () => {
+    const { c } = make();
+    await c.run("render shot.mov -o ../out/c/ --codec=-x");
+    expect(spawned[0].args).toEqual(expect.arrayContaining(["--codec", "-x"]));
+    expect(spawned[0].args).not.toContain("--codec=-x");
+    await finish(spawned[0].child, [], 2);
+  });
+
+  it("P8 (N2, BACKLOG row 107, open): sudo on a command that replaces nothing runs it normally, without a word", async () => {
+    const { c } = make();
+    const b = await c.run("sudo render shot.mov -o ../out/d/");
+    expect([b.state, b.elevated, confirms.length, b.lines]).toEqual(["running", false, 0, []]);
+    await finish(spawned[0].child, [], 0);
+  });
 });

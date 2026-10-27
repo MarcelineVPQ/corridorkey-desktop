@@ -342,3 +342,27 @@ Gate fixtures (S5), each run as `bash .hooks/check_electron_security.sh <fixture
 `shell: "/bin/bash"`, `shell: process.platform === "win32"`, `spawn("/bin/sh", ["-c", line])`,
 `execFile("cmd.exe", ["/d","/s","/c", line])`, `await import("node:child_process")` (plain and destructured),
 `shell.openPath(p)`.
+
+---
+
+## Status (2026-10-26, `feat/console`)
+
+Marcy approved all MUSTs and SHOULDs; the NICE items are backlog rows. Each fix has a test that failed on the old
+code; each probe is a regression test (P7-P9 pin the open rows' behaviour today: flip them when the row is built).
+
+| Finding | Done in | Test |
+|---|---|---|
+| M1 URL-looking values skip the write check | e95057f | P1 ×3 (`consoleRunner.test.ts` "review 2026-10-26 probes") |
+| M2 `--job` check fails open, TOCTOU | 0a0a73b: refused unless read and parsed; its folders passed as resolved `--output` / `--temp` | P2 ×2 |
+| M3 `--skip-existing` replaces without sudo | 3bacde9: destructive | P3 |
+| M4 no kill on Windows | 7fa5755: the runner's win32 default is `taskkill /T /F` (System32, full path) | P5 (built without an injected `killTree`); not run on the Windows VM (no other machines in this pass) |
+| S1 two jobs in the one slot | a8143fa: `run` takes the slot before any await | P4 |
+| S2 spawn after `shutdown()` | a8143fa: nothing spawns once quitting | P11 |
+| S3 estimate beside a Console render | 202aa31: `queue.running \|\| consoleGpu` | wiring test in `estimate.test.ts` (index.ts needs Electron) |
+| S4 elevated runs unlogged | ebcba7d: `append` resolves ok/failed; `granted` and `run` awaited, refused when unwritten | P6 ×2, `consoleSafety.test.ts` |
+| S5 gate misses shells | 394902d: `shell:` ≠ false, shells by name, `-c` / `/c` / `-Command`, `import()`, `shell.openPath`; `gate: shell-ok — why` for the five reviewed uses | the review's gate fixtures in `securityGate.test.ts` |
+| S6 Windows DLL search in the Console's folder | 2382ea9: ck-cli's main calls `SetDllDirectoryW("")` | evidence: Microsoft's documented behaviour of an empty SetDllDirectory; `npm run check:targets` lints it for Windows; not run on the VM. Not covered: ffmpeg processes the CLI starts still inherit the Console's folder as theirs |
+| S7 the sudo dialog | 26367a5: typed line + quoted argv without the Console's flags, control/bidi escaped, only the run's names counted | S7 tests |
+| S8 `role="log"` | 95829b7: plain region + one polite `role="status"` | `consoleBlocks.test.ts` |
+| P10 parse speed | — | `consoleParse.test.ts` (< 100 ms per 8 KiB line) |
+| N1-N12 | docs/BACKLOG.md rows 106-117 (idea) | P7 → row 106, P8 → row 107, P9 → row 108 |
