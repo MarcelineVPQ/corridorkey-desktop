@@ -814,10 +814,12 @@ impl HintReader {
     pub(crate) fn open(path: &Path, meta: &ClipMeta) -> Result<HintReader, Error> {
         if path.is_dir() {
             let paths = crate::clip::frame_paths(path)?;
-            if paths.len() < meta.num_frames {
-                return Err(Error::input(format!("{}: only {} hint frames for {} source frames", path.display(), paths.len(), meta.num_frames)));
+            // a ranged job's hint folder starts at the span's first frame (ClipMeta::select_range); otherwise at 0, as before
+            let first = if meta.range.is_some() { meta.start_frame } else { 0 };
+            if paths.len() < first + meta.num_frames {
+                return Err(Error::input(format!("{}: only {} hint frames for {} source frames", path.display(), paths.len(), first + meta.num_frames)));
             }
-            return Ok(HintReader { meta: meta.clone(), video: None, paths, next: 0 });
+            return Ok(HintReader { meta: meta.clone(), video: None, paths, next: first });
         }
         let p = crate::clip::ffprobe(path)?;
         // decoded at its own size (resized to the model's after): refused past MAX_SIDE before ffmpeg's frames are allocated
@@ -956,6 +958,7 @@ mod tests {
             deep_input: false,
             exr_linear: true,
             color_in: None,
+            range: None,
         };
         // loop: NOT-WORTH — both EXR codings
         for linear in [true, false] {

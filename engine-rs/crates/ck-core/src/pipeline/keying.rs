@@ -549,21 +549,27 @@ impl<L: Loader> Pipeline<L> {
         sink: &mut dyn Sink,
     ) -> Result<(), Error> {
         let (meta, frames) = (ctx.meta, ctx.frames);
-        let t_all = meta.num_frames;
+        // only the written frames get stage 2 (a ranged job's warm-up frames are read past, its tail not read)
+        let write = meta.write_range();
         self.unload();
         self.ensure(&plan.key, &["stage2"], ctx.trt, sink, LOAD_STAGE)?;
         // frames and stored states read and made into stage-2 inputs on their own thread, ahead of the card
         let mut reader = Prefetch::new("s2-decode", frames.open(false)?, 8)?;
         // the frame converted here, on the producer thread, to the type stage 2 takes
         let rgb_f16 = self.net("stage2")?.wants_f16("rgb");
+        let (w_start, w_end) = (write.start, write.end);
         let (itx, irx) = std::sync::mpsc::sync_channel::<Result<(Data<'static>, Data<'static>), Error>>(2);
         // loop: SERIAL-REQUIRED — the low-VRAM stage-2 producer: frames in order; ends at the clip's end, an error, or a dropped receiver
         let producer = crate::ahead::spawn_named("s2-inputs", move || {
             let mut prep_s = 0.0;
-            // loop: SERIAL-REQUIRED — frames in order; ends at the clip's end, an error, or a dropped receiver
-            for t in 0..t_all {
+            // loop: SERIAL-REQUIRED — frames in order; ends at the last written frame, an error, or a dropped receiver
+            for t in 0..w_end {
                 let tp = Instant::now();
-                let item = reader.next_frame().and_then(|f| f.ok_or_else(|| Error::input("short read".into()))).and_then(|f| {
+                let item = reader.next_frame().and_then(|f| f.ok_or_else(|| Error::input("short read".into())));
+                if t < w_start && item.is_ok() {
+                    continue;
+                }
+                let item = item.and_then(|f| {
                     let b = bf.get(t, t + 1)?;
                     let rgb = Data::Bf16(vec![&f.model[..]]);
                     Ok((if rgb_f16 { Data::F16(rgb.into_f16()) } else { Data::F32(rgb.into_f32()) }, Data::F16(b)))
@@ -578,7 +584,7 @@ impl<L: Loader> Pipeline<L> {
         })?;
         let mut res = Ok(());
         // loop: SERIAL-REQUIRED — frames in order to the writers
-        for _ in 0..t_all {
+        for _ in write {
             let tw = Instant::now();
             // loop: SERIAL-REQUIRED — stage 2's next input, in order [bounded: the producer sends every frame or its error, then ends]
             let item = irx.recv().map_err(|_| Error::engine("the stage-2 input thread stopped".into())).and_then(|r| r);
@@ -662,8 +668,15 @@ impl<L: Loader> Pipeline<L> {
         out: &mut Writing<'_, '_>,
         sink: &mut dyn Sink,
     ) -> Result<(), Error> {
+        let write = meta.write_range();
         // loop: SERIAL-REQUIRED — frames go to the writers in order
         for (t, b) in ready {
+            if !write.contains(&t) {
+                // a ranged job's warm-up or tail frame: keyed (its state was blended, its carry hint taken), never
+                // written, so no stage 2
+                stage2_frames.remove(&t);
+                continue;
+            }
             match baton_file {
                 Some(f) => f.put(t, &b)?,
                 None => {

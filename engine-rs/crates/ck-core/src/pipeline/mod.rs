@@ -652,6 +652,10 @@ impl Pipeline<OrtLoader> {
         } else {
             probe_video(Path::new(&job.input), &job.probe_opts())?
         };
+        // a frame range (frame_start / frame_end / preroll / tail): only its span is decoded and keyed
+        if let Some(r) = &job.frame_range {
+            meta.select_range(r, job.exr, crate::clip::none_path(job.hint_first_frame.as_deref()).is_some())?;
+        }
         if is_dir {
             if let Source::Frames(p) = &meta.source {
                 sink.log(&format!(
@@ -681,6 +685,21 @@ impl Pipeline<OrtLoader> {
                 "  probed {} frames @ {}x{} (native {}x{}, fps {:.2}, start={}, pad=({}, {}, {}, {}))",
                 meta.num_frames, meta.shape_w, meta.shape_h, meta.w, meta.h, meta.fps, meta.start_frame, meta.pad.l, meta.pad.r, meta.pad.t, meta.pad.b
             ));
+        }
+        if let (Some(r), Some(range)) = (&job.frame_range, &meta.range) {
+            sink.log(&format!(
+                "  frame range: writing {} ({} frames), keying {}-{} ({} warm-up frames of {} asked, {} tail frames of {} asked)",
+                range.numbers.describe(),
+                meta.write_range().len(),
+                range.keyed.0,
+                range.keyed.1,
+                range.write.0,
+                r.preroll,
+                meta.num_frames - range.write.1,
+                r.tail
+            ));
+        } else if job.frame_range.is_some() {
+            sink.log("  frame range: the whole shot (keyed as one job)");
         }
         if meta.scaled() {
             sink.log(&format!(
@@ -724,7 +743,13 @@ impl Pipeline<OrtLoader> {
         if job.manual {
             sink.send(json!({"type": "memory", "hann_chunk": chunk, "hann_stride": stride, "low_vram": low_vram, "auto": false, "provider": provider.name()}));
         }
-        sink.send(json!({"type": "clip", "width": meta.w, "height": meta.h, "fps": meta.fps, "frames": meta.num_frames}));
+        let mut clip_reply = json!({"type": "clip", "width": meta.w, "height": meta.h, "fps": meta.fps, "frames": meta.num_frames});
+        if let Some(r) = &meta.range {
+            // additive: the frames written and the frames keyed (source numbers); `frames` above counts the keyed ones
+            let (a, b) = (r.numbers.numbers.first().copied(), r.numbers.numbers.last().copied());
+            clip_reply["range"] = json!({"first": a, "last": b, "keyed_first": r.keyed.0, "keyed_last": r.keyed.1, "written": meta.write_range().len()});
+        }
+        sink.send(clip_reply);
         crate::clip::model_shape_supported(meta.shape_h, meta.shape_w, meta.model_w, meta.model_h, self.models.takes_portrait())?;
         let t_all = meta.num_frames;
         let (sh, sw) = (meta.shape_h, meta.shape_w);
@@ -826,7 +851,8 @@ impl Pipeline<OrtLoader> {
         let fps = meta.fps;
         let mut writers: Vec<(String, Box<dyn Writer>)> = Vec::new();
         // EXR frames carry the source's frame numbers (a frame folder's own, else 1001 + index; backlog row 30 a)
-        let exr_numbers = job.exr.then(|| std::sync::Arc::new(crate::clip::FrameNumbers::for_source(&meta.source, meta.num_frames)));
+        // (a ranged job's: the shot's numbers of the written frames, ClipMeta::exr_numbers)
+        let exr_numbers = job.exr.then(|| std::sync::Arc::new(meta.exr_numbers()));
         if let Some(n) = &exr_numbers {
             match &n.fallback {
                 Some(why) => sink.log(&format!("  EXR frame numbers: {} ({why}: numbered from 1001 instead)", n.describe())),
@@ -898,6 +924,10 @@ impl Pipeline<OrtLoader> {
                 exr_frames: exr_numbers.as_ref().map(|n| n.describe()),
                 color: color.as_ref().map(|c| c.settings_lines()),
                 input_bit_depth: job.input_bits,
+                range: meta.range.as_ref().map(|r| {
+                    let (a, b) = (r.numbers.numbers.first().copied().unwrap_or(0), r.numbers.numbers.last().copied().unwrap_or(0));
+                    (format!("{a}-{b}"), format!("{}-{} (warm-up {}, tail {})", r.keyed.0, r.keyed.1, r.write.0, meta.num_frames - r.write.1))
+                }),
             });
             if let Err(e) = std::fs::write(&settings_path, text) {
                 sink.log(&format!("[WARNING] Failed to write settings file: {e}"));
@@ -905,7 +935,9 @@ impl Pipeline<OrtLoader> {
         };
         write_settings(chunk, stride, low_vram, sink);
 
-        let mut report = FrameReport { total: t_all, last_sent: None, last_done: None };
+        // `frames` counts the frames written (a ranged job's warm-up and tail are keyed, never written)
+        let written = meta.write_range().len();
+        let mut report = FrameReport { total: written, last_sent: None, last_done: None };
         let setup_s = job_t.elapsed().as_secs_f64();
         let mut ctx = JobCtx::new(job, &meta, &meta, trt_ref, &clip);
         // colour-managed EXR outputs only: video outputs stay display sRGB / Rec.709 (decision 2)
@@ -936,7 +968,7 @@ impl Pipeline<OrtLoader> {
         res?;
         rel?;
         report.report(&writers, sink, true);
-        sink.log(&format!("  wrote {} output video(s) for {clip} ({t_all} frames @ {w}x{h})", writers.len()));
+        sink.log(&format!("  wrote {} output video(s) for {clip} ({written} frames @ {w}x{h})", writers.len()));
         Ok(JobResult {
             // loop: NOT-WORTH — ≤ four outputs, once per job
             outputs: writers.iter().map(|(_, w)| w.path().to_string_lossy().into_owned()).collect(),

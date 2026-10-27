@@ -60,6 +60,21 @@ pub struct JobConfig {
     /// VideoCapture at 8 bits, 16-bit PNG reduced to its high byte); 16 = video above 8 bits decoded at 16 bits and
     /// 16-bit PNG at full depth (differs from CorridorKey 2.0). EXR is float either way
     pub input_bits: u32,
+    /// `frame_start` / `frame_end` / `preroll` / `tail` (backlog rows 9 and 32): key part of a shot. None = the whole
+    /// clip, exactly as before
+    pub frame_range: Option<FrameRange>,
+}
+
+/// Part of a shot (run options `frame_start`, `frame_end`, `preroll`, `tail`): the frames `start`..=`end` (source
+/// frame numbers: a folder's own, a video's 1001 + its index) are written; `preroll` frames before and `tail` frames
+/// after are keyed too (they warm up RVM, the windows and the carry hint) and never written. Resolved against the
+/// shot by `ClipMeta::select_range`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FrameRange {
+    pub start: u64,
+    pub end: u64,
+    pub preroll: usize,
+    pub tail: usize,
 }
 
 fn num(o: &serde_json::Map<String, Value>, k: &str) -> Result<Option<f64>, Error> {
@@ -179,6 +194,34 @@ pub fn model_scale(o: &serde_json::Map<String, Value>) -> Result<f64, Error> {
 /// clip at 2.0 is 8K inside the networks), and a scale far past it only fails later, out of memory.
 pub const MAX_MODEL_SCALE: f64 = 2.0;
 
+/// A whole number 0 or above (`seed`, the frame range's options), None when absent.
+fn whole(o: &serde_json::Map<String, Value>, k: &str) -> Result<Option<u64>, Error> {
+    match num(o, k)? {
+        None => Ok(None),
+        Some(v) if v >= 0.0 && v.fract() == 0.0 && v < 18446744073709551616.0 => Ok(Some(v as u64)),
+        Some(v) => Err(Error::bad_request(format!("{k} must be a whole number 0 or above, got {v}"))),
+    }
+}
+
+/// The frame range options (FrameRange): both ends or neither; `preroll` / `tail` only with them; not with
+/// `num_frames` or a `start_mode` other than begin (those pick their own part of the clip).
+fn frame_range(o: &serde_json::Map<String, Value>, num_frames: i64, start_mode: crate::clip::StartMode) -> Result<Option<FrameRange>, Error> {
+    let (start, end, preroll, tail) = (whole(o, "frame_start")?, whole(o, "frame_end")?, whole(o, "preroll")?, whole(o, "tail")?);
+    let (start, end) = match (start, end) {
+        (None, None) if preroll.is_some() || tail.is_some() => return Err(Error::bad_request("preroll and tail need frame_start and frame_end".into())),
+        (None, None) => return Ok(None),
+        (Some(s), Some(e)) => (s, e),
+        _ => return Err(Error::bad_request("frame_start and frame_end go together: give both".into())),
+    };
+    if start > end {
+        return Err(Error::bad_request(format!("frame_start ({start}) is after frame_end ({end})")));
+    }
+    if num_frames > 0 || start_mode != crate::clip::StartMode::Begin {
+        return Err(Error::bad_request("frame_start / frame_end don't combine with num_frames or start_mode: the range picks the frames".into()));
+    }
+    Ok(Some(FrameRange { start, end, preroll: preroll.unwrap_or(0) as usize, tail: tail.unwrap_or(0) as usize }))
+}
+
 /// Parse a run request (it already has id, input, output_dir and temp_dir: the engine checked them).
 pub fn parse(req: &Value) -> Result<JobConfig, Error> {
     let s = |k: &str| req.get(k).and_then(|v| v.as_str().map(|x| x.to_string()).or_else(|| (!v.is_null()).then(|| v.to_string())));
@@ -252,6 +295,13 @@ pub fn parse(req: &Value) -> Result<JobConfig, Error> {
             alpha_for_cutout = true;
         }
     }
+    let num_frames = int(o, "num_frames")?.unwrap_or(-1);
+    let start_mode = match string(o, "start_mode") {
+        None => crate::clip::StartMode::Begin,
+        Some(s) => {
+            crate::clip::StartMode::parse(&s).ok_or_else(|| Error::bad_request(format!("start_mode must be begin, middle or random_middle, got {s:?}")))?
+        }
+    };
     Ok(JobConfig {
         id,
         input,
@@ -279,20 +329,11 @@ pub fn parse(req: &Value) -> Result<JobConfig, Error> {
             Some(v) => return Err(Error::bad_request(format!("frame_dir_fps must be above 0, got {v}"))),
         },
         frame_dir_linear: boolean(o, "frame_dir_linear", false),
-        num_frames: int(o, "num_frames")?.unwrap_or(-1),
+        num_frames,
         model_scale: model_scale(o)?,
-        start_mode: match string(o, "start_mode") {
-            None => crate::clip::StartMode::Begin,
-            Some(s) => {
-                crate::clip::StartMode::parse(&s).ok_or_else(|| Error::bad_request(format!("start_mode must be begin, middle or random_middle, got {s:?}")))?
-            }
-        },
-        seed: match num(o, "seed")? {
-            None => 0,
-            // numpy's SeedSequence takes non-negative integers only
-            Some(v) if v >= 0.0 && v.fract() == 0.0 && v < 18446744073709551616.0 => v as u64,
-            Some(v) => return Err(Error::bad_request(format!("seed must be a whole number 0 or above, got {v}"))),
-        },
+        start_mode,
+        // numpy's SeedSequence takes non-negative integers only
+        seed: whole(o, "seed")?.unwrap_or(0),
         linear_brightness: positive(o, "linear_brightness", 1.0)?,
         linear_contrast: positive(o, "linear_contrast", 1.0)?,
         linear_contrast_pivot: num(o, "linear_contrast_pivot")?.unwrap_or(0.18),
@@ -314,6 +355,7 @@ pub fn parse(req: &Value) -> Result<JobConfig, Error> {
             Some("16") => 16,
             Some(s) => return Err(Error::bad_request(format!("input_bit_depth must be \"8\" or \"16\", got {s}"))),
         },
+        frame_range: frame_range(o, num_frames, start_mode)?,
     })
 }
 
@@ -489,6 +531,33 @@ mod tests {
         ] {
             assert_eq!(parse(&req(o.clone())).unwrap_err().code.as_str(), "bad-request", "{o}");
         }
+    }
+
+    #[test]
+    fn frame_range_options() {
+        // absent: the whole clip, as before
+        assert_eq!(parse(&req(json!({}))).unwrap().frame_range, None);
+        let c = parse(&req(json!({"frame_start": 80, "frame_end": "90", "preroll": 8}))).unwrap();
+        assert_eq!(c.frame_range, Some(FrameRange { start: 80, end: 90, preroll: 8, tail: 0 }));
+        let c = parse(&req(json!({"frame_start": 1001, "frame_end": 1001, "tail": 4, "num_frames": -1, "start_mode": "begin"}))).unwrap();
+        assert_eq!(c.frame_range, Some(FrameRange { start: 1001, end: 1001, preroll: 0, tail: 4 }));
+        // loop: NOT-WORTH — a test's few options
+        for o in [
+            json!({"frame_start": 90, "frame_end": 80}),
+            json!({"frame_start": 80}),
+            json!({"frame_end": 80}),
+            json!({"preroll": 8}),
+            json!({"tail": 2}),
+            json!({"frame_start": -1, "frame_end": 5}),
+            json!({"frame_start": 1.5, "frame_end": 5}),
+            json!({"frame_start": 1, "frame_end": 5, "preroll": -2}),
+            json!({"frame_start": 1, "frame_end": 5, "num_frames": 10}),
+            json!({"frame_start": 1, "frame_end": 5, "start_mode": "middle"}),
+        ] {
+            assert_eq!(parse(&req(o.clone())).unwrap_err().code.as_str(), "bad-request", "{o}");
+        }
+        let e = parse(&req(json!({"frame_start": 90, "frame_end": 80}))).unwrap_err();
+        assert!(e.message.contains("frame_start (90) is after frame_end (80)"), "{}", e.message);
     }
 
     #[test]

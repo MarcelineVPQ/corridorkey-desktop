@@ -89,6 +89,7 @@ fn meta(h: usize, w: usize, sh: usize, sw: usize) -> ClipMeta {
         video_bits: 8,
         deep_input: false,
         color_in: None,
+        range: None,
     }
 }
 

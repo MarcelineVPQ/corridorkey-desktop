@@ -290,9 +290,11 @@ impl Network for FakeNet {
 }
 
 /// `n` frames of the model shape made in memory (no padding): each value a function of the frame, channel and
-/// position. `fail_at`: the stream fails at that frame (each time it is read).
+/// position. `fail_at`: the stream fails at that frame (each time it is read). `first`: the shot's frame the stream
+/// starts at (a ranged job's span, as the decoders start at `ClipMeta::start_frame`); its frames are the shot's.
 pub(crate) struct FakeFrames {
     pub(crate) n: usize,
+    pub(crate) first: usize,
     pub(crate) shape: (usize, usize),
     pub(crate) fail_at: Option<usize>,
 }
@@ -319,13 +321,14 @@ impl FakeFrames {
             video_bits: 8,
             deep_input: false,
             color_in: None,
+            range: None,
         }
     }
 }
 
 impl FrameSource for FakeFrames {
     fn open(&self, display_only: bool) -> Result<Box<dyn FrameStream>, Error> {
-        Ok(Box::new(FakeStream { n: self.n, shape: self.shape, fail_at: self.fail_at, display_only, t: 0 }))
+        Ok(Box::new(FakeStream { n: self.first + self.n, shape: self.shape, fail_at: self.fail_at, display_only, t: self.first }))
     }
 }
 

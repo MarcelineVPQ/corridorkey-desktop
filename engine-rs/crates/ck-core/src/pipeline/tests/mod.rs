@@ -6,6 +6,7 @@ mod jobs;
 mod retry;
 
 use super::*;
+use crate::clip::ClipMeta;
 use crate::hann::{taper_weights, window_starts};
 use crate::runtime::Data;
 use fakes::*;
@@ -136,7 +137,7 @@ impl Harness {
         std::fs::create_dir_all(&job.temp_dir).unwrap();
         let loader = FakeLoader::new(cfg);
         let pipe = Pipeline::with_loader(loader.clone(), fake_models(&dir.0), ArenaShrink::Auto);
-        Harness { pipe, loader, frames: FakeFrames { n, shape: SHAPE, fail_at: None }, job, _dir: dir }
+        Harness { pipe, loader, frames: FakeFrames { n, first: 0, shape: SHAPE, fail_at: None }, job, _dir: dir }
     }
 
     fn writers(&self) -> (crate::outputs::Writers, Seen) {
@@ -153,10 +154,23 @@ impl Harness {
     /// Steps 2-4 once (no retry) at `chunk` / `stride`.
     fn keying(&mut self, key: &ModelKey, trt: Option<&dyn Fn(&str) -> TrtSettings>, chunk: usize, stride: usize, low_vram: bool) -> Outcome {
         let meta = self.frames.meta();
+        self.keying_meta(&meta, key, trt, chunk, stride, low_vram)
+    }
+
+    /// Steps 2-4 once on `meta` (a ranged job's: `ClipMeta::select_range`), the frames from `self.frames`.
+    fn keying_meta(
+        &mut self,
+        meta: &ClipMeta,
+        key: &ModelKey,
+        trt: Option<&dyn Fn(&str) -> TrtSettings>,
+        chunk: usize,
+        stride: usize,
+        low_vram: bool,
+    ) -> Outcome {
         let (mut writers, seen) = self.writers();
-        let mut report = FrameReport { total: meta.num_frames, last_sent: None, last_done: None };
+        let mut report = FrameReport { total: meta.write_range().len(), last_sent: None, last_done: None };
         let mut sink = RecSink::default();
-        let ctx = JobCtx::new(&self.job, &meta, &self.frames, trt, "clip");
+        let ctx = JobCtx::new(&self.job, meta, &self.frames, trt, "clip");
         let plan = JobPlan { chunk, stride, low_vram, key: key.clone() };
         let res = self.pipe.keying(&ctx, &plan, &mut writers, &mut report, &mut sink, &mut false);
         // loop: NOT-WORTH — ≤ four writers

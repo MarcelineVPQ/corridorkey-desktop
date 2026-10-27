@@ -334,3 +334,147 @@ fn a_frame_that_cant_be_read_ends_the_job_cleanly() {
     stopped_part_way(true, Arc::new(|_, _| None), Some(5), crate::ErrorCode::Input, 0);
     stopped_part_way(false, Arc::new(|_, _| None), Some(5), crate::ErrorCode::Input, 0);
 }
+
+/// A shot of 56 fake frames (`source`'s numbers) narrowed to `range`, keyed at window 4/2: the ranged job, its meta,
+/// and the same frames keyed as a clip of their own (the keyed span, nothing written skipped).
+fn ranged_job(source: crate::clip::Source, range: crate::job::FrameRange, low_vram: bool) -> (ClipMeta, Outcome, Vec<Run>, Outcome, Vec<Run>) {
+    let mut meta = FakeFrames { n: 56, first: 0, shape: SHAPE, fail_at: None }.meta();
+    meta.source = source;
+    meta.select_range(&range, true, false).unwrap();
+    let k = key(if low_vram { Provider::Cuda } else { Provider::Cpu });
+    let mut h = Harness::new(FakeCfg::new(SHAPE), meta.num_frames, options(json!({})));
+    h.frames.first = meta.start_frame;
+    let out = h.keying_meta(&meta, &k, None, 4, 2, low_vram);
+    out.res.as_ref().unwrap();
+    let mut whole = Harness::new(FakeCfg::new(SHAPE), meta.num_frames, options(json!({})));
+    whole.frames.first = meta.start_frame;
+    let span = whole.keying(&k, None, 4, 2, low_vram);
+    span.res.as_ref().unwrap();
+    (meta, out, h.loader.runs(), span, whole.loader.runs())
+}
+
+/// Checks a ranged job of shot frames 7..=25 keyed (index), 15..=25 written: the warm-up frames reach RVM, stage 1
+/// and the carry exactly as the frames of a clip of their own; only the written frames reach stage 2 and the writers.
+fn check_ranged(meta: &ClipMeta, out: &Outcome, runs: &[Run], span: &Outcome, span_runs: &[Run]) {
+    assert_eq!((meta.start_frame, meta.num_frames, meta.write_range()), (7, 19, 8..19));
+    // loop: NOT-WORTH — a test job's runs
+    let of = |r: &[Run], p: &str| r.iter().filter(|x| x.piece == p).map(|x| x.hash).collect::<Vec<_>>();
+    assert_eq!(of(runs, "rvm").len(), 19, "RVM saw every keyed frame");
+    assert_eq!(of(runs, "rvm"), of(span_runs, "rvm"), "RVM: the span from a zero state");
+    assert_eq!(of(runs, "stage1"), of(span_runs, "stage1"), "stage 1: the span's windows, hints and carry");
+    assert_eq!(of(runs, "stage2"), of(span_runs, "stage2")[8..].to_vec(), "stage 2: the written frames only");
+    // loop: NOT-WORTH — a test job's runs
+    let s1: Vec<f32> = runs.iter().filter(|r| r.piece == "stage1").map(|r| r.firsts[0]).collect();
+    assert_eq!(s1[0], model_first(7), "the first window starts at the first warm-up frame (shot frame 7)");
+    // loop: NOT-WORTH — a test job's runs
+    let s2: Vec<f32> = runs.iter().filter(|r| r.piece == "stage2").map(|r| r.firsts[0]).collect();
+    // loop: NOT-WORTH — eleven frames
+    assert_eq!(s2, (15..=25).map(model_first).collect::<Vec<_>>(), "stage 2 on shot frames 15..=25, in order");
+    assert_eq!(out.frames(), vec![11, 11]);
+    assert_eq!(span.frames(), vec![19, 19]);
+    let last = out.sink.of_type("frames").last().cloned().unwrap().clone();
+    assert_eq!((last["done"].as_u64(), last["total"].as_u64()), (Some(11), Some(11)));
+}
+
+#[test]
+fn a_frame_range_keys_its_warm_up_and_writes_only_the_range() {
+    // a folder numbered 65-120; frames 80-90 with 8 warm-up frames: 72-90 keyed, 80-90 written with their numbers
+    // loop: NOT-WORTH — 56 names
+    let paths: Vec<PathBuf> = (65..=120).map(|i| PathBuf::from(format!("/plates/s_{i:05}.exr"))).collect();
+    let range = crate::job::FrameRange { start: 80, end: 90, preroll: 8, tail: 0 };
+    // loop: NOT-WORTH — both modes
+    for low_vram in [false, true] {
+        let (meta, out, runs, span, span_runs) = ranged_job(crate::clip::Source::Frames(paths.clone()), range, low_vram);
+        check_ranged(&meta, &out, &runs, &span, &span_runs);
+        assert_eq!(meta.source, crate::clip::Source::Frames(paths[7..=25].to_vec()), "the folder's files 72-90");
+        let n = meta.exr_numbers();
+        // loop: NOT-WORTH — eleven numbers
+        assert_eq!((n.numbers.clone(), n.width, n.from_source), ((80..=90).collect::<Vec<u64>>(), 5, true));
+        assert_eq!((n.file_name("s_alpha", 0).unwrap(), n.describe()), ("s_alpha.00080.exr".to_string(), "source (80-90)".to_string()));
+        assert_eq!(meta.range.as_ref().unwrap().keyed, (72, 90));
+    }
+}
+
+#[test]
+fn a_video_range_is_numbered_from_the_shots_1001() {
+    // a video of 56 frames is numbered 1001-1056; 1016-1026 with 8 warm-up frames: decoded from source frame 7
+    let range = crate::job::FrameRange { start: 1016, end: 1026, preroll: 8, tail: 0 };
+    // loop: NOT-WORTH — both modes
+    for low_vram in [false, true] {
+        let (meta, out, runs, span, span_runs) = ranged_job(crate::clip::Source::Video(PathBuf::from("/c/shot.mp4")), range, low_vram);
+        check_ranged(&meta, &out, &runs, &span, &span_runs);
+        let n = meta.exr_numbers();
+        // loop: NOT-WORTH — eleven numbers
+        assert_eq!((n.numbers.clone(), n.width, n.from_source), ((1016..=1026).collect::<Vec<u64>>(), 4, false));
+        assert_eq!(n.file_name("shot_fg", 10).unwrap(), "shot_fg.1026.exr");
+        assert_eq!(meta.range.as_ref().unwrap().keyed, (1008, 1026));
+    }
+}
+
+#[test]
+fn a_tail_is_keyed_after_the_range_and_not_written() {
+    let range = crate::job::FrameRange { start: 1016, end: 1026, preroll: 0, tail: 4 };
+    let mut meta = FakeFrames { n: 56, first: 0, shape: SHAPE, fail_at: None }.meta();
+    meta.source = crate::clip::Source::Video(PathBuf::from("/c/shot.mp4"));
+    meta.select_range(&range, true, false).unwrap();
+    assert_eq!((meta.start_frame, meta.num_frames, meta.write_range()), (15, 15, 0..11));
+    let mut h = Harness::new(FakeCfg::new(SHAPE), meta.num_frames, options(json!({})));
+    h.frames.first = meta.start_frame;
+    let out = h.keying_meta(&meta, &key(Provider::Cpu), None, 4, 2, false);
+    out.res.as_ref().unwrap();
+    assert_eq!(h.loader.runs_of("rvm").len(), 15);
+    // loop: NOT-WORTH — a test job's runs
+    let s2: Vec<f32> = h.loader.runs_of("stage2").iter().map(|r| r.firsts[0]).collect();
+    // loop: NOT-WORTH — eleven frames
+    assert_eq!(s2, (15..=25).map(model_first).collect::<Vec<_>>());
+    assert_eq!(out.frames(), vec![11, 11]);
+}
+
+#[test]
+fn a_whole_shot_job_is_unchanged() {
+    // no range: every frame written, numbered as before (the pinned digests above are the outputs, unchanged)
+    let meta = FakeFrames { n: 9, first: 0, shape: SHAPE, fail_at: None }.meta();
+    assert_eq!((meta.range.clone(), meta.write_range()), (None, 0..9));
+    // a range that writes the whole shot leaves the job exactly as a whole-shot job, video output too
+    // loop: NOT-WORTH — 56 names
+    let paths: Vec<PathBuf> = (65..=120).map(|i| PathBuf::from(format!("/plates/s_{i:05}.exr"))).collect();
+    let mut shot = FakeFrames { n: 56, first: 0, shape: SHAPE, fail_at: None }.meta();
+    shot.source = crate::clip::Source::Frames(paths);
+    let before = shot.clone();
+    shot.select_range(&crate::job::FrameRange { start: 65, end: 120, preroll: 8, tail: 8 }, false, true).unwrap();
+    assert_eq!(shot, before);
+    assert_eq!(shot.exr_numbers(), crate::clip::FrameNumbers::for_source(&before.source, 56));
+}
+
+#[test]
+fn bad_frame_ranges_are_refused() {
+    // loop: NOT-WORTH — 56 names
+    let paths: Vec<PathBuf> = (65..=120).map(|i| PathBuf::from(format!("/plates/s_{i:05}.exr"))).collect();
+    let shot = || {
+        let mut m = FakeFrames { n: 56, first: 0, shape: SHAPE, fail_at: None }.meta();
+        m.source = crate::clip::Source::Frames(paths.clone());
+        m
+    };
+    let r = |start, end, preroll| crate::job::FrameRange { start, end, preroll, tail: 0 };
+    let refuse = |range: crate::job::FrameRange, exr: bool, hint: bool| {
+        let e = shot().select_range(&range, exr, hint).unwrap_err();
+        assert_eq!(e.code.as_str(), "bad-request", "{range:?}: {}", e.message);
+        e.message
+    };
+    // outside the shot: the message names the shot's range
+    assert!(refuse(r(60, 90, 0), true, false).contains("(65-120)"));
+    assert!(refuse(r(80, 121, 0), true, false).contains("(65-120)"));
+    // part of a shot on video output
+    assert!(refuse(r(80, 90, 0), false, false).contains("use EXR for a range"));
+    // a first-frame hint with a span that doesn't start at the shot's first frame
+    assert!(refuse(r(80, 90, 8), true, true).contains("first-frame hint"));
+    // ... and with one that does (the warm-up reaches back to frame 65): taken
+    let mut m = shot();
+    m.select_range(&r(70, 90, 8), true, true).unwrap();
+    assert_eq!((m.start_frame, m.write_range()), (0, 5..26));
+    // a range between a folder's numbers
+    let mut gap = shot();
+    gap.source = crate::clip::Source::Frames(vec![PathBuf::from("/p/a_0065.exr"), PathBuf::from("/p/a_0066.exr"), PathBuf::from("/p/a_0070.exr")]);
+    gap.num_frames = 3;
+    assert_eq!(gap.select_range(&r(67, 69, 0), true, false).unwrap_err().code.as_str(), "bad-request");
+}

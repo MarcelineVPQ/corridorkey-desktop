@@ -78,6 +78,8 @@ pub(crate) struct SettingsLog<'a> {
     pub(crate) video_codec: Option<&'a str>,
     /// `input_bit_depth` (backlog row 27): 8 = CorridorKey 2.0's reader, 16 = deep (an additive line at the end)
     pub(crate) input_bit_depth: u32,
+    /// ranged jobs (frame_start / frame_end): the frames written and the frames keyed (additive lines at the end)
+    pub(crate) range: Option<(String, String)>,
 }
 
 pub(crate) fn settings_text(s: &SettingsLog) -> String {
@@ -130,6 +132,10 @@ pub(crate) fn settings_text(s: &SettingsLog) -> String {
         t.push_str(&format!("Video Codec: {v}\n"));
     }
     t.push_str(&format!("Input Bit Depth: {}\n", s.input_bit_depth));
+    if let Some((written, keyed)) = &s.range {
+        t.push_str(&format!("Frame Range: {written}\n"));
+        t.push_str(&format!("Keyed Frames: {keyed}\n"));
+    }
     t
 }
 
@@ -140,7 +146,7 @@ mod tests {
     #[test]
     fn exr_frame_numbers_line() {
         let d = crate::decode::Decoders { jpeg: "j".into(), ffmpeg: "8.0".into(), ffprobe: "8.0".into() };
-        let log = |exr_frames: Option<String>| {
+        let log = |exr_frames: Option<String>, range: Option<(String, String)>| {
             settings_text(&SettingsLog {
                 input: "/c/a",
                 output_dir: "/o",
@@ -175,9 +181,10 @@ mod tests {
                 exr_frames,
                 color: None,
                 input_bit_depth: 8,
+                range,
             })
         };
-        let t = log(Some("source (65-184)".into()));
+        let t = log(Some("source (65-184)".into()), None);
         assert!(t.ends_with("FFprobe: 8.0\nStart Frame: 12\nLinear Adjust Applied: True\nEXR Frame Numbers: source (65-184)\nInput Bit Depth: 8\n"), "{t}");
         assert!(
             t.contains(
@@ -185,7 +192,10 @@ mod tests {
             ),
             "{t}"
         );
-        assert!(log(None).ends_with("Linear Adjust Applied: True\nVideo Codec: h264-lossless\nInput Bit Depth: 8\n"));
+        assert!(log(None, None).ends_with("Linear Adjust Applied: True\nVideo Codec: h264-lossless\nInput Bit Depth: 8\n"));
+        // a ranged job: what was written and what was keyed, after every other line
+        let t = log(Some("source (80-90)".into()), Some(("80-90".into(), "72-90 (warm-up 8, tail 0)".into())));
+        assert!(t.ends_with("Input Bit Depth: 8\nFrame Range: 80-90\nKeyed Frames: 72-90 (warm-up 8, tail 0)\n"), "{t}");
     }
 
     #[test]

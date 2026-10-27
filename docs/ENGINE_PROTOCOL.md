@@ -118,6 +118,9 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
 | `input_bit_depth` | `"8"` \| `"16"` | Rust engine (additive, 2026-10-25; backlog row 27): how deep inputs are read. `"8"` (absent) = CorridorKey 2.0's own reader byte for byte: video decoded to 8-bit RGB as cv2.VideoCapture does whatever the source's depth, 16-bit PNG reduced to its high byte as cv2.imread(IMREAD_COLOR) does (test `default_reading_is_corridorkey_byte_identical`). `"16"` = video above 8 bits (10/12-bit ProRes, DNxHR, HEVC) decoded to 16-bit RGB and 16-bit PNG read at full depth: more precision, and different from CorridorKey 2.0. EXR is read as float either way; 8-bit sources and hints are the same either way. Any other value is a `bad-request`. A `log` line says how a video above 8 bits was read; `_settings.txt` adds `Input Bit Depth:`. The PyTorch engine always reads at 8 bits (it runs the original's reader) |
 | `linear_brightness`, `linear_contrast`, `linear_contrast_pivot` | number | Rust engine and the PyTorch engine (backlog row 45): the original's scene-linear adjust, `gain * (pivot + contrast * (linear − pivot))` on the model's input and its inverse on the foreground. 1.0 / 1.0 / 0.18 (identity). **Video inputs only**, as in the original (a frame folder runs without it; a `log` line says so; `_settings.txt` adds `Linear Adjust Applied:`). Brightness and contrast at 0 or below are a `bad-request` |
 | `start_mode`, `seed` | `begin` \| `middle` \| `random_middle`, int ≥ 0 | Rust engine and the PyTorch engine (backlog row 45): which part of a **video** `num_frames` takes (the original's `--start_mode` / `--seed`; `random_middle` draws with NumPy's generator, ported bit for bit). Without `num_frames`, or on a frame folder, the start is frame 0. A hint video starts at the same frame. `_settings.txt` adds `Start Frame:` |
+| `frame_start`, `frame_end` | int ≥ 0 | Rust engine (additive, 2026-10-26; backlog rows 9 and 32): key part of a shot. Both or neither, inclusive, in **source frame numbers**: a frame folder's own numbers (as its EXR outputs are numbered), a video's 1001-based numbers (source index + 1001; also a folder whose frames have no numbers or whose numbers don't increase). Absent = the whole clip, exactly as before. See "Frame ranges" below |
+| `preroll` | int ≥ 0 | Rust engine (additive, with `frame_start` / `frame_end` only): warm-up frames keyed before `frame_start` and never written (0). They run through RVM, the windows and the carry hint, so the first written frames don't start from a cold state |
+| `tail` | int ≥ 0 | Rust engine (additive, with `frame_start` / `frame_end` only): frames keyed after `frame_end` and never written (0; the recommended warm-up and tail are measured in the farm plan's phase 3) |
 | `video_codec` | `h264-lossless` \| `dnxhr444` \| `h264-crf12` | Rust engine, video outputs (backlog row 26): `h264-lossless` = libx264 `-qp 0`, High 4:4:4 Predictive, yuv444p10le, `.mp4`; `dnxhr444` = ffmpeg's `dnxhd` encoder, profile `dnxhr_444`, yuv444p10le, `.mov`; `h264-crf12` = the original's libx264 CRF 12, `.mp4`. Absent = `h264-crf12` (the original's output; the app sends `h264-lossless` for new jobs). Any other name is a `bad-request`; EXR jobs ignore it. None carries alpha: see the cutout below |
 | `crf`, `preset`, `pix_fmt` | | ffmpeg settings for the video path (12, medium, yuv444p10le). `crf` and `pix_fmt` apply to `h264-crf12` only, `preset` to both H.264 codecs |
 | `color_config` | path \| `ocio://` name | Rust engine: the OpenColorIO config for `input_colorspace` / `output_colorspace`. Absent = `$OCIO` as the engine sees it, else OCIO's built-in ACES studio config (`ocio://studio-config-latest`, recorded by its versioned name) |
@@ -176,6 +179,24 @@ a cancel (the engine killed) or a crash. The engine writes there as into any out
   why). `_settings.txt` adds `EXR Frame Numbers: source (65-184)` or `1001-1120`. The alpha EXR holds the matte as
   channel `A` alone, the cutout is RGBA premultiplied (RGB × alpha), fg and checker RGB. The PyTorch engine
   writes the original's layout: `<output>_000000.exr` from 0, the matte as `Y`, a straight cutout.
+- Frame ranges (Rust engine, additive, 2026-10-26; backlog rows 9 and 32): with `frame_start` / `frame_end` the job keys
+  the span `[frame_start − preroll, frame_end + tail]`, clamped to the shot (a frame folder: those files; a video:
+  decoded from the span's first frame, the hint video too, as `start_mode` seeks), and writes only
+  `frame_start`..`frame_end`. The EXR frames carry the shot's numbers and padding (a video's from 1001 + its source
+  index, not from the job's first frame), so the chunks of a shot are numbered as one whole-shot job numbers them.
+  Warm-up and tail frames run RVM, the stage-1 windows and the carry hint and nothing after: no stage 2, nothing
+  written. A chunk is near-identical to the same frames of a whole-shot job, not bit-identical (RVM starts from a
+  zero state at the span, the windows snap to it). The `clip` reply's `frames` counts the keyed frames and adds
+  `range` (`first`, `last`, `keyed_first`, `keyed_last`, `written`); `frames.total` counts the written ones;
+  `_settings.txt` adds `Frame Range:` (written) and `Keyed Frames:` (keyed, with the warm-up and tail counts), and
+  a `log` line says both. A range that writes the whole shot runs as a whole-shot job. `bad-request` (for a `run`,
+  with its id): only one of `frame_start` / `frame_end`, `frame_start` after `frame_end`, `preroll` or `tail`
+  without them, any of them with `num_frames` above 0 or a `start_mode` other than `begin`, a negative or
+  fractional number (all before anything loads); after the probe, an end outside the shot (the message names the
+  shot's range), no frame numbered inside the range (a folder's gap), `output_format: video` for part of a shot ("a
+  video output can't be split; use EXR for a range"), and `hint_first_frame` when the keyed span doesn't start at
+  the shot's first frame (the hint belongs to that frame: drop it for that chunk, which relies on its warm-up). A
+  `hint_video` (or hint folder) follows the span's first frame. The PyTorch engine doesn't read these options: it keys and writes the whole clip.
 - `frames` counts finished frames handed to every selected output's writer
   (the slowest one). The writers encode on their own threads with a queue of
   at most 2 batches, so it trails the file on disk by at most 2 frames at the

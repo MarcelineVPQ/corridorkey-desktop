@@ -49,7 +49,8 @@ pub struct ClipMeta {
     /// `--model_scale` (backlog row 42): frames Lanczos-4 resized to model_h x model_w on the way in, the outputs
     /// back to h x w on the way out
     pub model_scale: f64,
-    /// a video's first frame (`--start_mode` / `--seed` with `num_frames`; 0 for frame folders, as upstream)
+    /// a video's first frame (`--start_mode` / `--seed` with `num_frames`; 0 for frame folders, as upstream), or a
+    /// ranged job's first keyed frame (its index in the shot, folders too: a hint folder starts there)
     pub start_frame: usize,
     /// `--linear_brightness` / `--linear_contrast` / `--linear_contrast_pivot` (backlog row 45): video inputs only;
     /// a frame folder keeps the identity, as upstream's probe_frame_dir_meta does
@@ -69,6 +70,21 @@ pub struct ClipMeta {
     /// the clip's colour space -> the model's linear Rec.709 (ocio.rs; backlog row 29). None: read as CorridorKey
     /// 2.0 reads it (display-coded sRGB, or scene-linear EXR with `exr_linear`)
     pub color_in: Option<crate::ocio::XformRef>,
+    /// a ranged job (run options frame_start / frame_end / preroll / tail): which of the job's frames are written,
+    /// and their numbers. None: the whole clip, every frame written (`select_range`)
+    pub range: Option<Ranged>,
+}
+
+/// A ranged job's frames, resolved against the shot (`ClipMeta::select_range`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Ranged {
+    /// the written frames' EXR numbers: the shot's own (a folder's, else 1001 + the frame's index in the shot) and the
+    /// shot's padding, so every chunk of a shot is numbered as a whole-shot job numbers it
+    pub numbers: FrameNumbers,
+    /// the job's frames written: [write.0, write.1); the ones before are warm-up, the ones after the tail
+    pub write: (usize, usize),
+    /// source numbers of the first and last frame keyed
+    pub keyed: (u64, u64),
 }
 
 impl ClipMeta {
@@ -93,12 +109,76 @@ impl ClipMeta {
             video_bits: 8,
             deep_input: false,
             color_in: None,
+            range: None,
         }
     }
 
     /// The video is decoded at 16 bits: asked for (`deep_input`) and a source above 8 bits.
     pub fn decode_deep(&self) -> bool {
         self.deep_input && self.video_bits > 8
+    }
+
+    /// The job's frames that are written (all of them, unless the job is ranged).
+    pub fn write_range(&self) -> std::ops::Range<usize> {
+        match &self.range {
+            Some(r) => r.write.0..r.write.1,
+            None => 0..self.num_frames,
+        }
+    }
+
+    /// The written frames' EXR numbers (backlog row 30 a): a ranged job's are the shot's (`Ranged::numbers`); a
+    /// whole-clip job's as before (a folder's own, else 1001 + the job's index).
+    pub fn exr_numbers(&self) -> FrameNumbers {
+        match &self.range {
+            Some(r) => r.numbers.clone(),
+            None => FrameNumbers::for_source(&self.source, self.num_frames),
+        }
+    }
+
+    /// Narrow a whole-clip probe to a frame range (job.rs FrameRange): the frames `r.start..=r.end` (source numbers,
+    /// both inside the shot) are written, up to `r.preroll` frames before and `r.tail` after are keyed too (clamped to
+    /// the shot). A frame folder keeps the span's files; a video starts at the span's first frame (`start_frame`, the
+    /// decoder's seek, which the hint video follows). A range that writes the whole shot leaves the job as it is.
+    /// Refused (`bad-request`): ends outside the shot; video output for part of a shot (`exr` false: a movie can't be
+    /// stitched); a first-frame hint (`first_frame_hint`) when the keyed span doesn't start at the shot's first frame.
+    pub fn select_range(&mut self, r: &crate::job::FrameRange, exr: bool, first_frame_hint: bool) -> Result<(), Error> {
+        let n = self.num_frames;
+        let shot = FrameNumbers::for_source(&self.source, n);
+        let (Some(&first), Some(&last)) = (shot.numbers.first(), shot.numbers.last()) else {
+            return Err(Error::input("the clip has no frames".into()));
+        };
+        if r.start < first || r.end > last {
+            return Err(Error::bad_request(format!("frames {}-{} are not all inside the shot ({first}-{last})", r.start, r.end)));
+        }
+        // the first and last frame numbered inside the range (a folder may skip numbers)
+        // loop: NOT-WORTH — one pass over the shot's numbers, once per job
+        let a = shot.numbers.iter().position(|&v| v >= r.start).unwrap_or(n);
+        // loop: NOT-WORTH — as above
+        let b = shot.numbers.iter().rposition(|&v| v <= r.end).unwrap_or(0);
+        if a > b || a >= n {
+            return Err(Error::bad_request(format!("no frame of the shot ({first}-{last}) is numbered {}-{}", r.start, r.end)));
+        }
+        if a == 0 && b + 1 == n {
+            return Ok(());
+        }
+        if !exr {
+            return Err(Error::bad_request("a video output can't be split; use EXR for a range (or key the whole shot)".into()));
+        }
+        let (k0, k1) = (a.saturating_sub(r.preroll), (b + r.tail).min(n - 1));
+        if first_frame_hint && k0 > 0 {
+            return Err(Error::bad_request(format!(
+                "the first-frame hint belongs to the shot's first frame ({first}), but this range is keyed from frame {}: drop the hint for this chunk (it relies on its warm-up frames instead)",
+                shot.numbers[k0]
+            )));
+        }
+        if let Source::Frames(paths) = &mut self.source {
+            *paths = paths[k0..=k1].to_vec();
+        }
+        self.start_frame = k0;
+        self.num_frames = k1 - k0 + 1;
+        let numbers = FrameNumbers { numbers: shot.numbers[a..=b].to_vec(), width: shot.width, from_source: shot.from_source, fallback: shot.fallback };
+        self.range = Some(Ranged { numbers, write: (a - k0, b - k0 + 1), keyed: (shot.numbers[k0], shot.numbers[k1]) });
+        Ok(())
     }
 
     /// The networks run below (or above) the native size: frames and outputs are resized.
