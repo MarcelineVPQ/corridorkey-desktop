@@ -9,6 +9,18 @@ chunking is opt-in and its warm-up defaults to 0.
 Every submitter needs, on each worker: the `corridorkey` command, the model set's folder (`--models`), ONNX
 Runtime's library (`--ort`), ffmpeg for movie inputs, and an NVIDIA card. `corridorkey prepare` checks a worker.
 
+**Getting `corridorkey` onto a worker** (until the standalone farm archive per system exists, docs/CLI.md). It ships
+inside the app. On Linux it is inside the AppImage, which needs FUSE to run in place; on a worker, extract it once
+instead and point the submitter at the binary in the extracted tree:
+
+```sh
+./CorridorKey-Desktop-<version>.AppImage --appimage-extract   # writes ./squashfs-root/
+/opt/corridorkey/squashfs-root/resources/engine/corridorkey prepare   # after moving squashfs-root to /opt/corridorkey/
+```
+
+On Windows it is `resources\engine\corridorkey.exe` in the app's install folder; on macOS
+`CorridorKey.app/Contents/Resources/engine/corridorkey`.
+
 The app's Console writes these for the clips in its queue, with their settings: `farm export <openjd|deadline|opencue|flamenco|shell>
 --queue -o <folder>` (docs/CONSOLE.md "Farm export"). What it writes:
 
