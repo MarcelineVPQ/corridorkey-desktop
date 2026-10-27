@@ -73,9 +73,9 @@ on its own rail icon. Not a system shell: its own commands only, each parsed and
   internal resolution and input precision). A settings file that still names the folder loads as before; the key is
   dropped. Comparisons with Corridor's original stay in the repository's tools (`tools/vs_original.sh`,
   `tools/engine_bench.mjs`), which run it from its own checkout and venv.
-- The computer stays awake while the queue runs, on every system (the display may still sleep): a laptop that used to
-  sleep during a long queue now doesn't, until the queue stops. Measured on a Mac: asleep mid-job, a 0.08 s network
-  call took 300 s.
+- The computer stays awake while the queue or a Console `render` / `prepare` runs, on every system (the display may
+  still sleep): a laptop that used to sleep during a long queue now doesn't, until it stops. Measured on a Mac: asleep
+  mid-job, a 0.08 s network call took 300 s.
 - Security: every message from the app's page to the app is checked to come from that page, and the page is denied
   every permission (camera, microphone, notifications and the rest; it uses none).
 - The automatic window on 8 GB cards with a graphics-memory limit (a clip's Memory limit, `--max-vram`, a farm's

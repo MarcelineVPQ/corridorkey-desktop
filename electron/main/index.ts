@@ -236,7 +236,7 @@ function rustEngineProcess(onReply: (r: EngineReply) => void, onExit: (code: num
 
 // the Console's corridorkey has the graphics card (the Console, below)
 let consoleGpu = false;
-// the computer stays awake while the queue runs (keepAwake.ts)
+// the computer stays awake while the queue or the Console's corridorkey runs (keepAwake.ts)
 const keepAwake = keepAwakeWhile(powerSaveBlocker);
 const queue = new Queue({
   makeEngine: rustEngineProcess,
@@ -251,7 +251,7 @@ const queue = new Queue({
   changed: () => {
     // the queue's end resumes a paused background TensorRT build
     if (!queue.running) prebuild.queueStopped();
-    keepAwake(queue.running);
+    keepAwake("queue", queue.running);
     scheduleSend();
   },
   finished: (job) => {
@@ -481,10 +481,12 @@ const appConsole = new Console({
     estimator.stop();
     prebuild.pause();
     consoleGpu = true;
+    keepAwake("console", true);
     return null;
   },
   releaseGpu: () => {
     consoleGpu = false;
+    keepAwake("console", false);
     prebuild.queueStopped();
   },
   confirm: confirmElevation,
