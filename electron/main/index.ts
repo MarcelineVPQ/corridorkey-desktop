@@ -412,6 +412,11 @@ const appConsole = new Console({
   // loop: NOT-WORTH — the queue's jobs, once per written path checked
   writeRoots: () => [settings.outputRoot, cacheDir, appFolders.cache, ...settings.consoleWriteFolders, ...queue.jobs.map((j) => j.outputDir)].filter((x): x is string => !!x),
   allowed: () => settings.consoleWriteFolders,
+  bookmarks: () => settings.consoleBookmarks,
+  setBookmarks: (b) => {
+    settings = { ...settings, consoleBookmarks: b };
+    persist();
+  },
   setAllowed: (folders) => {
     settings = { ...settings, consoleWriteFolders: folders };
     persist();

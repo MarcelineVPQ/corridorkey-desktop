@@ -21,7 +21,8 @@ import type { AuditLog, History } from "./logs";
 import { checkWrite, expandHome, fsErrorText, resolveReal, type PathDeps } from "./paths";
 import { expandHistory, hasExpansion } from "../../../src/shared/console/expand";
 import { frameToken, groupSequences, sequenceOf, type Sequence } from "../../../src/shared/console/sequences";
-import { WRITE_FOLDERS_MAX } from "../settings";
+import { BOOKMARK_NAME, BOOKMARKS_MAX, WRITE_FOLDERS_MAX } from "../settings";
+import { matches, rankFolders } from "../../../src/shared/console/frecency";
 import { fileSizeText, gibBytes } from "../../../src/shared/units";
 
 /** Lines a block keeps (the newest); a long render's log can't grow the page or the pushes without bound. */
@@ -83,6 +84,10 @@ export interface ConsoleDeps {
   allowed: () => readonly string[];
   /** saves them (index.ts: settings, persisted) */
   setAllowed: (folders: string[]) => void;
+  /** the bookmarks (settings.consoleBookmarks): name → absolute folder */
+  bookmarks: () => Readonly<Record<string, string>>;
+  /** saves them (index.ts: settings, persisted) */
+  setBookmarks: (b: Record<string, string>) => void;
   /** open / start: the file manager shows the path (index.ts: shell.showItemInFolder; it never opens or runs a file) */
   showInFolder: (path: string) => void;
   /** `allow`'s native confirmation, naming the folder; true: confirmed */
@@ -136,6 +141,8 @@ export class Console {
   private cwd: string;
   /** the folder before the last cd (cd -) */
   private prevCwd: string | null = null;
+  /** pushd's folders, newest first (this session only) */
+  private stack: string[] = [];
   private job: Job | null = null;
   private nextId = 1;
   private expiryTimer: NodeJS.Timeout | null = null;
@@ -220,6 +227,7 @@ export class Console {
       home: this.d.paths.home,
       readdir: this.d.fs.readdir,
       isDir: async (p) => (await this.d.fs.stat(p).catch(() => null))?.isDirectory() ?? false,
+      bookmarks: this.d.bookmarks,
     });
   }
 
@@ -344,11 +352,31 @@ export class Console {
         const back = p.positionals.some((x) => x.value === "-" && !p.words[x.word].quoted);
         return now(await this.cd(b, pos("folder")[0], back));
       }
+      case "bookmark":
+        return now(await this.bookmark(b, pos("name")[0], pos("folder")[0], has("delete")));
+      case "bookmarks":
+        return now(this.bookmark(b, undefined, undefined, false) as ConsoleBlock);
+      case "j":
+        return now(await this.jump(b, pos("parts")));
+      case "pushd":
+        return now(await this.pushd(b, pos("folder")[0]));
+      case "popd": {
+        const to = this.stack[0];
+        if (to === undefined) return now(this.finish(b, "failed", "Nothing to go back to: pushd <folder> remembers where you are first."));
+        const r = await this.go(to);
+        if (typeof r !== "string") return now(this.finish(b, "failed", r.error));
+        this.stack.shift();
+        return now(this.dirsList(b));
+      }
+      case "dirs":
+        return now(this.dirsList(b));
       case "dir":
         return now(await this.dir(b, pos("folder")[0], p));
       case "open": {
         const a = this.d.paths.platform === "win32" ? win32 : posix;
-        let path = a.resolve(this.cwd, expandHome(pos("path")[0] ?? ".", this.d.paths));
+        const given = this.at(pos("path")[0] ?? ".");
+        if (given === null) return now(this.finish(b, "failed", noBookmark(pos("path")[0])));
+        let path = a.resolve(this.cwd, expandHome(given, this.d.paths));
         // a frame pattern: its first frame
         const pat = await this.patternAt(path);
         if (pat && !pat.seq) return now(this.finish(b, "failed", noFrames(pat, this.opts)));
@@ -386,21 +414,33 @@ export class Console {
       if (this.prevCwd === null) return this.finish(b, "failed", "No previous folder yet: cd - goes back to the folder you were in before the last cd.");
       to = this.prevCwd;
     }
+    const r = await this.go(to);
+    if (typeof r !== "string") return this.finish(b, "failed", r.error);
+    // silent on success (the bar and the prompt show the folder); cd - prints where it went, as bash does
+    return back ? this.finish(b, "done", r) : this.finish(b, "done");
+  }
+
+  /** The Console's folder changes to `to` (home when none; a bookmark, a frame pattern's folder): the folder, or why not. */
+  private async go(to: string | undefined): Promise<string | { error: string }> {
+    if (to !== undefined) {
+      const m = this.at(to);
+      if (m === null) return { error: noBookmark(to) };
+      to = m;
+    }
     let dir = "";
     try {
       // a frame pattern (cd plates/plate.####.exr): its folder
       dir = await resolveReal((to !== undefined && (await this.patternFolder(to))) || (to ?? this.d.paths.home), this.cwd, this.d.paths);
       // loop: NOT-WORTH — one async stat per cd
-      if (!(await this.d.fs.stat(dir)).isDirectory()) return this.finish(b, "failed", `${dir} isn't a folder.`);
+      if (!(await this.d.fs.stat(dir)).isDirectory()) return { error: `${dir} isn't a folder.` };
     } catch (e) {
       // error: SHOWN — the block says why
-      return this.finish(b, "failed", `Can't go to ${to ?? "~"}: ${fsErrorText(e, dir || to || this.d.paths.home)}. pwd says where you are, dir lists the folders here, Tab completes a name.`);
+      return { error: `Can't go to ${to ?? "~"}: ${fsErrorText(e, dir || to || this.d.paths.home)}. pwd says where you are, dir lists the folders here, Tab completes a name.` };
     }
     this.prevCwd = this.cwd;
     this.cwd = dir;
     this.d.sessionChanged();
-    // silent on success (the bar and the prompt show the folder); cd - prints where it went, as bash does
-    return back ? this.finish(b, "done", dir) : this.finish(b, "done");
+    return dir;
   }
 
   /**
@@ -414,6 +454,9 @@ export class Console {
       // loop: NOT-WORTH — ≤ 100 folders
       return this.finish(b, "done", "The Console may also write in (App settings → Console removes them):", ...list.map((f) => `  ${f}`));
     }
+    const m = this.at(folder);
+    if (m === null) return this.finish(b, "failed", noBookmark(folder));
+    folder = m;
     let dir = "";
     try {
       // a frame pattern (allow key/key.####.exr): its folder
@@ -443,6 +486,103 @@ export class Console {
     return true;
   }
 
+  /**
+   * `@name` (or `@name/more`): the bookmark's folder; null for a bookmark there isn't; anything else as it is. A frame
+   * token's `@@@@` never starts with a letter or digit, so it is never read as one.
+   */
+  private at(path: string): string | null {
+    const m = /^@([^\\/]+)(.*)$/.exec(path);
+    if (!m || !BOOKMARK_NAME.test(m[1])) return path;
+    const to = this.d.bookmarks()[m[1]];
+    return to === undefined ? null : to + m[2];
+  }
+
+  /** bookmark <name> [folder]: saved (across restarts); -d removes it; no name: the list. */
+  private bookmark(b: ConsoleBlock, name: string | undefined, folder: string | undefined, remove: boolean): ConsoleBlock | Promise<ConsoleBlock> {
+    const all = this.d.bookmarks();
+    if (name === undefined) {
+      // loop: NOT-WORTH — ≤ BOOKMARKS_MAX bookmarks, sorted once per list
+      const names = Object.keys(all).sort(naturalCompare);
+      if (!names.length) return this.finish(b, "done", "No bookmarks yet: bookmark <name> names the current folder, then cd @name goes there.");
+      // loop: NOT-WORTH — as above
+      const w = Math.max(...names.map((n) => n.length + 1));
+      // loop: NOT-WORTH — as above
+      return this.finish(b, "done", ...names.map((n) => `${`@${n}`.padEnd(w)}  ${all[n]}`));
+    }
+    if (!BOOKMARK_NAME.test(name)) return this.finish(b, "refused", `${name} can't be a bookmark's name: a letter or digit first, then letters, digits, _ . or - (at most 64).`);
+    if (remove) {
+      if (folder !== undefined) return this.finish(b, "refused", "bookmark -d takes only the name.");
+      if (!(name in all)) return this.finish(b, "failed", `No bookmark ${name} (bookmarks lists them).`);
+      const rest = { ...all };
+      delete rest[name];
+      this.d.setBookmarks(rest);
+      return this.finish(b, "done", `Removed @${name} (it was ${all[name]}).`);
+    }
+    if (!(name in all) && Object.keys(all).length >= BOOKMARKS_MAX) return this.finish(b, "refused", `${BOOKMARKS_MAX} bookmarks already: bookmark -d <name> removes one first.`);
+    return (async () => {
+      let dir = this.cwd;
+      if (folder !== undefined) {
+        const m = this.at(folder);
+        if (m === null) return this.finish(b, "failed", noBookmark(folder));
+        try {
+          dir = await resolveReal((await this.patternFolder(m)) ?? m, this.cwd, this.d.paths);
+          // loop: NOT-WORTH — one async stat per bookmark
+          if (!(await this.d.fs.stat(dir)).isDirectory()) return this.finish(b, "failed", `${dir} isn't a folder: a bookmark names a folder.`);
+        } catch (e) {
+          // error: SHOWN — the block says why
+          return this.finish(b, "failed", `Can't bookmark ${folder}: ${fsErrorText(e, dir)}. Tab completes a folder's name.`);
+        }
+      }
+      const was = all[name];
+      this.d.setBookmarks({ ...all, [name]: dir });
+      return this.finish(b, "done", `@${name} is ${dir}${was && was !== dir ? ` (was ${was})` : ""}: cd @${name} goes there.`);
+    })();
+  }
+
+  /** j <part…>: the best-ranked folder of the history's that matches and is still a folder; alone: the ranking. */
+  private async jump(b: ConsoleBlock, parts: string[]): Promise<ConsoleBlock> {
+    await this.d.history.loaded;
+    // loop: NOT-WORTH — the history's lines (≤ its cap), once per j
+    const ranked = rankFolders(this.d.history.entries("", Number.MAX_SAFE_INTEGER), this.now());
+    if (!parts.length) {
+      if (!ranked.length) return this.finish(b, "done", "No folders in the history yet: j learns the folders you type commands in.");
+      // loop: NOT-WORTH — the 20 best
+      return this.finish(b, "done", ...ranked.slice(0, JUMP_LISTED).map((r) => `${r.score.toFixed(2).padStart(7)}  ${r.folder}`));
+    }
+    // loop: NOT-WORTH — the history's folders, best first; one async stat per match until one is a folder
+    for (const r of ranked) {
+      if (r.folder === this.cwd || !matches(r.folder, parts)) continue;
+      if (!(await this.d.fs.stat(r.folder).catch(() => null))?.isDirectory()) continue;
+      const to = await this.go(r.folder);
+      return typeof to === "string" ? this.finish(b, "done", to) : this.finish(b, "failed", to.error);
+    }
+    return this.finish(b, "failed", `No folder in the history matches ${parts.join(" ")} (j alone lists them; cd goes anywhere).`);
+  }
+
+  /** pushd [folder]: cd there, the folder before remembered; alone: swap with the newest remembered. */
+  private async pushd(b: ConsoleBlock, folder: string | undefined): Promise<ConsoleBlock> {
+    const from = this.cwd;
+    if (folder === undefined) {
+      const to = this.stack[0];
+      if (to === undefined) return this.finish(b, "failed", "Nothing to swap with: pushd <folder> remembers where you are first.");
+      const r = await this.go(to);
+      if (typeof r !== "string") return this.finish(b, "failed", r.error);
+      this.stack[0] = from;
+      return this.dirsList(b);
+    }
+    if (this.stack.length >= STACK_MAX) return this.finish(b, "refused", `pushd remembers ${STACK_MAX} folders at most: popd first.`);
+    const r = await this.go(folder);
+    if (typeof r !== "string") return this.finish(b, "failed", r.error);
+    this.stack.unshift(from);
+    return this.dirsList(b);
+  }
+
+  /** dirs: where you are (0), then pushd's folders, newest first. */
+  private dirsList(b: ConsoleBlock): ConsoleBlock {
+    // loop: NOT-WORTH — ≤ STACK_MAX folders
+    return this.finish(b, "done", ...[this.cwd, ...this.stack].map((f, i) => `${String(i).padStart(2)}  ${f}`));
+  }
+
   private async dir(b: ConsoleBlock, folder: string | undefined, p: Parsed): Promise<ConsoleBlock> {
     // loop: NOT-WORTH — the line's few options
     const has = (id: string) => p.options.some((o) => o.arg.id === id);
@@ -457,6 +597,11 @@ export class Console {
       reverse = (by !== "name") !== order.startsWith("-");
     }
     const a = this.d.paths.platform === "win32" ? win32 : posix;
+    if (folder !== undefined) {
+      const m = this.at(folder);
+      if (m === null) return this.finish(b, "failed", noBookmark(folder));
+      folder = m;
+    }
     let dir = a.resolve(this.cwd, expandHome(folder ?? ".", this.d.paths));
     // a frame pattern (dir plates/plate.####.exr): that one sequence, in its folder
     const pat = folder !== undefined ? await this.patternAt(dir) : null;
@@ -1183,6 +1328,12 @@ export class Console {
     this.expiryTimer = null;
   }
 }
+
+/** pushd's folders, at most. */
+const STACK_MAX = 50;
+/** j alone: the folders listed. */
+const JUMP_LISTED = 20;
+const noBookmark = (path: string | undefined) => `No bookmark ${(path ?? "").slice(1).split(/[\\/]/)[0]} (bookmarks lists them; bookmark <name> <folder> makes one).`;
 
 /** doctor: how long `corridorkey info` may take (it loads ONNX Runtime and asks the driver). */
 const INFO_TIMEOUT_MS = 30_000;

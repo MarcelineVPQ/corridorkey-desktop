@@ -190,6 +190,32 @@ const BUILTINS: ConsoleCommand[] = [
   ),
   builtin("pwd", "print the current folder", [], ["pwd"]),
   builtin(
+    "bookmark",
+    "name a folder (none: the current one) so cd @name goes there; -d removes one; alone: the bookmarks",
+    [
+      arg({ id: "name", kind: "string", positional: true, valueName: "NAME", help: "the bookmark's name (letters, digits, _ . -)" }),
+      arg({ id: "folder", kind: "path", positional: true, valueName: "FOLDER", help: "the folder (default: the current one)" }),
+      arg({ id: "delete", short: "d", kind: "switch", help: "remove the bookmark" }),
+    ],
+    ["bookmark sh010", "bookmark plates ~/shots/sh010/plates", "cd @sh010", "bookmark -d sh010"],
+  ),
+  builtin("bookmarks", "the bookmarks (cd @name goes to one)", [], ["bookmarks"]),
+  builtin(
+    "j",
+    "jump to the folder you use most and lately whose path has these parts (the last one in its name); alone: the folders ranked",
+    [arg({ id: "parts", kind: "string", positional: true, multiple: true, valueName: "PART", help: "parts of the folder's path, in order" })],
+    ["j sh010", "j sq01 key", "j"],
+    ["z"],
+  ),
+  builtin(
+    "pushd",
+    "go to a folder and remember the one you were in (popd comes back); alone: swap the two newest",
+    [arg({ id: "folder", kind: "path", positional: true, valueName: "FOLDER", help: "the folder" })],
+    ["pushd ~/renders", "pushd @sh010", "pushd"],
+  ),
+  builtin("popd", "go back to the folder pushd remembered last", [], ["popd"]),
+  builtin("dirs", "the folders pushd remembered, newest first (0 is where you are)", [], ["dirs"]),
+  builtin(
     "dir",
     "list a folder's files with their sizes and dates",
     [

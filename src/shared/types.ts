@@ -328,6 +328,8 @@ export interface Settings {
   // the folders the Console may also write to (its `allow` command, after a confirmation; App settings, Console
   // removes them), absolute; docs/CONSOLE.md "File scope"
   consoleWriteFolders: string[];
+  // the Console's bookmarks (`bookmark sh010`, `cd @sh010`): name → absolute folder; docs/CONSOLE.md "Bookmarks"
+  consoleBookmarks: Record<string, string>;
 }
 
 // The app's own updates (electron/main/updater). null feed = no release

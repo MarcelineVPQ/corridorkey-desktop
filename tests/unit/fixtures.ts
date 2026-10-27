@@ -119,6 +119,7 @@ export const settings = (over: Partial<Settings> = {}): Settings => ({
   vramLimitGb: null,
   cacheRoot: null,
   consoleWriteFolders: [],
+  consoleBookmarks: {},
   trtSizes: DEFAULT_TRT_SIZES.map((s) => ({ ...s })),
   ...over,
 });

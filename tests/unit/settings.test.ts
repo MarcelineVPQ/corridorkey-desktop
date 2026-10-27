@@ -61,6 +61,21 @@ describe("Rust engine setup", () => {
     }
   });
 
+  it("keeps only Console bookmarks with a name cd @ can reach and an absolute folder (validated on load)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ck-settings-"));
+    try {
+      const f = join(dir, "settings.json");
+      writeFileSync(f, JSON.stringify({ consoleBookmarks: { sh010: "/mnt/show/sh010", "@x": "/a", rel: "shots", n: 7, __proto__x: "/b", "sq01.v2": "/mnt/sq01", z: "/a\u0000b" } }));
+      expect(loadSettings(f).consoleBookmarks).toEqual({ sh010: "/mnt/show/sh010", "sq01.v2": "/mnt/sq01" });
+      writeFileSync(f, JSON.stringify({ consoleBookmarks: ["/mnt"] }));
+      expect(loadSettings(f).consoleBookmarks).toEqual({});
+      writeFileSync(f, JSON.stringify({ consoleBookmarks: Object.fromEntries(Array.from({ length: 250 }, (_, i) => [`b${i}`, `/f${i}`])) }));
+      expect(Object.keys(loadSettings(f).consoleBookmarks)).toHaveLength(200);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("loads a settings file that still names the removed PyTorch engine's checkout, and drops the key", () => {
     const dir = mkdtempSync(join(tmpdir(), "ck-settings-"));
     try {

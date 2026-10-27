@@ -32,6 +32,7 @@ export function loadSettings(file: string): Settings {
     // an absolute folder only (anything else: the system's cache folder)
     cacheRoot: typeof saved.cacheRoot === "string" && isAbsolute(saved.cacheRoot) ? saved.cacheRoot : null,
     consoleWriteFolders: writeFolders(saved.consoleWriteFolders),
+    consoleBookmarks: bookmarks(saved.consoleBookmarks),
   };
 }
 
@@ -42,6 +43,20 @@ function writeFolders(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
   // loop: NOT-WORTH — ≤ a hundred folders, once at start
   return [...new Set(v.filter((p): p is string => typeof p === "string" && p !== "" && !p.includes("\0") && isAbsolute(p)))].slice(0, WRITE_FOLDERS_MAX);
+}
+
+/** A Console bookmark's name (`cd @sh010`): a letter or digit, then letters, digits, _ . - (never a frame token's @@). */
+export const BOOKMARK_NAME = /^[\p{L}\p{N}][\p{L}\p{N}_.-]{0,63}$/u;
+export const BOOKMARKS_MAX = 200;
+/** The Console's bookmarks as saved: valid names to absolute folders only, at most BOOKMARKS_MAX (a hand-edited file
+ * can't add a relative path or a name `cd @…` can't reach). */
+function bookmarks(v: unknown): Record<string, string> {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+  // loop: NOT-WORTH — ≤ a few hundred bookmarks, once at start
+  const ok = Object.entries(v as Record<string, unknown>).filter(
+    (e): e is [string, string] => BOOKMARK_NAME.test(e[0]) && typeof e[1] === "string" && e[1] !== "" && !e[1].includes("\0") && isAbsolute(e[1]),
+  );
+  return Object.fromEntries(ok.slice(0, BOOKMARKS_MAX));
 }
 
 /** The five networks the Rust engine runs (engine-rs runtime.rs PIECES). */

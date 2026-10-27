@@ -72,6 +72,7 @@ let allowAsked: string[];
 let allowAnswer: boolean;
 let shown: string[];
 let queued: readonly Job[];
+let marks: Record<string, string>;
 
 function make(over: Partial<ConsoleDeps> = {}, files = mkdtempSync(join(root, "user-"))) {
   const deps: ConsoleDeps = {
@@ -94,6 +95,8 @@ function make(over: Partial<ConsoleDeps> = {}, files = mkdtempSync(join(root, "u
     writeRoots: () => [out, ...allowedFolders],
     allowed: () => allowedFolders,
     setAllowed: (f) => void (allowedFolders = f),
+    bookmarks: () => marks,
+    setBookmarks: (m) => void (marks = m),
     confirmAllow: async (f) => (allowAsked.push(f), allowAnswer),
     showInFolder: (p) => void shown.push(p),
     takeGpu: () => {
@@ -134,6 +137,7 @@ beforeEach(() => {
   allowAnswer = true;
   shown = [];
   queued = [];
+  marks = {};
   gpuTaken = 0;
   gpuReleased = 0;
   gpuRefusal = null;
@@ -1324,5 +1328,72 @@ describe("SME review 2026-10-26: values in any case (S12)", () => {
     const r = await c.complete("render a.mov --format EX", 24);
     // loop: NOT-WORTH — one item
     expect(r.items.map((i) => i.insert)).toEqual(["exr"]);
+  });
+});
+
+describe("Phase 4: bookmarks, j, pushd and popd", () => {
+  it("bookmark names a folder (the current one by default), cd @name goes there, @name/more inside it; -d removes it", async () => {
+    const { c } = make();
+    expect((await c.run("bookmark sh010 ../out/sh010")).lines[0].text).toBe(`@sh010 is ${join(out, "sh010")}: cd @sh010 goes there.`);
+    expect((await c.run("bookmark shots")).state).toBe("done");
+    expect(marks).toEqual({ sh010: join(out, "sh010"), shots });
+    await c.run("cd @sh010");
+    expect(c.session().cwd).toBe(join(out, "sh010"));
+    await c.run("cd @shots");
+    await c.run("cd @out/..");
+    expect(c.session().cwd).toBe(shots);
+    const missing = await c.run("cd @nope");
+    expect([missing.state, missing.lines[0].text]).toEqual(["failed", "No bookmark nope (bookmarks lists them; bookmark <name> <folder> makes one)."]);
+    expect((await c.run("dir @sh010")).entries!.map((e) => e.name)).toEqual(["key.####.exr"]);
+    expect((await c.run("bookmarks")).lines.map((l) => l.text)).toEqual([`@sh010  ${join(out, "sh010")}`, `@shots  ${shots}`]);
+    expect((await c.run("bookmark -d sh010")).state).toBe("done");
+    expect(Object.keys(marks)).toEqual(["shots"]);
+    // a name cd @ can't reach, or one that isn't a folder, is refused; a frame token's @@@@ is never a bookmark
+    expect((await c.run("bookmark @x")).state).toBe("refused");
+    expect((await c.run("bookmark mov shot.mov")).state).toBe("failed");
+    expect((await c.run("dir @@@@.exr")).lines[0].text).toMatch(/^No frame of @@@@.exr/);
+  });
+
+  it("Tab completes @name to the bookmark, and @name/ inside its folder", async () => {
+    const { c } = make();
+    marks = { sh010: join(out, "sh010"), shots };
+    expect((await c.complete("cd @s", 5)).items.map((i) => i.insert)).toEqual(["@sh010/", "@shots/"]);
+    expect((await c.complete("dir @sh010/k", 12)).items.map((i) => i.insert)).toEqual(["@sh010/key.####.exr"]);
+  });
+
+  it("j goes to the best-ranked history folder matching the parts (the last one in its name), skipping gone ones", async () => {
+    const { c } = make();
+    await c.run("cd ../out/sh010");
+    await c.run("pwd");
+    await c.run("pwd");
+    await c.run("cd ../../elsewhere");
+    await c.run("pwd");
+    await c.run("cd /");
+    const b = await c.run("j sh0");
+    expect([b.state, b.lines[0].text]).toEqual(["done", join(out, "sh010")]);
+    expect(c.session().cwd).toBe(join(out, "sh010"));
+    expect((await c.run("j out")).state).toBe("failed");
+    expect((await c.run("j else")).lines[0].text).toBe(elsewhere);
+    const list = (await c.run("j")).lines.map((l) => l.text.trim());
+    expect(list[0]).toMatch(/^\d+\.\d\d  /);
+    expect(list[0].endsWith(join(out, "sh010"))).toBe(true);
+  });
+
+  it("pushd remembers the folder, popd comes back, dirs lists them (0 is where you are); pushd alone swaps", async () => {
+    const { c } = make();
+    const p = await c.run("pushd ../out");
+    expect(p.lines.map((l) => l.text)).toEqual([` 0  ${out}`, ` 1  ${shots}`]);
+    await c.run("pushd sh010");
+    expect((await c.run("dirs")).lines.map((l) => l.text)).toEqual([` 0  ${join(out, "sh010")}`, ` 1  ${out}`, ` 2  ${shots}`]);
+    await c.run("pushd");
+    expect(c.session().cwd).toBe(out);
+    await c.run("popd");
+    expect(c.session().cwd).toBe(join(out, "sh010"));
+    await c.run("popd");
+    expect(c.session().cwd).toBe(shots);
+    const none = await c.run("popd");
+    expect([none.state, none.lines[0].text]).toEqual(["failed", "Nothing to go back to: pushd <folder> remembers where you are first."]);
+    expect((await c.run("pushd nowhere")).state).toBe("failed");
+    expect((await c.run("dirs")).lines).toHaveLength(1);
   });
 });

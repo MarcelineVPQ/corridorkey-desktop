@@ -84,6 +84,18 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   reads it: YAML, key=value, JSON, shell words), the runner's scope and sudo. `openjd check` and `openjd summary`
   passed on a generated bundle (openjd-cli in a scratch venv, 2026-10-27; it isn't installed for the tests, which
   check the bundle structurally).
+- **Bookmarks and jumping.** `bookmark <name> [folder]` names a folder (the current one by default; a frame
+  pattern's folder), `bookmark -d <name>` removes it, `bookmarks` (or `bookmark` alone) lists them; `@name` (and
+  `@name/more`) is that folder for `cd`, `pushd`, `dir`, `open`, `allow` and `bookmark`, and Tab completes `@na` to
+  the bookmarks and `@name/` inside one. A name starts with a letter or digit (then letters, digits, `_ . -`, at most
+  64), so a frame token's `@@@@` is never read as one; an unknown `@name` is said ("No bookmark …"). Saved per user in
+  settings (`consoleBookmarks`: name → absolute folder, at most 200, each checked on load). `j <part…>` (alias `z`)
+  jumps like zoxide: the folders the history's lines were typed in, ranked by frecency (each line counts 4 within the
+  hour, 2 within the day, ½ within the week, ¼ older: `src/shared/console/frecency.ts`), the best one whose path has
+  every part in order with the last one in its last folder's name, still there, and not the current one; it prints
+  where it went; `j` alone prints the ranking. `pushd <folder>` goes there and remembers the folder before, `pushd`
+  alone swaps with the newest remembered, `popd` goes back, `dirs` lists them (0 is the current folder; at most 50,
+  this session only); each prints the list, as bash does.
 - **doctor** (`doctor --json`): every check in one go, one row each (✓ ok, ⚠ warning, ✗ problem) and under each problem
   its exact fix (a Console line or an App action): the corridorkey command line (found), the graphics card and driver,
   ONNX Runtime and the models (all three from `corridorkey info --json`: it loads the runtime and asks the driver, never

@@ -19,6 +19,8 @@ export interface CompleteDeps {
   readdir: (p: string) => Promise<Dirent[]>;
   /** a link's target is a folder? */
   isDir: (p: string) => Promise<boolean>;
+  /** the bookmarks (`@name` completes to one; `@name/` goes on inside it) */
+  bookmarks: () => Readonly<Record<string, string>>;
 }
 
 // loop: NOT-WORTH — two names per flag
@@ -114,7 +116,19 @@ async function paths(prefix: string, cwd: string, d: CompleteDeps, opts: ParseOp
   const cut = Math.max(prefix.lastIndexOf("/"), opts.windows ? prefix.lastIndexOf("\\") : -1);
   const dirPart = prefix.slice(0, cut + 1);
   const namePart = prefix.slice(cut + 1);
-  const dir = a.resolve(cwd, expandHome(dirPart || ".", { home: d.home, platform: d.platform }));
+  const sep = opts.windows ? "\\" : "/";
+  const marks = d.bookmarks();
+  // @na: the bookmarks starting so (a frame token's @@ is never one: a name starts with a letter or digit)
+  if (cut < 0 && /^@[\p{L}\p{N}]?[\p{L}\p{N}_.-]*$/u.test(prefix))
+    // loop: NOT-WORTH — ≤ 200 bookmarks, once per Tab
+    return Object.keys(marks)
+      .filter((n) => `@${n}`.startsWith(prefix))
+      .sort(naturalCompare)
+      .map((n) => ({ insert: `@${n}${sep}`, label: `@${n}${sep}`, kind: "folder", help: marks[n] }));
+  // @name/…: inside the bookmark's folder
+  const mark = /^@([^\\/]+)[\\/]/.exec(dirPart);
+  const base = mark && marks[mark[1]] !== undefined ? marks[mark[1]] + dirPart.slice(mark[0].length - 1) : dirPart;
+  const dir = a.resolve(cwd, expandHome(base || ".", { home: d.home, platform: d.platform }));
   const fold = d.platform === "win32" || d.platform === "darwin" ? (s: string) => s.toLowerCase() : (s: string) => s;
   let entries: Dirent[];
   try {
@@ -124,7 +138,6 @@ async function paths(prefix: string, cwd: string, d: CompleteDeps, opts: ParseOp
     // error: NOT-WORTH — no such folder (or unreadable): nothing to offer
     return [];
   }
-  const sep = opts.windows ? "\\" : "/";
   // loop: NOT-WORTH — one folder's names, once per Tab
   const matching = entries.filter((e) => fold(e.name).startsWith(fold(namePart)) && (namePart.startsWith(".") || !e.name.startsWith(".")));
   const folders = new Set<string>();

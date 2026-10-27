@@ -63,8 +63,8 @@ App settings → Storage lists what the app keeps on this PC, each with its size
 
 The **Console** (its own icon on the rail) is a command line inside the app for people who live in one: the farm CLI's
 `render`, `verify`, `prepare` and `info` with the same flags, output and exit codes, plus `help`, `apropos`, `doctor`, `farm export`, `cd`, `pwd`,
-`dir` / `ls`, `allow`, `open` (shows a folder in the file manager), `cls`, `history`, `version`, `run` (a `.ckcmd` script of
-Console lines) and `sudo`. Other shells' words get a straight answer: `man` is `help`, `exit` says the Console stays
+`dir` / `ls`, `bookmark`, `j`, `pushd` / `popd` / `dirs`, `allow`, `open` (shows a folder in the file manager), `cls`,
+`history`, `version`, `run` (a `.ckcmd` script of Console lines) and `sudo`. Other shells' words get a straight answer: `man` is `help`, `exit` says the Console stays
 open, `rm` that the Console never deletes files, `cat` and `echo` that they come later. Every command and flag comes
 from the `corridorkey` CLI's own definitions, so the Console and the farm never differ. `help` lists the commands,
 `help render` or `render ?` explains one with examples, `help -k overwrite` (or `apropos overwrite`) searches them. The
@@ -80,6 +80,13 @@ jobs, with their settings: `farm export openjd --queue -o ~/farm/sq01` (an OpenJ
 and plugin info, with the plugin), `opencue` (a submit script), `flamenco` (a job and the job type) or `shell` (shot
 lists and the line that runs them); name clips instead of `--queue` for some of them. It never replaces its files
 unless you say `sudo … --overwrite`.
+
+**Getting around.** `bookmark sh010` names the folder you are in (`bookmark plates ~/shots/sh010/plates` another
+one), and `cd @sh010` goes there from anywhere (`@sh010/plates` too, and `dir`, `open`, `pushd` and `allow` take
+`@names`; Tab completes them); `bookmarks` lists them, `bookmark -d sh010` removes one; they are kept after a restart.
+`j sh010` jumps to the folder you have worked in most, and lately, whose name has sh010 (`j sq01 key`: a path with
+sq01 and then key; `j` alone lists them, best first), learned from the folders you typed commands in. `pushd <folder>`
+goes somewhere and remembers where you were, `popd` comes back, `dirs` lists them.
 
 **doctor** checks this computer in one go: the corridorkey command line, the graphics card and its driver, ONNX
 Runtime, the models, TensorRT, ffmpeg, and each folder the Console writes to (there, writable, free space), one row
@@ -152,6 +159,9 @@ Examples:
 
 ```
 cd ~/shots/sh010
+bookmark sh010
+cd @sh010
+j sh010
 dir plates
 dir plates/sh010.%04d.exr
 allow ~/renders
