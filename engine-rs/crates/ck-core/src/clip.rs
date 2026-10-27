@@ -266,7 +266,7 @@ pub(crate) fn none_path(p: Option<&str>) -> Option<&str> {
 }
 
 /// video_io.raw_clip_name: the file stem, or the parent folder's name for input/frames/rgb.
-pub(crate) fn raw_clip_name(path: &str) -> String {
+pub fn raw_clip_name(path: &str) -> String {
     let norm = normpath(path);
     let p = Path::new(&norm);
     let base = p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();

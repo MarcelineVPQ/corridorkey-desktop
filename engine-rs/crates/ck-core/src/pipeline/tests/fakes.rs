@@ -413,6 +413,10 @@ impl Writer for MemWriter {
 #[derive(Default)]
 pub(crate) struct RecSink {
     pub(crate) msgs: Vec<Value>,
+    /// asks the job to stop at its stop point number `stop_at` (counted from 0: Some(0) stops it at its first)
+    pub(crate) stop_at: Option<usize>,
+    /// the stop points the job has passed
+    pub(crate) stop_checks: usize,
 }
 
 impl Sink for RecSink {
@@ -421,6 +425,10 @@ impl Sink for RecSink {
     }
     fn log(&mut self, text: &str) {
         self.msgs.push(serde_json::json!({"type": "log", "text": text}));
+    }
+    fn stop_requested(&mut self) -> bool {
+        self.stop_checks += 1;
+        self.stop_at.is_some_and(|n| self.stop_checks > n)
     }
 }
 

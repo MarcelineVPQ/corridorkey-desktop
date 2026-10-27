@@ -66,7 +66,7 @@ pub struct ModelSet {
     pub dir: PathBuf,
     manifest: BTreeMap<String, BTreeMap<String, String>>,
     /// manifest.json's "version" (CorridorKey2.0 make_manifest.py), when the folder has one
-    pub(crate) version: Option<String>,
+    pub version: Option<String>,
     /// coreml.json, when the folder has one: the Core ML set (fixed-shape files, engine-rs/export/coreml)
     pub(crate) coreml: Option<CoremlManifest>,
 }

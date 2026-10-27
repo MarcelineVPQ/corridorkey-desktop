@@ -40,6 +40,12 @@ pub trait Sink {
         eprintln!("{text}");
         self.send(json!({"type": "log", "text": text}));
     }
+    /// Whether the job should stop now (`corridorkey render` on SIGTERM / SIGINT; the app kills the engine instead).
+    /// Asked before each RVM step, foundation chunk, stage-1 window and stage-2 frame: the job then ends `cancelled`,
+    /// its temporary files removed, the frames already written left whole.
+    fn stop_requested(&mut self) -> bool {
+        false
+    }
 }
 
 pub(crate) const FRAMES_EVERY_S: f64 = 0.25;

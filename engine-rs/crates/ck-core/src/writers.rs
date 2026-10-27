@@ -449,10 +449,32 @@ pub(crate) fn write_exr(path: &Path, w: usize, h: usize, channels: usize, nhwc: 
         // loop: NOT-WORTH — ≤ four channels per frame
         AnyChannels::sort(chans.into_iter().collect()),
     );
-    Image::from_layer(layer).write().to_file(path).map_err(|e| match e {
+    // written to a hidden name beside the frame, then renamed over it: a writer killed mid-frame (a farm's SIGKILL, a
+    // crash) or a full disk never leaves a cut file at the frame's name, only a `.<name>.partial` that the next write
+    // of that frame replaces
+    let part = partial_name(path);
+    let res = Image::from_layer(layer).write().to_file(&part).map_err(|e| match e {
         exr::error::Error::Io(io) => crate::Error::write("an EXR frame", path, &io),
         other => crate::Error::engine(format!("{}: {other}", path.display())),
-    })
+    });
+    let res = res.and_then(|()| std::fs::rename(&part, path).map_err(|e| crate::Error::write("an EXR frame", path, &e)));
+    if res.is_err() {
+        let _ = std::fs::remove_file(&part);
+    }
+    res
+}
+
+/// The hidden name a frame is written under before it is renamed into place (`write_exr`).
+pub(crate) fn partial_name(path: &Path) -> PathBuf {
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    path.with_file_name(format!(".{name}.partial"))
+}
+
+/// Whether `path` reads as a whole EXR: its header and every pixel block decode (a frame cut short by a killed writer
+/// or a full disk does not). Reads the whole file (the `corridorkey verify` check and `--skip-existing`).
+pub fn exr_complete(path: &Path) -> bool {
+    use exr::prelude::*;
+    read().no_deep_data().largest_resolution_level().all_channels().all_layers().all_attributes().pedantic().from_file(path).is_ok()
 }
 
 impl ExrWriter {
@@ -722,6 +744,76 @@ mod tests {
         // loop: NOT-WORTH — four samples
         let vals: Vec<f32> = ch[0].sample_data.values_as_f32().collect();
         assert_eq!(vals, matte);
+    }
+
+    /// A sample of noise in 0-1 from its index (ZIP can't shrink it much: the files stay big).
+    fn noise(i: usize) -> f32 {
+        let x = (i as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        ((x ^ (x >> 29)) >> 40) as f32 / 16_777_216.0
+    }
+
+    #[test]
+    fn a_whole_exr_is_complete_and_a_cut_one_is_not() {
+        let dir = std::env::temp_dir().join(format!("ck-exr-whole-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("f.exr");
+        // noise, so ZIP leaves the file big enough to cut in many places
+        let (w, h) = (64, 48);
+        // loop: NOT-WORTH — a test frame's samples
+        let px: Vec<f32> = (0..w * h * 3).map(noise).collect();
+        write_exr(&p, w, h, 3, &px, ExrType::Half).unwrap();
+        assert!(exr_complete(&p));
+        let bytes = std::fs::read(&p).unwrap();
+        let cut = dir.join("cut.exr");
+        // loop: NOT-WORTH — a few cut points
+        for keep in [bytes.len() - 1, bytes.len() * 3 / 4, bytes.len() / 2, 40, 0] {
+            std::fs::write(&cut, &bytes[..keep]).unwrap();
+            assert!(!exr_complete(&cut), "{keep} of {} bytes read as complete", bytes.len());
+        }
+        std::fs::write(&cut, b"not an exr").unwrap();
+        assert!(!exr_complete(&cut));
+        assert!(!exr_complete(&dir.join("missing.exr")));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The child side of `a_writer_killed_mid_frame_leaves_no_frame_at_its_name`: writes one big frame to
+    /// CK_EXR_CHILD (run only by that test, as its own process).
+    #[test]
+    #[ignore]
+    fn exr_writer_child() {
+        let Some(p) = std::env::var_os("CK_EXR_CHILD") else { return };
+        let (w, h) = (2048, 1024);
+        // loop: NOT-WORTH — the test frame's samples, once
+        let px: Vec<f32> = (0..w * h * 4).map(noise).collect();
+        write_exr(Path::new(&p), w, h, 4, &px, ExrType::Float).unwrap();
+    }
+
+    #[test]
+    fn a_writer_killed_mid_frame_leaves_no_frame_at_its_name() {
+        // a farm kills a task (SIGKILL after its grace time): whatever is at a frame's final name must be a whole
+        // EXR; before, write_exr wrote in place and a kill left a cut file that Nuke reads as a broken frame
+        let dir = std::env::temp_dir().join(format!("ck-exr-kill-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("key.1001.exr");
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "writers::tests::exr_writer_child", "--ignored", "--test-threads=1"])
+            .env("CK_EXR_CHILD", &p)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        // loop: SERIAL-REQUIRED — a 1 ms poll for the frame's name [bounded: 60 s, or the child's end]
+        while !p.exists() && std::time::Instant::now() < end && child.try_wait().unwrap().is_none() {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        // killed the moment anything shows at the frame's name (or after the child ended)
+        let _ = child.kill();
+        // loop: NOT-WORTH — reaps the killed child [bounded: a killed child exits]
+        let _ = child.wait();
+        let whole = !p.exists() || exr_complete(&p);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(whole, "a cut frame was left at its final name");
     }
 
     #[test]

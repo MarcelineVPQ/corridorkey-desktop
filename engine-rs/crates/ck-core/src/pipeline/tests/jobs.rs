@@ -308,6 +308,38 @@ fn stopped_part_way(low_vram: bool, fail: FailRun, fail_frame: Option<usize>, co
     assert_eq!(again.frames(), vec![9, 9]);
 }
 
+#[test]
+fn a_stop_request_ends_the_job_after_the_current_frame() {
+    // `corridorkey render` on SIGTERM / SIGINT (a farm's cancel, Ctrl+C): the sink says stop, the job ends `cancelled`
+    // at its next frame or window, its temporary files removed; nothing after the stop point is keyed
+    // loop: NOT-WORTH — both modes
+    for low_vram in [false, true] {
+        let mut h = Harness::new(FakeCfg::new(SHAPE), 9, options(json!({})));
+        h.stop_at = Some(0);
+        let (h, out) = within(move || {
+            let out = h.keying(&key(Provider::Cuda), None, 4, 2, low_vram);
+            (h, out)
+        });
+        assert_eq!(out.res.as_ref().unwrap_err().code, crate::ErrorCode::Cancelled, "low_vram {low_vram}");
+        assert_eq!(out.frames(), vec![0, 0]);
+        assert!(h.loader.runs_of("rvm").is_empty(), "nothing keyed after a stop asked before the job (low_vram {low_vram})");
+        assert_eq!(h.temp_files(), Vec::<PathBuf>::new());
+        // asked part way (past the 9 RVM steps and the first window): the job stops before the clip's end, cleanly
+        let mut h = Harness::new(FakeCfg::new(SHAPE), 9, options(json!({})));
+        h.stop_at = Some(13);
+        let (h, out) = within(move || {
+            let out = h.keying(&key(Provider::Cuda), None, 4, 2, low_vram);
+            (h, out)
+        });
+        assert_eq!(out.res.as_ref().unwrap_err().code, crate::ErrorCode::Cancelled, "low_vram {low_vram}");
+        let f = out.frames();
+        assert!(f[0] < 9 && f[0] == f[1], "frames written {f:?} (low_vram {low_vram})");
+        assert_eq!(h.loader.runs_of("rvm").len(), 9, "the RVM pass ran whole (low_vram {low_vram})");
+        assert!(h.loader.runs_of("stage2").len() < 9);
+        assert_eq!(h.temp_files(), Vec::<PathBuf>::new());
+    }
+}
+
 /// Fails `piece`'s run number `at` (from 0, counted over the test) with `code`.
 fn fail_nth(piece: &'static str, at: usize, code: crate::ErrorCode) -> FailRun {
     let n = std::sync::atomic::AtomicUsize::new(0);

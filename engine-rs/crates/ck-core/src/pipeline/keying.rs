@@ -251,6 +251,7 @@ impl<L: Loader> Pipeline<L> {
             let net = self.net("rvm")?;
             // loop: SERIAL-REQUIRED — RVM is recurrent: each frame's step takes the previous state
             while let Some(small) = small_frames.next_item()? {
+                stop_point(sink)?;
                 let outs = net.run(vec![("frame", vec![1, 3, he, we], small.into()), ("state", vec![1, ntok, RVM_CH], state)])?;
                 // loop: NOT-WORTH — two outputs per RVM step
                 let mut it = outs.into_iter();
@@ -323,6 +324,7 @@ impl<L: Loader> Pipeline<L> {
         let mut t0 = 0;
         // loop: SERIAL-REQUIRED — chunks of 4 frames, in order
         while let Some((n, (radio, moge))) = chunks.next_item()? {
+            stop_point(sink)?;
             let (c, m) = self.foundation_run(n, radio, moge, sh, sw)?;
             cf.put(t0, &c)?;
             mf.put(t0, &m)?;
@@ -409,6 +411,7 @@ impl<L: Loader> Pipeline<L> {
         sink.send(json!({"type": "progress", "stage": "keying"}));
         // loop: SERIAL-REQUIRED — windows run in order: each one's carry hint feeds the next
         for (i, &t0) in starts.iter().enumerate() {
+            stop_point(sink)?;
             let tw = Instant::now();
             let t1 = (t0 + chunk).min(t_all);
             let tc = t1 - t0;
@@ -691,6 +694,7 @@ impl<L: Loader> Pipeline<L> {
 
     /// Stage 2 on one frame; its output goes to the render thread (rendered and handed to every writer there).
     fn stage2_run(&mut self, rgb: Data<'_>, baton: Data<'_>, meta: &ClipMeta, out: &mut Writing<'_, '_>, sink: &mut dyn Sink) -> Result<(), Error> {
+        stop_point(sink)?;
         let (sh, sw) = (meta.shape_h, meta.shape_w);
         let outs = self.net("stage2")?.run(vec![("rgb", vec![1, 1, 3, sh, sw], rgb), ("baton", vec![1, 1, BATON_CH, sh / 16, sw / 16], baton)])?;
         // the logits go to the render thread as stage 2 made them (float16 there becomes float32 off this thread)
@@ -706,6 +710,14 @@ impl<L: Loader> Pipeline<L> {
         }
         sent
     }
+}
+
+/// A job's stop point (`Sink::stop_requested`): `cancelled` when the sink asks the job to stop.
+fn stop_point(sink: &mut dyn Sink) -> Result<(), Error> {
+    if sink.stop_requested() {
+        return Err(Error::new(crate::ErrorCode::Cancelled, "stopped on request".into()));
+    }
+    Ok(())
 }
 
 fn bf16_to_f32(v: &[half::bf16], out: &mut Vec<f32>) {
