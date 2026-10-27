@@ -378,6 +378,9 @@ export async function runInstall(data: string, deps: InstallDeps, c: Catalog = C
   mkdirSync(data, { recursive: true });
   const room = deps.freeBytes(data);
   const downloads = join(data, DOWNLOADS_DIR);
+  // a Core ML file counts in its .partial folder, or in the model set's folder where a stop during the moves left it
+  // loop: NOT-WORTH — two stats per Core ML file, once per install start
+  const coremlHas = (f: Download) => Math.max(already(join(data, MODELS_DIR, `.partial-${c.coreml!.name}`, f.file), f.size), already(join(data, MODELS_DIR, MODELS.name, f.file), f.size));
   // what a stopped install already downloaded is on the disk: only the rest needs room (a resume on a full-ish disk)
   // loop: NOT-WORTH — a dozen planned files, once per install start
   const have =
@@ -385,7 +388,7 @@ export async function runInstall(data: string, deps: InstallDeps, c: Catalog = C
     // loop: NOT-WORTH — as above
     (need.models ? MODELS.files.reduce((n, f) => n + already(join(data, MODELS_DIR, `.partial-${MODELS.name}`, f.file), f.size), 0) : 0) +
     // loop: NOT-WORTH — as above
-    (need.coreml && c.coreml ? c.coreml.files.reduce((n, f) => n + already(join(data, MODELS_DIR, `.partial-${c.coreml!.name}`, f.file), f.size), 0) : 0);
+    (need.coreml && c.coreml ? c.coreml.files.reduce((n, f) => n + coremlHas(f), 0) : 0);
   const needRoom = (need.runtime ? total(RUNTIME.wheels) * 2.5 : 0) + (need.models ? total(MODELS.files) : 0) + (need.coreml && c.coreml ? total(c.coreml.files) : 0) - have;
   if (room !== null && room < needRoom) throw noRoom(needRoom, data, room);
   // loop: NOT-WORTH — one mkdir per install
@@ -432,7 +435,13 @@ export async function runInstall(data: string, deps: InstallDeps, c: Catalog = C
     // loop: NOT-WORTH — one mkdir per install
     mkdirSync(partial, { recursive: true });
     // loop: SERIAL-REQUIRED — one file at a time, see fetchOne (a file a stopped install finished is checked and kept)
-    for (const f of c.coreml.files) await fetchOne(f, `Downloading the Core ML models (${f.file})`, join(partial, f.file));
+    for (const f of c.coreml.files) {
+      const target = join(partial, f.file);
+      // a stop during the moves below left it in the set's folder already: taken back, and checked again (not downloaded)
+      // loop: NOT-WORTH — two stats + one rename per file
+      if (!existsSync(target) && existsSync(join(set, f.file))) renameSync(join(set, f.file), target);
+      await fetchOne(f, `Downloading the Core ML models (${f.file})`, target);
+    }
     // loop: NOT-WORTH — thirteen local renames in the list's order, coreml.json last: the set counts as installed from there
     for (const f of c.coreml.files) renameSync(join(partial, f.file), join(set, f.file));
     // loop: NOT-WORTH — removes the emptied folder

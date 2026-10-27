@@ -355,6 +355,35 @@ describe("runInstall", () => {
     rmSync(data, { recursive: true, force: true });
   });
 
+  // review N9: a stop during the rename loop left c-t4.onnx already in the model set's folder, out of .partial-*
+  it("a Core ML file a stopped install already moved is checked again, not downloaded again", async () => {
+    const data = mkdtempSync(join(tmpdir(), "ck-run-"));
+    mkdirSync(join(data, "runtime", "rt"), { recursive: true });
+    mkdirSync(join(data, "models", "m1"), { recursive: true });
+    // loop: NOT-WORTH — three files
+    for (const f of ["a.onnx", "b.onnx"]) writeFileSync(join(data, "models", "m1", f), files[f]);
+    writeFileSync(join(data, "models", "m1", "c-t4.onnx"), "C".repeat(200));
+    mkdirSync(join(data, "models", ".partial-m1-coreml"), { recursive: true });
+    asked.length = 0;
+    // room for coreml.json alone: the moved file needs none again
+    await runInstall(data, deps(files["coreml.json"].length), coremlCatalog());
+    expect(asked).toEqual(["coreml.json"]);
+    expect(existsSync(join(data, "models", "m1", "c-t4.onnx")) && existsSync(join(data, "models", "m1", "coreml.json"))).toBe(true);
+    // a moved file that isn't the pinned one fails its checksum and is downloaded again
+    const bad = mkdtempSync(join(tmpdir(), "ck-run-"));
+    mkdirSync(join(bad, "runtime", "rt"), { recursive: true });
+    mkdirSync(join(bad, "models", "m1"), { recursive: true });
+    // loop: NOT-WORTH — two files
+    for (const f of ["a.onnx", "b.onnx"]) writeFileSync(join(bad, "models", "m1", f), files[f]);
+    writeFileSync(join(bad, "models", "m1", "c-t4.onnx"), "X".repeat(200));
+    asked.length = 0;
+    await runInstall(bad, deps(), coremlCatalog());
+    expect(asked).toEqual(["c-t4.onnx", "coreml.json"]);
+    expect(readFileSync(join(bad, "models", "m1", "c-t4.onnx"), "utf8")).toBe("C".repeat(200));
+    rmSync(data, { recursive: true, force: true });
+    rmSync(bad, { recursive: true, force: true });
+  });
+
   it("refuses a Core ML file whose checksum is wrong and leaves no coreml.json", async () => {
     const data = mkdtempSync(join(tmpdir(), "ck-run-"));
     mkdirSync(join(data, "runtime", "rt"), { recursive: true });
