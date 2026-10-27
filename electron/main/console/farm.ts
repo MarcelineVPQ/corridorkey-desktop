@@ -323,7 +323,8 @@ function deadline(j: FarmJob, env: FarmEnv): FarmExport["files"] {
 /** OpenCue: the submit script's invocation (corridorkey_submit.py beside it), one task over the whole shot. */
 function opencue(j: FarmJob, env: FarmEnv): FarmExport["files"][number] {
   const [a, b] = j.range!;
-  // the booking is --max-vram for the task too (the script passes it): a limit set in the queue becomes the booking
+  // a limit set in the queue becomes the booking (whole GiB) and the engine's --max-vram; Auto books the default and
+  // lets the engine use what the card has free
   // loop: NOT-WORTH — a job's few flags
   const maxVram = farmFlags(j).find(([n]) => n === "max-vram")?.[1];
   // loop: NOT-WORTH — as above
@@ -338,7 +339,7 @@ function opencue(j: FarmJob, env: FarmEnv): FarmExport["files"][number] {
     "--range",
     `${a}-${b}`,
     ...runtimeWords(env),
-    ...(maxVram ? ["--gpu-memory", String(Math.ceil(Number(maxVram)))] : []),
+    ...(maxVram ? ["--gpu-memory", String(Math.ceil(Number(maxVram))), "--max-vram", maxVram] : []),
     "--",
     "--outputs",
     outputs(j),

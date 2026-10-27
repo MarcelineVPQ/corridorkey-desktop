@@ -126,8 +126,8 @@ python3 corridorkey_submit.py --show demo --shot sh010 \
     -- --linear --outputs alpha
 ```
 
-Each render task gets `--max-vram` the size of its graphics-memory booking (`--gpu-memory`), so the engine picks a
-window that fits. RQD's `CUE_GPU_CORES` picks the card. Commands are quoted for Linux and macOS hosts; Windows hosts
+Each render task books graphics memory (`--gpu-memory`, 12 GiB by default) and the engine picks its window from what
+the card has free. `--max-vram GB` limits the engine as well; farm export passes a clip's limit from the queue as both. RQD's `CUE_GPU_CORES` picks the card. Commands are quoted for Linux and macOS hosts; Windows hosts
 would need their own quoting.
 
 ## Flamenco

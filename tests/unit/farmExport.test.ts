@@ -105,7 +105,15 @@ describe("farm export", () => {
     const w = words(line);
     expect(w.slice(0, 2)).toEqual(["exec", "python3"]);
     const at = (f: string) => w[w.indexOf(f) + 1];
-    expect([at("--shot"), at("-i"), at("-o"), at("--range"), at("--gpu-memory"), at("--models")]).toEqual(["sh010", "/shots/sh010.mov", "/renders/sh010", "1001-1024", "10", "/opt/ck/models"]);
+    expect([at("--shot"), at("-i"), at("-o"), at("--range"), at("--gpu-memory"), at("--max-vram"), at("--models")]).toEqual([
+      "sh010",
+      "/shots/sh010.mov",
+      "/renders/sh010",
+      "1001-1024",
+      "10",
+      "10",
+      "/opt/ck/models",
+    ]);
     expect(w.slice(w.indexOf("--") + 1)).toEqual(["--outputs", "alpha", "--despill", "0.3", "--window", "8/4", "--low-vram"]);
     expect(e.files.map((f) => f.path)).toContain("corridorkey_submit.py");
   });
@@ -547,9 +555,10 @@ describe("farm export: the CLI reproduces the app's job (round trip)", () => {
           .find((l) => l.startsWith("exec "))!,
       );
       const at = (f: string) => w[w.indexOf(f) + 1];
-      const booking = w.includes("--gpu-memory") ? at("--gpu-memory") : "12";
-      const cmd = ["render", "-i", at("-i"), "-o", at("-o"), ...w.slice(w.indexOf("--") + 1), "-s", "1001", "-e", "1024", "--overwrite", "--max-vram", booking];
-      check(j, cmd, { frame_start: 1001, frame_end: 1024, vram_budget_gb: j.options.vramLimitGb === null ? 12 : Math.ceil(j.options.vramLimitGb) }, `opencue ${j.name}`);
+      // the script passes --max-vram only when given one (a queue limit); Auto leaves the engine its card's free memory
+      const limit = w.includes("--max-vram") ? ["--max-vram", at("--max-vram")] : [];
+      const cmd = ["render", "-i", at("-i"), "-o", at("-o"), ...w.slice(w.indexOf("--") + 1), "-s", "1001", "-e", "1024", "--overwrite", ...limit];
+      check(j, cmd, { frame_start: 1001, frame_end: 1024 }, `opencue ${j.name}`);
     }
   });
 

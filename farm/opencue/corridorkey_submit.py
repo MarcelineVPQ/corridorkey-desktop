@@ -45,6 +45,7 @@ def main():
     ap.add_argument("--chunk", type=int, default=0, help="frames per task (default: the whole shot in one task)")
     ap.add_argument("--preroll", type=int, default=0, help="warm-up frames before each chunk (chunks only)")
     ap.add_argument("--gpu-memory", type=int, default=DEFAULT_GPU_MEMORY_GB, help="GiB of graphics memory per task (12)")
+    ap.add_argument("--max-vram", type=float, help="limit the engine's graphics memory, GB (default: what the card has free)")
     ap.add_argument("--memory", type=int, default=DEFAULT_MEMORY_GB, help="GiB of RAM per task (16)")
     ap.add_argument("--corridorkey", default="corridorkey", help="the corridorkey executable on the hosts")
     ap.add_argument("--models", help="the model set's folder on the hosts (else their CK_ENGINE_MODELS)")
@@ -76,9 +77,10 @@ def main():
         "-s", "#FRAME_START#", "-e", "#FRAME_END#",
         # a retried task finds the frames its earlier try renamed into place: replace them
         "--overwrite",
-        "--max-vram", str(a.gpu_memory),
         "--progress-format", "plain",
     ]
+    if a.max_vram:
+        render_cmd += ["--max-vram", "%g" % a.max_vram]
     if a.preroll:
         render_cmd += ["--preroll", str(a.preroll)]
     render = outline.modules.shell.Shell(

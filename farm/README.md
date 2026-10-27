@@ -199,8 +199,9 @@ service. Run `--help` for the rest.
 
 **Bookings.**
 
-- **Graphics memory, 12 GiB by default (`--gpu-memory`).** Each render task also gets `--max-vram` of the same size,
-  so the engine picks a window that fits what was booked.
+- **Graphics memory, 12 GiB by default (`--gpu-memory`).** The booking reserves the card; the engine uses what the card
+  has free and picks its window from that. `--max-vram GB` limits the engine too (farm export passes the queue's limit
+  as both the booking, rounded up, and `--max-vram`).
 - **Where 12 comes from.** These are the measured peaks on an RTX 5080 with model set onnx.4, from
   [README: The same-day pair on onnx.4](../README.md#the-same-day-pair-on-onnx4-2026-10-26) and "What we got wrong" 5:
 
