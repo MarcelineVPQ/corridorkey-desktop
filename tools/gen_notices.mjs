@@ -5,7 +5,7 @@
 //     of tools/build_engine.sh, build and dev crates left out);
 //   the app's npm packages: package-lock.json's production packages (what electron-builder puts in app.asar) and the
 //     licence file each one ships in node_modules;
-//   the first-run downloads: the wheels and model sets electron/main/install.ts pins;
+//   the first-run downloads: the wheels and model sets electron/main/install.ts pins (tools/install_pins.mjs);
 //   OpenColorIO and the C++ libraries its bundled build links into the engine: OCIO_LIBS below (versions from the
 //     vendored sources, texts in licenses/ocio/).
 // Licences of the parts that are not code here (downloads, foundation models, build tools) are the table below, each
@@ -20,6 +20,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { modelSets, wheels as pinnedWheels } from "./install_pins.mjs";
 
 const APP = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(APP, "THIRD_PARTY_NOTICES.md");
@@ -132,43 +133,33 @@ const WHEEL_LICENCES = [
     "Microsoft proprietary licence (PyPI: Proprietary): Microsoft's redistributable Visual C++ runtime, [its licence terms](https://visualstudio.microsoft.com/license-terms/vs2022-cruntime/)",
   ],
 ];
+// what each model set is for, by its suffix after the base set's name ("" = the base set)
+const SET_KINDS = { "": "every system", coreml: "macOS: Core ML", trt: "Linux: the opt-in TensorRT jobs" };
 function downloads() {
   const src = readFileSync(join(APP, "electron/main/install.ts"), "utf8");
   const repo = readFileSync(join(APP, "electron/main/updateFeed.ts"), "utf8").match(/export const REPO = "([^"]+)"/)?.[1];
-  const set = src.match(/const MODEL_SET = "([^"]+)"/)?.[1];
-  const trtSet = src.match(/const TRT_MODEL_SET = "([^"]+)"/)?.[1];
-  if (!repo || !set || !trtSet) throw new Error("gen_notices: install.ts / updateFeed.ts no longer name the repository or the model sets");
-  // the catalog's parts in the file's order: Linux, Windows, macOS, then the opt-in TensorRT download
-  const parts = [
-    ["Linux", /export const RUNTIME = \{([\s\S]*?)\n\};/],
-    ["Windows", /export const RUNTIME_WIN = \{([\s\S]*?)\n\};/],
-    ["macOS", /export const RUNTIME_MAC = \{([\s\S]*?)\n\};/],
-    ["Linux, opt-in TensorRT", /export const TENSORRT = \{\s*libs: \{([\s\S]*?)\} as Download/],
-  ];
-  const wheels = new Map();
-  // loop: NOT-WORTH — four catalog parts, once per run
-  for (const [platform, re] of parts) {
-    const body = src.match(re)?.[1];
-    if (!body) throw new Error(`gen_notices: install.ts's ${platform} download list was not found`);
-    // loop: NOT-WORTH — a part's wheels (≤ 9)
-    for (const m of body.matchAll(/file: "(([A-Za-z0-9_]+)-([0-9][0-9A-Za-z.]*)-[^"]+\.whl)"/g)) {
-      const [, , name, version] = m;
-      const key = `${name} ${version}`;
-      const w = wheels.get(key) ?? { name, version, platforms: [] };
-      w.platforms.push(platform);
-      wheels.set(key, w);
-    }
-  }
-  // loop: NOT-WORTH — ~15 wheels, once per run
-  const rows = [...wheels.values()].sort(byNameVersion).map((w) => {
-    // loop: NOT-WORTH — five licence rules per wheel
-    const lic = WHEEL_LICENCES.find(([re]) => re.test(w.name))?.[1] ?? "licence not determined";
-    const host = w.name.startsWith("tensorrt_") ? "pypi.nvidia.com" : "pypi.org";
-    const project = w.name.replace(/_/g, "-");
-    const page = host === "pypi.org" ? `https://pypi.org/project/${project}/${w.version}/` : `https://pypi.nvidia.com/${project}/`;
-    return `| ${project} | ${w.version} | ${w.platforms.join(", ")} | ${lic} | [${host}](${page}) |`;
+  if (!repo) throw new Error("gen_notices: updateFeed.ts no longer names the repository");
+  // the model sets (tools/install_pins.mjs): the base set first, then each kind by its suffix; a new kind needs its
+  // line here
+  const [base, ...more] = modelSets(src);
+  // loop: NOT-WORTH — the two or three sets
+  const sets = [base, ...more].map((name) => {
+    const kind = SET_KINDS[name === base ? "" : name.slice(base.length + 1)];
+    if (!name.startsWith(base) || kind === undefined) throw new Error(`gen_notices: model set ${name}: no SET_KINDS line for it`);
+    return { name, kind };
   });
-  return { repo, set, trtSet, rows };
+  // loop: NOT-WORTH — ~15 wheels, once per run
+  const rows = pinnedWheels(src)
+    .sort(byNameVersion)
+    .map((w) => {
+      // loop: NOT-WORTH — five licence rules per wheel
+      const lic = WHEEL_LICENCES.find(([re]) => re.test(w.name))?.[1] ?? "licence not determined";
+      const host = w.name.startsWith("tensorrt_") ? "pypi.nvidia.com" : "pypi.org";
+      const project = w.name.replace(/_/g, "-");
+      const page = host === "pypi.org" ? `https://pypi.org/project/${project}/${w.version}/` : `https://pypi.nvidia.com/${project}/`;
+      return `| ${project} | ${w.version} | ${w.platforms.join(", ")} | ${lic} | [${host}](${page}) |`;
+    });
+  return { repo, sets, rows };
 }
 
 // --- OpenColorIO and the C++ libraries its bundled build links into the engine (ocio-sys 0.3.0, engine-rs/vendor) ---
@@ -248,7 +239,7 @@ function render() {
     `| OpenColorIO and its bundled C++ libraries (inside the engine) | yes | ${OCIO_LIBS.length} | ${countBy(OCIO_LIBS.map((l) => ({ license: l[3] })))} |`,
     `| Electron ${electron} with Chromium | yes | 1 | MIT (Electron); Chromium's own notices in LICENSES.chromium.html |`,
     "| TensorRT engine builder (ck-trt-build, Linux) | yes | 2 | Apache-2.0 (TensorRT headers); Apache-2.0 WITH LLVM-exception (LLVM libc++) |",
-    `| GPU runtime, models | no: downloaded at first run from their publishers | ${dl.rows.length} wheels, 2 model sets | see below |`,
+    `| GPU runtime, models | no: downloaded at first run from their publishers | ${dl.rows.length} wheels, ${dl.sets.length} model sets | see below |`,
     "",
     "## Shipped inside the app",
     "",
@@ -329,15 +320,16 @@ function render() {
     "",
     "### The CorridorKey models",
     "",
-    `- The model set \`${dl.set}\` (and \`${dl.trtSet}\` for the opt-in TensorRT jobs): CorridorKey 2.0's five networks`,
-    "  converted to ONNX from Corridor Digital's checkpoint, downloaded from this app's GitHub releases",
-    `  (https://github.com/${dl.repo}/releases/tag/models-${dl.set}). CorridorKey 2.0 is © Corridor Digital, under the`,
-    "  CorridorKey licence (https://github.com/nikopueringer/CorridorKey2.0).",
+    "- The model sets: CorridorKey 2.0's five networks converted to ONNX from Corridor Digital's checkpoint, downloaded",
+    "  from this app's GitHub releases. CorridorKey 2.0 is © Corridor Digital, under the CorridorKey licence",
+    "  (https://github.com/nikopueringer/CorridorKey2.0).",
+    // loop: NOT-WORTH — the two or three sets
+    ...dl.sets.map((s) => `  - \`${s.name}\` (${s.kind}): https://github.com/${dl.repo}/releases/tag/models-${s.name}`),
     "- **Modified:** every network is converted from the original PyTorch checkpoint to ONNX, with exact graph rewrites",
     "  for speed and portrait input (listed in the set's manifest.json); the fp16 files follow CorridorKey 2.0's own",
     "  precision policy (fp16 convolutions, matrix multiplies and attention; fp32 norms, softmax, exp/pow, sums and",
-    "  upsampling); the TensorRT set adds TensorRT-specific rewrites. Each model release carries ATTRIBUTION.md, NOTICE",
-    "  and the licence texts below.",
+    "  upsampling); the TensorRT set adds TensorRT-specific rewrites; the Core ML set holds fixed-shape copies for ONNX",
+    "  Runtime's Core ML provider. Each model release carries ATTRIBUTION.md, NOTICE and the licence texts below.",
     "- Three of the five networks are foundation models. They stay under their publishers' licences, **not** under the",
     "  CorridorKey licence, with no added terms:",
     "  - **C-RADIOv4-SO400M**, NVIDIA Corporation (https://huggingface.co/nvidia/C-RADIOv4-SO400M, revision",

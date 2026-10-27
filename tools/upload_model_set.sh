@@ -7,9 +7,11 @@
 # DIR holds the set as its build writes it. TensorRT (`-trt`, engine-rs/export/build_trt_models.sh):
 # ck2-*-trt-fp16.onnx, their .onnx.data, the -ctx.onnx EPContext stubs, and models.json. Core ML (`-coreml`,
 # engine-rs/export/coreml/build_coreml_models.sh's OUT/set): ck2-*-fp16-coreml-*.onnx and coreml.json (their weights
-# are the model set's own .onnx.data, not in this release). Idempotent: creates the release only if it is missing
-# (never as Latest), uploads only what isn't there with the right size, and at the end checks every asset's size and
-# SHA-256 on GitHub against the files here. Run it again after a failure. Publishing needs Marcy's OK.
+# are the model set's own .onnx.data, not in this release). Both also get the base set's licence and attribution
+# files (ATTRIBUTION.md, LICENSE, NOTICE, LICENSE-*), downloaded from models-<base set> into DIR. Idempotent: creates
+# the release only if it is missing (never as Latest), uploads only what isn't there with the right size, and at the
+# end checks every asset's size and SHA-256 on GitHub against the files here. Run it again after a failure.
+# Publishing needs Marcy's OK.
 set -euo pipefail
 DIR=${1:?usage: tools/upload_model_set.sh DIR SET}
 SET=${2:?usage: tools/upload_model_set.sh DIR SET}
@@ -39,6 +41,15 @@ case "$SET" in
     ;;
 esac
 [ "${#FILES[@]}" -gt 0 ] && [ -f "$LIST" ] || { echo "upload_model_set: no $SET set in $DIR" >&2; exit 1; }
+# the licence and attribution files every model release carries (audit 2026-10-27 row 9: the Core ML release went up
+# without them): the base set's own copies, downloaded into DIR and uploaded with the set
+BASE=${SET%-*}
+LICENCE_FILES=(ATTRIBUTION.md LICENSE NOTICE LICENSE-Apache-2.0.txt LICENSE-MIT-MoGe.txt LICENSE-NVIDIA-OPEN-MODEL-2024-06.pdf LICENSE-NVIDIA-OPEN-MODEL-2024-06.txt)
+PATTERNS=()
+# loop: NOT-WORTH — seven file names
+for f in "${LICENCE_FILES[@]}"; do PATTERNS+=(-p "$f"); done
+gh release download "models-$BASE" -R "$REPO" -D . --clobber "${PATTERNS[@]}"
+FILES+=("${LICENCE_FILES[@]}")
 echo "hashing ${#FILES[@]} files in $DIR"
 SUMS=$(sha256sum "${FILES[@]}")
 

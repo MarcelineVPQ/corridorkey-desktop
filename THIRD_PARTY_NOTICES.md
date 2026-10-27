@@ -16,7 +16,7 @@ electron/main/install.ts. Do not edit it by hand: run `node tools/gen_notices.mj
 | OpenColorIO and its bundled C++ libraries (inside the engine) | yes | 9 | BSD-3-Clause: 3 · MIT: 2 · Zlib: 2 · BSD-2-Clause: 1 · ICC Software License 0.2: 1 |
 | Electron 45.0.0-beta.3 with Chromium | yes | 1 | MIT (Electron); Chromium's own notices in LICENSES.chromium.html |
 | TensorRT engine builder (ck-trt-build, Linux) | yes | 2 | Apache-2.0 (TensorRT headers); Apache-2.0 WITH LLVM-exception (LLVM libc++) |
-| GPU runtime, models | no: downloaded at first run from their publishers | 12 wheels, 2 model sets | see below |
+| GPU runtime, models | no: downloaded at first run from their publishers | 12 wheels, 3 model sets | see below |
 
 ## Shipped inside the app
 
@@ -284,15 +284,17 @@ publishers' licences; the wheels' own licence files are kept next to the librari
 
 ### The CorridorKey models
 
-- The model set `2.0.0-onnx.4` (and `2.0.0-onnx.4-trt` for the opt-in TensorRT jobs): CorridorKey 2.0's five networks
-  converted to ONNX from Corridor Digital's checkpoint, downloaded from this app's GitHub releases
-  (https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.4). CorridorKey 2.0 is © Corridor Digital, under the
-  CorridorKey licence (https://github.com/nikopueringer/CorridorKey2.0).
+- The model sets: CorridorKey 2.0's five networks converted to ONNX from Corridor Digital's checkpoint, downloaded
+  from this app's GitHub releases. CorridorKey 2.0 is © Corridor Digital, under the CorridorKey licence
+  (https://github.com/nikopueringer/CorridorKey2.0).
+  - `2.0.0-onnx.4` (every system): https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.4
+  - `2.0.0-onnx.4-coreml` (macOS: Core ML): https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.4-coreml
+  - `2.0.0-onnx.4-trt` (Linux: the opt-in TensorRT jobs): https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.4-trt
 - **Modified:** every network is converted from the original PyTorch checkpoint to ONNX, with exact graph rewrites
   for speed and portrait input (listed in the set's manifest.json); the fp16 files follow CorridorKey 2.0's own
   precision policy (fp16 convolutions, matrix multiplies and attention; fp32 norms, softmax, exp/pow, sums and
-  upsampling); the TensorRT set adds TensorRT-specific rewrites. Each model release carries ATTRIBUTION.md, NOTICE
-  and the licence texts below.
+  upsampling); the TensorRT set adds TensorRT-specific rewrites; the Core ML set holds fixed-shape copies for ONNX
+  Runtime's Core ML provider. Each model release carries ATTRIBUTION.md, NOTICE and the licence texts below.
 - Three of the five networks are foundation models. They stay under their publishers' licences, **not** under the
   CorridorKey licence, with no added terms:
   - **C-RADIOv4-SO400M**, NVIDIA Corporation (https://huggingface.co/nvidia/C-RADIOv4-SO400M, revision
