@@ -19,7 +19,6 @@
      only be this green"). Every accent use is this exact value; hover/pressed keep it and add a dark inner ring
      (--accent-text), never a second green. tests/unit/tokens.test.ts fails on any other green. */
   --accent: #00b140;
-  --accent-strong: #00b140;
   /* text on a green fill: dark (6.04:1; white is 2.85:1) */
   --accent-text: #0b1f13;
   --accent-soft: rgba(0, 177, 64, 0.14);
@@ -40,8 +39,6 @@
   --status-error-soft: rgba(255, 107, 107, 0.12);
   --status-warn-soft: rgba(242, 184, 75, 0.12);
   --progress-track: #2a2e38;
-  --checker-a: #3a3f4b;
-  --checker-b: #2c303a;
   --focus-ring: #6cb4ff;
   --overlay: rgba(10, 12, 16, 0.78);
   --task: #f2b84b;
@@ -66,7 +63,6 @@
     --text-2: #3d4350;
     --text-3: #575e6c;
     --accent: #00b140;
-    --accent-strong: #00b140;
     --accent-text: #0b1f13;
     --accent-soft: rgba(0, 177, 64, 0.12);
     /* green words fail on light grounds (2.85:1 on white): words take the normal text color, the green moves to a
@@ -85,8 +81,6 @@
     --status-error-soft: rgba(198, 40, 40, 0.08);
     --status-warn-soft: rgba(168, 106, 0, 0.1);
     --progress-track: #dfe3ea;
-    --checker-a: #d5d9e0;
-    --checker-b: #c3c8d1;
     --focus-ring: #1f6fd1;
     --overlay: rgba(243, 244, 247, 0.85);
     --task: #b07200;

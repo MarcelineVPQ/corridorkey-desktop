@@ -10,7 +10,8 @@
 //   - a line marked `theme-exempt: <reason>`; listed by `--list`;
 //   - a token source (TOKEN_SOURCES below): the .ts files whose job is to hold
 //     the palettes the tokens are built from. Exempt by path, listed by `--list`.
-// It walks .css, .tsx and .ts.
+// It walks .css, .tsx and .ts. It also fails on a token tokens.css defines that nothing uses, and on a var(--x) that
+// nothing defines (below).
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
@@ -94,6 +95,28 @@ for (const file of files) {
   }
 }
 
+// Tokens (audit row 17): every token src/styles/tokens.css defines is used somewhere (a `var(--x)`), and every
+// `var(--x)` has a definition: a `--x:` in a stylesheet, or a "--x" string in a .ts/.tsx (palette.ts's tokens, an
+// inline style's variable).
+const TOKENS = "src/styles/tokens.css";
+const defined = new Set();
+const used = new Set();
+// loop: NOT-WORTH — the source files, once per gate run
+for (const file of files) {
+  const text = readFileSync(file, "utf8");
+  // loop: NOT-WORTH — one file's var() uses
+  for (const m of text.matchAll(/var\(\s*(--[\w-]+)/g)) used.add(m[1]);
+  // loop: NOT-WORTH — one file's definitions
+  for (const m of text.matchAll(file.endsWith(".css") ? /(--[\w-]+)\s*:/g : /["'`](--[\w-]+)["'`]/g)) defined.add(m[1]);
+}
+// loop: NOT-WORTH — the few dozen tokens (both themes define each)
+const tokens = new Set([...readFileSync(TOKENS, "utf8").matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
+const tokenHits = [];
+// loop: NOT-WORTH — the few dozen tokens
+for (const t of tokens) if (!used.has(t)) tokenHits.push(`${TOKENS}: ${t} is defined but nothing uses it`);
+// loop: NOT-WORTH — the few dozen tokens used
+for (const t of used) if (!defined.has(t)) tokenHits.push(`var(${t}) is used but nothing defines ${t}`);
+
 if (process.argv.includes("--list")) {
   console.log(exempt.join("\n"));
   process.exit(0);
@@ -101,5 +124,6 @@ if (process.argv.includes("--list")) {
 if (hits.length) {
   console.log("Theme gate: literal color outside the theme tokens (use a token, or mark the line 'theme-exempt: <reason>')");
   console.log(hits.join("\n"));
-  process.exit(1);
 }
+if (tokenHits.length) console.log("Theme gate: tokens defined and used must match (remove an unused token, define a used one)\n" + tokenHits.join("\n"));
+if (hits.length || tokenHits.length) process.exit(1);

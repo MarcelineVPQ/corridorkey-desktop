@@ -133,7 +133,6 @@ export function accentVars(accent: Rgb, grounds: Rgb[], isDark: boolean): Record
   const onAccent = wantsLightInk(accent) ? WHITE : BLACK;
   return {
     "--accent": css(accent),
-    "--accent-strong": css(mix(accent, isDark ? WHITE : BLACK, 0.15)),
     "--accent-text": css(onAccent),
     "--accent-ink": css(legibleOnAll(accent, grounds, 4.6, ink)),
     "--accent-soft": cssA(accent, isDark ? 0.18 : 0.14),

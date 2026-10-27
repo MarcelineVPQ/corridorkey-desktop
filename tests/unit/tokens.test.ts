@@ -42,7 +42,7 @@ const TINTS = ["--accent-soft", "--status-warn-soft", "--status-error-soft"];
 // below; --status-ok is a fill and a mark, never words)
 const TEXT = ["--text-1", "--text-2", "--text-3", "--status-warn", "--status-error", "--status-info"];
 // every token that paints green, in both themes
-const GREEN_TOKENS = ["--accent", "--accent-strong", "--accent-soft", "--status-ok"];
+const GREEN_TOKENS = ["--accent", "--accent-soft", "--status-ok"];
 
 describe("tokens.css, the one green", () => {
   it("holds no green but #00b140 (and #0b1f13, the dark ink on it)", () => {
@@ -86,8 +86,8 @@ describe.each(THEMES)("tokens.css, %s theme", (_name, t) => {
 
   it("text on the green (primary buttons, the chosen segment, step badges, the engine dot, the ✓ disc) is dark, 4.5:1 or better", () => {
     expect(hexOf(t["--accent-text"].rgb)).toBe("#0b1f13");
-    // loop: NOT-WORTH — three fills
-    for (const fill of ["--accent", "--accent-strong", "--status-ok"]) expect(contrast(t["--accent-text"].rgb, t[fill].rgb)).toBeGreaterThanOrEqual(4.5);
+    // loop: NOT-WORTH — two fills
+    for (const fill of ["--accent", "--status-ok"]) expect(contrast(t["--accent-text"].rgb, t[fill].rgb)).toBeGreaterThanOrEqual(4.5);
     if (t["--mark-fill"].alpha > 0) expect(contrast(t["--mark-ink"].rgb, t["--mark-fill"].rgb)).toBeGreaterThanOrEqual(4.5);
   });
 
