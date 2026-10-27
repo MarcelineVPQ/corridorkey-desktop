@@ -397,10 +397,13 @@ impl<L: Loader> Pipeline<L> {
                 if let Some((_, _, own)) = crate::gpu::budget() {
                     let w = crate::runtime::model_bytes(&file);
                     self.gpu_overhead = Some(own.saturating_sub(w));
-                    eprintln!(
-                        "  graphics memory outside the arenas (CUDA context, libraries): {:.2} GiB measured",
-                        own.saturating_sub(w) as f64 / 1073741824.0
-                    );
+                    if own >= w {
+                        eprintln!("  graphics memory outside the arenas (CUDA context, libraries): {:.2} GiB measured", (own - w) as f64 / 1073741824.0);
+                    } else {
+                        // C-RADIO's file holds fp32 weights that load as fp16: on the card they take less than the
+                        // file, so this sum can't see the context (counted as 0: the other arenas come out tighter)
+                        eprintln!("  graphics memory outside the arenas: not measurable ({piece} takes less on the card than its file), counted as 0");
+                    }
                 }
             }
         }
