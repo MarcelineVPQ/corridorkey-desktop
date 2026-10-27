@@ -198,7 +198,8 @@ inner loop's words);
   first 2000 lines (at most 1 MiB read; a file with a NUL in its first 8 KiB is binary and refused; several: each
   under `==> name <==`), `head` / `tail [-n N] FILE` (default 10, at most 2000; `tail` reads only the file's last MiB),
   `wc FILE…` (lines, words, bytes; read 1 MiB at a time, up to 256 MiB; several: a total), `du [FOLDER…]` (each folder
-  inside with its size, human, then the total; links not followed; past 200 000 entries the sizes say `≥`), `tree
+  inside with its size, human, then the total; links not followed: one inside a folder counts its own size, never
+  its target's; past 200 000 entries the sizes say `≥`), `tree
   [FOLDER] [-L N] [-a]` (depth 2 by default, at most 6; sequences as one row with their frames; at most 1000 rows;
   dot files with `-a`). Bytes come through `ConsoleFs.readRange` (`files.ts readRange`: bounded reads to the end of
   the range; never a whole file in memory; opened without blocking and checked again on the open file, so a pipe

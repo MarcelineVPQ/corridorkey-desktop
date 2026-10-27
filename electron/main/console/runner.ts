@@ -1300,7 +1300,7 @@ export class Console {
       for (const n of names.sort((x, y) => naturalCompare(x.name, y.name))) {
         if (stop()) return this.finish(b, "cancelled");
         if (n.isDirectory()) {
-          const s = await this.walk(a.join(dir, n.name), () => true, true, budget);
+          const s = await this.walk(a.join(dir, n.name), () => true, true, budget, undefined, true);
           rows.push([s.bytes, n.name + a.sep]);
           total += s.bytes;
         } else if (!n.isSymbolicLink()) total += (await this.d.fs.stat(a.join(dir, n.name)).catch(() => null))?.size ?? 0;
@@ -1957,6 +1957,8 @@ export class Console {
     deep = true,
     budget: { left: number; stop?: () => boolean } = { left: 200_000 },
     enter: (name: string) => boolean = () => true,
+    // du: a link counts its own size, never its target's (which can be outside the folder: P4 senior review N5)
+    ownLinks = false,
   ): Promise<{ files: number; bytes: number }> {
     const a = this.d.paths.platform === "win32" ? win32 : posix;
     let files = 0;
@@ -1974,12 +1976,12 @@ export class Console {
       if (budget.left-- <= 0 || budget.stop?.()) break;
       if (n.isDirectory()) {
         if (!deep || !enter(n.name)) continue;
-        const sub = await this.walk(a.join(dir, n.name), keep, deep, budget, enter);
+        const sub = await this.walk(a.join(dir, n.name), keep, deep, budget, enter, ownLinks);
         files += sub.files;
         bytes += sub.bytes;
       } else if (keep(n.name)) {
         files++;
-        bytes += (await this.d.fs.stat(a.join(dir, n.name)).catch(() => null))?.size ?? 0;
+        bytes += (await (ownLinks ? this.d.fs.lstat : this.d.fs.stat)(a.join(dir, n.name)).catch(() => null))?.size ?? 0;
       }
     }
     return { files, bytes };

@@ -1968,6 +1968,16 @@ describe("Phase 4: file built-ins (read-only)", () => {
     expect((await c.run("tree")).nowrap).toBe(true);
     expect(text(await c.run("tree -L 3 sub"))).toEqual(["sub", "├── a.####.exr  1001-1002 · 2 frames", "└── deep/", "    └── x.txt", "1 folder, 2 files or sequences"]);
   });
+
+  it.skipIf(process.platform === "win32")("du counts a link inside a folder as the link, never its target outside (P4 senior review N5, BACKLOG row 135)", async () => {
+    const top = mkdtempSync(join(root, "du-link-"));
+    writeFileSync(join(top, "big.bin"), Buffer.alloc(1024 * 1024));
+    mkdirSync(join(top, "in", "sub"), { recursive: true });
+    symlinkSync(join(top, "big.bin"), join(top, "in", "sub", "link"));
+    const { c } = make({ startDir: join(top, "in") });
+    const rows = text(await c.run("du"));
+    expect(rows[0]).toMatch(/^\s*\d+ B {2}sub\/$/);
+  });
 });
 
 // senior review 2026-10-27 M4 (probes P3, P4, P5): a throw inside a program kept the job slot until restart, a thrown
