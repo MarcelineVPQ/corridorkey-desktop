@@ -33,6 +33,20 @@ export const idArg = (v: unknown): string | null => (typeof v === "string" && v.
 /** An absolute path, or null. */
 export const pathArg = (v: unknown): string | null => (typeof v === "string" && v.length > 0 && isAbsolute(v) ? v : null);
 
+/** A Console line: a string of at most `max` characters without NUL (anything else: null, refused). */
+export const consoleLineArg = (v: unknown, max: number): string | null => (typeof v === "string" && v.length <= max && !v.includes("\0") ? v : null);
+
+/** A cursor position within `line`, or null. */
+export const cursorArg = (v: unknown, line: string): number | null => (typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= line.length ? v : null);
+
+/**
+ * The message comes from the app's own page: its window's top frame, never an embedded frame or another window. The
+ * Console's channels run commands, so they check this on top of the sandbox.
+ */
+export function fromAppPage(e: { sender: unknown; senderFrame?: unknown }, appContents: { mainFrame: unknown } | null | undefined): boolean {
+  return !!appContents && e.sender === appContents && !!e.senderFrame && e.senderFrame === appContents.mainFrame;
+}
+
 /** Dropped paths: the strings of an array (anything else: none). */
 // loop: NOT-WORTH — the dropped paths, once per drop
 export const pathsArg = (v: unknown): string[] => (Array.isArray(v) ? v.filter((p): p is string => typeof p === "string" && p.length > 0) : []);

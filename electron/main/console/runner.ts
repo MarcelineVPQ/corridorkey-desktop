@@ -1,0 +1,639 @@
+// The Console's runner (backlog row 95, docs/CONSOLE.md): every line the page sends is parsed here again with the shared
+// parser and checked here, whatever the page showed. Never a system shell: built-ins run in this process; `corridorkey`
+// runs as one fixed program with an argv (spawn, shell: false), never a command string.
+//
+// lifetime: at most ONE console job (a corridorkey run, or a `run` script) at a time; its child ends with the job
+// (Ctrl+C: SIGTERM, the CLI stops cleanly with 143; a second Ctrl+C or the app's quit after the grace: the process
+// group is killed). The CLI doesn't watch its parent (docs/CLI.md), so the app's quit always stops it (shutdown).
+import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import type { Dirent, Stats } from "node:fs";
+import { createInterface } from "node:readline";
+import { posix, win32 } from "node:path";
+import { naturalCompare } from "../media";
+import { parse, type Parsed, type ParseOptions } from "../../../src/shared/console/parse";
+import { EXIT_MEANINGS, fullName, type ConsoleArg, type Registry } from "../../../src/shared/console/registry";
+import type { ConsoleBlock, ConsoleEntry, ConsoleSession } from "../../../src/shared/types";
+import { complete } from "./complete";
+import type { Elevation } from "./elevation";
+import { commandHelp, findLines, overview } from "./help";
+import type { AuditLog, History } from "./logs";
+import { checkWrite, expandHome, resolveReal, type PathDeps } from "./paths";
+
+/** Lines a block keeps (the newest); a long render's log can't grow the page or the pushes without bound. */
+export const CONSOLE_LINES_KEPT = 2000;
+const LINE_CHARS = 4000;
+/** dir / ls rows (a plate folder can hold 100 000 frames). */
+export const LIST_MAX = 5000;
+/** A script (run) or job file read: at most this many bytes. */
+const FILE_MAX = 1024 * 1024;
+/** The quit's grace for a running corridorkey: it stops cleanly within it, else it is killed. */
+export const QUIT_GRACE_MS = 7000;
+/** The longest line the Console takes (the IPC check; a typed line is far shorter). */
+export const LINE_MAX = 8192;
+
+export type SpawnFn = (cmd: string, args: string[], opts: SpawnOptions) => ChildProcess;
+
+export interface ConsoleFs {
+  readdir: (p: string) => Promise<Dirent[]>;
+  stat: (p: string) => Promise<Stats>;
+  readFile: (p: string, maxBytes: number) => Promise<string>;
+  mkdir: (p: string) => Promise<void>;
+}
+
+/** What a sudo confirmation shows: the exact command and what it touches. */
+export interface ElevationRequest {
+  command: string;
+  targets: { path: string; files: number; bytes: number }[];
+}
+
+export interface ConsoleDeps {
+  registry: Registry;
+  paths: PathDeps;
+  fs: ConsoleFs;
+  /** the first folder (the results folder, else home) */
+  startDir: string;
+  /** the shipped corridorkey (engineFind.ts findCli), or null */
+  cli: () => string | null;
+  /** its environment (engine.ts rustEngineEnv + the app's models, runtime and TensorRT cache) */
+  cliEnv: () => NodeJS.ProcessEnv;
+  /** render's --temp when none is given: inside the app's cache (a chosen folder) */
+  cliTemp: () => string;
+  /** --models / --ort: only what the Engine page lists (a library is code: never one the page names freely) */
+  runtimeAllowed: (what: "models" | "ort", path: string) => boolean;
+  /** the folders the Console may write to */
+  writeRoots: () => string[];
+  /** take the graphics card for a job: null when taken, else why not (the queue runs) */
+  takeGpu: () => string | null;
+  releaseGpu: () => void;
+  /** the native confirmation (index.ts: dialog.showMessageBox); true: confirmed */
+  confirm: (req: ElevationRequest) => Promise<boolean>;
+  elevation: Elevation;
+  audit: AuditLog;
+  history: History;
+  /** a block changed (index.ts pushes it, throttled) */
+  changed: (block: ConsoleBlock) => void;
+  /** the session (folder, elevation, running) changed */
+  sessionChanged: () => void;
+  spawn?: SpawnFn;
+  /** the second Ctrl+C / the quit: the child's whole process group (tree on Windows) */
+  killTree?: (pid: number) => void;
+  now?: () => number;
+}
+
+interface Job {
+  block: ConsoleBlock;
+  child: ChildProcess | null;
+  cancels: number;
+}
+
+/** The CLI's progress as JSON events (docs/CLI.md "Progress"): the Console shows them itself. */
+const PROGRESS = ["--progress-format", "json"];
+
+export class Console {
+  private cwd: string;
+  private job: Job | null = null;
+  private nextId = 1;
+  private expiryTimer: NodeJS.Timeout | null = null;
+  private readonly spawnFn: SpawnFn;
+  private readonly now: () => number;
+  private readonly opts: ParseOptions;
+
+  constructor(private readonly d: ConsoleDeps) {
+    this.cwd = d.startDir;
+    this.spawnFn = d.spawn ?? nodeSpawn;
+    this.now = d.now ?? Date.now;
+    this.opts = { windows: d.paths.platform === "win32" };
+  }
+
+  session(): ConsoleSession {
+    return { cwd: this.cwd, elevatedUntil: this.d.elevation.expiresAt, running: this.job?.block.line ?? null, cliFound: this.d.cli() !== null };
+  }
+
+  /** Run a typed line. Resolves with its block once it is done, or (corridorkey, run) once it has started. */
+  async run(line: string): Promise<ConsoleBlock> {
+    void this.d.history.add(line);
+    // a job's block finishes later (its updates are pushed); a built-in's is finished here
+    return (await this.runLine(line, null)).block;
+  }
+
+  /** Ctrl+C: SIGTERM (the CLI stops after the frame it is on, cleanly, 143); again: the whole group at once. */
+  cancel(): void {
+    const job = this.job;
+    if (!job) return;
+    job.cancels++;
+    const pid = job.child?.pid;
+    if (job.cancels === 1) {
+      this.note(job.block, "info", job.child ? "Stopping after the current frame (Ctrl+C again stops it at once)…" : "Stopping the script after this command…");
+      // Windows has no SIGTERM for a console program: the tree is ended (the output stays safe: docs/CLI.md)
+      if (pid && this.d.paths.platform === "win32") this.killTree(pid);
+      else job.child?.kill("SIGTERM");
+    } else if (pid) {
+      this.note(job.block, "info", "Stopped at once.");
+      this.killTree(pid);
+    }
+  }
+
+  async complete(line: string, cursor: number) {
+    return complete(line, cursor, this.cwd, {
+      registry: this.d.registry,
+      platform: this.d.paths.platform,
+      home: this.d.paths.home,
+      readdir: this.d.fs.readdir,
+      isDir: async (p) => (await this.d.fs.stat(p).catch(() => null))?.isDirectory() ?? false,
+    });
+  }
+
+  history(query: string): string[] {
+    return this.d.history.search(query);
+  }
+
+  /** sudo -k, the window's blur, quit: elevation ends (and the audit log says why). */
+  dropElevation(reason: string): void {
+    if (!this.d.elevation.drop()) return;
+    void this.d.audit.append({ event: "dropped", reason });
+    this.clearExpiry();
+    this.d.sessionChanged();
+  }
+
+  /** The app quits: elevation dropped, a running corridorkey stopped (SIGTERM, then killed after `graceMs`). */
+  shutdown(graceMs = QUIT_GRACE_MS): Promise<void> {
+    this.dropElevation("the app quit");
+    const child = this.job?.child;
+    if (!child) {
+      // a script between two lines: it runs no further line
+      this.cancel();
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      // loop: NOT-WORTH — one wait at quit [bounded: graceMs, then the group is killed]
+      const timer = setTimeout(() => {
+        if (child.pid) this.killTree(child.pid);
+        resolve();
+      }, graceMs);
+      child.once("exit", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      this.cancel();
+    });
+  }
+
+  // --- execution ---
+
+  private block(line: string, parent: number | null): ConsoleBlock {
+    return {
+      id: this.nextId++,
+      line,
+      parent,
+      cwd: this.cwd,
+      argv: null,
+      elevated: false,
+      state: "running",
+      exitCode: null,
+      exitMeaning: null,
+      startedAt: this.now(),
+      finishedAt: null,
+      progress: null,
+      status: null,
+      lines: [],
+      linesDropped: 0,
+      entries: null,
+      errors: [],
+      clear: false,
+    };
+  }
+
+  private note(b: ConsoleBlock, kind: "out" | "err" | "info", text: string): void {
+    b.lines.push({ kind, text: text.length > LINE_CHARS ? text.slice(0, LINE_CHARS) + "…" : text });
+    if (b.lines.length > CONSOLE_LINES_KEPT) b.linesDropped += b.lines.splice(0, b.lines.length - CONSOLE_LINES_KEPT).length;
+    if (b.state === "running") this.d.changed(b);
+  }
+
+  private finish(b: ConsoleBlock, state: ConsoleBlock["state"], ...lines: string[]): ConsoleBlock {
+    // loop: NOT-WORTH — a few lines
+    for (const l of lines) this.note(b, state === "done" ? "out" : "err", l);
+    b.state = state;
+    b.finishedAt = this.now();
+    if (b.exitCode === null) b.exitCode = state === "done" ? 0 : null;
+    this.d.changed(b);
+    return b;
+  }
+
+  /** One line: parsed, checked, run. `done` settles when it has finished (a script waits on it). */
+  private async runLine(line: string, parent: number | null): Promise<{ block: ConsoleBlock; done: Promise<ConsoleBlock> }> {
+    const b = this.block(line, parent);
+    const now = (x: ConsoleBlock) => ({ block: x, done: Promise.resolve(x) });
+    const p = parse(line, this.d.registry, this.opts);
+    if (p.errors.length) {
+      b.errors = p.errors;
+      // loop: NOT-WORTH — a line's few mistakes
+      return now(this.finish(b, "refused", ...p.errors.map((e) => e.message)));
+    }
+    const cmd = p.command;
+    if (!cmd) return now(this.finish(b, "done"));
+    if (p.help) return now(this.finish(b, "done", ...(cmd.name === "help" && cmd.kind === "builtin" ? overview(this.d.registry) : commandHelp(this.d.registry, cmd))));
+    if (cmd.kind === "cli") return this.cli(b, p, parent !== null);
+    // loop: NOT-WORTH — the line's few options
+    const has = (id: string) => p.options.some((o) => o.arg.id === id);
+    // loop: NOT-WORTH — the line's few positionals
+    const pos = (id: string) => p.positionals.filter((x) => x.arg.id === id).map((x) => x.value);
+    switch (cmd.name) {
+      case "help": {
+        const name = pos("command")[0];
+        const c = name ? parse(name, this.d.registry, this.opts).command : null;
+        if (name && !c) return now(this.finish(b, "refused", `No command ${name}. help lists them.`));
+        return now(this.finish(b, "done", ...(c ? commandHelp(this.d.registry, c) : overview(this.d.registry))));
+      }
+      case "find":
+        return now(this.finish(b, "done", ...findLines(this.d.registry, pos("term"))));
+      case "pwd":
+        return now(this.finish(b, "done", this.cwd));
+      case "cd":
+        return now(await this.cd(b, pos("folder")[0]));
+      case "dir":
+        return now(await this.dir(b, pos("folder")[0]));
+      case "cls":
+        b.clear = true;
+        return now(this.finish(b, "done"));
+      case "history":
+        return now(await this.historyBlock(b, has("audit")));
+      case "sudo":
+        this.dropElevation("sudo -k");
+        return now(this.finish(b, "done", "Not elevated."));
+      case "run":
+        return this.script(b, pos("file")[0], parent !== null);
+    }
+    return now(this.finish(b, "refused", `${cmd.name} isn't a command this Console runs.`));
+  }
+
+  private async cd(b: ConsoleBlock, to: string | undefined): Promise<ConsoleBlock> {
+    let dir: string;
+    try {
+      dir = await resolveReal(to ?? this.d.paths.home, this.cwd, this.d.paths);
+      // loop: NOT-WORTH — one async stat per cd
+      if (!(await this.d.fs.stat(dir)).isDirectory()) return this.finish(b, "failed", `${dir} isn't a folder.`);
+    } catch (e) {
+      // error: SHOWN — the block says why
+      return this.finish(b, "failed", `Can't go to ${to}: ${(e as Error).message}`);
+    }
+    this.cwd = dir;
+    this.d.sessionChanged();
+    return this.finish(b, "done", dir);
+  }
+
+  private async dir(b: ConsoleBlock, folder: string | undefined): Promise<ConsoleBlock> {
+    const a = this.d.paths.platform === "win32" ? win32 : posix;
+    const dir = a.resolve(this.cwd, expandHome(folder ?? ".", this.d.paths));
+    let names: Dirent[];
+    try {
+      // loop: NOT-WORTH — one async readdir per dir / ls
+      names = await this.d.fs.readdir(dir);
+    } catch (e) {
+      // error: SHOWN — the block says why
+      return this.finish(b, "failed", `Can't list ${dir}: ${(e as Error).message}`);
+    }
+    // loop: NOT-WORTH — sorts one folder's names, per dir / ls
+    names.sort((x, y) => naturalCompare(x.name, y.name));
+    const entries: ConsoleEntry[] = [];
+    // loop: NOT-WORTH — one async stat per listed entry, at most LIST_MAX, per dir / ls
+    for (const n of names.slice(0, LIST_MAX)) {
+      const s = await this.d.fs.stat(a.join(dir, n.name)).catch(() => null);
+      entries.push({ name: n.name, folder: s?.isDirectory() ?? n.isDirectory(), bytes: s && !s.isDirectory() ? s.size : null, modified: s?.mtimeMs ?? null });
+    }
+    b.entries = entries;
+    // loop: NOT-WORTH — the listed entries
+    const files = entries.filter((e) => !e.folder);
+    // loop: NOT-WORTH — as above
+    const bytes = files.reduce((n, e) => n + (e.bytes ?? 0), 0);
+    const more = names.length - entries.length;
+    return this.finish(b, "done", `${dir}: ${files.length} files (${bytes} bytes), ${entries.length - files.length} folders${more > 0 ? `; ${more} more not listed` : ""}`);
+  }
+
+  private async historyBlock(b: ConsoleBlock, audit: boolean): Promise<ConsoleBlock> {
+    if (!audit) {
+      const lines = this.d.history.recent(50);
+      // loop: NOT-WORTH — ≤ 50 lines, once per history
+      return this.finish(b, "done", ...(lines.length ? lines.map((l, i) => `${String(i + 1).padStart(4)}  ${l}`) : ["No history yet."]));
+    }
+    const entries = await this.d.audit.tail(50);
+    // loop: NOT-WORTH — ≤ 50 entries
+    const text = entries.map((e) =>
+      [e.time, e.event, e.argv ? e.argv.join(" ") : "", e.exit !== undefined ? `exit ${e.exit}` : "", e.reason ?? "", e.targets?.length ? `targets: ${e.targets.join(", ")}` : ""]
+        .filter(Boolean)
+        .join("  "),
+    );
+    return this.finish(b, "done", ...(text.length ? text : ["Nothing elevated yet."]));
+  }
+
+  /** run <file.ckcmd>: each line through runLine (the same checks), in order, until one fails. */
+  private async script(b: ConsoleBlock, file: string, nested: boolean): Promise<{ block: ConsoleBlock; done: Promise<ConsoleBlock> }> {
+    const now = (x: ConsoleBlock) => ({ block: x, done: Promise.resolve(x) });
+    if (nested) return now(this.finish(b, "refused", "A script can't run another script."));
+    if (this.job) return now(this.finish(b, "refused", `Busy with ${this.job.block.line} (one command at a time; Ctrl+C stops it).`));
+    const a = this.d.paths.platform === "win32" ? win32 : posix;
+    const path = a.resolve(this.cwd, expandHome(file, this.d.paths));
+    let text: string;
+    try {
+      text = await this.d.fs.readFile(path, FILE_MAX);
+    } catch (e) {
+      // error: SHOWN — the block says why
+      return now(this.finish(b, "failed", `Can't read ${path}: ${(e as Error).message}`));
+    }
+    const job: Job = { block: b, child: null, cancels: 0 };
+    this.job = job;
+    this.d.sessionChanged();
+    const done = (async () => {
+      let failed: ConsoleBlock | null = null;
+      // loop: SERIAL-REQUIRED — a script's lines run one after another, each waiting for the last [bounded: the file's lines]
+      for (const [i, raw] of text.split(/\r?\n/).entries()) {
+        const line = raw.trim();
+        if (!line || line.startsWith("#")) continue;
+        if (job.cancels > 0) break;
+        this.note(b, "info", `${a.basename(path)}:${i + 1}  ${line}`);
+        const r = await this.runLine(line, b.id);
+        const end = await r.done;
+        if (end.state !== "done") {
+          failed = end;
+          this.note(b, "err", `stopped at line ${i + 1}: ${end.state}${end.exitCode !== null ? ` (exit ${end.exitCode})` : ""}`);
+          break;
+        }
+      }
+      this.job = null;
+      this.d.sessionChanged();
+      if (job.cancels > 0) return this.finish(b, "cancelled");
+      if (failed) {
+        b.exitCode = failed.exitCode;
+        return this.finish(b, "failed");
+      }
+      return this.finish(b, "done");
+    })();
+    return { block: b, done };
+  }
+
+  // --- corridorkey ---
+
+  private async cli(b: ConsoleBlock, p: Parsed, inScript: boolean): Promise<{ block: ConsoleBlock; done: Promise<ConsoleBlock> }> {
+    const now = (x: ConsoleBlock) => ({ block: x, done: Promise.resolve(x) });
+    const cmd = p.command!;
+    const bin = this.d.cli();
+    if (!bin) return now(this.finish(b, "refused", "The corridorkey command line isn't part of this copy of the app (it ships next to the engine, in resources/engine)."));
+    if (this.job && !(inScript && this.job.block.id === b.parent)) return now(this.finish(b, "refused", `Busy with ${this.job.block.line} (one command at a time; Ctrl+C stops it).`));
+
+    // the arguments, checked: written paths only into chosen folders (resolved: what was checked is what runs),
+    // the runtime only from the Engine page's lists, the job file's own output folders too
+    const argv: string[] = [cmd.name];
+    const positionals: string[] = [];
+    const abs = (v: string) => (this.d.paths.platform === "win32" ? win32 : posix).resolve(this.cwd, expandHome(v, this.d.paths));
+    const targets: string[] = [];
+    const refusals: string[] = [];
+    // loop: NOT-WORTH — the line's few options
+    const given = new Set(p.options.map((o) => o.arg.id));
+    const pathValue = async (a: ConsoleArg, v: string): Promise<string> => {
+      if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) return v; // ocio://… names a built-in config, not a file
+      if (a.writes) {
+        const w = await checkWrite(v, this.cwd, this.d.writeRoots(), this.d.paths);
+        if (!w.ok) refusals.push(`${a.long ? `--${a.long}` : a.id}: ${w.reason}`);
+        targets.push(w.path);
+        return w.path;
+      }
+      return expandHome(v, this.d.paths);
+    };
+    // loop: NOT-WORTH — the line's options, one async realpath per written path
+    for (const o of p.options) {
+      const flag = o.arg.long ? `--${o.arg.long}` : `-${o.arg.short}`;
+      if (o.value === null) {
+        argv.push(flag);
+        continue;
+      }
+      let v = o.arg.kind === "path" ? await pathValue(o.arg, o.value) : o.value;
+      if (o.arg.id === "models" || o.arg.id === "ort") {
+        v = abs(v);
+        if (!this.d.runtimeAllowed(o.arg.id, v))
+          refusals.push(`${flag}: the Console runs only the ${o.arg.id === "ort" ? "ONNX Runtime" : "model sets"} the Engine page lists (${v} isn't one; add it there first)`);
+      }
+      if (o.arg.id === "job") refusals.push(...(await this.jobFileRefusals(v, given, targets)));
+      argv.push(flag, v);
+    }
+    // loop: NOT-WORTH — the line's positionals (render's clip)
+    for (const x of p.positionals) positionals.push(x.arg.kind === "path" ? await pathValue(x.arg, x.value) : x.value);
+    // --progress-format json: progress as events (render, verify, prepare); render's temporary files in the app's cache
+    // loop: NOT-WORTH — a command's ~50 flags
+    if (cmd.args.some((a) => a.id === "progress-format")) argv.splice(1, 0, ...PROGRESS);
+    const temp = cmd.name === "render" && !given.has("temp") ? this.d.cliTemp() : null;
+    if (temp) argv.splice(1, 0, "--temp", temp);
+    // the clip after `--`: a name starting with - is never read as a flag
+    if (positionals.length) argv.push("--", ...positionals);
+    b.argv = argv;
+    if (refusals.length) return now(this.finish(b, "refused", ...refusals));
+
+    // destructive: only as sudo, and confirmed (or already elevated)
+    // loop: NOT-WORTH — the line's options
+    const destructive = p.options.filter((o) => o.arg.destructive);
+    // loop: NOT-WORTH — one or two flags
+    if (destructive.length && !p.sudo) return now(this.finish(b, "refused", `${destructive.map((o) => o.name).join(", ")} replaces files that are already there: run it as sudo ${b.line.trim()}`));
+    if (p.sudo && destructive.length) {
+      if (!this.d.elevation.active) {
+        const req: ElevationRequest = { command: `sudo ${fullName(this.d.registry, cmd)} ${argv.slice(1).join(" ")}`, targets: await this.measureTargets(targets) };
+        const ok = await this.d.confirm(req);
+        void this.d.audit.append({ event: ok ? "granted" : "refused", argv, targets });
+        if (!ok) return now(this.finish(b, "refused", "Not run: the confirmation was cancelled."));
+        this.d.elevation.grant();
+        this.armExpiry();
+      } else {
+        this.d.elevation.extend();
+        this.armExpiry();
+      }
+      b.elevated = true;
+      this.d.sessionChanged();
+    }
+    if (temp) {
+      try {
+        // loop: NOT-WORTH — one async mkdir per render
+        await this.d.fs.mkdir(temp);
+      } catch (e) {
+        // error: SHOWN — the block says why
+        return now(this.finish(b, "failed", `Can't make ${temp}: ${(e as Error).message}`));
+      }
+    }
+    // the dialog (and the folder) took time: another command may have started meanwhile; from here to the spawn
+    // nothing awaits, so the slot can't be taken twice
+    if (this.job && !(inScript && this.job.block.id === b.parent)) return now(this.finish(b, "refused", `Busy with ${this.job.block.line} (one command at a time).`));
+    const gpuRefusal = cmd.gpu ? this.d.takeGpu() : null;
+    if (gpuRefusal) return now(this.finish(b, "refused", gpuRefusal));
+    return this.spawnCli(b, bin, argv, cmd.gpu, inScript, targets);
+  }
+
+  /** A --job file names its own output and temporary folders: they are checked as -o and --temp are (flags win). */
+  private async jobFileRefusals(path: string, given: Set<string>, targets: string[]): Promise<string[]> {
+    let job: { output_dir?: unknown; temp_dir?: unknown };
+    try {
+      const abs = (this.d.paths.platform === "win32" ? win32 : posix).resolve(this.cwd, path);
+      job = JSON.parse(await this.d.fs.readFile(abs, FILE_MAX)) as typeof job;
+    } catch {
+      // error: SHOWN — corridorkey reads it too, and says what is wrong with it (exit 2 / 3)
+      return [];
+    }
+    const out: string[] = [];
+    const checks: [string, unknown, string][] = [
+      ["output", job?.output_dir, "output_dir"],
+      ["temp", job?.temp_dir, "temp_dir"],
+    ];
+    // loop: NOT-WORTH — two fields, one async realpath each
+    for (const [flag, v, key] of checks) {
+      if (given.has(flag) || typeof v !== "string" || !v) continue;
+      const w = await checkWrite(v, this.cwd, this.d.writeRoots(), this.d.paths);
+      if (!w.ok) out.push(`--job's ${key}: ${w.reason}`);
+      targets.push(w.path);
+    }
+    return out;
+  }
+
+  /** The dialog's numbers: what each written target holds now (files and bytes; a frame pattern: its folder's frames). */
+  private async measureTargets(paths: string[]): Promise<ElevationRequest["targets"]> {
+    const a = this.d.paths.platform === "win32" ? win32 : posix;
+    const out: ElevationRequest["targets"] = [];
+    // loop: NOT-WORTH — one or two targets per elevation
+    for (const path of paths) {
+      const s = await this.d.fs.stat(path).catch(() => null);
+      if (s?.isFile()) out.push({ path, files: 1, bytes: s.size });
+      else if (s?.isDirectory()) out.push({ path, ...(await this.walk(path, () => true)) });
+      else {
+        // key.####.exr / key.%04d.exr / key.$F4.exr: its frames (and key_alpha.1001.exr…) in the parent folder
+        const base = a.basename(path);
+        const m = /(#+|%0?\d*d|\$F\d*)/.exec(base);
+        if (!m) {
+          out.push({ path, files: 0, bytes: 0 });
+          continue;
+        }
+        const esc = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const re = new RegExp(`^${esc(base.slice(0, m.index).replace(/[._]+$/, ""))}.*\\d+${esc(base.slice(m.index + m[0].length))}$`);
+        out.push({ path, ...(await this.walk(a.dirname(path), (n) => re.test(n), false)) });
+      }
+    }
+    return out;
+  }
+
+  private async walk(dir: string, keep: (name: string) => boolean, deep = true, budget = { left: 200_000 }): Promise<{ files: number; bytes: number }> {
+    const a = this.d.paths.platform === "win32" ? win32 : posix;
+    let files = 0;
+    let bytes = 0;
+    let names: Dirent[];
+    try {
+      // loop: NOT-WORTH — one async readdir per folder, once per sudo confirmation [bounded: 200 000 entries]
+      names = await this.d.fs.readdir(dir);
+    } catch {
+      // error: NOT-WORTH — unreadable: counted as empty
+      return { files, bytes };
+    }
+    // loop: NOT-WORTH — one async stat per entry, once per sudo confirmation [bounded: 200 000 entries]
+    for (const n of names) {
+      if (budget.left-- <= 0) break;
+      if (n.isDirectory()) {
+        if (!deep) continue;
+        const sub = await this.walk(a.join(dir, n.name), keep, deep, budget);
+        files += sub.files;
+        bytes += sub.bytes;
+      } else if (keep(n.name)) {
+        files++;
+        bytes += (await this.d.fs.stat(a.join(dir, n.name)).catch(() => null))?.size ?? 0;
+      }
+    }
+    return { files, bytes };
+  }
+
+  private spawnCli(b: ConsoleBlock, bin: string, argv: string[], gpu: boolean, inScript: boolean, targets: string[]): { block: ConsoleBlock; done: Promise<ConsoleBlock> } {
+    const win = this.d.paths.platform === "win32";
+    // detached: its own process group, so a second Ctrl+C also ends the ffmpeg writers it started (Linux, macOS; on
+    // Windows detached would open a console window: the tree is ended with taskkill instead)
+    const child = this.spawnFn(bin, argv, { cwd: this.cwd, env: this.d.cliEnv(), shell: false, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, detached: !win });
+    const own = !inScript;
+    const job: Job = own ? { block: b, child, cancels: 0 } : this.job!;
+    if (own) this.job = job;
+    else job.child = child;
+    if (b.elevated) void this.d.audit.append({ event: "run", argv, targets });
+    this.d.sessionChanged();
+    this.d.changed(b);
+    let failMessage: string | null = null;
+    // lifetime: OK — both readers end with the child's streams
+    createInterface({ input: child.stdout! }).on("line", (l) => {
+      const ev = jsonEvent(l);
+      if (!ev) return this.note(b, "out", l);
+      if (ev.event === "progress") b.progress = { percent: num(ev.percent), done: num(ev.done), total: num(ev.total) };
+      else if (ev.event === "status") b.status = String(ev.text ?? "");
+      else if (ev.event === "fail") failMessage = `failed: ${String(ev.message ?? "")} (${String(ev.reason ?? "")})`;
+      else return this.note(b, "out", l);
+      this.d.changed(b);
+    });
+    createInterface({ input: child.stderr! }).on("line", (l) => this.note(b, "err", l));
+    return {
+      block: b,
+      done: new Promise<ConsoleBlock>((resolve) => {
+        let ended = false;
+        const end = (code: number | null, signal: NodeJS.Signals | null, err?: Error) => {
+          if (ended) return;
+          ended = true;
+          if (gpu) this.d.releaseGpu();
+          if (own) this.job = null;
+          else job.child = null;
+          b.exitCode = code;
+          b.exitMeaning = code !== null ? (EXIT_MEANINGS[code] ?? null) : null;
+          if (failMessage) this.note(b, "err", failMessage);
+          if (err) this.note(b, "err", `corridorkey couldn't start: ${err.message}`);
+          else if (code === null) this.note(b, "err", `ended by ${signal ?? "a signal"}`);
+          // stopped by Ctrl+C: 143 (130) on Linux and macOS; Windows' taskkill gives another code
+          const cancelled = job.cancels > 0 && code !== 0;
+          if (b.elevated) void this.d.audit.append({ event: "exit", argv, exit: code });
+          this.d.sessionChanged();
+          resolve(this.finish(b, code === 0 ? "done" : cancelled ? "cancelled" : "failed"));
+        };
+        child.on("error", (e) => end(null, null, e));
+        child.on("close", (code, signal) => end(code, signal));
+      }),
+    };
+  }
+
+  private killTree(pid: number): void {
+    if (this.d.killTree) return this.d.killTree(pid);
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      // error: NOT-WORTH — the group is already gone; the exit handler reports it
+    }
+  }
+
+  /** The page's badge drops when the elevation runs out: one timer, re-armed by each grant or extension. */
+  private armExpiry(): void {
+    this.clearExpiry();
+    const at = this.d.elevation.expiresAt;
+    if (at === null) return;
+    // lifetime: OK — one-shot, cleared by the next grant, extension or drop
+    // loop: NOT-WORTH — one timer per elevation change
+    this.expiryTimer = setTimeout(() => {
+      this.expiryTimer = null;
+      if (!this.d.elevation.active) {
+        void this.d.audit.append({ event: "dropped", reason: "timed out" });
+        this.d.sessionChanged();
+      }
+    }, at - this.now());
+    this.expiryTimer.unref?.();
+  }
+
+  private clearExpiry(): void {
+    if (this.expiryTimer) clearTimeout(this.expiryTimer);
+    this.expiryTimer = null;
+  }
+}
+
+const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+
+/** A JSON progress event line ({"event": …}), else null (the CLI's other stdout lines are shown as they are). */
+function jsonEvent(l: string): Record<string, unknown> | null {
+  if (!l.startsWith("{")) return null;
+  try {
+    const v = JSON.parse(l) as unknown;
+    return v && typeof v === "object" && typeof (v as { event?: unknown }).event === "string" ? (v as Record<string, unknown>) : null;
+  } catch {
+    // error: NOT-WORTH — not an event: shown as a line
+    return null;
+  }
+}

@@ -526,6 +526,80 @@ export interface AppState {
   // this system's file names, for the Engine page's hints (electron/main/platform.ts)
   // and the home folder, shown as ~ in shortened paths (src/ui/paths.ts)
   system: { engineBin: string; ortLib: string; platform: string; home: string };
+  // the Console's session (electron/main/console; its output blocks come on their own channel: onConsoleBlocks)
+  console: ConsoleSession;
+}
+
+// The Console (backlog row 95, docs/CONSOLE.md). The main process runs every command; the page shows these.
+export interface ConsoleSession {
+  // the Console's current folder (cd)
+  cwd: string;
+  // elevated (sudo) until this time (ms since the epoch); null: not elevated
+  elevatedUntil: number | null;
+  // the line of the command running now (one at a time), or null
+  running: string | null;
+  // the corridorkey command line ships with this copy (render, verify, prepare, info need it)
+  cliFound: boolean;
+}
+
+export interface ConsoleLine {
+  text: string;
+  // out: the command's output; err: its error stream or a refusal; info: the Console's own notes
+  kind: "out" | "err" | "info";
+}
+
+// a dir / ls row
+export interface ConsoleEntry {
+  name: string;
+  folder: boolean;
+  // null: unreadable (a dangling link)
+  bytes: number | null;
+  modified: number | null;
+}
+
+// one command and everything it printed (Warp-style output block)
+export interface ConsoleBlock {
+  id: number;
+  // the line as typed
+  line: string;
+  // the script block (run file.ckcmd) this line ran from, or null
+  parent: number | null;
+  cwd: string;
+  // corridorkey's arguments as run (paths resolved, --progress-format json added), or null for a built-in
+  argv: string[] | null;
+  elevated: boolean;
+  state: "running" | "done" | "failed" | "refused" | "cancelled";
+  exitCode: number | null;
+  // the exit code's meaning (docs/CLI.md "Exit codes")
+  exitMeaning: string | null;
+  startedAt: number;
+  finishedAt: number | null;
+  // from the CLI's own JSON events: frames handed to the writers, never an estimate
+  progress: { percent: number; done: number; total: number } | null;
+  // the CLI's phase (loading the models, keying: window 3/10 done…)
+  status: string | null;
+  lines: ConsoleLine[];
+  // lines dropped at the front (CONSOLE_LINES_KEPT)
+  linesDropped: number;
+  entries: ConsoleEntry[] | null;
+  // a refused line's mistakes, with their ranges in `line`
+  errors: { message: string; start: number; end: number }[];
+  // cls / clear: the page clears the screen
+  clear: boolean;
+}
+
+export interface ConsoleCompletionItem {
+  // the text that replaces start..end (quoted as needed)
+  insert: string;
+  label: string;
+  kind: "command" | "flag" | "value" | "file" | "folder";
+  help: string;
+}
+
+export interface ConsoleCompletion {
+  start: number;
+  end: number;
+  items: ConsoleCompletionItem[];
 }
 
 // the hint file a dialog picks: the first-frame matte image, or the hint video (or frame folder)
@@ -583,4 +657,16 @@ export interface CorridorKeyApi {
   restartToUpdate(): Promise<void>;
   backToStable(): Promise<void>;
   setVisible(visible: boolean): void;
+  // the Console (docs/CONSOLE.md): run a typed line (the main process parses and checks it; null: refused as input)
+  consoleRun(line: string): Promise<ConsoleBlock | null>;
+  // Ctrl+C: the running command stops cleanly; a second one ends it at once
+  consoleCancel(): Promise<void>;
+  // Tab: completions for the word at the cursor
+  consoleComplete(line: string, cursor: number): Promise<ConsoleCompletion>;
+  // Ctrl+R: earlier lines containing the query, newest first
+  consoleHistory(query: string): Promise<string[]>;
+  // sudo -k from the panel: elevation dropped now
+  consoleElevationDrop(): Promise<void>;
+  // block updates (a running command's output and progress), at most 10 a second, while the window is shown
+  onConsoleBlocks(listener: (blocks: ConsoleBlock[]) => void): () => void;
 }

@@ -278,6 +278,10 @@ export function parse(line: string, reg: Registry, opts: ParseOptions): Parsed {
         const names = cmd.args.filter((a) => !a.positional && !a.refused).flatMap((a) => [a.long ? `--${a.long}` : null, a.short ? `-${a.short}` : null].filter((n): n is string => !!n));
         const s = suggest(name, names);
         fail(`${fullName(reg, cmd)} has no option ${name}${s ? ` (did you mean ${s}?)` : ""}`, w.start, flagEnd);
+        // the flag it is likely a typo of takes a value: the next word is that value (one mistake, one error)
+        // loop: HOT-PATH-OK — a command's ~50 flags, once per unknown flag
+        const meant = s && cmd.args.find((a) => `--${a.long}` === s || `-${a.short}` === s);
+        if (meant && meant.kind !== "switch" && inline === null && words[i] && !looksLikeFlag(words[i]) && !isHelp(words[i])) i++;
         continue;
       }
       const refusal = arg.refused ? `${flagName(arg)}: ${arg.refused}` : seen.has(arg.id) && !arg.multiple ? `${flagName(arg)} is given twice` : null;

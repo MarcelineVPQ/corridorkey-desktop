@@ -159,5 +159,6 @@ export const appState = (over: Partial<AppState> = {}): AppState => ({
   desktopPalette: null,
   update: updateState(),
   system: { engineBin: "corridorkey-engine", ortLib: "libonnxruntime.so", platform: "linux", home: "/home/user" },
+  console: { cwd: "/home/user", elevatedUntil: null, running: null, cliFound: true },
   ...over,
 });
