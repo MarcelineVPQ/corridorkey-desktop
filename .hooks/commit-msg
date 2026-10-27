@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# The docs-touch gate on the commit being made (senior review 2026-10-27 S6): its staged files and this message.
+# A CLI change (args.rs, cliSpec.json) needs docs/CLI.md, docs/wiki/Command-Line.md and docs/GUIDE.md staged, or a
+# line `docs: none-needed — why` in the message. Needs node only, no node_modules. Skip once with --no-verify.
+set -euo pipefail
+msg="$(realpath "$1")"
+cd "$(git rev-parse --show-toplevel)"
+exec node tools/check_docs_touch.mjs --staged "$msg"

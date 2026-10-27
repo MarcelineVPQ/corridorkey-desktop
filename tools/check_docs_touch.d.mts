@@ -9,4 +9,5 @@ export const CLI_SOURCES: string[];
 export const CLI_DOCS: string[];
 export function parseLog(text: string): Commit[];
 export function checkCommits(commits: Commit[]): string[];
-export function checkAll(app?: string): string[];
+export function checkAll(app?: string, range?: string): string[];
+export function checkStaged(msgFile: string, app?: string): string[];
