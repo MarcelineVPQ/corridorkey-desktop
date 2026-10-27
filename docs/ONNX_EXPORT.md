@@ -448,6 +448,90 @@ The app's setup on macOS downloads it (electron/main/install.ts `COREML`, pinned
 `.partial-2.0.0-onnx.4-coreml`, then moves the files into the model set's folder, `coreml.json` last; a set
 installed without it gets it the next time the setup runs.
 
+## onnx.5: one masked attention (candidate `2.0.0-onnx.5`, built 2026-10-27, not measured)
+
+Why: AMD's MIGraphX can't load stage 1 or stage 2 of onnx.4 (docs/AMD.md on branch `amd`): ONNX `RMSNormalization`
+is unknown to it, and onnx_patches v2 splits every Swin block into four region groups whose sizes follow the input
+size, so at every size some group is empty (MIGraphX reads a 0 in a Reshape target as "copy"). Apple's Neural Engine
+compiler overflows its stack scheduling stage 2's attention branches (four per Swin block in v2). `onnx5_patches.py`
+replaces three things at export time, on top of v2; Corridor's code and weights are unchanged.
+
+- **Stage 2: one masked attention per Swin block.** The standard Swin form: windows of the padded, rolled grid, one
+  attention over all of them with an additive mask (0 where query and key share a region, -inf elsewhere). The
+  labels are upstream's (`_shifted_region_ids_2d`: slices (0, -w), (-w, -s), (-s, None) of the padded pre-shift grid,
+  padding its own region, whose queries are cropped after). The mask is (B·windows, 1, 256, 256): 5.2 MB per frame at
+  HD (40 windows), 17.7 MB at 4K (135), one per block shape and shift, shared by the blocks that have it. Attention
+  nodes 30 → 12. A mask turns CUDA flash attention off: MHA then uses memory-efficient attention (speed: test request).
+- **Stage 1: mask-free regions, gathered.** Stage 1 attends over 256·T tokens per window, T up to 80 in the engine;
+  a mask would be (windows, N, N) with N = 256·T, e.g. 40 × 20480² values at 1920×1152, T=80, so the single masked
+  form isn't possible there. Stage 1 keeps v2's exact regions (full windows, halves, quarters), but takes them
+  straight from the token grid with **one Gather per q / k / v** (the index includes the window partition and the
+  region split), with **one zero region appended to every group**, so no tensor is ever empty at any size, runs four
+  plain attentions and puts the result back with **one Gather**. The indices are built from broadcast ranges and
+  compares (no division), once per block shape and shift (four ScatterElements in the whole network).
+- **RMSNorm in plain ops.** torch's own `rms_norm` composite (fp32 inside, back to the input type, times the weight)
+  written as Pow / ReduceMean / Add / Sqrt / Div / Cast / Mul, the pattern ONNX Runtime fuses back into one
+  SimplifiedLayerNormalization at load; `LayerNorm2d` reduces over the channel axis in place (no permute pair).
+- **`to_mha.py`** turns a masked `Attention` into MHA with the mask as `attention_bias`, and drops Transpose pairs
+  that undo each other (128 pairs in stage 1, 27 in C-RADIO). `to_trt.py`'s plain form adds the mask before the
+  softmax and accepts MHA inputs whose pair was dropped.
+- **C-RADIO fp16 with fp16 weights (BACKLOG row 152).** Exported as before (fp16 autocast), then `fold_casts.py`
+  turns its 109 weight casts into fp16 initializers: 1,724,414,688 → 900,504,288 bytes; fp16 initializers
+  0.768 GiB, fp32 0.071 GiB (norms, position grid). Same inputs, outputs and op types; ONNX Runtime's optimised
+  graph (Core ML probe below) has 933 nodes for both files. ORT folded those casts at load before, so the card holds
+  the same fp16 weights. The TensorRT set's C-RADIO keeps starting from onnx.4's file (`CK_TRT_CRADIO_FROM`): its
+  fp32 islands need the fp32 weights.
+
+Inputs, outputs, names, dtypes and dynamic axes are unchanged (checked on all four stage files), so the engine needs
+no change. Set download (the five fp16 files): 3,302,681,217 → 2,478,578,104 bytes.
+
+**Region maps, checked (index arithmetic only, no model):** for 280 grid / shift / batch cases (1-5 windows per
+axis, with and without the 8-token padding) every real token's attention set from the gather maps and from the
+stage-2 mask equals upstream's region labels; the back map inverts the forward map; every group holds ≥ 1 region.
+A mutated shift fails the check.
+
+**Static comparison** (`2.0.0-onnx.4` → `2.0.0-onnx.5`; layout = Reshape, Transpose, Slice, Concat, Pad, Expand,
+Tile, Squeeze, Unsqueeze, Gather, Split, Flatten, DepthToSpace):
+
+| file | nodes | layout ops | Reshape | Transpose | Slice | Concat | attention | RMSNormalization |
+|---|---|---|---|---|---|---|---|---|
+| stage 1 fp16 | 4322 → 4550 | 2911 → **2243** | 925 → 753 | 608 → 328 | 541 → 361 | 403 → 252 | 48 → 48 | 111 → 0 |
+| stage 1 fp32 | 4100 → 4182 | 2772 → **2117** | 912 → 753 | 482 → 202 | 541 → 361 | 403 → 252 | 48 → 48 | 111 → 0 |
+| stage 2 fp16 | 2377 → 2039 | 1686 → **1024** | 531 → 247 | 366 → 202 | 341 → 205 | 226 → 121 | 30 → 12 | 50 → 0 |
+| stage 2 fp32 | 2268 → 1862 | 1655 → **963** | 530 → 247 | 305 → 141 | 341 → 205 | 257 → 121 | 30 → 12 | 50 → 0 |
+
+The node count of stage 1 grows by the norms written out (111 × 5 ops, fused again by ORT at load). Stage 1's
+remaining layout ops are outside the windowed attention (CSwin / full blocks, the rolls, the DepthwiseSwiGLU
+convolutions): not touched here.
+
+**MIGraphX 2.18 parser** (`tools/migraphx_ops.py`, parsing only, at 384×256, 1280×1152, 1920×1152 and 3840×2176,
+4 frames): the TensorRT-form files (plain attention; what `migraphx_patch.py` starts from) parse for **all five
+networks at all four sizes**, without the RMSNorm patch (onnx.4: stage 1 and 2 refused). In the plain fp16 set
+stage 1 parses at all sizes; stage 2 doesn't: MIGraphX's MultiHeadAttention parser wants `attention_bias` with one
+row per head (ours broadcasts one mask over the heads), so AMD keeps using the TensorRT-form files.
+
+**ORT Core ML partitioner** (`coreml/ep_probe.py`, the Linux ORT 1.31 build with the Core ML EP, ML Program, session
+creation only, the dynamic files with their sizes fixed to 1152×1280, T=4; no `fold.py`, so these are not the Core
+ML set's numbers, only old against new on equal terms). Core ML partitions / nodes left on the CPU:
+
+| file | onnx.4 | onnx.5 |
+|---|---|---|
+| stage 1 fp16 | 210 / 1163 | 113 / 590 |
+| stage 1 TensorRT form | 190 / 919 | 93 / 346 |
+| stage 2 fp16 | 101 / 726 | 49 / 164 |
+| stage 2 TensorRT form | 91 / 576 | 39 / 100 |
+| C-RADIO fp16 | 29 / 138 | 29 / 138 |
+
+Not measured yet (test requests, `onnx5_parity.sh`): parity with onnx.4 and with upstream, speed and memory on
+CUDA / TensorRT / CPU, whether Apple's Neural Engine now compiles stage 2, and a MIGraphX run on an AMD card.
+
+```
+cd engine-rs/export
+CK_ONNX_VERSION=2.0.0-onnx.5 CK_PATCH=--onnx5 CK_NEW_PIECES="stage1 stage2 cradio:fp16" CK_FOLD_CRADIO=1 \
+  CK_REUSE_FROM=<onnx.4 files incl. fp32> CK_MODELS_DIR=OUT ./build_models.sh       # ~6 min CPU, peak 7 GB
+./onnx5_parity.sh torch|net|cuda|engine|cpu ONNX4_SET ONNX5_SET OUT                 # the test requests (not run)
+```
+
 ## Test clips
 
 Procedural (`make_clip.py`), so they carry no rights and come with a ground-truth alpha. Each has
@@ -502,7 +586,7 @@ The ORT 1.31 GPU wheel targets CUDA 13 and needs a driver that supports it (this
 4. Per-session arenas: the five sessions don't share GPU memory, so peaks may add up. The engine
    can run them one after another as upstream does.
 5. Torch-free host pipeline: resize kernels, asinh/sRGB and Hann blending need their own parity test.
-6. Native fp16 C-RADIO (fp32 weights today, 1.72 GB).
+6. Native fp16 C-RADIO (fp32 weights today, 1.72 GB): fp16 weights in the onnx.5 candidate (0.90 GB), not measured.
 7. TensorRT: the TensorRT set above (MHA has no TensorRT plugin; the set uses plain attention). Some maxima
    under TensorRT are above CUDA fp16's (MoGe 0.086 vs 0.047, C-RADIO 0.146 vs 0.092); the means are below.
 8. A side of 128 px: stage 1's reflect/replicate branch (`blocks.py`) is fixed to reflect by the export, so the

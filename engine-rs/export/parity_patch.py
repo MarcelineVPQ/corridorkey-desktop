@@ -1,6 +1,7 @@
 """Check onnx_patches against the unpatched PyTorch model (fp32, CPU).
 
-usage: parity_patch.py HxWxT [HxWxT ...]   (pixel sizes, multiples of 128)
+usage: parity_patch.py [--onnx5] HxWxT [HxWxT ...]   (pixel sizes, multiples of 128)
+--onnx5: check onnx5_patches (set 2.0.0-onnx.5) instead of onnx_patches v2.
 Pick sizes whose /16 grid covers 1, 2 and 3+ windows per axis, with and
 without the 8-token padding (grid % 16 == 8), e.g. 256x384x2 384x640x2 768x1280x2.
 """
@@ -9,8 +10,9 @@ import torch
 from common import load_cpu_model
 import export as ex
 
+ONNX5 = "--onnx5" in sys.argv
 # loop: NOT-WORTH — the few sizes given
-sizes = [tuple(int(v) for v in a.split("x")) for a in sys.argv[1:]]
+sizes = [tuple(int(v) for v in a.split("x")) for a in sys.argv[1:] if a != "--onnx5"]
 model = load_cpu_model()
 res = {}
 # loop: SERIAL-REQUIRED — one size at a time, each a CPU forward (memory)
@@ -25,7 +27,8 @@ for (H, W, T) in sizes:
 from moge.model.dinov2.models import vision_transformer as _vt
 _orig_ipe = _vt.DinoVisionTransformer.interpolate_pos_encoding
 import onnx_patches
-onnx_patches.apply()
+import onnx5_patches
+(onnx5_patches if ONNX5 else onnx_patches).apply()
 # loop: SERIAL-REQUIRED — the recorded runs, one CPU forward at a time
 for (piece, H, W, T), (mod, args, ref) in res.items():
     with torch.no_grad():

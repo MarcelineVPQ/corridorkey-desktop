@@ -16,9 +16,11 @@ graphs). `MultiHeadAttention` has fused kernels: flash attention on the CPU EP
 at S=8192, 8 heads: Attention-23 peak RSS 2.31 GB (fp32) / 5.48 GB (fp16),
 MHA 0.20 / 0.23 GB.
 
-Only mask-free, non-causal, default-scale 4D nodes (Q/K/V = (B, heads, S, d)
-with static heads and d) are rewritten; anything else is left alone and
-reported. Each node becomes
+Only non-causal, default-scale 4D nodes (Q/K/V = (B, heads, S, d) with static
+heads and d), mask-free or with an additive float mask (set 2.0.0-onnx.5's
+stage-2 Swin mask; it becomes MHA's attention_bias), are rewritten; anything
+else is left alone and reported. A mask turns CUDA flash attention off (MHA
+then uses memory-efficient attention). Each node becomes
   Transpose(0,2,1,3) -> Reshape(0,0,heads*d)  for Q, K, V
   MultiHeadAttention(num_heads=heads)
   Reshape(0,0,heads,d) -> Transpose(0,2,1,3)  back to the original output.
@@ -37,6 +39,11 @@ def _shape(vi, name):
         return None
     # loop: NOT-WORTH — one value's few dims
     return [d.dim_param or d.dim_value for d in v.type.tensor_type.shape.dim]
+
+
+def vi_type(vi, name):
+    v = vi.get(name)
+    return v.type.tensor_type.elem_type if v is not None else None
 
 
 def convert(model):
@@ -59,9 +66,12 @@ def convert(model):
     for n in g.node:
         # loop: NOT-WORTH — one node's few attributes
         attrs = {a.name: helper.get_attribute_value(a) for a in n.attribute}
+        # Q, K, V and an optional additive float mask (B or 1, 1 or heads, Sq, Skv): MHA's attention_bias
+        mask = n.input[3] if len(n.input) == 4 and n.input[3] else None
         ok = (n.op_type == "Attention" and n.domain in ("", "ai.onnx")
-              # loop: NOT-WORTH — one node's three inputs
-              and len([i for i in n.input if i]) == 3 and len(n.input) == 3
+              # loop: NOT-WORTH — one node's few inputs
+              and all(n.input[:3]) and len(n.input) == (4 if mask else 3)
+              and (mask is None or vi_type(vi, mask) in (onnx.TensorProto.FLOAT, onnx.TensorProto.FLOAT16))
               # loop: NOT-WORTH — one node's few outputs
               and len([o for o in n.output if o]) == 1
               and attrs.get("is_causal", 0) == 0 and "scale" not in attrs
@@ -81,12 +91,14 @@ def convert(model):
         p = f"{n.name or 'attn'}_mha{n_conv}"
         flat = []
         # loop: NOT-WORTH — one Attention node's three inputs
-        for j, x in enumerate(n.input):
+        for j, x in enumerate(n.input[:3]):
             t, r = f"{p}_t{j}", f"{p}_r{j}"
             new_nodes.append(helper.make_node("Transpose", [x], [t], perm=[0, 2, 1, 3], name=t))
             new_nodes.append(helper.make_node("Reshape", [t, const([0, 0, heads * d])], [r], name=r))
             flat.append(r)
         o3, o4 = f"{p}_o3", f"{p}_o4"
+        if mask:
+            flat += ["", "", mask]  # bias, key_padding_mask unused; attention_bias = the mask
         new_nodes.append(helper.make_node("MultiHeadAttention", flat, [o3], domain="com.microsoft",
                                           num_heads=heads, name=f"{p}"))
         new_nodes.append(helper.make_node("Reshape", [o3, const([0, 0, heads, d])], [o4], name=o4))
@@ -99,6 +111,48 @@ def convert(model):
     if not any(o.domain == "com.microsoft" for o in model.opset_import):
         model.opset_import.append(helper.make_opsetid("com.microsoft", 1))
     return n_conv, skipped
+
+
+def cancel_transposes(model):
+    """Drop Transpose pairs that undo each other (perm composes to the identity), e.g. the exporter's
+    (B,S,h,d)->(B,h,S,d) in front of an attention and convert()'s way back in front of the MHA. Exact (data
+    movement only); only pairs whose first Transpose feeds the second alone. Returns the pairs dropped."""
+    g = model.graph
+    # loop: NOT-WORTH — one pass over the nodes' outputs, offline
+    prod = {o: n for n in g.node for o in n.output}
+    uses = {}
+    # loop: NOT-WORTH — one pass over the nodes' inputs, offline
+    for n in g.node:
+        # loop: NOT-WORTH — one node's few inputs
+        for i in n.input:
+            uses[i] = uses.get(i, 0) + 1
+    # loop: NOT-WORTH — the graph's few outputs
+    outs = {o.name for o in g.output}
+    # loop: NOT-WORTH — one node's few attributes
+    perm = lambda n: [a.ints for a in n.attribute if a.name == "perm"][0]  # noqa: E731
+    rename, drop = {}, set()
+    # loop: NOT-WORTH — one pass over the graph's nodes, offline
+    for n in g.node:
+        t1 = prod.get(n.input[0]) if n.op_type == "Transpose" else None
+        if (t1 is None or t1.op_type != "Transpose" or t1.name in drop or uses.get(t1.output[0]) != 1
+                or n.output[0] in outs or t1.output[0] in outs):
+            continue
+        p1, p2 = perm(t1), perm(n)
+        # loop: NOT-WORTH — one permutation's ≤ 8 axes
+        if len(p1) == len(p2) and all(p1[p2[k]] == k for k in range(len(p2))):
+            rename[n.output[0]] = rename.get(t1.input[0], t1.input[0])
+            drop.update([t1.name, n.name])
+    # loop: NOT-WORTH — one pass over the graph's nodes, offline
+    keep = [n for n in g.node if n.name not in drop]
+    # loop: NOT-WORTH — one pass over the kept nodes, offline
+    for n in keep:
+        # loop: NOT-WORTH — one node's few inputs
+        for j, i in enumerate(n.input):
+            if i in rename:
+                n.input[j] = rename[i]
+    del g.node[:]
+    g.node.extend(keep)
+    return len(drop) // 2
 
 
 DIM_NAMES = {
@@ -137,6 +191,7 @@ def main():
     src, dst = Path(sys.argv[1]), Path(sys.argv[2])
     m = onnx.load(str(src), load_external_data=True)
     n, skipped = convert(m)
+    print(f"TO_MHA transpose pairs cancelled: {cancel_transposes(m)}")
     if len(sys.argv) > 3:
         print("TO_MHA dims", rename_dims(m, sys.argv[3]))
     # Drop the exporter's intermediate value_info. With it, ORT's memory-reuse
