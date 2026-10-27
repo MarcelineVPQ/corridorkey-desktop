@@ -144,7 +144,7 @@ impl RunDirs {
                 Err(e) => return Err(format!("can't make the temporary folder {}: {e}", temp.display())),
                 Ok(()) => dirs.dirs.push(temp.clone()),
             }
-            // loop: NOT-WORTH — two folders
+            // loop: NOT-WORTH — two folders [bounded: two lock files, once per run]
             for d in [&staging, &temp] {
                 let f = File::create(d.join(LOCK)).map_err(|e| format!("can't make {}: {e}", d.join(LOCK).display()))?;
                 // a filesystem without locks: the sweep then goes by the PID and the age alone

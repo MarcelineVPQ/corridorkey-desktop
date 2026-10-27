@@ -444,6 +444,7 @@ fn rename_retry(from: &Path, to: &Path) -> std::io::Result<()> {
         if std::fs::rename(from, to).is_ok() {
             return Ok(());
         }
+        // loop: SERIAL-REQUIRED — the back-off between tries [bounded: 50, 150, 450 ms]
         std::thread::sleep(wait);
         wait *= 3;
     }
