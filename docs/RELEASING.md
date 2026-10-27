@@ -84,6 +84,8 @@ spent 29 minutes waiting on a package mirror).
 1. Set the version (package.json and the lock together):
    `npx -y npm@10.9.2 version X.Y.Z-dev.N --no-git-tag-version` (Development) or `… X.Y.Z …` (Stable).
    Add its `## X.Y.Z-dev.N` section to `CHANGELOG.md` (the release notes are that section). Commit on `main`.
+   Publish the wiki if `docs/wiki/` changed since it was last published (The wiki, below): the release refuses a
+   published wiki that differs.
 2. `tools/release.sh`. It checks the version shape (`X.Y.Z` = Stable, `X.Y.Z-dev.N` = Development), the lock, a
    clean `main` in step with GitHub, the CHANGELOG section and the signing key; runs `npm run check` and
    `npm run dist:linux` (memory-capped; the engine is linked for glibc 2.28 with cargo-zigbuild, Zig in
@@ -127,6 +129,29 @@ Development builds ship one feature at a time on the Development channel; a stab
 planned set is done and Marcy has done her QC (the DS5 rhythm).
 
 **Never edit the feeds by hand.** They are only ever written by `tools/release.sh` (build, sign, verify).
+
+## The wiki
+
+The wiki ([github.com/MarcelineVPQ/corridorkey-desktop/wiki](https://github.com/MarcelineVPQ/corridorkey-desktop/wiki)) is
+written in this repository, `docs/wiki/` (one `.md` per page, named as the wiki names them, `_Sidebar.md` and
+`_Footer.md` included), and changes in the same piece of work as what it describes (Marcy 2026-10-26: "keep the wiki
+up to date — make that a gate", "especially important for the command line").
+
+- **The gate** (`npm run gates`, offline): `tools/check_wiki.mjs` fails when a `corridorkey` command or flag (from
+  `src/shared/console/cliSpec.json`, the CLI's own `__spec --json`) is missing from `Command-Line.md` or no example
+  of a command that takes it uses it; an exit code (ck-cli's `exit.rs`) has no row there; a progress format is
+  missing there; a Console built-in (`registry.ts`) is missing from `Console.md`; one of the engine's messages
+  written for people (ck-core's errors that start with a capital letter, and the no-GPU reason) is missing from
+  `Troubleshooting.md`; or a wiki link, an anchor, or a link into this repository (`…/blob/main/<file>#anchor`)
+  doesn't resolve. Tests: `tests/unit/checkWiki.test.ts` (a fixture failing each rule).
+- **Publishing is Marcy's step** (public words get her OK first). `node tools/publish_wiki.mjs <wiki clone>` runs the
+  gate, pulls the clone, copies `docs/wiki/` into it (a page removed here is removed there), stages it and prints the
+  diff: nothing is committed or pushed. Read it, then `node tools/publish_wiki.mjs <wiki clone> --push` commits
+  ("The wiki from corridorkey-desktop <commit>") and pushes; it refuses while `docs/wiki/` has uncommitted changes.
+  A clone, once: `git clone https://github.com/MarcelineVPQ/corridorkey-desktop.wiki.git <folder>`.
+- **The release gate**: `tools/release.sh` clones the wiki read-only (shallow, into a temporary folder) and runs
+  `node tools/check_wiki.mjs --published <it>`, which refuses the release while any page differs from `docs/wiki/`
+  (added, removed or changed; line ends don't count). It is the only network part; the everyday gate needs none.
 
 ## A local signed test feed
 

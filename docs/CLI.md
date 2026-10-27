@@ -1,5 +1,8 @@
 # `corridorkey`: the command line
 
+Its page for users is the wiki's Command line (`docs/wiki/Command-Line.md`; `tools/check_wiki.mjs` fails when a
+command, flag, exit code or progress format is missing there: change both together).
+
 `corridorkey` keys clips without the app: on a render farm (Deadline, AWS Deadline Cloud / Open Job Description,
 OpenCue, Flamenco), from a shell loop, or from a compositor's terminal. It is the same engine as the app (ck-core,
 linked in; [ENGINE_RUST.md](ENGINE_RUST.md)): a whole shot keyed here is bit for bit the app's matte (tested:

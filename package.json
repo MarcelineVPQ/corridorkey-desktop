@@ -18,7 +18,7 @@
     "test": "vitest run",
     "test:reference": "python3 -I -m unittest discover -s tools/reference -p 'test_*.py'",
     "test:farm": "python3 -I -m unittest discover -s farm/deadline10 -p 'test_*.py'",
-    "gates": "./.hooks/check_electron_security.sh && node .hooks/check_theme_colors.mjs && node tools/list_loops.mjs --check && node tools/check_no_folds.mjs",
+    "gates": "./.hooks/check_electron_security.sh && node .hooks/check_theme_colors.mjs && node tools/list_loops.mjs --check && node tools/check_no_folds.mjs && node tools/check_wiki.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "npm run typecheck && npm run format:check && npm run gates && npm test && npm run test:reference && npm run test:farm",

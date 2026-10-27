@@ -4,6 +4,9 @@ The Console tab (BACKLOG row 95) is a command line inside the app for power user
 shell. This page is the main process side, `electron/main/console/` and `src/shared/console/`; the page is
 `src/ui/pages/ConsolePage.tsx` and `src/ui/console/` (its use: docs/GUIDE.md "Console").
 
+Its page for users is the wiki's Console (`docs/wiki/Console.md`; `tools/check_wiki.mjs` fails when a built-in is
+missing there).
+
 ## Design
 
 - **One parser.** `src/shared/console/parse.ts` reads a line the same way for the page's highlighting and completion
