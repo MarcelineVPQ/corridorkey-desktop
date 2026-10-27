@@ -116,6 +116,8 @@ describe("farm export", () => {
     ]);
     expect(w.slice(w.indexOf("--") + 1)).toEqual(["--outputs", "alpha", "--despill", "0.3", "--window", "8/4", "--low-vram"]);
     expect(e.files.map((f) => f.path)).toContain("corridorkey_submit.py");
+    // POSIX quoting only: the notes name the hosts it is for (farm senior review 2026-10-26 N7)
+    expect(e.notes.join(" ")).toContain("For Linux and macOS hosts");
   });
 
   it("a clip whose frame range isn't known is left out of deadline and opencue, and said", () => {

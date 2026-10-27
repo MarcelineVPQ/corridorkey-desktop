@@ -227,8 +227,8 @@ service. Run `--help` for the rest.
 - PyOutline sends `gpus` and `gpu_memory` only when its `spec_version` is 1.12 or later. Below that it logs a
   warning and drops them.
 - Cuebot gets the commands as they are (`use_pycuerun=False`) and fills in `#FRAME_START#` and `#FRAME_END#` per
-  task (`-s` / `-e`). The script quotes each argument for a POSIX shell, so Linux and macOS hosts are covered;
-  Windows hosts would need their own quoting.
+  task (`-s` / `-e`). The script quotes each argument for a POSIX shell, so it is for **Linux and macOS hosts
+  only**; Windows hosts would need their own quoting (not built).
 - `--overwrite` is always passed, so a retried task replaces the frames its earlier try renamed into place.
   `corridorkey` never exits 33 or 137 (OpenCue's retry codes).
 

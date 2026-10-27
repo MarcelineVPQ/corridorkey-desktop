@@ -193,7 +193,7 @@ export function farmExport(format: FarmFormat, jobs: readonly FarmJob[], env: Fa
       // loop: NOT-WORTH — one script per clip
       for (const j of ranged) files.push(opencue(j, env));
       files.push({ path: "corridorkey_submit.py", text: opencueSubmit });
-      notes.push(`Submit with CUE_SHOW=<show> sh <clip>_opencue.sh (PyOutline installed). ${runtimeNote(env)}`);
+      notes.push(`Submit with CUE_SHOW=<show> sh <clip>_opencue.sh (PyOutline installed). For Linux and macOS hosts: the commands are quoted for a POSIX shell. ${runtimeNote(env)}`);
       break;
     case "flamenco":
       // loop: NOT-WORTH — one job per clip

@@ -12,6 +12,9 @@ The commands go to Cuebot as they are (`use_pycuerun=False`); Cuebot fills in #F
 (corridorkey's -s / -e). RQD exports the booked card as CUE_GPU_CORES, which corridorkey reads when no --gpu is
 given. GPU booking needs RQD's GPU support on the hosts and an outline spec_version of 1.12 or later (PyOutline drops
 `gpus` / `gpu_memory` with a warning below that). Not yet run on a real OpenCue (farm/README.md).
+
+Linux and macOS hosts only: each argument is quoted for a POSIX shell (shlex.quote), which a Windows RQD host doesn't
+read (farm senior review 2026-10-26 N7).
 """
 import argparse
 import getpass
