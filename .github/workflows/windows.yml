@@ -32,4 +32,4 @@ jobs:
       - run: rustup toolchain install
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
-      - run: cargo test --locked
+      - run: cargo test --locked --no-fail-fast

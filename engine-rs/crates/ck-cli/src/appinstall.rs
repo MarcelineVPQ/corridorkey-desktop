@@ -261,7 +261,7 @@ mod tests {
         assert_eq!(f.models, Some(d.join("corridorkey-desktop/models/s")));
         assert_eq!(f.ort, Some(d.join("corridorkey-desktop/runtime/r/onnxruntime/capi/libonnxruntime.so.1.31.0")));
         assert!(
-            f.notes[0].starts_with("no --models given: using the app's model set ") && f.notes[0].contains("corridorkey-desktop/models/s"),
+            f.notes[0].starts_with("no --models given: using the app's model set ") && f.notes[0].replace('\\', "/").contains("corridorkey-desktop/models/s"),
             "{:?}",
             f.notes
         );
