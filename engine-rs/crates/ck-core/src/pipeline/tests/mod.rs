@@ -235,6 +235,15 @@ fn the_hint_made_in_the_graphs_type_is_the_same_tensor() {
 }
 
 #[test]
+fn an_unmeasurable_context_is_not_counted_as_0() {
+    // senior review 2026-10-27 S3: C-RADIO first (its fp32 file loads as fp16, smaller on the card) gave Some(0), and
+    // a later low-VRAM job's arenas left no room for the CUDA context; None keeps arena_limit's 0.5 GiB default
+    assert_eq!(overhead_outside_weights(1_500 << 20, 1_725_204_048), None);
+    assert_eq!(overhead_outside_weights(1_300 << 20, 926_574_332), Some((1_300 << 20) - 926_574_332));
+    assert_eq!(overhead_outside_weights(7, 7), Some(0));
+}
+
+#[test]
 fn tensorrt_cache_root_per_system() {
     let env = |pairs: &'static [(&'static str, &'static str)]| {
         // loop: NOT-WORTH — a test's two or three variables

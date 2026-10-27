@@ -131,7 +131,10 @@ pub struct Pipeline<L: Loader = OrtLoader> {
     /// TensorRT jobs: seconds each network took to build its engine (built in this job) or to load it (reused)
     trt_seconds: BTreeMap<&'static str, (f64, bool)>,
     /// measured once per process: graphics memory the CUDA context and libraries take (bytes), outside any arena
+    /// (None: not measurable, arena_limit's 0.5 GiB default)
     gpu_overhead: Option<u64>,
+    /// the first load read gpu_overhead (later loads hold other networks too)
+    overhead_read: bool,
     /// this job's measured seconds per network, kept across low-VRAM unloads
     stats: BTreeMap<&'static str, NetTotals>,
     /// this job's seconds spent loading sessions, in all and per network
@@ -268,6 +271,7 @@ impl<L: Loader> Pipeline<L> {
             trt_fallbacks: BTreeMap::new(),
             trt_seconds: BTreeMap::new(),
             gpu_overhead: None,
+            overhead_read: false,
             stats: BTreeMap::new(),
             load_s: 0.0,
             load_each: BTreeMap::new(),
@@ -392,17 +396,19 @@ impl<L: Loader> Pipeline<L> {
             *self.load_each.entry(piece).or_insert(0.0) += t.elapsed().as_secs_f64();
             self.nets.insert(piece, net);
             self.set_shrink();
-            if self.gpu_overhead.is_none() && key.vram_cap.is_some() {
-                // the first session made the CUDA context: what this process holds beyond its weights
+            if !self.overhead_read && key.vram_cap.is_some() {
+                // the first session made the CUDA context: what this process holds beyond its weights (later loads
+                // can't tell the context from the networks already loaded, so only this one reads it)
                 if let Some((_, _, own)) = crate::gpu::budget() {
-                    let w = crate::runtime::model_bytes(&file);
-                    self.gpu_overhead = Some(own.saturating_sub(w));
-                    if own >= w {
-                        eprintln!("  graphics memory outside the arenas (CUDA context, libraries): {:.2} GiB measured", (own - w) as f64 / 1073741824.0);
-                    } else {
+                    self.overhead_read = true;
+                    self.gpu_overhead = overhead_outside_weights(own, crate::runtime::model_bytes(&file));
+                    match self.gpu_overhead {
+                        Some(o) => eprintln!("  graphics memory outside the arenas (CUDA context, libraries): {:.2} GiB measured", o as f64 / 1073741824.0),
                         // C-RADIO's file holds fp32 weights that load as fp16: on the card they take less than the
-                        // file, so this sum can't see the context (counted as 0: the other arenas come out tighter)
-                        eprintln!("  graphics memory outside the arenas: not measurable ({piece} takes less on the card than its file), counted as 0");
+                        // file, so this sum can't see the context; arena_limit keeps its 0.5 GiB default
+                        None => {
+                            eprintln!("  graphics memory outside the arenas: not measurable ({piece} takes less on the card than its file), 0.5 GiB assumed")
+                        }
                     }
                 }
             }
@@ -1233,6 +1239,14 @@ impl Pipeline<OrtLoader> {
         }
         Ok(())
     }
+}
+
+/// The graphics memory a process holding `own` bytes takes beyond the first network's `weights` (its file's bytes): the
+/// CUDA context and libraries. None when the network takes less on the card than its file (C-RADIO's fp32 weights
+/// load as fp16): not measurable, so arena_limit keeps its 0.5 GiB default rather than counting the context as 0
+/// (senior review 2026-10-27 S3: 0 left a later low-VRAM job's stage-1 arena ~0.33 GiB over its limit).
+fn overhead_outside_weights(own: u64, weights: u64) -> Option<u64> {
+    (own >= weights).then(|| own - weights)
 }
 
 /// The networks loaded while `piece`'s arena holds working memory (from its first run until it is dropped): all
