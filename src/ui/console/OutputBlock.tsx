@@ -2,14 +2,15 @@
 // the exit code and what it means, the CLI's progress (frames handed to the writers, from its own JSON events), what
 // it printed (selectable), a folder listing, the paths it wrote (Show in folder), and Copy command / Copy output /
 // Re-run (which puts the line back in the input, never runs it), shown on hover and on keyboard focus. An elevated
-// block is marked; a built-in's is compact.
+// block is marked; a built-in's is compact. A program's commands are one row each (a button: click or Enter shows the
+// whole block; Collapse folds it again), and one that runs, failed or was refused shows whole on its own.
 import { memo, useContext, useEffect, useState } from "react";
-import { Check, Copy, CornerDownLeft, FolderOpen, ShieldAlert } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, CornerDownLeft, FolderOpen, ShieldAlert } from "lucide-react";
 import type { Registry } from "../../shared/console/registry";
 import type { ConsoleBlock } from "../../shared/types";
 import { ProgressBar } from "../ProgressBar";
 import { fileSizeText } from "../../shared/units";
-import { blockStatus, blockText, compactBlock, DOCTOR_MARK, duration, entryName, errorSpans, isoTime, sequenceText, shortenKnown, writtenPaths } from "./model";
+import { blockStatus, blockText, childOpens, childRow, compactBlock, DOCTOR_MARK, duration, entryName, errorSpans, isoTime, sequenceText, shortenKnown, writtenPaths } from "./model";
 import { HomeContext } from "../PathText";
 
 const COPIED_MS = 1500;
@@ -31,7 +32,34 @@ function CopyButton({ label, text }: { label: string; text: string }) {
   );
 }
 
-export const OutputBlock = memo(function OutputBlock({ b, registry, onReinsert }: { b: ConsoleBlock; registry: Registry; onReinsert: (line: string) => void }) {
+type BlockProps = { b: ConsoleBlock; registry: Registry; onReinsert: (line: string) => void };
+
+export const OutputBlock = memo(function OutputBlock(props: BlockProps) {
+  const { b } = props;
+  // a program's command: null follows childOpens (running, failed, refused), else what the user chose
+  const [open, setOpen] = useState<boolean | null>(null);
+  if (b.parent === null) return <FullBlock {...props} onCollapse={null} />;
+  if (open ?? childOpens(b)) return <FullBlock {...props} onCollapse={() => setOpen(false)} />;
+  const st = blockStatus(b);
+  const row = childRow(b);
+  const took = duration(b);
+  return (
+    <article className={`cblock child row tone-${st.tone}`} aria-label={b.line}>
+      <button type="button" className="cb-row" aria-expanded={false} title="Show the whole block" onClick={() => setOpen(true)}>
+        <ChevronRight size={13} aria-hidden />
+        <span className={`cb-mark ${st.tone}`} aria-hidden>
+          {row.mark}
+        </span>
+        <span className="sr-only">{st.word}</span>
+        <code className="cb-row-line">{b.line}</code>
+        {took && <span className="cb-took">{took}</span>}
+        {row.last !== null && <span className="cb-row-last">{row.last}</span>}
+      </button>
+    </article>
+  );
+});
+
+function FullBlock({ b, registry, onReinsert, onCollapse }: BlockProps & { onCollapse: (() => void) | null }) {
   const st = blockStatus(b);
   const took = duration(b);
   const written = b.state === "done" || b.state === "failed" || b.state === "cancelled" ? writtenPaths(b, registry) : [];
@@ -41,6 +69,12 @@ export const OutputBlock = memo(function OutputBlock({ b, registry, onReinsert }
     // the line is the user's own input: it labels the block, the live log announces only what the command printed
     <article className={`cblock tone-${st.tone} ${b.elevated ? "elevated" : ""} ${b.parent !== null ? "child" : ""} ${compactBlock(b) ? "compact" : ""}`} aria-label={b.line}>
       <header className="cb-head">
+        {onCollapse && (
+          <button type="button" className="cb-collapse" aria-expanded={true} title="Fold this command into one row" onClick={onCollapse}>
+            <ChevronDown size={13} aria-hidden />
+            <span className="sr-only">Collapse</span>
+          </button>
+        )}
         <code className="cb-line" aria-hidden>
           {b.elevated && (
             <span className="cb-sudo" title="Ran elevated (sudo)">
@@ -154,4 +188,4 @@ export const OutputBlock = memo(function OutputBlock({ b, registry, onReinsert }
       )}
     </article>
   );
-});
+}

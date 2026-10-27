@@ -114,6 +114,22 @@ export function announcement(blocks: readonly ConsoleBlock[]): string {
 /** A built-in's block (no corridorkey argv, no progress) is drawn compact: the runs stand out in a long session. */
 export const compactBlock = (b: ConsoleBlock): boolean => b.argv === null && b.progress === null;
 
+/**
+ * A program's command (a block with a parent) as one row (SME review 2026-10-27 S8: a 40-shot loop was a wall of
+ * headers): a mark, the line, its time, its last output line. It shows whole while it runs, when it failed or was
+ * refused (it opens on its own), and when the row is opened.
+ */
+export const childOpens = (b: ConsoleBlock): boolean => b.state === "running" || b.state === "failed" || b.state === "refused";
+
+/** The row's mark (✓ done, ✗ failed or refused, ■ stopped, … running) and the command's last output line. */
+export function childRow(b: ConsoleBlock): { mark: string; last: string | null } {
+  const mark = { running: "…", done: "✓", failed: "✗", refused: "✗", cancelled: "■" }[b.state];
+  // the last line it printed, not the Console's own note (from <what was typed>)
+  // loop: NOT-WORTH — a block's lines, from the end, per render of a changed row
+  const last = [...b.lines].reverse().find((l) => l.kind !== "info")?.text ?? null;
+  return { mark, last };
+}
+
 /** How long it took ("0.4 s", "2 min 05 s"); null while it runs. */
 export function duration(b: ConsoleBlock): string | null {
   // a queue job's echoed line ran nothing here: no time to show

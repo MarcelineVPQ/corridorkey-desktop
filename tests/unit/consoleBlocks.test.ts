@@ -1,11 +1,15 @@
 // The Console page's view model (src/ui/console/model.ts): the line's colours, the blocks as shown.
 import { readFileSync } from "node:fs";
+import { createElement, type ComponentType } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { parse } from "../../src/shared/console/parse";
 import { makeRegistry } from "../../src/shared/console/registry";
 import {
   announcement,
   blockStatus,
+  childOpens,
+  childRow,
   blockText,
   clearScreen,
   compactBlock,
@@ -24,6 +28,12 @@ import {
   shortenKnown,
 } from "../../src/ui/console/model";
 import type { ConsoleBlock } from "../../src/shared/types";
+import type { Registry } from "../../src/shared/console/registry";
+
+// the page's component, rendered to markup (the tests' typecheck has no JSX: loaded by a path it doesn't follow)
+const { OutputBlock } = (await import("../../src/ui/console/OutputBlock" as string)) as {
+  OutputBlock: ComponentType<{ b: ConsoleBlock; registry: Registry; onReinsert: (line: string) => void }>;
+};
 import { fileSizeText as sizeText } from "../../src/shared/units";
 
 const reg = makeRegistry();
@@ -316,5 +326,45 @@ describe("layout polish: long paths and doctor's table (Phase 4)", () => {
       "               fix: App: Engine page → TensorRT",
     ]);
     expect(blockText(block(1, { lines: [{ kind: "out", text: "3 checks: 1 ok, 1 warning, 1 problem" }], doctor: rows })).split("\n")[1]).toBe("✓ corridorkey  /opt/ck/corridorkey");
+  });
+});
+
+// SME review 2026-10-27 S8 (screenshot for-sequence.png): every iteration of a loop was a full block (header, state,
+// exit code, time, three buttons, a "from" line), about 100 px for one line of output
+describe("a program's commands are one row each (review 2026-10-27 S8)", () => {
+  const kid = (extra: Partial<ConsoleBlock>) =>
+    block(7, {
+      parent: 3,
+      line: 'echo "a.exr"',
+      lines: [
+        { kind: "info", text: "from echo ${f}" },
+        { kind: "out", text: "a.exr" },
+      ],
+      ...extra,
+    });
+  const html = (b: ConsoleBlock) => renderToStaticMarkup(createElement(OutputBlock, { b, registry: reg, onReinsert: () => {} }));
+
+  it("a done command is one row: a button (keyboard reachable, collapsed) with its mark, line, time and last output line", () => {
+    expect(childRow(kid({}))).toEqual({ mark: "✓", last: "a.exr" });
+    expect([childOpens(kid({})), childOpens(kid({ state: "cancelled" }))]).toEqual([false, false]);
+    const h = html(kid({}));
+    expect(h).toMatch(/^<article class="cblock child row tone-ok"/);
+    expect(h).toMatch(/<button type="button" class="cb-row" aria-expanded="false"/);
+    expect(h).toContain("a.exr");
+    expect(h).toContain("0.4 s");
+    // none of the full block's chrome
+    expect(h).not.toMatch(/cb-actions|Copy command|from echo/);
+  });
+
+  it("one that runs, failed or was refused shows whole on its own, with a Collapse button; a top-level block never folds", () => {
+    // loop: NOT-WORTH — three states
+    for (const state of ["running", "failed", "refused"] as const) {
+      expect(childOpens(kid({ state }))).toBe(true);
+      const h = html(kid({ state, exitCode: state === "failed" ? 1 : null }));
+      expect(h, state).toMatch(/class="cb-collapse" aria-expanded="true"/);
+      expect(h, state).toContain("Copy command");
+    }
+    expect(childRow(kid({ state: "failed" })).mark).toBe("✗");
+    expect(html(block(1))).not.toMatch(/cb-row|cb-collapse/);
   });
 });
