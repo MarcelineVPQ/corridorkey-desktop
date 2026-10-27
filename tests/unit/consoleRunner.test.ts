@@ -1261,6 +1261,15 @@ describe("Phase 4: farm export", () => {
     expect((await c.run(`farm export deadline --queue -o ${join(out, "farm4")} --priority 101`)).state).toBe("refused");
   });
 
+  it("on a Mac, farm export's Flamenco jobs say they were submitted from darwin (the runner's own platform)", async () => {
+    queued = [qjob("sh020")];
+    const { c } = make({ paths: { realpath: (p) => import("node:fs/promises").then((f) => f.realpath(p)), platform: "darwin", home: root } });
+    const b = await c.run(`farm export flamenco sh020.mov -o ${join(out, "farm-mac")}`);
+    expect(b.state, b.lines.map((l) => l.text).join("\n")).toBe("done");
+    const job = JSON.parse(readFileSync(join(out, "farm-mac", "sh020.flamenco.json"), "utf8")) as { submitter_platform: string };
+    expect(job.submitter_platform).toBe("darwin");
+  });
+
   // SME review 2026-10-27 M2 (probe): an unpadded folder grouped as 1-9, 10-99, 100-120 and Deadline keyed 9 of 120
   // frames, ending green; a folder of two sequences is refused (corridorkey would key them as one clip)
   it("SME M2: a frame folder's range is all of its frames; a folder of several sequences is refused", async () => {
