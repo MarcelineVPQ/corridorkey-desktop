@@ -263,7 +263,9 @@ fn skip_existing_runs_nothing_only_when_every_frame_is_whole() {
 #[cfg(unix)]
 fn a_launcher_that_exits_first_doesnt_end_the_task() {
     // farm launchers and containers: the task's parent is PID 1 (or a subreaper), or exits before it; the engine
-    // ends itself then (its parent-death watch), the command line must not
+    // ends itself then (its parent-death watch), the command line must not. That holds by construction (only
+    // ck-engine calls proc::end_with_parent); this only shows an orphaned task runs to its end, since `verify` ends
+    // before any watch could fire (farm senior review 2026-10-26 N5)
     let d = scratch("orphan");
     let pl = plates(&d.0, &[1, 2]);
     let pat = d.0.join("key/key.####.exr");

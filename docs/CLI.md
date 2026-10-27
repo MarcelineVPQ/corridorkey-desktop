@@ -243,7 +243,10 @@ next run's sweep. Farms send SIGKILL after their grace time: the
 output stays safe (above), only the hidden folders are left.
 
 **No parent watch.** Unlike `corridorkey-engine` (which ends with the app), `corridorkey` keeps running when its parent
-exits or is PID 1 (containers, farm launchers). Tested: `tests/cli.rs` `a_launcher_that_exits_first_doesnt_end_the_task`.
+exits or is PID 1 (containers, farm launchers). This holds by construction: only `corridorkey-engine` calls
+`ck_core::proc::end_with_parent`; `corridorkey` has no code that watches its parent. The test
+`tests/cli.rs` `a_launcher_that_exits_first_doesnt_end_the_task` only shows an orphaned `verify` runs to its end (it
+finishes before any watch could fire, so it can't prove more; farm senior review 2026-10-26 N5).
 
 ## Progress
 
