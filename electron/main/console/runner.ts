@@ -21,7 +21,8 @@ import type { AuditLog, History } from "./logs";
 import { checkWrite, expandHome, fsErrorText, resolveReal, type PathDeps } from "./paths";
 import { expandHistory, hasExpansion } from "../../../src/shared/console/expand";
 import { frameToken, groupSequences, sequenceOf, type Sequence } from "../../../src/shared/console/sequences";
-import { BOOKMARK_NAME, BOOKMARKS_MAX, WRITE_FOLDERS_MAX } from "../settings";
+import { BOOKMARK_NAME, BOOKMARKS_MAX, VARIABLES_MAX, WRITE_FOLDERS_MAX } from "../settings";
+import { expandVars, READ_ONLY, VALUE_MAX, VAR_NAME } from "../../../src/shared/console/vars";
 import { matches, rankFolders } from "../../../src/shared/console/frecency";
 import { fileSizeText, gibBytes } from "../../../src/shared/units";
 
@@ -88,6 +89,10 @@ export interface ConsoleDeps {
   bookmarks: () => Readonly<Record<string, string>>;
   /** saves them (index.ts: settings, persisted) */
   setBookmarks: (b: Record<string, string>) => void;
+  /** the kept variables (settings.consoleVariables, `set -p`) */
+  variables: () => Readonly<Record<string, string>>;
+  /** saves them (index.ts: settings, persisted) */
+  setVariables: (v: Record<string, string>) => void;
   /** open / start: the file manager shows the path (index.ts: shell.showItemInFolder; it never opens or runs a file) */
   showInFolder: (path: string) => void;
   /** `allow`'s native confirmation, naming the folder; true: confirmed */
@@ -143,6 +148,10 @@ export class Console {
   private prevCwd: string | null = null;
   /** pushd's folders, newest first (this session only) */
   private stack: string[] = [];
+  /** the variables (`set`): this session's, the kept ones (`set -p`, settings) loaded at start */
+  private readonly vars = new Map<string, string>();
+  /** the last command's exit status (`${status}`) */
+  private status = 0;
   private job: Job | null = null;
   private nextId = 1;
   private expiryTimer: NodeJS.Timeout | null = null;
@@ -157,6 +166,8 @@ export class Console {
     this.spawnFn = d.spawn ?? nodeSpawn;
     this.now = d.now ?? Date.now;
     this.opts = { windows: d.paths.platform === "win32" };
+    // loop: NOT-WORTH — ≤ VARIABLES_MAX kept variables, once at start
+    for (const [k, v] of Object.entries(d.variables())) this.vars.set(k, v);
   }
 
   session(): ConsoleSession {
@@ -179,11 +190,24 @@ export class Console {
       typed = line;
       line = x.line;
     }
-    // kept with its folder (a leading space: not kept), and how it ended once it has
+    // kept with its folder (a leading space: not kept), and how it ended once it has; with its ${name}s as typed (a
+    // later !! fills them in again)
     const n = this.d.history.add(line, this.cwd);
-    const r = await this.runLine(line, null, typed);
+    const v = this.expand(line);
+    if ("error" in v) {
+      const b = this.finish(this.block(line, null), "refused", v.error);
+      this.status = 2;
+      // loop: NOT-WORTH — one async history append per line's end [bounded: a local file write]
+      void n.then(async (k) => {
+        if (k !== null) await this.d.history.ended(k, null, b.state);
+      });
+      return b;
+    }
+    if (v.changed) typed ??= line;
+    const r = await this.runLine(v.line, null, typed);
     // loop: NOT-WORTH — one async history append per line's end [bounded: a local file write]
     void r.done.then(async (b) => {
+      this.status = statusOf(b);
       const k = await n;
       if (k !== null) await this.d.history.ended(k, b.exitCode, b.state);
     });
@@ -268,6 +292,86 @@ export class Console {
   }
 
   // --- execution ---
+
+  /** The line with its `${name}`s filled in (vars.ts): the read-only ones, then the variables set. */
+  private expand(line: string) {
+    return expandVars(line, (name) => this.lookup(name), this.opts);
+  }
+
+  private lookup(name: string): string | undefined {
+    const now = new Date(this.now());
+    const p = (n: number) => String(n).padStart(2, "0");
+    switch (name) {
+      case "cwd":
+        return this.cwd;
+      case "home":
+        return this.d.paths.home;
+      case "date":
+        return `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`;
+      case "time":
+        return `${p(now.getHours())}-${p(now.getMinutes())}-${p(now.getSeconds())}`;
+      case "status":
+        return String(this.status);
+    }
+    return this.vars.get(name);
+  }
+
+  /** set [-p] name=value…: a variable for later lines (-p: kept after a restart); a name alone prints it; alone: all. */
+  private set(b: ConsoleBlock, assigns: string[], keep: boolean): ConsoleBlock {
+    const kept = this.d.variables();
+    if (!assigns.length) {
+      // loop: NOT-WORTH — ≤ a few hundred variables, sorted once per set
+      const names = [...this.vars.keys()].sort(naturalCompare);
+      // loop: NOT-WORTH — five names
+      const own = READ_ONLY.map((k) => `${k}=${this.lookup(k)}  (the Console's own)`);
+      // loop: NOT-WORTH — as above
+      return this.finish(b, "done", ...names.map((k) => `${k}=${this.vars.get(k)}${Object.hasOwn(kept, k) ? "  (kept)" : ""}`), ...own);
+    }
+    const next = { ...kept };
+    const lines: string[] = [];
+    // loop: NOT-WORTH — the line's few assignments
+    for (const a of assigns) {
+      const eq = a.indexOf("=");
+      const name = eq < 0 ? a : a.slice(0, eq);
+      if (!VAR_NAME.test(name)) return this.finish(b, "refused", `${name} can't be a variable's name: a letter or _ first, then letters, digits, _ (set name=value).`);
+      if ((READ_ONLY as readonly string[]).includes(name)) return this.finish(b, "refused", `\${${name}} is the Console's own: it can't be set.`);
+      if (eq < 0) {
+        const v = this.lookup(name);
+        if (v === undefined) return this.finish(b, "failed", `No variable ${name} (set lists them).`);
+        lines.push(`${name}=${v}`);
+        continue;
+      }
+      const value = a.slice(eq + 1);
+      if (value.length > VALUE_MAX || value.includes("\0")) return this.finish(b, "refused", `${name}: a value is at most ${VALUE_MAX} characters, without NUL.`);
+      if (!this.vars.has(name) && this.vars.size >= VARIABLES_SESSION_MAX) return this.finish(b, "refused", `${VARIABLES_SESSION_MAX} variables already: unset some first.`);
+      // a kept variable stays kept (set changes it everywhere); -p keeps a new one
+      if (keep || Object.hasOwn(kept, name)) {
+        if (!Object.hasOwn(next, name) && Object.keys(next).length >= VARIABLES_MAX) return this.finish(b, "refused", `${VARIABLES_MAX} kept variables already: unset some first.`);
+        next[name] = value;
+      }
+      this.vars.set(name, value);
+    }
+    // loop: NOT-WORTH — ≤ VARIABLES_MAX names
+    if (Object.keys(next).some((k) => next[k] !== kept[k]) || Object.keys(next).length !== Object.keys(kept).length) this.d.setVariables(next);
+    return this.finish(b, "done", ...lines);
+  }
+
+  /** unset name…: gone, the kept one too. */
+  private unset(b: ConsoleBlock, names: string[]): ConsoleBlock {
+    const kept = { ...this.d.variables() };
+    let save = false;
+    // loop: NOT-WORTH — the line's few names
+    for (const n of names) {
+      if ((READ_ONLY as readonly string[]).includes(n)) return this.finish(b, "refused", `\${${n}} is the Console's own: it can't be unset.`);
+      if (!this.vars.delete(n)) return this.finish(b, "failed", `No variable ${n} (set lists them).`);
+      if (Object.hasOwn(kept, n)) {
+        delete kept[n];
+        save = true;
+      }
+    }
+    if (save) this.d.setVariables(kept);
+    return this.finish(b, "done");
+  }
 
   private block(line: string, parent: number | null): ConsoleBlock {
     return {
@@ -370,6 +474,12 @@ export class Console {
       }
       case "dirs":
         return now(this.dirsList(b));
+      case "set":
+        return now(this.set(b, pos("assign"), has("persist")));
+      case "unset":
+        return now(this.unset(b, pos("names")));
+      case "echo":
+        return now(this.finish(b, "done", pos("words").join(" ")));
       case "dir":
         return now(await this.dir(b, pos("folder")[0], p));
       case "open": {
@@ -493,8 +603,8 @@ export class Console {
   private at(path: string): string | null {
     const m = /^@([^\\/]+)(.*)$/.exec(path);
     if (!m || !BOOKMARK_NAME.test(m[1])) return path;
-    const to = this.d.bookmarks()[m[1]];
-    return to === undefined ? null : to + m[2];
+    const marks = this.d.bookmarks();
+    return Object.hasOwn(marks, m[1]) ? marks[m[1]] + m[2] : null;
   }
 
   /** bookmark <name> [folder]: saved (across restarts); -d removes it; no name: the list. */
@@ -512,13 +622,13 @@ export class Console {
     if (!BOOKMARK_NAME.test(name)) return this.finish(b, "refused", `${name} can't be a bookmark's name: a letter or digit first, then letters, digits, _ . or - (at most 64).`);
     if (remove) {
       if (folder !== undefined) return this.finish(b, "refused", "bookmark -d takes only the name.");
-      if (!(name in all)) return this.finish(b, "failed", `No bookmark ${name} (bookmarks lists them).`);
+      if (!Object.hasOwn(all, name)) return this.finish(b, "failed", `No bookmark ${name} (bookmarks lists them).`);
       const rest = { ...all };
       delete rest[name];
       this.d.setBookmarks(rest);
       return this.finish(b, "done", `Removed @${name} (it was ${all[name]}).`);
     }
-    if (!(name in all) && Object.keys(all).length >= BOOKMARKS_MAX) return this.finish(b, "refused", `${BOOKMARKS_MAX} bookmarks already: bookmark -d <name> removes one first.`);
+    if (!Object.hasOwn(all, name) && Object.keys(all).length >= BOOKMARKS_MAX) return this.finish(b, "refused", `${BOOKMARKS_MAX} bookmarks already: bookmark -d <name> removes one first.`);
     return (async () => {
       let dir = this.cwd;
       if (folder !== undefined) {
@@ -985,8 +1095,10 @@ export class Console {
       for (const { n, line } of lines) {
         if (job.cancels > 0 || this.closing) break;
         this.note(b, "info", `${name}:${n}  ${line}`);
-        const r = await this.runLine(line, b.id);
-        const end = await r.done;
+        const v = this.expand(line);
+        const r = "error" in v ? null : await this.runLine(v.line, b.id, v.changed ? line : null);
+        const end = r ? await r.done : this.finish(this.block(line, b.id), "refused", (v as { error: string }).error);
+        this.status = statusOf(end);
         if (end.state !== "done") {
           failed = end;
           this.note(b, "err", `stopped at line ${n}: ${end.state}${end.exitCode !== null ? ` (exit ${end.exitCode})` : ""}`);
@@ -1327,6 +1439,15 @@ export class Console {
     if (this.expiryTimer) clearTimeout(this.expiryTimer);
     this.expiryTimer = null;
   }
+}
+
+/** Variables set in a session, at most. */
+const VARIABLES_SESSION_MAX = 500;
+
+/** A block's exit status for `${status}` (and the next line): its exit code, else 0 done, 2 refused, 130 stopped, 1 failed. */
+export function statusOf(b: ConsoleBlock): number {
+  if (b.exitCode !== null) return b.exitCode;
+  return b.state === "done" ? 0 : b.state === "refused" ? 2 : b.state === "cancelled" ? 130 : 1;
 }
 
 /** pushd's folders, at most. */

@@ -120,6 +120,7 @@ export const settings = (over: Partial<Settings> = {}): Settings => ({
   cacheRoot: null,
   consoleWriteFolders: [],
   consoleBookmarks: {},
+  consoleVariables: {},
   trtSizes: DEFAULT_TRT_SIZES.map((s) => ({ ...s })),
   ...over,
 });

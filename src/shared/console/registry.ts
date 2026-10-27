@@ -214,6 +214,27 @@ const BUILTINS: ConsoleCommand[] = [
     ["pushd ~/renders", "pushd @sh010", "pushd"],
   ),
   builtin("popd", "go back to the folder pushd remembered last", [], ["popd"]),
+  builtin(
+    "set",
+    "set variables for later lines: set name=value (this session; -p keeps it after a restart); ${name} in a line is its value; alone: the variables",
+    [
+      arg({ id: "assign", kind: "string", positional: true, multiple: true, valueName: "NAME=VALUE", help: "a name (letters, digits, _) and its value; a name alone prints it" }),
+      arg({ id: "persist", short: "p", kind: "switch", help: "keep it after a restart (in settings)" }),
+    ],
+    ["set shot=sh010", "set -p show=/mnt/show", "dir ${show}/${shot}", "set"],
+  ),
+  builtin(
+    "unset",
+    "remove variables (kept ones too)",
+    [arg({ id: "names", kind: "string", positional: true, multiple: true, required: true, valueName: "NAME", help: "the variable's name" })],
+    ["unset shot"],
+  ),
+  builtin(
+    "echo",
+    "print its words (with ${name} filled in)",
+    [arg({ id: "words", kind: "string", positional: true, multiple: true, valueName: "WORD", help: "what to print" })],
+    ["echo ${shot} ${date}", "echo ${status}"],
+  ),
   builtin("dirs", "the folders pushd remembered, newest first (0 is where you are)", [], ["dirs"]),
   builtin(
     "dir",
@@ -352,7 +373,6 @@ export const ANSWERS: Readonly<Record<string, string>> = {
   less: SHOW_FILE,
   head: SHOW_FILE,
   tail: SHOW_FILE,
-  echo: "echo comes in a later version (the Console's Phase 4); nothing here has variables to print yet",
   which: "corridorkey is the app's own: version prints its version, corridorkey info checks its engine",
   where: "corridorkey is the app's own: version prints its version, corridorkey info checks its engine",
 };

@@ -127,7 +127,7 @@ async function paths(prefix: string, cwd: string, d: CompleteDeps, opts: ParseOp
       .map((n) => ({ insert: `@${n}${sep}`, label: `@${n}${sep}`, kind: "folder", help: marks[n] }));
   // @name/…: inside the bookmark's folder
   const mark = /^@([^\\/]+)[\\/]/.exec(dirPart);
-  const base = mark && marks[mark[1]] !== undefined ? marks[mark[1]] + dirPart.slice(mark[0].length - 1) : dirPart;
+  const base = mark && Object.hasOwn(marks, mark[1]) ? marks[mark[1]] + dirPart.slice(mark[0].length - 1) : dirPart;
   const dir = a.resolve(cwd, expandHome(base || ".", { home: d.home, platform: d.platform }));
   const fold = d.platform === "win32" || d.platform === "darwin" ? (s: string) => s.toLowerCase() : (s: string) => s;
   let entries: Dirent[];

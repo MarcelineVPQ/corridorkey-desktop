@@ -73,6 +73,7 @@ let allowAnswer: boolean;
 let shown: string[];
 let queued: readonly Job[];
 let marks: Record<string, string>;
+let keptVars: Record<string, string>;
 
 function make(over: Partial<ConsoleDeps> = {}, files = mkdtempSync(join(root, "user-"))) {
   const deps: ConsoleDeps = {
@@ -97,6 +98,8 @@ function make(over: Partial<ConsoleDeps> = {}, files = mkdtempSync(join(root, "u
     setAllowed: (f) => void (allowedFolders = f),
     bookmarks: () => marks,
     setBookmarks: (m) => void (marks = m),
+    variables: () => keptVars,
+    setVariables: (v) => void (keptVars = v),
     confirmAllow: async (f) => (allowAsked.push(f), allowAnswer),
     showInFolder: (p) => void shown.push(p),
     takeGpu: () => {
@@ -138,6 +141,7 @@ beforeEach(() => {
   shown = [];
   queued = [];
   marks = {};
+  keptVars = {};
   gpuTaken = 0;
   gpuReleased = 0;
   gpuRefusal = null;
@@ -1395,5 +1399,83 @@ describe("Phase 4: bookmarks, j, pushd and popd", () => {
     expect([none.state, none.lines[0].text]).toEqual(["failed", "Nothing to go back to: pushd <folder> remembers where you are first."]);
     expect((await c.run("pushd nowhere")).state).toBe("failed");
     expect((await c.run("dirs")).lines).toHaveLength(1);
+  });
+});
+
+describe("Phase 4: variables", () => {
+  it("set name=value for this session; ${name} fills it in; the block shows what ran and what was typed; the history keeps ${name}", async () => {
+    const { c } = make();
+    expect((await c.run("set shot=sh010 dest=../out")).state).toBe("done");
+    const b = await c.run("dir ${dest}/${shot}");
+    expect(b.line).toBe('dir "../out/sh010"');
+    expect(b.lines[0]).toEqual({ kind: "info", text: "from dir ${dest}/${shot}" });
+    expect(b.entries!.map((e) => e.name)).toEqual(["key.####.exr"]);
+    expect(c.history("dir")[0].line).toBe("dir ${dest}/${shot}");
+    expect((await c.run("set shot")).lines[0].text).toBe("shot=sh010");
+    expect((await c.run("set")).lines.map((l) => l.text).slice(0, 2)).toEqual(["dest=../out", "shot=sh010"]);
+    expect(keptVars).toEqual({});
+  });
+
+  it("frame tokens and other shells' variables stay as typed: $F, $F4, $HIP, %04d, ####, @@@@, !", async () => {
+    const { c } = make();
+    for (const l of ["dir plate.$F4.exr", "dir $HIP/plate.%04d.exr", "dir plate.####.exr", "dir @@@@.exr", "dir sh010!.mov", "dir 'take ${shot}'"]) {
+      const b = await c.run(l);
+      expect(b.line).toBe(l);
+      expect(b.lines[0].text).not.toMatch(/variable/);
+    }
+  });
+
+  it("a value is one quoted word: never split, never a flag, sudo or a command (the destructive flags are the ones typed)", async () => {
+    const { c } = make();
+    await c.run("set o=--overwrite cmd=render s=sudo");
+    const b = await c.run("render shot.mov -o ../out/a ${o}");
+    expect(b.state).toBe("refused");
+    expect(b.lines.at(-1)!.text).toMatch(/takes no more arguments here: '--overwrite'/);
+    expect((await c.run("${cmd} shot.mov -o ../out/a")).lines.at(-1)!.text).toMatch(/unknown command 'render'/);
+    expect((await c.run("${s} render shot.mov -o ../out/a --overwrite")).lines.at(-1)!.text).toMatch(/unknown command 'sudo'/);
+    expect(spawned).toHaveLength(0);
+    expect(confirms).toHaveLength(0);
+    await c.run('set two="my shots"');
+    expect((await c.run("cd ../${two}")).state).toBe("done");
+    expect(c.session().cwd).toBe(shots);
+  });
+
+  it("the Console's own are read-only: cwd, home, date, time, status (the last line's exit status)", async () => {
+    const { c } = make();
+    t = new Date(2026, 9, 27, 9, 5, 7).getTime();
+    expect((await c.run("echo ${date} ${time} ${cwd}")).lines.at(-1)!.text).toBe(`2026-10-27 09-05-07 ${shots}`);
+    await c.run("cd nowhere");
+    expect((await c.run("echo ${status}")).lines.at(-1)!.text).toBe("1");
+    expect((await c.run("echo ${status}")).lines.at(-1)!.text).toBe("0");
+    expect((await c.run("set cwd=/x")).state).toBe("refused");
+    expect((await c.run("unset home")).state).toBe("refused");
+    const bad = await c.run("echo ${nope}");
+    expect([bad.state, bad.lines[0].text]).toEqual(["refused", "${nope}: no such variable (set lists them; set nope=value makes it)"]);
+    expect((await c.run("echo ${a b}")).state).toBe("refused");
+    expect((await c.run("set __proto__=x")).state).toBe("refused");
+  });
+
+  it("set -p keeps it after a restart (settings); a kept one stays kept; unset removes it from both", async () => {
+    const { c } = make();
+    await c.run("set -p show=/mnt/show");
+    await c.run("set tmp=1");
+    expect(keptVars).toEqual({ show: "/mnt/show" });
+    await c.run("set show=/mnt/show2");
+    expect(keptVars).toEqual({ show: "/mnt/show2" });
+    expect((await c.run("set")).lines.map((l) => l.text).slice(0, 2)).toEqual(["show=/mnt/show2  (kept)", "tmp=1"]);
+    const again = make().c;
+    expect((await again.run("echo ${show}")).lines.at(-1)!.text).toBe("/mnt/show2");
+    expect((await again.run("echo ${tmp}")).state).toBe("refused");
+    await again.run("unset show");
+    expect(keptVars).toEqual({});
+  });
+
+  it("a script's lines fill in variables too (each when it runs)", async () => {
+    const { c } = make();
+    await c.run("set d=../out");
+    const b = await c.runLines(["set s=sh010", "dir ${d}/${s}"]);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(blocks.get(b.id)!.state).toBe("done");
+    expect([...blocks.values()].find((x) => x.parent === b.id && x.line.startsWith("dir"))!.line).toBe('dir "../out/sh010"');
   });
 });

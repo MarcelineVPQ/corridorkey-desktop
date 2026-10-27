@@ -76,6 +76,19 @@ describe("Rust engine setup", () => {
     }
   });
 
+  it("keeps only Console variables with a valid, settable name and a string value (validated on load)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ck-settings-"));
+    try {
+      const f = join(dir, "settings.json");
+      writeFileSync(f, JSON.stringify({ consoleVariables: { show: "/mnt/show", cwd: "/x", "1a": "y", n: 7, long: "x".repeat(5000), nul: "a\u0000", ok_2: "" } }));
+      expect(loadSettings(f).consoleVariables).toEqual({ show: "/mnt/show", ok_2: "" });
+      writeFileSync(f, JSON.stringify({ consoleVariables: "x" }));
+      expect(loadSettings(f).consoleVariables).toEqual({});
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("loads a settings file that still names the removed PyTorch engine's checkout, and drops the key", () => {
     const dir = mkdtempSync(join(tmpdir(), "ck-settings-"));
     try {

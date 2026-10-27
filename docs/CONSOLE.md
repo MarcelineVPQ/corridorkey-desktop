@@ -13,8 +13,8 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   ranges; mistakes are errors with positions and a did-you-mean. An enum's value is taken in any case (`--format EXR`)
   and passed to the CLI as the CLI spells it (`exr`); a word that means one of its values (`MEANINGS` in registry.ts:
   `--device gpu` → auto, `--format mp4` → video, `--datatype fp32` → float) is suggested by meaning, not by spelling,
-  and never taken in its place (a test checks every target against the CLI's spec). No variables, globs, pipes or
-  redirections.
+  and never taken in its place (a test checks every target against the CLI's spec). The parser itself knows no
+  variables, globs, pipes or redirections: `${name}` is filled in before it reads the line (Variables, below).
 - **One registry.** `src/shared/console/registry.ts`: the built-ins and `corridorkey`'s commands. The CLI's part comes
   from `cliSpec.json`, which `tools/gen_cli_spec.mjs` writes from `corridorkey __spec --json` at build time (checked in;
   `tests/unit/cliSpec.test.ts` fails when it and the built binary differ). Each entry: name, aliases, arguments (kinds
@@ -42,7 +42,7 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   order through `consoleRunLines`, the same path as `run`; Esc keeps the first line; Ctrl+C drops them), `sudo <command>`,
   `sudo -k`, `farm export` (below), and `corridorkey render | verify | prepare | info` (also bare `render` …). Other command lines' names get
   an answer instead of "unknown command" (`ANSWERS` in registry.ts): `exit` / `quit` (the Console stays open), `rm` /
-  `del` / `rmdir` (the Console never deletes files), `cp` / `mv`, `cat` / `type` / `echo` (a later version, Phase 4),
+  `del` / `rmdir` (the Console never deletes files), `cp` / `mv`, `cat` / `type` (a later version, Phase 4),
   `which`. Built-ins say a file system error in words with what to type (`fsErrorText` in paths.ts), never Node's
   `ENOENT: …, stat '…'`.
 - **Running corridorkey.** The shipped binary (`engineFind.ts findCli`) is spawned with an argv, `shell: false`, its own
@@ -96,6 +96,23 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   where it went; `j` alone prints the ranking. `pushd <folder>` goes there and remembers the folder before, `pushd`
   alone swaps with the newest remembered, `popd` goes back, `dirs` lists them (0 is the current folder; at most 50,
   this session only); each prints the list, as bash does.
+- **Variables** (`src/shared/console/vars.ts`; SME review item 6). `set name=value` (several at once; a name alone
+  prints it; `set` alone lists them and the Console's own), `unset name…`, `echo …` prints its words. `${name}` is the
+  only syntax, braces required: in this world `$F`, `$F4`, `$HIP`, `%04d`, `####`, `@@@@` and `!` are parts of file
+  names, so nothing else is ever expanded. It is filled in outside quotes and inside `"…"`, never inside `'…'` or after
+  a backslash (Linux, macOS); an unknown name or an unclosed `${` refuses the line with the reason. A word with a
+  variable becomes ONE quoted word (on Windows `'…'` when the value has a `"`; a value with both quote marks is
+  refused there): a value never splits into words and is never read as a flag, `sudo`, `?`, `--` or a command's name,
+  so the flags a line has (and its destructive ones) are the ones typed, and the parser and the file scope check the
+  filled-in line as any other. The Console's own are read-only: `${cwd}`, `${home}`, `${date}` (YYYY-MM-DD),
+  `${time}` (HH-MM-SS: safe in a file name everywhere) and `${status}` (the last line's exit status: its exit code,
+  else 0 done, 2 refused, 130 stopped, 1 failed). Typed lines and each script line are filled in when they run (after
+  history expansion, as in bash); the block shows the line that ran and `from <what was typed>`, and the history keeps
+  the `${name}`s (so `!!` fills them in again). The page colours a value with `${…}` as a value (it is checked once
+  filled in). **Session or kept:** `set` is this session's (judgement call: a variable that outlives the session
+  surprises in a script); `set -p` also keeps it in settings (`consoleVariables`: valid names, never a read-only one,
+  strings without NUL up to 4096 characters, at most 200; checked on load), and a kept one stays kept when `set`
+  again; `unset` removes it from both. At most 500 in a session.
 - **doctor** (`doctor --json`): every check in one go, one row each (✓ ok, ⚠ warning, ✗ problem) and under each problem
   its exact fix (a Console line or an App action): the corridorkey command line (found), the graphics card and driver,
   ONNX Runtime and the models (all three from `corridorkey info --json`: it loads the runtime and asks the driver, never

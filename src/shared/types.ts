@@ -330,6 +330,8 @@ export interface Settings {
   consoleWriteFolders: string[];
   // the Console's bookmarks (`bookmark sh010`, `cd @sh010`): name → absolute folder; docs/CONSOLE.md "Bookmarks"
   consoleBookmarks: Record<string, string>;
+  // the Console's kept variables (`set -p name=value`; `${name}` in a line): name → value; docs/CONSOLE.md "Variables"
+  consoleVariables: Record<string, string>;
 }
 
 // The app's own updates (electron/main/updater). null feed = no release

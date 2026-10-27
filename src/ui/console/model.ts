@@ -32,7 +32,9 @@ export function highlight(line: string, parsed: Parsed): Span[] {
     const start = Math.max(t.start, pos);
     const end = Math.min(Math.max(t.end, start), line.length);
     if (start > pos) out.push({ text: line.slice(pos, start), kind: "plain" });
-    if (end > start) out.push({ text: line.slice(start, end), kind: kindOf(t, parsed.expecting), title: t.error });
+    // a value with a ${name} in it is checked once it is filled in (when it runs), not as typed
+    const text = line.slice(start, end);
+    if (end > start) out.push(t.kind === "error" && text.includes("${") ? { text, kind: "value" } : { text, kind: kindOf(t, parsed.expecting), title: t.error });
     pos = Math.max(pos, end);
   }
   if (pos < line.length) out.push({ text: line.slice(pos), kind: "plain" });
@@ -205,8 +207,11 @@ export function lineHint(p: Parsed, line: string, cursor: number, reg: Registry,
   // what the line still needs at its end ("needs a value"), or a word still being typed toward a suggestion, is what
   // comes next, not a mistake
   const pending = (e: { end: number; message: string }) => e.end >= line.length && (typing || / needs /.test(e.message));
+  // a value with a ${name} in it is checked once it is filled in
   // loop: HOT-PATH-OK — the line's few mistakes, per keystroke
-  const err = p.errors.find((e) => !pending(e)) ?? p.errors[0];
+  const errors = p.errors.filter((e) => !line.slice(e.start, e.end).includes("${"));
+  // loop: HOT-PATH-OK — as above
+  const err = errors.find((e) => !pending(e)) ?? errors[0];
   if (err && typing && pending(err)) return null;
   if (err) return { text: err.message, error: !pending(err) };
   // loop: HOT-PATH-OK — the line's tokens, per keystroke

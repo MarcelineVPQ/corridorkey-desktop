@@ -266,7 +266,8 @@ describe("SME review 2026-10-26: foreign commands (S5)", () => {
     expect([first("rm -rf plates"), first("del *.exr"), first("RMDIR x")]).toEqual(Array(3).fill(expect.stringMatching(/^the Console never deletes files/)));
     expect(first("exit")).toMatch(/stays open/);
     expect(first("quit")).toMatch(/stays open/);
-    expect(first("echo hi")).toMatch(/^echo comes in a later version \(the Console's Phase 4\)/);
+    // echo is a command now (Phase 4: variables)
+    expect(parse("echo hi", reg, posix).command?.name).toBe("echo");
     expect([first("cat a.txt"), first("type a.txt")]).toEqual(Array(2).fill(expect.stringMatching(/later version \(the Console's Phase 4\)/)));
     expect(first("cp a b")).toMatch(/doesn't copy or move/);
   });

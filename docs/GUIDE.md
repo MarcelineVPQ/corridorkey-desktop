@@ -65,7 +65,7 @@ The **Console** (its own icon on the rail) is a command line inside the app for 
 `render`, `verify`, `prepare` and `info` with the same flags, output and exit codes, plus `help`, `apropos`, `doctor`, `farm export`, `cd`, `pwd`,
 `dir` / `ls`, `bookmark`, `j`, `pushd` / `popd` / `dirs`, `allow`, `open` (shows a folder in the file manager), `cls`,
 `history`, `version`, `run` (a `.ckcmd` script of Console lines) and `sudo`. Other shells' words get a straight answer: `man` is `help`, `exit` says the Console stays
-open, `rm` that the Console never deletes files, `cat` and `echo` that they come later. Every command and flag comes
+open, `rm` that the Console never deletes files, `cat` that it comes later. Every command and flag comes
 from the `corridorkey` CLI's own definitions, so the Console and the farm never differ. `help` lists the commands,
 `help render` or `render ?` explains one with examples, `help -k overwrite` (or `apropos overwrite`) searches them. The
 shell reflexes work: `ls -la`, `ls -tr`, `dir /o:-d`, `cd -`; `dir` shows a frame sequence as one row with its range
@@ -88,13 +88,20 @@ one), and `cd @sh010` goes there from anywhere (`@sh010/plates` too, and `dir`, 
 sq01 and then key; `j` alone lists them, best first), learned from the folders you typed commands in. `pushd <folder>`
 goes somewhere and remembers where you were, `popd` comes back, `dirs` lists them.
 
+**Variables.** `set shot=sh010` (and `set -p show=/mnt/show` to keep it after a restart), then `${shot}` in any line:
+`dir ${show}/${shot}/plates`. Only `${name}` with braces is a variable, so `$F4`, `%04d`, `####` and `@@@@` in file
+names stay as they are; inside `'…'` nothing is filled in. A value is always one word (spaces and all), never a flag.
+`set` lists them, `unset shot` removes one, `echo ${shot}` prints it; `${cwd}`, `${home}`, `${date}`, `${time}` and
+`${status}` (the last command's exit code) are the Console's own. The block shows the line as it ran and what you
+typed.
+
 **doctor** checks this computer in one go: the corridorkey command line, the graphics card and its driver, ONNX
 Runtime, the models, TensorRT, ffmpeg, and each folder the Console writes to (there, writable, free space), one row
 each with ✓, ⚠ or ✗, and under each problem what to do (a command, or where in the app). It only asks; it never keys
 on the card. `doctor --json` prints the same as JSON.
 
-**Safety.** It is not a system shell: only its own commands, each one parsed and checked (no variables, pipes, globs
-or other programs). It **reads anywhere** you can, and **writes only into the folders you chose**: the results folder
+**Safety.** It is not a system shell: only its own commands, each one parsed and checked (no pipes, globs or other
+programs; its variables are `${name}` only, and a value is always one word, never a flag). It **reads anywhere** you can, and **writes only into the folders you chose**: the results folder
 (App settings), the cache folder, the queued clips' results folders, and the folders you **allow**; anything else is
 refused with the reason and the line that allows it (`allow "/mnt/show/sq01"`), before anything runs. `allow <folder>`
 asks you to confirm, then the Console may write in that folder and every folder inside it, also after a restart;
@@ -161,6 +168,8 @@ Examples:
 cd ~/shots/sh010
 bookmark sh010
 cd @sh010
+set -p show=/mnt/show
+dir ${show}/sh010
 j sh010
 dir plates
 dir plates/sh010.%04d.exr

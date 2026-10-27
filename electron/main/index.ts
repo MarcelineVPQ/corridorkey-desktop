@@ -417,6 +417,11 @@ const appConsole = new Console({
     settings = { ...settings, consoleBookmarks: b };
     persist();
   },
+  variables: () => settings.consoleVariables,
+  setVariables: (v) => {
+    settings = { ...settings, consoleVariables: v };
+    persist();
+  },
   setAllowed: (folders) => {
     settings = { ...settings, consoleWriteFolders: folders };
     persist();

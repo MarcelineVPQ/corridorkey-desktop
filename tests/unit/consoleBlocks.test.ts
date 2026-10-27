@@ -272,3 +272,12 @@ describe("history shortcuts in the hint", () => {
     expect(expansionHint("render sh010!.mov", past, false)).toBeNull();
   });
 });
+
+describe("variables in the typed line", () => {
+  it("a value with ${name} is checked once filled in: never marked a mistake as typed", () => {
+    expect(kinds("render a.mov -F ${range}")).toContainEqual(["${range}", "value"]);
+    expect(lineHint(parse("render a.mov -F ${range}", reg, opts), "render a.mov -F ${range}", 3, reg, false)?.error).toBe(false);
+    // a real mistake still is
+    expect(kinds("render a.mov -F abc")).toContainEqual(["abc", "error"]);
+  });
+});

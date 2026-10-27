@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import type { CheckoutCheck, Settings } from "../../src/shared/types";
 import { sanitizeAppearance, sanitizeOptions, vramLimit } from "./validate";
 import { sanitizeTrtSizes } from "../../src/shared/trt";
+import { READ_ONLY, VALUE_MAX, VAR_NAME } from "../../src/shared/console/vars";
 
 export function loadSettings(file: string): Settings {
   let saved: Partial<Settings> = {};
@@ -33,6 +34,7 @@ export function loadSettings(file: string): Settings {
     cacheRoot: typeof saved.cacheRoot === "string" && isAbsolute(saved.cacheRoot) ? saved.cacheRoot : null,
     consoleWriteFolders: writeFolders(saved.consoleWriteFolders),
     consoleBookmarks: bookmarks(saved.consoleBookmarks),
+    consoleVariables: variables(saved.consoleVariables),
   };
 }
 
@@ -57,6 +59,18 @@ function bookmarks(v: unknown): Record<string, string> {
     (e): e is [string, string] => BOOKMARK_NAME.test(e[0]) && typeof e[1] === "string" && e[1] !== "" && !e[1].includes("\0") && isAbsolute(e[1]),
   );
   return Object.fromEntries(ok.slice(0, BOOKMARKS_MAX));
+}
+
+export const VARIABLES_MAX = 200;
+/** The Console's kept variables (`set -p`): valid names (never a read-only one), strings without NUL, at most
+ * VALUE_MAX long and VARIABLES_MAX of them. */
+function variables(v: unknown): Record<string, string> {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+  // loop: NOT-WORTH — ≤ a few hundred variables, once at start
+  const ok = Object.entries(v as Record<string, unknown>).filter(
+    (e): e is [string, string] => VAR_NAME.test(e[0]) && !(READ_ONLY as readonly string[]).includes(e[0]) && typeof e[1] === "string" && e[1].length <= VALUE_MAX && !e[1].includes("\0"),
+  );
+  return Object.fromEntries(ok.slice(0, VARIABLES_MAX));
 }
 
 /** The five networks the Rust engine runs (engine-rs runtime.rs PIECES). */
