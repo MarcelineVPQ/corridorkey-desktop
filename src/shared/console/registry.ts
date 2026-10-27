@@ -29,6 +29,8 @@ export interface ConsoleArg {
   destructive: boolean;
   /** why the Console refuses this flag (null: allowed) */
   refused: string | null;
+  /** the ids of the arguments it can't be used with (the CLI's conflicts_with, as declared on this one) */
+  conflicts: readonly string[];
 }
 
 export interface ConsoleCommand {
@@ -62,6 +64,7 @@ interface SpecArg {
   multiple: boolean;
   takes_value: boolean;
   hidden: boolean;
+  conflicts_with?: string[];
 }
 interface SpecCommand {
   name: string;
@@ -121,6 +124,7 @@ function cliCommand(c: SpecCommand): ConsoleCommand {
       // loop: NOT-WORTH — as above
       destructive: (DESTRUCTIVE[c.name] ?? []).includes(a.id),
       refused: REFUSED[a.id] ?? null,
+      conflicts: a.conflicts_with ?? [],
     })),
     examples: c.examples,
     kind: "cli",
@@ -143,6 +147,7 @@ const arg = (a: ArgIn): ConsoleArg => ({
   writes: false,
   destructive: false,
   refused: null,
+  conflicts: [],
   ...a,
 });
 const builtin = (name: string, about: string, args: ConsoleArg[], examples: string[], aliases: string[] = []): ConsoleCommand => ({

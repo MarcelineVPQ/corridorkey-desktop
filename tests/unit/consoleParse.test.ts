@@ -94,7 +94,8 @@ describe("parse", () => {
 
   it("reads short flags with attached values and combined switches", () => {
     const p = parse("render a.mov -o=out -F1001 -qv", reg, posix);
-    expect(p.errors).toEqual([]);
+    // read as two switches (render's only short ones, which the CLI then can't take together: S3)
+    expect(p.errors.map((e) => e.message)).toEqual(["-v can't be used with -q (one or the other)"]);
     expect(p.options.map((o) => [o.arg.id, o.value])).toEqual([
       ["output", "out"],
       ["frames", "1001"],
@@ -255,5 +256,32 @@ describe("SME review 2026-10-26", () => {
       ).toEqual(["find (a file search) comes in a later version; to search the commands and their options: help -k <term> (or apropos <term>)"]);
       expect(p.errors[0].start).toBe(0);
     }
+  });
+});
+
+describe("SME review 2026-10-26: the CLI's conflicts", () => {
+  it("S3: flags the CLI can't take together are marked before Enter, from the CLI's own spec", () => {
+    const msg = (l: string) => parse(l, reg, posix).errors.map((e) => e.message);
+    expect(msg("render a.mov -o out/ -F 1001-1100 -s 1001")).toEqual(["-s can't be used with -F (one or the other)"]);
+    expect(msg("render a.mov -o out/ -e 1100 --frames 1001-1100")).toEqual(["--frames can't be used with -e (one or the other)"]);
+    expect(msg("render a.mov -o out/ -q -v")).toEqual(["-v can't be used with -q (one or the other)"]);
+    expect(msg("render a.mov -o out/ -qv")).toEqual(["-v can't be used with -q (one or the other)"]);
+    expect(msg("sudo render a.mov -o out/ --overwrite --skip-existing")).toEqual(["--skip-existing can't be used with --overwrite (one or the other)"]);
+    expect(msg("render a.mov -i b.mov -o out/")).toEqual(["-i can't be used with INPUT (one or the other)"]);
+    // the error sits on the second flag
+    const line = "render a.mov -o out/ -F 1001-1100 -s 1001";
+    const e = parse(line, reg, posix).errors[0];
+    expect(line.slice(e.start, e.end)).toBe("-s");
+    // a flag and its attached value are one word: that word is marked
+    const l2 = "render a.mov -o out/ -F1001 --start=1001";
+    const e2 = parse(l2, reg, posix).errors[0];
+    expect(l2.slice(e2.start, e2.end)).toBe("--start=1001");
+    expect(msg("render a.mov -o out/ -s 1001 -e 1100")).toEqual([]);
+  });
+
+  it("S3: the conflicts come from the spec (both directions are checked)", () => {
+    const render = reg.cli.subcommands.find((c) => c.name === "render")!;
+    expect(render.args.find((a) => a.id === "start")!.conflicts).toEqual(["frames"]);
+    expect(render.args.find((a) => a.id === "frames")!.conflicts).toEqual([]);
   });
 });

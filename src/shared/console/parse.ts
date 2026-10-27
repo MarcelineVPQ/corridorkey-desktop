@@ -337,6 +337,19 @@ export function parse(line: string, reg: Registry, opts: ParseOptions): Parsed {
     if (problem) fail(problem, w.start, w.end, arg);
     else out.tokens.push({ kind: valueKind(arg), start: w.start, end: w.end, arg });
   }
+  if (!out.help) {
+    // the CLI's conflicts (-F with -s/-e, -q with -v, --overwrite with --skip-existing, -i with INPUT): the later one is marked
+    // loop: HOT-PATH-OK — the line's few arguments, in the order typed, per keystroke
+    const given = [...out.options.map((o) => ({ arg: o.arg, name: o.name, word: o.word })), ...out.positionals.map((x) => ({ arg: x.arg, name: x.arg.valueName ?? x.arg.id, word: x.word }))].sort(
+      (a, b) => a.word - b.word,
+    );
+    // loop: HOT-PATH-OK — as above
+    for (const [n, g] of given.entries()) {
+      // loop: HOT-PATH-OK — as above
+      const e = given.slice(0, n).find((x) => x.arg !== g.arg && (g.arg.conflicts.includes(x.arg.id) || x.arg.conflicts.includes(g.arg.id)));
+      if (e) fail(`${g.name} can't be used with ${e.name} (one or the other)`, words[g.word].start, words[g.word].end, g.arg);
+    }
+  }
   if (!out.help && cmd.name === "sudo" && cmd.kind === "builtin" && !out.options.length)
     fail("sudo needs a command (sudo render … --overwrite), or -k to drop the elevation", line.length, line.length);
   if (!out.help) {

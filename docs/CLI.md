@@ -45,7 +45,8 @@ argument exists: '--frames'").
 
 For tools: `corridorkey __spec --json` (hidden from the help) prints the command line itself as JSON: `version`,
 `about`, and `commands` (`name`, `about`, `examples`, `args`: `id`, `long`, `short`, `positional`, `value_name`,
-`possible_values`, `help`, `required`, `multiple`, `default`, `takes_value`, `hidden`). It walks the same parser the
+`possible_values`, `help`, `required`, `multiple`, `default`, `takes_value`, `hidden`, `conflicts_with`: the ids it
+can't be used with, as declared on it, so check both directions). It walks the same parser the
 commands use, so it can't drift from them; the app's Console reads it for completion and hints.
 
 ## Frames

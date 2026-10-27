@@ -20,7 +20,7 @@ fn text(s: Option<&clap::builder::StyledStr>) -> Option<String> {
 
 fn command(c: &Command) -> Value {
     // loop: NOT-WORTH — a subcommand's ~50 arguments
-    let args: Vec<Value> = c.get_arguments().map(arg).collect();
+    let args: Vec<Value> = c.get_arguments().map(|a| arg(c, a)).collect();
     let after = c.get_after_help().map(|s| s.to_string()).unwrap_or_default();
     // the after-help's example lines: the ones that start with the program's name
     // loop: NOT-WORTH — a few lines of help text
@@ -28,7 +28,7 @@ fn command(c: &Command) -> Value {
     json!({ "name": c.get_name(), "about": text(c.get_about()), "args": args, "examples": examples })
 }
 
-fn arg(a: &Arg) -> Value {
+fn arg(c: &Command, a: &Arg) -> Value {
     let action = a.get_action();
     // loop: NOT-WORTH — a flag's few names and values
     let value_name = a.get_value_names().map(|v| v.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(" "));
@@ -36,6 +36,9 @@ fn arg(a: &Arg) -> Value {
     let possible: Vec<String> = a.get_possible_values().iter().map(|p| p.get_name().to_string()).collect();
     // loop: NOT-WORTH — a flag's few defaults
     let default: Vec<String> = a.get_default_values().iter().map(|d| d.to_string_lossy().into_owned()).collect();
+    // the arguments it can't be used with, as declared (`-s` names `-F`; a tool checks both directions)
+    // loop: NOT-WORTH — a flag's one or two conflicts
+    let conflicts: Vec<&str> = c.get_arg_conflicts_with(a).iter().map(|x| x.get_id().as_str()).collect();
     json!({
         "id": a.get_id().as_str(),
         "long": a.get_long(),
@@ -49,6 +52,7 @@ fn arg(a: &Arg) -> Value {
         "default": default,
         "takes_value": action.takes_values(),
         "hidden": a.is_hide_set(),
+        "conflicts_with": conflicts,
     })
 }
 
@@ -92,5 +96,13 @@ mod tests {
         assert_eq!(render.iter().find(|a| a["long"] == "overwrite").unwrap()["takes_value"], false);
         assert!(find(cmds, "info")["args"].as_array().unwrap().iter().any(|a| a["long"] == "json"));
         assert!(find(cmds, "prepare")["args"].as_array().unwrap().iter().any(|a| a["long"] == "tensorrt-size"));
+        // the conflicts the parser enforces (the Console marks them before Enter)
+        let conflicts = |id: &str| render.iter().find(|a| a["id"] == id).unwrap()["conflicts_with"].clone();
+        assert_eq!(conflicts("start"), json!(["frames"]));
+        assert_eq!(conflicts("end"), json!(["frames"]));
+        assert_eq!(conflicts("skip-existing"), json!(["overwrite"]));
+        assert_eq!(conflicts("quiet"), json!(["verbose"]));
+        assert_eq!(conflicts("input"), json!(["clip"]));
+        assert_eq!(conflicts("frames"), json!([]));
     }
 }

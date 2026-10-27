@@ -16,7 +16,8 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   `tests/unit/cliSpec.test.ts` fails when it and the built binary differ). Each entry: name, aliases, arguments (kinds
   path / enum / number / frames / string, value names, values), description, examples; `render --overwrite` and
   `render --skip-existing` (it keys the whole set again unless every frame is there and whole: docs/CLI.md "Output
-  safety") are marked destructive, `render`'s `-o`, `--report`, `--temp` (and `verify`'s and `prepare`'s `--report`) as written paths.
+  safety") are marked destructive, each argument carries the CLI's own `conflicts_with` (the parser marks `-F` with
+  `-s`/`-e`, `-q` with `-v`, `--overwrite` with `--skip-existing`, `-i` with INPUT before Enter), `render`'s `-o`, `--report`, `--temp` (and `verify`'s and `prepare`'s `--report`) as written paths.
 - **Commands.** `help [command]` (also `command ?`), `help -k <term>` / `apropos <term>` (search the help; `find` is
   kept free for a file search and says so), `cd`, `pwd`, `dir` / `ls`, `cls` / `clear`,
   `history` (`--audit`: the elevated log), `run <file.ckcmd>` (a script of Console lines, one per line, `#` comments;

@@ -5,6 +5,7 @@
       "about": "key a clip: EXR sequences (or videos) of alpha, fg, cutout, checker",
       "args": [
         {
+          "conflicts_with": [],
           "default": [],
           "help": "the clip: a video, a frame folder or a plate.####.exr pattern",
           "hidden": false,
@@ -19,6 +20,9 @@
           "value_name": "INPUT"
         },
         {
+          "conflicts_with": [
+            "clip"
+          ],
           "default": [],
           "help": "the clip (as INPUT)",
           "hidden": false,
@@ -33,6 +37,7 @@
           "value_name": "INPUT"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "a folder, or one file per frame: key.####.exr, key.%04d.exr, key.$F4.exr",
           "hidden": false,
@@ -47,6 +52,7 @@
           "value_name": "DIR|PATTERN"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "frames to write: 1001-1100, 1001-1100x2 (or :2), 1001,1005,1010-1020; repeatable [default: the whole shot]",
           "hidden": false,
@@ -61,6 +67,9 @@
           "value_name": "SPEC"
         },
         {
+          "conflicts_with": [
+            "frames"
+          ],
           "default": [],
           "help": "the first frame to write [default: the shot's first]",
           "hidden": false,
@@ -75,6 +84,9 @@
           "value_name": "N"
         },
         {
+          "conflicts_with": [
+            "frames"
+          ],
           "default": [],
           "help": "the last frame to write [default: the shot's last]",
           "hidden": false,
@@ -89,6 +101,7 @@
           "value_name": "N"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "alpha, fg, cutout, checker, comma-separated [default: alpha,fg]",
           "hidden": false,
@@ -103,6 +116,7 @@
           "value_name": "LIST"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "a manual Hann window: C frames, stride S (C alone: S = C/2) [default: automatic]",
           "hidden": false,
@@ -117,6 +131,7 @@
           "value_name": "C/S"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "the engine protocol's run object (input, output_dir, options); flags win over it",
           "hidden": false,
@@ -131,6 +146,7 @@
           "value_name": "FILE.json"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "temporary files, in a folder of the run's own [env: OPENJD_SESSION_WORKING_DIR, TMPDIR]",
           "hidden": false,
@@ -145,6 +161,7 @@
           "value_name": "DIR"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "replace frames already at the output's names",
           "hidden": false,
@@ -159,6 +176,9 @@
           "value_name": null
         },
         {
+          "conflicts_with": [
+            "overwrite"
+          ],
           "default": [],
           "help": "do nothing when every requested frame is already there and whole (else key them all again)",
           "hidden": false,
@@ -173,6 +193,7 @@
           "value_name": null
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "first-frame matte (a PNG's alpha, an EXR's A), for the shot's first frame",
           "hidden": false,
@@ -187,6 +208,7 @@
           "value_name": "FILE"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "a hint matte for every frame: a video or a frame folder",
           "hidden": false,
@@ -201,6 +223,7 @@
           "value_name": "PATH"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "trust in the hint [default: 0.95]",
           "hidden": false,
@@ -215,6 +238,7 @@
           "value_name": "0-1"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "don't carry each window's matte into the next as a hint",
           "hidden": false,
@@ -229,6 +253,7 @@
           "value_name": null
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "trust in the carried hint [default: 0.95]",
           "hidden": false,
@@ -243,6 +268,7 @@
           "value_name": "0-1"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "one phase's networks at a time (less graphics memory, slower)",
           "hidden": false,
@@ -257,6 +283,7 @@
           "value_name": null
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "EXR sequences, or videos (whole shots only) [default: exr]",
           "hidden": false,
@@ -271,6 +298,7 @@
           "value_name": "exr|video"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "EXR pixel type [default: half]",
           "hidden": false,
@@ -285,6 +313,7 @@
           "value_name": "half|float"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "despill strength [default: 0.5]",
           "hidden": false,
@@ -299,6 +328,7 @@
           "value_name": "0-1"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "a video cutout in linear light",
           "hidden": false,
@@ -313,6 +343,7 @@
           "value_name": null
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "a frame folder's rate, for video outputs [default: 24]",
           "hidden": false,
@@ -327,6 +358,7 @@
           "value_name": "FPS"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "scene-linear EXR plates (else read as display-coded, clipped to 0-1)",
           "hidden": false,
@@ -341,6 +373,7 @@
           "value_name": null
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "run the networks at S times the plate's size, above 0 up to 2 [default: 1]",
           "hidden": false,
@@ -355,6 +388,7 @@
           "value_name": "S"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "linear gain before keying (video inputs) [default: 1]",
           "hidden": false,
@@ -369,6 +403,7 @@
           "value_name": "G"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "linear contrast before keying (video inputs) [default: 1]",
           "hidden": false,
@@ -383,6 +418,7 @@
           "value_name": "C"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "the contrast's pivot [default: 0.18]",
           "hidden": false,
@@ -397,6 +433,7 @@
           "value_name": "P"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "video outputs: h264-crf12, h264-lossless or dnxhr444 [default: h264-crf12]",
           "hidden": false,
@@ -411,6 +448,7 @@
           "value_name": "NAME"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "video outputs: x264's CRF [default: 12]",
           "hidden": false,
@@ -425,6 +463,7 @@
           "value_name": "N"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "video outputs: x264's preset [default: medium]",
           "hidden": false,
@@ -439,6 +478,7 @@
           "value_name": "NAME"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "video outputs: the pixel format [default: yuv444p10le]",
           "hidden": false,
@@ -453,6 +493,7 @@
           "value_name": "FMT"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "TensorRT (build its range first: corridorkey prepare --tensorrt-size WxH)",
           "hidden": false,
@@ -467,6 +508,7 @@
           "value_name": null
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "never build TensorRT inside the job: a range not built yet runs on CUDA",
           "hidden": false,
@@ -481,6 +523,7 @@
           "value_name": null
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "graphics memory this job may use [default: what is free]",
           "hidden": false,
@@ -495,6 +538,7 @@
           "value_name": "GB"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "OCIO config: a path or an ocio:// name [default: $OCIO, else the ACES studio config]",
           "hidden": false,
@@ -509,6 +553,7 @@
           "value_name": "CONFIG"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "the plates' colour space (EXR and image sequences)",
           "hidden": false,
@@ -523,6 +568,7 @@
           "value_name": "NAME"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "the EXR outputs' colour space [default: the input's]",
           "hidden": false,
@@ -537,6 +583,7 @@
           "value_name": "NAME"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "8 reads as CorridorKey 2.0 does; 16 keeps a deep source's bits [default: 8]",
           "hidden": false,
@@ -551,6 +598,7 @@
           "value_name": "8|16"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "warm-up frames keyed before the range and never written [default: 0]",
           "hidden": false,
@@ -565,6 +613,7 @@
           "value_name": "N"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "frames keyed after the range and never written [default: 0]",
           "hidden": false,
@@ -579,6 +628,7 @@
           "value_name": "N"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "the engine's every reply on stderr too",
           "hidden": false,
@@ -593,6 +643,9 @@
           "value_name": null
         },
         {
+          "conflicts_with": [
+            "verbose"
+          ],
           "default": [],
           "help": "stderr: failures only",
           "hidden": false,
@@ -607,6 +660,7 @@
           "value_name": null
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "progress lines on stdout [default: both openjd_progress: N and PROGRESS: N%]",
           "hidden": false,
@@ -626,6 +680,7 @@
           "value_name": "openjd|deadline|plain|json"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "write the run as JSON (docs/CLI.md \"Report\"), however it ends",
           "hidden": false,
@@ -640,6 +695,7 @@
           "value_name": "FILE.json"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "the ONNX model set's folder [env: CK_ENGINE_MODELS]",
           "hidden": false,
@@ -654,6 +710,7 @@
           "value_name": "DIR"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "ONNX Runtime's library (libonnxruntime.so / onnxruntime.dll) [env: CK_ENGINE_ORT]",
           "hidden": false,
@@ -668,6 +725,7 @@
           "value_name": "LIB"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "auto/cuda: the graphics card; cpu: ONNX Runtime's CPU provider (slow); coreml: macOS [default: auto]",
           "hidden": false,
@@ -682,6 +740,7 @@
           "value_name": "auto|cuda|cpu|coreml"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "the card: an index in CUDA's order or its GPU-/MIG- UUID [env: CUDA_VISIBLE_DEVICES, CUE_GPU_CORES]",
           "hidden": false,
@@ -696,6 +755,7 @@
           "value_name": "N|UUID"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "CPU threads per network (0: ONNX Runtime's choice)",
           "hidden": false,
@@ -722,6 +782,7 @@
       "about": "check that every requested frame is there and reads as a whole EXR",
       "args": [
         {
+          "conflicts_with": [],
           "default": [],
           "help": "the clip: a video, a frame folder or a plate.####.exr pattern",
           "hidden": false,
@@ -736,6 +797,9 @@
           "value_name": "INPUT"
         },
         {
+          "conflicts_with": [
+            "clip"
+          ],
           "default": [],
           "help": "the clip (as INPUT)",
           "hidden": false,
@@ -750,6 +814,7 @@
           "value_name": "INPUT"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "a folder, or one file per frame: key.####.exr, key.%04d.exr, key.$F4.exr",
           "hidden": false,
@@ -764,6 +829,7 @@
           "value_name": "DIR|PATTERN"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "frames to write: 1001-1100, 1001-1100x2 (or :2), 1001,1005,1010-1020; repeatable [default: the whole shot]",
           "hidden": false,
@@ -778,6 +844,9 @@
           "value_name": "SPEC"
         },
         {
+          "conflicts_with": [
+            "frames"
+          ],
           "default": [],
           "help": "the first frame to write [default: the shot's first]",
           "hidden": false,
@@ -792,6 +861,9 @@
           "value_name": "N"
         },
         {
+          "conflicts_with": [
+            "frames"
+          ],
           "default": [],
           "help": "the last frame to write [default: the shot's last]",
           "hidden": false,
@@ -806,6 +878,7 @@
           "value_name": "N"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "alpha, fg, cutout, checker, comma-separated [default: alpha,fg]",
           "hidden": false,
@@ -820,6 +893,7 @@
           "value_name": "LIST"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "a manual Hann window: C frames, stride S (C alone: S = C/2) [default: automatic]",
           "hidden": false,
@@ -834,6 +908,7 @@
           "value_name": "C/S"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "the engine protocol's run object (input, output_dir, options); flags win over it",
           "hidden": false,
@@ -848,6 +923,7 @@
           "value_name": "FILE.json"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "temporary files, in a folder of the run's own [env: OPENJD_SESSION_WORKING_DIR, TMPDIR]",
           "hidden": false,
@@ -862,6 +938,7 @@
           "value_name": "DIR"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "replace frames already at the output's names",
           "hidden": false,
@@ -876,6 +953,9 @@
           "value_name": null
         },
         {
+          "conflicts_with": [
+            "overwrite"
+          ],
           "default": [],
           "help": "do nothing when every requested frame is already there and whole (else key them all again)",
           "hidden": false,
@@ -890,6 +970,7 @@
           "value_name": null
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "first-frame matte (a PNG's alpha, an EXR's A), for the shot's first frame",
           "hidden": false,
@@ -904,6 +985,7 @@
           "value_name": "FILE"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "a hint matte for every frame: a video or a frame folder",
           "hidden": false,
@@ -918,6 +1000,7 @@
           "value_name": "PATH"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "trust in the hint [default: 0.95]",
           "hidden": false,
@@ -932,6 +1015,7 @@
           "value_name": "0-1"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "don't carry each window's matte into the next as a hint",
           "hidden": false,
@@ -946,6 +1030,7 @@
           "value_name": null
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "trust in the carried hint [default: 0.95]",
           "hidden": false,
@@ -960,6 +1045,7 @@
           "value_name": "0-1"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "one phase's networks at a time (less graphics memory, slower)",
           "hidden": false,
@@ -974,6 +1060,7 @@
           "value_name": null
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "EXR sequences, or videos (whole shots only) [default: exr]",
           "hidden": false,
@@ -988,6 +1075,7 @@
           "value_name": "exr|video"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "EXR pixel type [default: half]",
           "hidden": false,
@@ -1002,6 +1090,7 @@
           "value_name": "half|float"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "despill strength [default: 0.5]",
           "hidden": false,
@@ -1016,6 +1105,7 @@
           "value_name": "0-1"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "a video cutout in linear light",
           "hidden": false,
@@ -1030,6 +1120,7 @@
           "value_name": null
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "a frame folder's rate, for video outputs [default: 24]",
           "hidden": false,
@@ -1044,6 +1135,7 @@
           "value_name": "FPS"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "scene-linear EXR plates (else read as display-coded, clipped to 0-1)",
           "hidden": false,
@@ -1058,6 +1150,7 @@
           "value_name": null
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "run the networks at S times the plate's size, above 0 up to 2 [default: 1]",
           "hidden": false,
@@ -1072,6 +1165,7 @@
           "value_name": "S"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "linear gain before keying (video inputs) [default: 1]",
           "hidden": false,
@@ -1086,6 +1180,7 @@
           "value_name": "G"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "linear contrast before keying (video inputs) [default: 1]",
           "hidden": false,
@@ -1100,6 +1195,7 @@
           "value_name": "C"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "the contrast's pivot [default: 0.18]",
           "hidden": false,
@@ -1114,6 +1210,7 @@
           "value_name": "P"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "video outputs: h264-crf12, h264-lossless or dnxhr444 [default: h264-crf12]",
           "hidden": false,
@@ -1128,6 +1225,7 @@
           "value_name": "NAME"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "video outputs: x264's CRF [default: 12]",
           "hidden": false,
@@ -1142,6 +1240,7 @@
           "value_name": "N"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "video outputs: x264's preset [default: medium]",
           "hidden": false,
@@ -1156,6 +1255,7 @@
           "value_name": "NAME"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "video outputs: the pixel format [default: yuv444p10le]",
           "hidden": false,
@@ -1170,6 +1270,7 @@
           "value_name": "FMT"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "TensorRT (build its range first: corridorkey prepare --tensorrt-size WxH)",
           "hidden": false,
@@ -1184,6 +1285,7 @@
           "value_name": null
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "never build TensorRT inside the job: a range not built yet runs on CUDA",
           "hidden": false,
@@ -1198,6 +1300,7 @@
           "value_name": null
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "graphics memory this job may use [default: what is free]",
           "hidden": false,
@@ -1212,6 +1315,7 @@
           "value_name": "GB"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "OCIO config: a path or an ocio:// name [default: $OCIO, else the ACES studio config]",
           "hidden": false,
@@ -1226,6 +1330,7 @@
           "value_name": "CONFIG"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "the plates' colour space (EXR and image sequences)",
           "hidden": false,
@@ -1240,6 +1345,7 @@
           "value_name": "NAME"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "the EXR outputs' colour space [default: the input's]",
           "hidden": false,
@@ -1254,6 +1360,7 @@
           "value_name": "NAME"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "8 reads as CorridorKey 2.0 does; 16 keeps a deep source's bits [default: 8]",
           "hidden": false,
@@ -1268,6 +1375,7 @@
           "value_name": "8|16"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "warm-up frames keyed before the range and never written [default: 0]",
           "hidden": false,
@@ -1282,6 +1390,7 @@
           "value_name": "N"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "frames keyed after the range and never written [default: 0]",
           "hidden": false,
@@ -1296,6 +1405,7 @@
           "value_name": "N"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "the engine's every reply on stderr too",
           "hidden": false,
@@ -1310,6 +1420,9 @@
           "value_name": null
         },
         {
+          "conflicts_with": [
+            "verbose"
+          ],
           "default": [],
           "help": "stderr: failures only",
           "hidden": false,
@@ -1324,6 +1437,7 @@
           "value_name": null
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "progress lines on stdout [default: both openjd_progress: N and PROGRESS: N%]",
           "hidden": false,
@@ -1343,6 +1457,7 @@
           "value_name": "openjd|deadline|plain|json"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "write the run as JSON (docs/CLI.md \"Report\"), however it ends",
           "hidden": false,
@@ -1357,6 +1472,7 @@
           "value_name": "FILE.json"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "the ONNX model set's folder [env: CK_ENGINE_MODELS]",
           "hidden": false,
@@ -1371,6 +1487,7 @@
           "value_name": "DIR"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "ONNX Runtime's library (libonnxruntime.so / onnxruntime.dll) [env: CK_ENGINE_ORT]",
           "hidden": false,
@@ -1385,6 +1502,7 @@
           "value_name": "LIB"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "auto/cuda: the graphics card; cpu: ONNX Runtime's CPU provider (slow); coreml: macOS [default: auto]",
           "hidden": false,
@@ -1399,6 +1517,7 @@
           "value_name": "auto|cuda|cpu|coreml"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "the card: an index in CUDA's order or its GPU-/MIG- UUID [env: CUDA_VISIBLE_DEVICES, CUE_GPU_CORES]",
           "hidden": false,
@@ -1413,6 +1532,7 @@
           "value_name": "N|UUID"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "CPU threads per network (0: ONNX Runtime's choice)",
           "hidden": false,
@@ -1437,6 +1557,7 @@
       "about": "check models, runtime, card and memory before a farm's tasks start; build TensorRT",
       "args": [
         {
+          "conflicts_with": [],
           "default": [],
           "help": "the engine's every reply on stderr too",
           "hidden": false,
@@ -1451,6 +1572,9 @@
           "value_name": null
         },
         {
+          "conflicts_with": [
+            "verbose"
+          ],
           "default": [],
           "help": "stderr: failures only",
           "hidden": false,
@@ -1465,6 +1589,7 @@
           "value_name": null
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "progress lines on stdout [default: both openjd_progress: N and PROGRESS: N%]",
           "hidden": false,
@@ -1484,6 +1609,7 @@
           "value_name": "openjd|deadline|plain|json"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "write the run as JSON (docs/CLI.md \"Report\"), however it ends",
           "hidden": false,
@@ -1498,6 +1624,7 @@
           "value_name": "FILE.json"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "the ONNX model set's folder [env: CK_ENGINE_MODELS]",
           "hidden": false,
@@ -1512,6 +1639,7 @@
           "value_name": "DIR"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "ONNX Runtime's library (libonnxruntime.so / onnxruntime.dll) [env: CK_ENGINE_ORT]",
           "hidden": false,
@@ -1526,6 +1654,7 @@
           "value_name": "LIB"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "auto/cuda: the graphics card; cpu: ONNX Runtime's CPU provider (slow); coreml: macOS [default: auto]",
           "hidden": false,
@@ -1540,6 +1669,7 @@
           "value_name": "auto|cuda|cpu|coreml"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "the card: an index in CUDA's order or its GPU-/MIG- UUID [env: CUDA_VISIBLE_DEVICES, CUE_GPU_CORES]",
           "hidden": false,
@@ -1554,6 +1684,7 @@
           "value_name": "N|UUID"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "CPU threads per network (0: ONNX Runtime's choice)",
           "hidden": false,
@@ -1568,6 +1699,7 @@
           "value_name": "N"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "build TensorRT's engines for clips of this size (one-time, minutes)",
           "hidden": false,
@@ -1582,6 +1714,7 @@
           "value_name": "WxH"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "graphics memory a job may use (the window TensorRT is built for)",
           "hidden": false,
@@ -1606,6 +1739,7 @@
       "about": "version, model set, runtime, provider and card",
       "args": [
         {
+          "conflicts_with": [],
           "default": [],
           "help": "the ONNX model set's folder [env: CK_ENGINE_MODELS]",
           "hidden": false,
@@ -1620,6 +1754,7 @@
           "value_name": "DIR"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "ONNX Runtime's library (libonnxruntime.so / onnxruntime.dll) [env: CK_ENGINE_ORT]",
           "hidden": false,
@@ -1634,6 +1769,7 @@
           "value_name": "LIB"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "auto/cuda: the graphics card; cpu: ONNX Runtime's CPU provider (slow); coreml: macOS [default: auto]",
           "hidden": false,
@@ -1648,6 +1784,7 @@
           "value_name": "auto|cuda|cpu|coreml"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "the card: an index in CUDA's order or its GPU-/MIG- UUID [env: CUDA_VISIBLE_DEVICES, CUE_GPU_CORES]",
           "hidden": false,
@@ -1662,6 +1799,7 @@
           "value_name": "N|UUID"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "CPU threads per network (0: ONNX Runtime's choice)",
           "hidden": false,
@@ -1676,6 +1814,7 @@
           "value_name": "N"
         },
         {
+          "conflicts_with": [],
           "default": [],
           "help": "as JSON",
           "hidden": false,
