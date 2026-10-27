@@ -21,6 +21,20 @@ const api = (platform: NodeJS.Platform) => (platform === "win32" ? win32 : posix
 /** Windows and macOS (APFS's default) compare names without case. */
 const foldsCase = (platform: NodeJS.Platform) => platform === "win32" || platform === "darwin";
 
+/** A read of the file system (readdir, stat, lstat, realpath) answers within this, or the Console says it didn't. */
+export const FS_ANSWER_MS = 3000;
+
+/**
+ * `p`, or an ETIMEDOUT error once `ms` have passed (senior review 2026-10-26 N11: Tab or `dir` on a hung network share
+ * left the request pending, the page showing nothing). The read itself goes on; its late answer is dropped.
+ */
+export function answerWithin<T>(p: Promise<T>, ms = FS_ANSWER_MS): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  // loop: NOT-WORTH — one deadline per file system read [bounded: ms]
+  const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(Object.assign(new Error("no answer"), { code: "ETIMEDOUT" })), ms)));
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
+}
+
 /** `~` and `~/…` (`~\…` on Windows) are the home folder; nothing else is expanded. */
 export function expandHome(p: string, d: Pick<PathDeps, "home" | "platform">): string {
   if (p === "~") return d.home;

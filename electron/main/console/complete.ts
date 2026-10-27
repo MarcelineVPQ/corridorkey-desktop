@@ -143,7 +143,10 @@ async function paths(prefix: string, cwd: string, d: CompleteDeps, opts: ParseOp
   try {
     // loop: NOT-WORTH — one async readdir per Tab
     entries = await d.readdir(dir);
-  } catch {
+  } catch (e) {
+    // a folder that didn't answer in time (a hung share) says so, the typed name unchanged if taken
+    if ((e as NodeJS.ErrnoException | null)?.code === "ETIMEDOUT")
+      return [{ insert: quoteArg(prefix, opts), label: `${dir} didn't answer`, kind: "value", help: "a drive or network share that is busy or gone" }];
     // error: NOT-WORTH — no such folder (or unreadable): nothing to offer
     return [];
   }

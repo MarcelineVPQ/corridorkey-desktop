@@ -19,7 +19,7 @@ import { complete } from "./complete";
 import type { Elevation } from "./elevation";
 import { commandHelp, findLines, overview } from "./help";
 import type { AuditLog, History } from "./logs";
-import { checkWrite, expandHome, fsErrorText, nextVersion, resolveReal, type PathDeps } from "./paths";
+import { answerWithin, checkWrite, expandHome, FS_ANSWER_MS, fsErrorText, nextVersion, resolveReal, type PathDeps } from "./paths";
 import { expandHistory, hasExpansion } from "../../../src/shared/console/expand";
 import { folderRange, frameToken, groupSequences, isFrameFile, sequenceOf, type Sequence } from "../../../src/shared/console/sequences";
 import { commands, globRegExp, isCompound, parseProgram, type CmdNode, type List } from "../../../src/shared/console/script";
@@ -82,6 +82,8 @@ export interface ConsoleDeps {
   registry: Registry;
   paths: PathDeps;
   fs: ConsoleFs;
+  /** how long a readdir / stat / lstat / realpath may take (FS_ANSWER_MS; tests shorten it) */
+  fsAnswerMs?: number;
   /** the first folder (the results folder, else home) */
   startDir: string;
   /** the shipped corridorkey (engineFind.ts findCli), or null */
@@ -193,6 +195,13 @@ export class Console {
   private closing = false;
 
   constructor(private readonly d: ConsoleDeps) {
+    // every read of the file system answers in time, or says the drive or share didn't (senior review 2026-10-26 N11)
+    const ms = d.fsAnswerMs ?? FS_ANSWER_MS;
+    const timed =
+      <A extends unknown[], R>(f: (...a: A) => Promise<R>) =>
+      (...a: A) =>
+        answerWithin(f(...a), ms);
+    this.d = { ...d, fs: { ...d.fs, readdir: timed(d.fs.readdir), stat: timed(d.fs.stat), lstat: timed(d.fs.lstat) }, paths: { ...d.paths, realpath: timed(d.paths.realpath) } };
     this.cwd = d.startDir;
     this.spawnFn = d.spawn ?? nodeSpawn;
     this.now = d.now ?? Date.now;

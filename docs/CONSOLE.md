@@ -54,7 +54,9 @@ missing there).
   `del` / `rmdir` (the Console never deletes files), `cp` / `mv`, `more` / `less` (`cat`, `head`, `tail`),
   `which`. Built-ins say a file system error in words with what to type (`fsErrorText` in paths.ts), never Node's
   `ENOENT: …, stat '…'`; one they didn't expect (a file whose stat works but whose open doesn't) ends the block failed
-  in the same words (`cat: you have no permission to open …`), never a call with no block.
+  in the same words (`cat: you have no permission to open …`), never a call with no block. Every readdir, stat, lstat
+  and realpath answers within 3 s (`answerWithin`, `FS_ANSWER_MS`): on a hung network share `dir`, `cd` and the write
+  checks say "… didn't answer (a drive or network share that is busy or gone)", and Tab offers one item saying so.
 - **Running corridorkey.** The shipped binary (`engineFind.ts findCli`) is spawned with an argv, `shell: false`, its own
   process group, the engine's environment (`rustEngineEnv`, the app's models, runtime and TensorRT cache), in the
   Console's folder (on Windows corridorkey takes the current folder out of its DLL search first, `SetDllDirectoryW("")`

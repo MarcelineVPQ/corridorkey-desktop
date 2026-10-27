@@ -683,6 +683,21 @@ describe("completion", () => {
   });
 });
 
+describe("a folder that doesn't answer (review 2026-10-26 N11, BACKLOG row 116)", () => {
+  it("dir, cd and Tab say the folder didn't answer, within the deadline, instead of hanging", async () => {
+    const base = make().deps.fs;
+    // a hung network share: its reads never answer
+    const { c } = make({ fs: { ...base, readdir: () => new Promise(() => {}), stat: () => new Promise(() => {}) }, fsAnswerMs: 20 });
+    const d = await c.run("dir");
+    expect(d.state).toBe("failed");
+    expect(d.lines[0].text).toMatch(/didn't answer \(a drive or network share that is busy or gone\)/);
+    const cd = await c.run("cd plates");
+    expect([cd.state, cd.lines[0].text]).toEqual(["failed", expect.stringMatching(/didn't answer/)]);
+    const t = await c.complete("dir sub/", 8);
+    expect(t.items).toEqual([expect.objectContaining({ insert: "sub/", label: expect.stringMatching(/didn't answer$/) })]);
+  });
+});
+
 describe("block pushes and IPC checks", () => {
   it("coalesces block updates to one send per 100 ms, only while shown", async () => {
     vi.useFakeTimers();
