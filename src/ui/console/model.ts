@@ -4,6 +4,7 @@
 import type { Parsed, Token } from "../../shared/console/parse";
 import type { Registry } from "../../shared/console/registry";
 import type { ConsoleBlock, ConsoleEntry } from "../../shared/types";
+import { fileSizeText } from "../../shared/units";
 
 export type SpanKind = "plain" | "command" | "flag" | "value" | "path" | "string" | "error" | "danger";
 
@@ -128,34 +129,35 @@ export function writtenPaths(b: ConsoleBlock, reg: Registry): { flag: string; pa
   return out;
 }
 
-/** Copy output: what the block printed, as text (a listing as its rows). */
+/** A listing's date: local time, YYYY-MM-DD HH:MM (sortable, the same in every studio); "" when unknown. */
+export function isoTime(ms: number | null): string {
+  if (ms === null) return "";
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** A listing row's name cell: the name (a folder with /), a sequence's frames after it. */
+export const entryName = (e: ConsoleEntry): string => (e.folder ? `${e.name}/` : e.name) + (e.sequence ? `  ${sequenceText(e.sequence)}` : "");
+
+/** Copy output: what the block printed, as text; a listing as the table shows it (name, size, modified). */
 export function blockText(b: ConsoleBlock): string {
   // loop: NOT-WORTH — ≤ 2000 lines, per Copy press
   const lines = b.lines.map((l) => l.text);
-  if (b.entries)
+  if (b.entries?.length) {
     // loop: NOT-WORTH — ≤ 5000 rows, per Copy press
-    for (const e of b.entries) lines.push(`${e.folder ? "<DIR>".padStart(14) : (e.bytes === null ? "?" : String(e.bytes)).padStart(14)}  ${e.name}${e.folder ? "/" : ""}`);
+    const rows = b.entries.map((e) => [entryName(e), e.folder ? "folder" : fileSizeText(e.bytes), isoTime(e.modified)]);
+    // loop: NOT-WORTH — as above
+    const w = Math.max(4, ...rows.map((r) => r[0].length));
+    // loop: NOT-WORTH — as above
+    for (const r of [["Name", "Size", "Modified"], ...rows]) lines.push(`${r[0].padEnd(w)}  ${r[1].padEnd(10)}  ${r[2]}`.trimEnd());
+  }
   return lines.join("\n");
 }
 
 /** A sequence row's frames, lsseq-style: "1001-1100 · 96 frames · missing 1047, 1050-1052". */
 export function sequenceText(q: NonNullable<ConsoleEntry["sequence"]>): string {
   return `${q.range} · ${q.count} frames${q.missing ? ` · missing ${q.missing}` : ""}`;
-}
-
-/** A file's size in a listing (1 KiB = 1024 bytes, as the file managers show it). */
-export function sizeText(bytes: number | null): string {
-  if (bytes === null) return "?";
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KiB", "MiB", "GiB", "TiB"];
-  let v = bytes / 1024;
-  let u = 0;
-  // loop: NOT-WORTH — at most three steps
-  while (v >= 1024 && u < units.length - 1) {
-    v /= 1024;
-    u++;
-  }
-  return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${units[u]}`;
 }
 
 /** A refused line cut at its mistakes (the block's command shows where each one is). */

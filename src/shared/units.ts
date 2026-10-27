@@ -14,3 +14,18 @@ export function gibBytes(bytes: number): string {
 export function mbOrGbBytes(bytes: number): string {
   return bytes < 1e9 ? `${(bytes / 1e6).toFixed(1)} MB` : gbBytes(bytes);
 }
+
+/** A file's size in a listing (1 KiB = 1024 bytes, as the file managers show it); null: unknown ("?"). */
+export function fileSizeText(bytes: number | null): string {
+  if (bytes === null) return "?";
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KiB", "MiB", "GiB", "TiB"];
+  let v = bytes / 1024;
+  let u = 0;
+  // loop: NOT-WORTH — at most three steps
+  while (v >= 1024 && u < units.length - 1) {
+    v /= 1024;
+    u++;
+  }
+  return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${units[u]}`;
+}

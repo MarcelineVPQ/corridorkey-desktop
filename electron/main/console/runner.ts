@@ -19,6 +19,7 @@ import { commandHelp, findLines, overview } from "./help";
 import type { AuditLog, History } from "./logs";
 import { checkWrite, expandHome, resolveReal, type PathDeps } from "./paths";
 import { groupSequences } from "../../../src/shared/console/sequences";
+import { fileSizeText } from "../../../src/shared/units";
 
 /** Lines a block keeps (the newest); a long render's log can't grow the page or the pushes without bound. */
 export const CONSOLE_LINES_KEPT = 2000;
@@ -393,7 +394,7 @@ export class Console {
     const framed = seqs.reduce((n, e) => n + e.sequence!.count, 0);
     const more = rows.length - entries.length;
     const summary =
-      `${dir}: ${fileCount} files (${bytes} bytes${unread ? `; the sizes of ${unread} frames not read` : ""})` +
+      `${dir}: ${fileCount} files (${fileSizeText(bytes)}${unread ? `; the sizes of ${unread} frames not read` : ""})` +
       `${seqs.length ? `, ${framed} of them in ${seqs.length} sequence${seqs.length === 1 ? "" : "s"} (dir -f lists the frames)` : ""}` +
       `, ${entries.length - files.length} folders${more > 0 ? `; ${more} more not listed` : ""}${hidden > 0 ? `; ${hidden} hidden (dir -a shows them)` : ""}`;
     if (has("names")) {

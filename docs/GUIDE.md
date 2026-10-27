@@ -113,7 +113,8 @@ instead (**F2** switches).
 **Output.** Each command is a block: the line, its state (running, done, failed, refused, stopped), the exit code
 and what it means, the CLI's progress (frames handed to the writers) and phase, and what it printed. **Copy
 command**, **Copy output** and **Re-run** (puts the line back in the input to edit; it never runs by itself) are on
-every block; a render's output folder and report open with **Show in folder**. Elevated blocks are marked amber.
+every block; a render's output folder and report open with **Show in folder**. A listing's sizes are human (KiB, MiB, GiB, in its summary too) and its dates
+ISO-style local time (`2026-10-26 22:58`); **Copy output** copies the same columns. Elevated blocks are marked amber.
 **History** in the panel searches every line you typed; a click puts one back.
 
 Examples:

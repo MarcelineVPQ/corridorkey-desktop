@@ -359,7 +359,7 @@ describe("built-ins", () => {
       ["shot.mov", false, 1],
     ]);
     expect(b.entries![0].modified).toBeGreaterThan(0);
-    expect(b.lines[0].text).toMatch(/3 files \(3 bytes\), 0 folders/);
+    expect(b.lines[0].text).toMatch(/3 files \(3 B\), 0 folders/);
     expect((await c.run("dir ..")).entries!.some((e) => e.name === "out" && e.folder)).toBe(true);
   });
 
@@ -840,7 +840,7 @@ describe("SME review 2026-10-26: sequences (M4, S1)", () => {
       ["sh010_plate.mov", 1, null],
       ["sh010_plates", null, null],
     ]);
-    expect(b.lines[0].text).toMatch(/13 files .*in 1 sequence/);
+    expect(b.lines[0].text).toMatch(/13 files \(1.1 KiB\), 11 of them in 1 sequence/);
     const f = await c.run("dir -f");
     expect(f.entries!.filter((e) => e.name.startsWith("sh010_plate.1"))).toHaveLength(11);
     expect((await c.run("ls -1")).lines.map((l) => l.text)).toContain("sh010_plate.####.exr");

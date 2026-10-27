@@ -12,13 +12,14 @@ import {
   errorSpans,
   highlight,
   mergeBlocks,
+  isoTime,
   sequenceText,
-  sizeText,
   visibleBlocks,
   writtenPaths,
   BLOCKS_KEPT,
 } from "../../src/ui/console/model";
 import type { ConsoleBlock } from "../../src/shared/types";
+import { fileSizeText as sizeText } from "../../src/shared/units";
 
 const reg = makeRegistry();
 const opts = { windows: false };
@@ -147,7 +148,7 @@ describe("the blocks", () => {
         { name: "a.mov", folder: false, bytes: 2048, modified: null, sequence: null },
       ],
     });
-    expect(blockText(b).split("\n")).toEqual(["a", "b", "         <DIR>  plates/", "          2048  a.mov"]);
+    expect(blockText(b).split("\n")).toEqual(["a", "b", "Name     Size        Modified", "plates/  folder", "a.mov    2.0 KiB"]);
   });
 
   it("sizes", () => {
@@ -187,5 +188,30 @@ describe("SME review 2026-10-26: sequences in a listing (S1)", () => {
   it("a sequence row says its range, frame count and gaps", () => {
     expect(sequenceText({ range: "1001-1100", count: 96, missing: "1047, 1050-1052" })).toBe("1001-1100 · 96 frames · missing 1047, 1050-1052");
     expect(sequenceText({ range: "1-2", count: 2, missing: null })).toBe("1-2 · 2 frames");
+  });
+});
+
+describe("SME review 2026-10-26: dates and sizes for pros (S8)", () => {
+  it("dates are ISO-style local time, YYYY-MM-DD HH:MM (sortable, unambiguous across studios)", () => {
+    const ms = new Date(2026, 9, 6, 9, 5, 7).getTime();
+    expect(isoTime(ms)).toBe("2026-10-06 09:05");
+    expect(isoTime(null)).toBe("");
+  });
+
+  it("Copy output has the table's columns: name, human size, the same date", () => {
+    const ms = new Date(2026, 9, 26, 22, 58).getTime();
+    const b = block(1, {
+      lines: [{ kind: "out", text: "/shots: 3 files (2.0 GiB)" }],
+      entries: [
+        { name: "sh010_plate.####.exr", folder: false, bytes: 2 * 1024 ** 3, modified: ms, sequence: { range: "1001-1100", count: 100, missing: null } },
+        { name: "notes.txt", folder: false, bytes: 12, modified: ms, sequence: null },
+      ],
+    });
+    expect(blockText(b).split("\n")).toEqual([
+      "/shots: 3 files (2.0 GiB)",
+      "Name                                          Size        Modified",
+      "sh010_plate.####.exr  1001-1100 · 100 frames  2.0 GiB     2026-10-26 22:58",
+      "notes.txt                                     12 B        2026-10-26 22:58",
+    ]);
   });
 });

@@ -7,7 +7,8 @@ import { Check, Copy, CornerDownLeft, FolderOpen, ShieldAlert } from "lucide-rea
 import type { Registry } from "../../shared/console/registry";
 import type { ConsoleBlock } from "../../shared/types";
 import { ProgressBar } from "../ProgressBar";
-import { blockStatus, blockText, duration, errorSpans, sequenceText, sizeText, writtenPaths } from "./model";
+import { fileSizeText } from "../../shared/units";
+import { blockStatus, blockText, duration, errorSpans, isoTime, sequenceText, writtenPaths } from "./model";
 
 const COPIED_MS = 1500;
 
@@ -27,8 +28,6 @@ function CopyButton({ label, text }: { label: string; text: string }) {
     </button>
   );
 }
-
-const when = (ms: number | null) => (ms === null ? "" : new Date(ms).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" }));
 
 export const OutputBlock = memo(function OutputBlock({ b, registry, onReinsert }: { b: ConsoleBlock; registry: Registry; onReinsert: (line: string) => void }) {
   const st = blockStatus(b);
@@ -105,8 +104,8 @@ export const OutputBlock = memo(function OutputBlock({ b, registry, onReinsert }
                   {e.folder ? `${e.name}/` : e.name}
                   {e.sequence && <span className="cb-seq">{sequenceText(e.sequence)}</span>}
                 </td>
-                <td>{e.folder ? "folder" : sizeText(e.bytes)}</td>
-                <td>{when(e.modified)}</td>
+                <td>{e.folder ? "folder" : fileSizeText(e.bytes)}</td>
+                <td>{isoTime(e.modified)}</td>
               </tr>
             ))}
           </tbody>
