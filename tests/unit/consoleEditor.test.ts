@@ -372,3 +372,23 @@ describe("SME review 2026-10-26: pasting several lines (S2)", () => {
     expect([x.handled, x.state.paste?.length, x.effect]).toEqual([true, 3, undefined]);
   });
 });
+
+describe("Ctrl+R and Ctrl+W never reach the default menu (senior review 2026-10-26 N12, BACKLOG row 117)", () => {
+  // the app sets no application menu, so Electron's default keeps Ctrl+R (reload) and Ctrl+W (close); the editor's
+  // synchronous preventDefault for a handled key keeps them from it. Handled in every state of the line, so the page
+  // never reloads or closes from the input (the real-window check: tools/isolated.sh, docs/CONSOLE.md)
+  it("handles them on an empty line, a typed one, in search, with the list open and with lines pasted", () => {
+    const listOpen = press(withComp(typed("render --"), 7, [item("--overwrite"), item("--outputs")]), " ", { ctrl: true }).state;
+    const states: [string, EditorState][] = [
+      ["empty", initialEditor()],
+      ["typed", typed("render a.mov")],
+      ["search", press(typed(""), "r", { ctrl: true }).state],
+      ["list", listOpen],
+      ["pasted", pasted(typed(""), "dir\npwd\n")],
+    ];
+    // loop: NOT-WORTH — a test's few states and keys
+    for (const [name, s] of states)
+      for (const mods of [{ ctrl: true }, { ctrl: true, shift: true }])
+        for (const key of ["r", "w", "R", "W"]) expect([name, key, mods.shift ?? false, press(s, key, mods).handled]).toEqual([name, key, mods.shift ?? false, true]);
+  });
+});

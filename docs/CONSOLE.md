@@ -344,3 +344,9 @@ each format's wrangler items (`farmExport.test.ts`), `${dir}/*.exr` and the list
 block rendered to markup) and the CLI's fallback (ck-cli `appinstall.rs` and `tests/cli.rs`).
 The page (`consoleBlocks.test.ts`): the output is a plain region; one polite `role="status"` says each command's
 start and end (`announcement()`), never its streamed lines.
+
+The app sets no application menu, so Electron's default keeps Ctrl+R (reload), Ctrl+W (close) and Ctrl+Shift+I. In the
+input the editor handles Ctrl+R and Ctrl+W (with or without Shift) in every state of the line and calls
+`preventDefault` synchronously, which on Linux and Windows keeps them from the menu (`consoleEditor.test.ts`, senior
+review 2026-10-26 N12). Not yet checked in a real window: once, in `tools/isolated.sh`, Ctrl+R and Ctrl+W in the
+input, the page neither reloading nor closing. Ctrl+Shift+I isn't the editor's: it opens the developer tools.
