@@ -415,8 +415,8 @@ Graph outputs keep no shape (`fix_shapes.py` leaves them for ORT to infer): the 
 with the inferred output shapes filled in it passes.
 
 The published HD set, from `2.0.0-onnx.4` (padded 1152×1280; the engine takes the smallest stage-1 window it has,
-4/2 low-memory): C-RADIO and MoGe at 4 frames per call (the low-memory prepass's chunk), RVM, stage 1 at 4, stage 2
-at 1; 951,572,211 bytes in six files (`coreml.json` last). Built on the Linux PC (the graph rewrites are plain CPU
+4/2 low-memory): C-RADIO and MoGe at 4 frames per call (the low-memory prepass's chunk), RVM, stage 1 at 4 and 8, stage 2
+at 1; 1,089,814,318 bytes in seven files (`coreml.json` last). Built on the Linux PC (the graph rewrites are plain CPU
 work; on the 16 GB Mac C-RADIO's fold reached the memory gate's pressure limit at 8 GB): ORT's Core ML partitioner
 (Linux build) puts every node of every file on Core ML in one partition, and the files are byte-identical to the
 2026-10-26 rebuild (sha256), so the build is reproducible.

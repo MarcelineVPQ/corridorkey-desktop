@@ -26,7 +26,7 @@ case "$SET" in
     HOW="\`engine-rs/export/build_trt_models.sh\` (docs/ONNX_EXPORT.md, \"TensorRT set\")"
     ;;
   *-coreml)
-    # loop: NOT-WORTH — a sorted listing of the set's six files
+    # loop: NOT-WORTH — a sorted listing of the set's seven files
     mapfile -t FILES < <(ls ck2-*-fp16-coreml-*.onnx coreml.json 2>/dev/null | sort)
     LIST=coreml.json
     TITLE="Models ${SET%-coreml} (Core ML, fp16)"

@@ -273,9 +273,10 @@ export const COREML = {
     coremlModel("ck2-moge-fp16-coreml-1152x1280-t4.onnx", 172035616, "e04b8594da157a56fe2b9c52e0e47077e2773d0e4f7a30bc60ed848d3dc76666"),
     coremlModel("ck2-rvm-fp16-coreml-1152x1280-t1.onnx", 66811967, "c0cedf0b9d11eff3ea156153b6df22834412946f38f0a2a2f5f1a3d9304b1d08"),
     coremlModel("ck2-stage1-fp16-coreml-1152x1280-t4.onnx", 135921658, "c802c2b81198c4bc9715b7181f8bf2ce8e69da502b2a557546104853a27d6d8f"),
+    coremlModel("ck2-stage1-fp16-coreml-1152x1280-t8.onnx", 138242044, "0c247b6a4d8eba8513320d1cbcb791417d69110b11e895b06f1901112f280f1a"),
     coremlModel("ck2-stage2-fp16-coreml-1152x1280-t1.onnx", 286986834, "a48a93e87b394a14d43039782f87b327e26cac01be62e7411aca93e8c0ea0e81"),
     // last: the engine finds the set by it, and the install counts it as done once it is there
-    coremlModel("coreml.json", 395, "21cb1f77683b444e159c6085032592616d8b8ef2f18a3915630f36eb4b9e1c7a"),
+    coremlModel("coreml.json", 458, "365cf2b9c34861237b930412b70e9a5d25135ada6e5d9b34637e744b0d66b040"),
   ],
 };
 /** The Core ML set this system downloads with the models (macOS only). */
@@ -425,7 +426,7 @@ export async function runInstall(data: string, deps: InstallDeps, c: Catalog = C
     mkdirSync(partial, { recursive: true });
     // loop: SERIAL-REQUIRED — one file at a time, see fetchOne (a file a stopped install finished is checked and kept)
     for (const f of c.coreml.files) await fetchOne(f, `Downloading the Core ML models (${f.file})`, join(partial, f.file));
-    // loop: NOT-WORTH — six local renames in the list's order, coreml.json last: the set counts as installed from there
+    // loop: NOT-WORTH — seven local renames in the list's order, coreml.json last: the set counts as installed from there
     for (const f of c.coreml.files) renameSync(join(partial, f.file), join(set, f.file));
     // loop: NOT-WORTH — removes the emptied folder
     rmSync(partial, { recursive: true, force: true });

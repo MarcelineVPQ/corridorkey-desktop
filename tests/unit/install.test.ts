@@ -541,7 +541,7 @@ describe("TensorRT catalogue and rules", () => {
     // macOS adds the Core ML set
     const gb = (r: { wheels: { size: number }[] }, extra: { size: number }[] = []) => ((sum(r.wheels) + sum(MODELS.files) + sum(extra)) / 1e9).toFixed(2);
     const text = `${gb(RUNTIME)} GB download on Linux, ${gb(RUNTIME_WIN)} GB on Windows, ${gb(RUNTIME_MAC, COREML.files)} GB on macOS, once`;
-    expect(text).toBe("4.86 GB download on Linux, 4.64 GB on Windows, 4.28 GB on macOS, once");
+    expect(text).toBe("4.86 GB download on Linux, 4.64 GB on Windows, 4.41 GB on macOS, once");
     // loop: NOT-WORTH — two documents
     for (const doc of ["../../README.md", "../../docs/GUIDE.md"]) expect(readFileSync(new URL(doc, import.meta.url), "utf8")).toContain(text);
   });

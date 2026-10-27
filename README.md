@@ -81,7 +81,7 @@ none of them changes what a user sees today.
   graphics card with CUDA." (AMD would need ONNX Runtime's MIGraphX or DirectML build; not in 1.0.)
 - macOS 14 or newer on Apple Silicon (M1 or newer; the disk image). Intel Macs aren't supported.
 - Nothing else to set up: the engine comes with the app, and on first start the setup downloads the GPU runtime and
-  the CorridorKey models (a 4.86 GB download on Linux, 4.64 GB on Windows, 4.28 GB on macOS, once). If `ffmpeg` is
+  the CorridorKey models (a 4.86 GB download on Linux, 4.64 GB on Windows, 4.41 GB on macOS, once). If `ffmpeg` is
   missing, it offers to install it (apt or pacman on Linux, `winget` on Windows, Homebrew on macOS).
 - Optional, Linux: **TensorRT** (Engine settings, TensorRT; off by default) for about 1.9-2.2× the original's speed at
   HD and about 2.3-2.4× at 4K, with the same mattes (Speed, the same-day pair of 2026-10-26). Switching it on offers its own download: NVIDIA's TensorRT 10.16
@@ -111,7 +111,7 @@ There's no NVIDIA card on a Mac, so the Mac engine uses ONNX Runtime's Core ML b
 instead of CUDA, and that path needs more development before it keys:
 
 - **Core ML models in setup** (backlog row 59): Core ML compiles for fixed sizes, so the Mac needs its own model set.
-  It's built but not published, and setup doesn't download it yet. Until it does, a Mac job stops on the missing set.
+  It's published (release `models-2.0.0-onnx.4-coreml`) and setup downloads it on a Mac; the first Mac build brings that setup.
 - **The app asks for Core ML** (row 58): built, not yet tried on a real Mac.
 - **HD only** (row 60): the one Core ML set is for HD (clips up to 1280×1080). 4K needs its own set or per-size
   builds in the engine, measured on a Mac (compile time, memory on 16 GB, speed).
@@ -133,7 +133,7 @@ decimal GB: `du --si`):
 | Runtime | **2.4 GB**: ONNX Runtime + CUDA/cuDNN (a 1.6 GB download) | **7.6 GB** Python venv: PyTorch, NVIDIA libraries, Triton, other packages |
 | Models | **3.3 GB** (fp16) | **5.1 GB**: CorridorKey weights 2.7 GB + foundation models 2.4 GB |
 | **Total** | **5.9 GB** | **12.6 GB** |
-| Setup | Download one file; the app fetches the rest itself (4.86 GB on Linux, 4.64 GB on Windows, 4.28 GB on macOS) | Install Python, create a venv, pip install, run a download script |
+| Setup | Download one file; the app fetches the rest itself (4.86 GB on Linux, 4.64 GB on Windows, 4.41 GB on macOS) | Install Python, create a venv, pip install, run a download script |
 
 PyTorch's environment carries NVIDIA libraries the ONNX Runtime engine never uses (NCCL and
 cuSPARSELt, for multi-GPU and training), and the fp16 models are a third smaller.
