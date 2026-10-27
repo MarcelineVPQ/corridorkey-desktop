@@ -95,6 +95,40 @@ fn usage_mistakes_exit_2_and_say_what_to_type() {
 }
 
 #[test]
+fn start_and_end_outside_the_shot_are_refused_as_frames_are() {
+    // farm review 2026-10-26 M1: `-s 0 -e 99` on plates 1-3 verified the 3 frames there and exited 0, so a farm
+    // marked frames done that were never written; -F refuses the same range (exit 2)
+    let d = scratch("ends");
+    let pl = plates(&d.0, &[1, 2, 3]);
+    let pat = d.0.join("key/key.####.exr");
+    // loop: NOT-WORTH — three frames
+    for n in 1..=3 {
+        exr(&d.0.join(format!("key/key.{n:04}.exr")));
+    }
+    let job = d.0.join("job.json");
+    std::fs::write(&job, r#"{"options": {"frame_start": 2, "frame_end": 9}}"#).unwrap();
+    let cases: [&[&str]; 6] = [&["-s", "0", "-e", "99"], &["-s", "0", "-e", "2"], &["-e", "4"], &["-s", "0"], &["-s", "4"], &["--job", s(&job)]];
+    // loop: NOT-WORTH — a test's few cases
+    for extra in cases {
+        // loop: NOT-WORTH — both commands
+        for cmd in ["verify", "render"] {
+            let mut a = vec![cmd, "-i", s(&pl), "-o", s(&pat), "--outputs", "alpha", "--models", "/nonexistent/models"];
+            a.extend(extra);
+            let o = run(&a);
+            assert_eq!(o.status.code(), Some(2), "{cmd} {extra:?}: {}", text(&o.stderr));
+            assert!(text(&o.stderr).contains("outside the shot (1-3"), "{cmd} {extra:?}: {}", text(&o.stderr));
+        }
+    }
+    // either end alone runs to the shot's end or from its start; ends inside the shot are fine
+    // loop: NOT-WORTH — a test's few cases
+    for extra in [&["-s", "2"][..], &["-e", "2"], &["-s", "1", "-e", "3"]] {
+        let mut a = vec!["verify", "-i", s(&pl), "-o", s(&pat), "--outputs", "alpha"];
+        a.extend(extra);
+        assert_eq!(run(&a).status.code(), Some(0), "{extra:?}");
+    }
+}
+
+#[test]
 fn help_and_version_exit_0() {
     let o = run(&["--version"]);
     assert_eq!(o.status.code(), Some(0));

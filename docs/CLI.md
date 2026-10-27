@@ -59,8 +59,9 @@ start. They are what schedulers fill in: Deadline `-s <STARTFRAME> -e <ENDFRAME>
 -e #FRAME_END#`, OpenJD `-F {{Task.Param.Frame}}`. Without any of them the whole shot is keyed.
 
 Frame numbers are the shot's own: a frame folder's numbers (`plate.1001.exr` is 1001), a movie's from 1001 (its
-first frame is 1001), as the outputs are numbered. A frame outside the shot, or one a folder skips, is exit 2 saying
-the shot's range.
+first frame is 1001), as the outputs are numbered. A frame outside the shot (an `-s` / `-e` end or a job file's
+`frame_start` / `frame_end` too), or one a folder skips, is exit 2 saying the shot's range; `-s` / `-e` keep only a
+folder's gaps inside the range out of the frames, never an end past the shot.
 
 The networks are temporal (RVM runs through every frame; the windows blend neighbours), so a step or a list is keyed
 over its whole span and only the frames asked for are kept: `-F 1001-1100x2` keys 1001-1100 and writes 50 frames.

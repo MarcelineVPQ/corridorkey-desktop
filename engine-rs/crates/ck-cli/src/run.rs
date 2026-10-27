@@ -255,33 +255,45 @@ fn render(m: &ArgMatches, verify: bool, sink: &mut CliSink, report: &mut Report)
     let whole_number = |v: &Value, what: &str| {
         v.as_u64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok())).ok_or_else(|| fail(exit::USAGE, format!("--job: {what} must be a whole number")))
     };
-    // the shot's frames numbered a..=b (a folder may skip numbers)
-    // loop: NOT-WORTH — the shot's numbers, once per run
-    let in_shot = |a: u64, b: u64| -> Vec<u64> { shot.numbers.iter().copied().filter(|n| (a..=b).contains(n)).collect() };
+    let describe = shot.describe();
+    let outside = |what: String| fail(exit::USAGE, format!("{what} is outside the shot ({first}-{last}, {} frames; numbered {describe})", shot.numbers.len()));
+    // the shot's frames numbered a..=b (a folder may skip numbers); ends outside the shot are refused, as -F's are
+    // (a farm would mark frames done that were never written)
+    let in_shot = |a: u64, b: u64, (sa, sb): (&str, &str)| -> Result<Vec<u64>, Fail> {
+        if !(first..=last).contains(&a) {
+            return Err(outside(format!("{sa} {a}")));
+        }
+        if !(first..=last).contains(&b) {
+            return Err(outside(format!("{sb} {b}")));
+        }
+        if a > b {
+            return Err(fail(exit::USAGE, format!("{sa} {a} is after {sb} {b} (write {sa} {b} {sb} {a})")));
+        }
+        // loop: NOT-WORTH — the shot's numbers, once per run
+        Ok(shot.numbers.iter().copied().filter(|n| (a..=b).contains(n)).collect())
+    };
     let requested: Option<Vec<u64>> = if let Some(spec) = spec {
         Some(frames::parse_frames(&spec).map_err(|e| fail(exit::USAGE, format!("-F {e}")))?)
     } else if start.is_some() || end.is_some() {
         let (a, b) = (start.unwrap_or(first), end.unwrap_or(last));
-        if a > b {
-            return Err(fail(exit::USAGE, format!("-s {a} is after -e {b} (write -s {b} -e {a})")));
-        }
-        Some(in_shot(a, b))
+        Some(in_shot(a, b, ("-s", "-e"))?)
     } else {
         match job_range {
             (Some(a), Some(b)) => {
                 let (a, b) = (whole_number(&a, "frame_start")?, whole_number(&b, "frame_end")?);
-                Some(in_shot(a, b))
+                Some(in_shot(a, b, ("--job: frame_start", "--job: frame_end"))?)
             }
             (None, None) => None,
             _ => return Err(fail(exit::USAGE, "--job: frame_start and frame_end go together: give both")),
         }
     };
-    let describe = shot.describe();
     if let Some(r) = &requested {
         // loop: NOT-WORTH — the frames asked for, once per run
         if let Some(n) = r.iter().find(|n| shot.numbers.binary_search(n).is_err()) {
-            let why = if (first..=last).contains(n) { format!("the shot has no frame {n}") } else { format!("frame {n} is outside the shot") };
-            return Err(fail(exit::USAGE, format!("{why} ({first}-{last}, {} frames; numbered {describe})", shot.numbers.len())));
+            if !(first..=last).contains(n) {
+                return Err(outside(format!("frame {n}")));
+            }
+            return Err(fail(exit::USAGE, format!("the shot has no frame {n} ({first}-{last}, {} frames; numbered {describe})", shot.numbers.len())));
         }
         if r.is_empty() {
             return Err(fail(exit::USAGE, format!("no frame of the shot ({first}-{last}) in -s / -e")));
