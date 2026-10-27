@@ -119,7 +119,9 @@ and what it means, the CLI's progress (frames handed to the writers) and phase, 
 command**, **Copy output** and **Re-run** (puts the line back in the input to edit; it never runs by itself) are on
 every block; a render's output folder and report open with **Show in folder**. A listing's sizes are human (KiB, MiB, GiB, in its summary too) and its dates
 ISO-style local time (`2026-10-26 22:58`); **Copy output** copies the same columns. Elevated blocks are marked amber.
-**History** in the panel searches every line you typed; a click puts one back.
+**History** in the panel searches every line you typed (and the folder you typed it in), with its number and ✓ or ✗;
+a click puts one back. `history 20` prints the last 20, `history sh010` the lines about sh010, each with when it ran
+and its exit code. Start a line with a space to keep it out of the history.
 
 Examples:
 

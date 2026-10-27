@@ -1182,6 +1182,21 @@ select {
 .console-history button:hover {
   background: var(--bg-3);
 }
+.console-history .ch-n {
+  display: inline-block;
+  min-width: 4ch;
+  color: var(--text-3);
+}
+.console-history .ch-end {
+  display: inline-block;
+  min-width: 5ch;
+}
+.console-history .ch-end.ok {
+  color: var(--accent-ink);
+}
+.console-history .ch-end.error {
+  color: var(--status-error);
+}
 .console-keys {
   width: 100%;
   border-collapse: collapse;

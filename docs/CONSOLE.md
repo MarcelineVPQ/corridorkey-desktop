@@ -24,7 +24,7 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   combined like `-la`, and DOS's `/w /b /a /o:d` on every system; dot files only with `-a`; a frame sequence is one row,
   `sh010_plate.####.exr  1001-1100 · 96 frames · missing 1047`, `-f` lists its frames: `src/shared/console/sequences.ts`,
   which Tab completion uses too: one candidate per sequence, never one per frame), `cls` / `clear`,
-  `history` (`--audit`: the elevated log), `version` (also `corridorkey --version`, `render --version`: the app's
+  `history [N|term]` (`--audit`: the elevated log), `version` (also `corridorkey --version`, `render --version`: the app's
   version, which its corridorkey shares; answered without running it), `run <file.ckcmd>` (a script of Console lines, one per line, `#` comments;
   each line through the same checks; stops at the first that fails; no script inside a script), `sudo <command>`,
   `sudo -k`, and `corridorkey render | verify | prepare | info` (also bare `render` …). Other command lines' names get
@@ -50,7 +50,11 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   progress, the last 2000 lines, `dir`'s rows. Updates are pushed on `ck:console-blocks`, at most 10 a second and only
   while the window is shown; the session (folder, elevation's end, the running line) rides in the app state.
 - **History** (`userData/console-history.jsonl`): the lines typed, across restarts, the newest 5000, consecutive
-  duplicates once; Ctrl+R searches it (`consoleHistory`).
+  duplicates once, a line typed with a leading space not at all (bash's ignorespace). Each line has a stable number
+  (it never changes, also across compaction; for `!N` later), its folder and time (`{n, time, line, cwd}`), and its end
+  once known (an `{n, exit, state}` row appended when its block ends). `history [N|term]` prints the last N (default
+  50) or the lines whose text or folder contains the term: number, local time, ✓ or ✗ with the exit code, the line, its
+  folder. Ctrl+R searches it; the History panel shows the number and ✓ / ✗ (`consoleHistory` returns the entries).
 
 ## Security rules
 

@@ -2,10 +2,13 @@
 //   console-audit.jsonl    append-only: every elevation (granted, refused, dropped), every elevated command (its
 //                          argv, the resolved targets, its exit) and every write folder allowed or removed. Only ever opened to append (flag "a"); never
 //                          rewritten, truncated or pruned by the app.
-//   console-history.jsonl  the lines typed, per user, across restarts: the newest HISTORY_CAP, consecutive
-//                          duplicates kept once; compacted (temp file + rename) when it grows past the cap by a tenth.
+//   console-history.jsonl  the lines typed, per user, across restarts, each with a stable number, its folder and
+//                          time ({n, time, line, cwd}), and its end once known ({n, exit, state}): the newest
+//                          HISTORY_CAP, consecutive duplicates kept once, a line typed with a leading space not at all;
+//                          compacted (temp file + rename, one row per line) when it grows past the cap by a tenth.
 // Every read and write is async; writes go one at a time, in order.
 import { appendFile, open, readFile, rename, writeFile } from "node:fs/promises";
+import type { ConsoleHistoryEntry } from "../../../src/shared/types";
 
 export const HISTORY_CAP = 5000;
 /** How much of the audit log's end `history --audit` reads (the file itself is never cut). */
@@ -92,7 +95,8 @@ function parseLines<T>(text: string): T[] {
 }
 
 export class History {
-  private lines: string[] = [];
+  private items: ConsoleHistoryEntry[] = [];
+  private nextN = 1;
   private inFile = 0;
   private readonly serial = new Serial();
   readonly loaded: Promise<void>;
@@ -104,39 +108,84 @@ export class History {
     // loop: NOT-WORTH — one async read of the history at start
     this.loaded = readFile(file, "utf8").then(
       (t) => {
+        const rows = parseLines<Partial<ConsoleHistoryEntry> & { line?: unknown }>(t);
+        this.inFile = rows.length;
+        const all: ConsoleHistoryEntry[] = [];
+        const byN = new Map<number, ConsoleHistoryEntry>();
+        let n = 0;
         // loop: NOT-WORTH — the file's lines, once at start
-        const all = parseLines<{ line?: unknown }>(t)
-          .map((e) => e.line)
-          .filter((l): l is string => typeof l === "string");
-        this.inFile = all.length;
-        this.lines = [...all.slice(-this.cap), ...this.lines];
+        for (const r of rows) {
+          // an end row ({n, exit, state}) completes its line; an older file's lines have no number: counted on
+          if (typeof r.line !== "string") {
+            const e = typeof r.n === "number" ? byN.get(r.n) : undefined;
+            if (e) Object.assign(e, { exit: typeof r.exit === "number" ? r.exit : null, state: typeof r.state === "string" ? r.state : null });
+            continue;
+          }
+          n = typeof r.n === "number" && r.n > n ? r.n : n + 1;
+          const e: ConsoleHistoryEntry = {
+            n,
+            line: r.line,
+            time: typeof r.time === "string" ? r.time : null,
+            cwd: typeof r.cwd === "string" ? r.cwd : null,
+            exit: typeof r.exit === "number" ? r.exit : null,
+            state: typeof r.state === "string" ? r.state : null,
+          };
+          all.push(e);
+          byN.set(n, e);
+        }
+        this.nextN = n + 1;
+        // lines typed before the file was read come after it
+        // loop: NOT-WORTH — the few lines typed while it loads
+        for (const e of this.items) e.n = this.nextN++;
+        this.items = [...all.slice(-this.cap), ...this.items];
       },
       // error: NOT-WORTH — no history yet (first start)
       () => {},
     );
   }
 
-  /** A typed line, kept (an empty one, or the same as the last, isn't). */
-  async add(line: string, now = new Date()): Promise<void> {
+  /**
+   * A typed line, kept with its folder and time; resolves with its number (stable: it never changes), or null when it
+   * isn't kept: an empty line, or one typed with a leading space (bash's ignorespace). The same as the last: its number.
+   */
+  async add(line: string, cwd: string | null = null, now = new Date()): Promise<number | null> {
     await this.loaded;
-    if (!line.trim() || this.lines[this.lines.length - 1] === line) return;
-    this.lines.push(line);
-    if (this.lines.length > this.cap) this.lines.splice(0, this.lines.length - this.cap);
-    const text = JSON.stringify({ time: now.toISOString(), line }) + "\n";
+    if (!line.trim() || line.startsWith(" ")) return null;
+    const last = this.items[this.items.length - 1];
+    if (last?.line === line) return last.n;
+    const e: ConsoleHistoryEntry = { n: this.nextN++, line, time: now.toISOString(), cwd, exit: null, state: null };
+    this.items.push(e);
+    if (this.items.length > this.cap) this.items.splice(0, this.items.length - this.cap);
+    await this.write({ n: e.n, time: e.time, line, cwd });
+    return e.n;
+  }
+
+  /** Line `n` has ended: its exit code and state (done, failed, refused, cancelled), kept with it. */
+  async ended(n: number, exit: number | null, state: string): Promise<void> {
+    await this.loaded;
+    let e: ConsoleHistoryEntry | undefined;
+    // loop: NOT-WORTH — ≤ HISTORY_CAP entries, newest first; the line just run is the last or close to it
+    for (let i = this.items.length - 1; i >= 0 && !e; i--) if (this.items[i].n === n) e = this.items[i];
+    if (!e) return;
+    Object.assign(e, { exit, state });
+    await this.write({ n, exit, state });
+  }
+
+  private async write(row: object): Promise<void> {
     try {
       if (this.inFile + 1 > this.cap + Math.ceil(this.cap / 10)) {
-        // loop: NOT-WORTH — the history rewritten once per cap/10 lines typed [bounded: a local file write]
-        const all = this.lines.map((l) => JSON.stringify({ line: l }) + "\n").join("");
+        // loop: NOT-WORTH — the history rewritten once per cap/10 rows [bounded: a local file write]
+        const all = this.items.map((e) => JSON.stringify(e) + "\n").join("");
         await this.serial.then(async () => {
           // loop: NOT-WORTH — as above
           await writeFile(`${this.file}.tmp`, all);
           // loop: NOT-WORTH — as above
           await rename(`${this.file}.tmp`, this.file);
         });
-        this.inFile = this.lines.length;
+        this.inFile = this.items.length;
       } else {
-        // loop: NOT-WORTH — one async append per typed line [bounded: a local file write]
-        await this.serial.then(() => appendFile(this.file, text, { flag: "a" }));
+        // loop: NOT-WORTH — one async append per typed line or its end [bounded: a local file write]
+        await this.serial.then(() => appendFile(this.file, JSON.stringify(row) + "\n", { flag: "a" }));
         this.inFile++;
       }
     } catch (e) {
@@ -145,17 +194,36 @@ export class History {
     }
   }
 
-  /** Lines containing `query` (any case), newest first, at most `limit`. */
+  /** Entries whose line (or folder) contains `query` (any case), newest first, at most `limit`. */
+  entries(query: string, limit = 200): ConsoleHistoryEntry[] {
+    const q = query.toLowerCase();
+    const out: ConsoleHistoryEntry[] = [];
+    // loop: NOT-WORTH — ≤ HISTORY_CAP lines, newest first, stops at the limit; per search
+    for (let i = this.items.length - 1; i >= 0 && out.length < limit; i--) {
+      const e = this.items[i];
+      if (e.line.toLowerCase().includes(q) || (e.cwd ?? "").toLowerCase().includes(q)) out.push({ ...e });
+    }
+    return out;
+  }
+
+  /** Lines containing `query` (any case), newest first, at most `limit` (Ctrl+R, the suggestions). */
   search(query: string, limit = 200): string[] {
     const q = query.toLowerCase();
     const out: string[] = [];
     // loop: NOT-WORTH — ≤ HISTORY_CAP lines, newest first, stops at the limit; per Ctrl+R keystroke
-    for (let i = this.lines.length - 1; i >= 0 && out.length < limit; i--) if (this.lines[i].toLowerCase().includes(q)) out.push(this.lines[i]);
+    for (let i = this.items.length - 1; i >= 0 && out.length < limit; i--) if (this.items[i].line.toLowerCase().includes(q)) out.push(this.items[i].line);
     return out;
   }
 
   /** The newest `n` lines, oldest first. */
   recent(n: number): string[] {
-    return this.lines.slice(-n);
+    // loop: NOT-WORTH — ≤ n entries
+    return this.items.slice(-n).map((e) => e.line);
+  }
+
+  /** The newest `n` entries, oldest first. */
+  last(n: number): ConsoleHistoryEntry[] {
+    // loop: NOT-WORTH — ≤ n entries
+    return this.items.slice(-n).map((e) => ({ ...e }));
   }
 }

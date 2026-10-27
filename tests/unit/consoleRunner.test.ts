@@ -436,9 +436,34 @@ describe("built-ins", () => {
     expect((await c.run("cls")).clear).toBe(true);
     await c.run("pwd");
     await new Promise((r) => setTimeout(r, 5));
-    expect((await c.run("history")).lines.map((l) => l.text)).toEqual(["   1  cls", "   2  pwd"]);
+    expect((await c.run("history")).lines.map((l) => l.text)).toEqual([
+      expect.stringMatching(new RegExp(`^   1  \\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d  ✓    cls   \\[${shots}\\]$`)),
+      expect.stringMatching(/^   2  .*  ✓    pwd   \[/),
+    ]);
     expect((await c.run("history --audit")).lines[0].text).toBe("Nothing elevated yet.");
-    expect(c.history("PW")).toEqual(["pwd"]);
+    // loop: NOT-WORTH — one entry
+    expect(c.history("PW").map((e) => e.line)).toEqual(["pwd"]);
+  });
+
+  it("SME S6: history N and history <term>, stable numbers, the exit code kept, a leading space not kept", async () => {
+    const { c, files } = make();
+    // loop: NOT-WORTH — four lines
+    for (const l of ["pwd", "cd nowhere", " cd ..", "dir"]) await c.run(l);
+    await new Promise((r) => setTimeout(r, 10));
+    const text = async (l: string) => (await c.run(l)).lines.map((x) => x.text);
+    // the line with a leading space isn't kept (it still ran: cd .. moved up)
+    const all = await text("history 10");
+    expect(all.map((t) => t.split(/\s+/)[1])).toEqual(["1", "2", "3"]);
+    expect(all[1]).toMatch(/✗\s+cd nowhere/);
+    expect(await text("history 1")).toEqual([expect.stringMatching(/^ +4 .*history 10/)]);
+    expect(await text("history nowhere")).toEqual([expect.stringMatching(/^ +2 .*✗\s+cd nowhere/)]);
+    // the folder is searched too, and kept across a restart with its number and end
+    await new Promise((r) => setTimeout(r, 10));
+    const again = new History(join(files, "console-history.jsonl"));
+    await again.loaded;
+    // loop: NOT-WORTH — a few entries
+    expect(again.entries("cd nowhere").map((e) => [e.n, e.state, e.cwd])).toEqual([[2, "failed", shots]]);
+    expect(again.entries(root).length).toBeGreaterThanOrEqual(4);
   });
 });
 

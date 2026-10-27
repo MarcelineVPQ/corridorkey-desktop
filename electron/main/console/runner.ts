@@ -12,7 +12,7 @@ import { posix, win32 } from "node:path";
 import { naturalCompare } from "../media";
 import { parse, quoteArg, type Parsed, type ParseOptions } from "../../../src/shared/console/parse";
 import { EXIT_MEANINGS, fullName, type ConsoleArg, type Registry } from "../../../src/shared/console/registry";
-import type { ConsoleBlock, ConsoleEntry, ConsoleSession } from "../../../src/shared/types";
+import type { ConsoleBlock, ConsoleEntry, ConsoleHistoryEntry, ConsoleSession } from "../../../src/shared/types";
 import { complete } from "./complete";
 import type { Elevation } from "./elevation";
 import { commandHelp, findLines, overview } from "./help";
@@ -137,9 +137,16 @@ export class Console {
 
   /** Run a typed line. Resolves with its block once it is done, or (corridorkey, run) once it has started. */
   async run(line: string): Promise<ConsoleBlock> {
-    void this.d.history.add(line);
+    // kept with its folder (a leading space: not kept), and how it ended once it has
+    const n = this.d.history.add(line, this.cwd);
+    const r = await this.runLine(line, null);
+    // loop: NOT-WORTH — one async history append per line's end [bounded: a local file write]
+    void r.done.then(async (b) => {
+      const k = await n;
+      if (k !== null) await this.d.history.ended(k, b.exitCode, b.state);
+    });
     // a job's block finishes later (its updates are pushed); a built-in's is finished here
-    return (await this.runLine(line, null)).block;
+    return r.block;
   }
 
   /** Ctrl+C: SIGTERM (the CLI stops after the frame it is on, cleanly, 143); again: the whole group at once. */
@@ -169,8 +176,8 @@ export class Console {
     });
   }
 
-  history(query: string): string[] {
-    return this.d.history.search(query);
+  history(query: string): ConsoleHistoryEntry[] {
+    return this.d.history.entries(query);
   }
 
   /** sudo -k, a screen lock, sleep, quit: elevation ends (and the audit log says why). */
@@ -304,7 +311,7 @@ export class Console {
         b.clear = true;
         return now(this.finish(b, "done"));
       case "history":
-        return now(await this.historyBlock(b, has("audit")));
+        return now(await this.historyBlock(b, has("audit"), pos("which")[0]));
       case "sudo":
         this.dropElevation("sudo -k");
         return now(this.finish(b, "done", "Not elevated."));
@@ -466,11 +473,18 @@ export class Console {
     return this.finish(b, "done", summary);
   }
 
-  private async historyBlock(b: ConsoleBlock, audit: boolean): Promise<ConsoleBlock> {
+  /** history [N|term]: numbered (stable numbers), when, how it ended (✓, ✗ and the exit code), the line, its folder. */
+  private async historyBlock(b: ConsoleBlock, audit: boolean, which: string | undefined): Promise<ConsoleBlock> {
     if (!audit) {
-      const lines = this.d.history.recent(50);
-      // loop: NOT-WORTH — ≤ 50 lines, once per history
-      return this.finish(b, "done", ...(lines.length ? lines.map((l, i) => `${String(i + 1).padStart(4)}  ${l}`) : ["No history yet."]));
+      const count = which !== undefined && /^\d+$/.test(which) ? Math.max(1, Math.min(HISTORY_SHOWN_MAX, Number(which))) : null;
+      // the last N (default 50), or every line (and folder) with the term, oldest first
+      const list = which === undefined || count !== null ? this.d.history.last(count ?? 50) : this.d.history.entries(which, HISTORY_SHOWN_MAX).reverse();
+      // loop: NOT-WORTH — ≤ HISTORY_SHOWN_MAX lines, once per history
+      const width = Math.max(4, ...list.map((e) => String(e.n).length));
+      const ended = (e: ConsoleHistoryEntry) => (e.state === null ? " " : e.state === "done" ? "✓" : `✗${e.exit !== null ? ` ${e.exit}` : ""}`);
+      // loop: NOT-WORTH — as above
+      const lines = list.map((e) => `${String(e.n).padStart(width)}  ${localTime(e.time)}  ${ended(e).padEnd(5)}${e.line}${e.cwd ? `   [${e.cwd}]` : ""}`);
+      return this.finish(b, "done", ...(lines.length ? lines : [which === undefined ? "No history yet." : `No line contains ${which}.`]));
     }
     const entries = await this.d.audit.tail(50);
     // loop: NOT-WORTH — ≤ 50 entries
@@ -835,6 +849,17 @@ export class Console {
     if (this.expiryTimer) clearTimeout(this.expiryTimer);
     this.expiryTimer = null;
   }
+}
+
+/** The most lines `history` prints. */
+const HISTORY_SHOWN_MAX = 1000;
+
+/** An ISO time as local YYYY-MM-DD HH:MM (as dir shows dates); blanks when unknown. */
+function localTime(iso: string | null): string {
+  const d = iso ? new Date(iso) : null;
+  if (!d || Number.isNaN(d.getTime())) return " ".repeat(16);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 /** Control and bidi characters as \u{…}: a dialog line shows exactly one line, in the order it is stored. */

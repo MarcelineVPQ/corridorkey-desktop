@@ -545,6 +545,19 @@ export interface ConsoleSession {
   cliFound: boolean;
 }
 
+// A line in the Console's history (electron/main/console/logs.ts): its stable number, folder and time, and how it ended
+// (null: not known yet, or from before these were kept)
+export interface ConsoleHistoryEntry {
+  n: number;
+  line: string;
+  // ISO time it was typed
+  time: string | null;
+  cwd: string | null;
+  exit: number | null;
+  // the block's end state: done, failed, refused, cancelled
+  state: string | null;
+}
+
 export interface ConsoleLine {
   text: string;
   // out: the command's output; err: its error stream or a refusal; info: the Console's own notes
@@ -668,8 +681,8 @@ export interface CorridorKeyApi {
   consoleCancel(): Promise<void>;
   // Tab: completions for the word at the cursor
   consoleComplete(line: string, cursor: number): Promise<ConsoleCompletion>;
-  // Ctrl+R: earlier lines containing the query, newest first
-  consoleHistory(query: string): Promise<string[]>;
+  // Ctrl+R and the History panel: earlier lines whose text or folder contains the query, newest first
+  consoleHistory(query: string): Promise<ConsoleHistoryEntry[]>;
   // sudo -k from the panel: elevation dropped now
   consoleElevationDrop(): Promise<void>;
   // App settings → Console: the Console may no longer write in this allowed folder (false: it wasn't one)

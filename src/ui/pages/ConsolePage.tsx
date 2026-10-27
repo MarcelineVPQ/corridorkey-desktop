@@ -5,7 +5,7 @@
 // The main process parses and checks every line again, whatever this page showed.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { History, Keyboard, SlidersHorizontal, SquareTerminal, Square, ShieldAlert, Check, X } from "lucide-react";
-import type { AppState } from "../../shared/types";
+import type { AppState, ConsoleHistoryEntry } from "../../shared/types";
 import { makeRegistry } from "../../shared/console/registry";
 import { Accordion, Row, Section, Segmented } from "../panel/Section";
 import { SplitView } from "../panel/SplitView";
@@ -65,7 +65,8 @@ export function ConsolePage(props: {
   const out = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
 
-  const loadHistory = useCallback(() => void window.ck.consoleHistory("").then((h) => setHistory(uniqueHistory(h))), []);
+  // loop: NOT-WORTH — ≤ 200 entries, per history fetch
+  const loadHistory = useCallback(() => void window.ck.consoleHistory("").then((h) => setHistory(uniqueHistory(h.map((e) => e.line)))), []);
   useEffect(() => {
     loadHistory();
     editor.current?.focus();
@@ -279,13 +280,14 @@ export function ConsolePage(props: {
   );
 }
 
-/** History: the lines typed before, newest first, filtered as you type; a click puts one in the input. */
+/** History: the lines typed before, newest first, filtered as you type (the line or its folder), each with its number
+ * and how it ended (✓ / ✗ and the exit code); a click puts one in the input. */
 function HistoryBox({ onPick }: { onPick: (line: string) => void }) {
   const [query, setQuery] = useState("");
-  const [lines, setLines] = useState<string[]>([]);
+  const [entries, setEntries] = useState<ConsoleHistoryEntry[]>([]);
   useEffect(() => {
     let live = true;
-    void window.ck.consoleHistory(query).then((h) => live && setLines(uniqueHistory(h)));
+    void window.ck.consoleHistory(query).then((h) => live && setEntries(h));
     return () => {
       live = false;
     };
@@ -293,13 +295,15 @@ function HistoryBox({ onPick }: { onPick: (line: string) => void }) {
   return (
     <>
       <input type="search" className="console-search" placeholder="Search the history" aria-label="Search the history" value={query} onChange={(e) => setQuery(e.target.value)} />
-      {lines.length ? (
+      {entries.length ? (
         <ul className="console-history">
           {/* loop: NOT-WORTH — ≤ 200 lines, per search */}
-          {lines.map((l) => (
-            <li key={l}>
-              <button type="button" title="Put this line in the input" onClick={() => onPick(l)}>
-                {l}
+          {entries.map((e) => (
+            <li key={e.n}>
+              <button type="button" title={`Put this line in the input${e.cwd ? ` (typed in ${e.cwd})` : ""}`} onClick={() => onPick(e.line)}>
+                <span className="ch-n">{e.n}</span>
+                <span className={`ch-end ${e.state === "done" ? "ok" : e.state ? "error" : ""}`}>{historyEnd(e)}</span>
+                {e.line}
               </button>
             </li>
           ))}
@@ -309,4 +313,10 @@ function HistoryBox({ onPick }: { onPick: (line: string) => void }) {
       )}
     </>
   );
+}
+
+/** ✓ (done), ✗ and the exit code (failed, refused, stopped), or nothing while unknown. */
+export function historyEnd(e: Pick<ConsoleHistoryEntry, "state" | "exit">): string {
+  if (e.state === null) return "";
+  return e.state === "done" ? "✓" : `✗${e.exit !== null ? ` ${e.exit}` : ""}`;
 }

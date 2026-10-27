@@ -231,9 +231,12 @@ const BUILTINS: ConsoleCommand[] = [
   builtin("version", "the app's version, which is its corridorkey command line's (also corridorkey --version)", [], ["version", "corridorkey --version"]),
   builtin(
     "history",
-    "the commands typed before (newest last)",
-    [arg({ id: "audit", long: "audit", kind: "switch", help: "the elevated (sudo) commands' log instead" })],
-    ["history", "history --audit"],
+    "the commands typed before (newest last), numbered, with when and how each ended; a line typed with a leading space isn't kept",
+    [
+      arg({ id: "which", kind: "string", positional: true, valueName: "N|TERM", help: "the last N lines, or the lines (and folders) containing TERM" }),
+      arg({ id: "audit", long: "audit", kind: "switch", help: "the elevated (sudo) commands' log instead" }),
+    ],
+    ["history", "history 20", "history sh010", "history --audit"],
   ),
   builtin(
     "run",

@@ -227,6 +227,31 @@ describe("history", () => {
     expect(again.search("")).toEqual(["dir", "cd shots", "render a.mov -o out", "dir"]);
   });
 
+  it("numbers each line for good, keeps its folder and end, and skips a line typed with a leading space (SME S6)", async () => {
+    const f = join(tmp, "numbered.jsonl");
+    // an older file: lines without numbers count from 1
+    writeFileSync(f, JSON.stringify({ time: "2026-10-01T10:00:00.000Z", line: "dir" }) + "\n");
+    const h = new History(f, 4);
+    expect(await h.add("pwd", "/shots")).toBe(2);
+    expect(await h.add(" secret line", "/shots")).toBeNull();
+    expect(await h.add("pwd", "/shots")).toBe(2);
+    await h.ended(2, 0, "done");
+    // loop: NOT-WORTH — eight lines, past the cap: compacted
+    for (let i = 0; i < 8; i++) await h.add(`render ${i}`, "/x");
+    await h.ended(10, 4, "failed");
+    const again = new History(f, 4);
+    await again.loaded;
+    // loop: NOT-WORTH — four entries
+    expect(again.last(4).map((e) => [e.n, e.line, e.exit, e.state])).toEqual([
+      [7, "render 4", null, null],
+      [8, "render 5", null, null],
+      [9, "render 6", null, null],
+      [10, "render 7", 4, "failed"],
+    ]);
+    expect(await again.add("next")).toBe(11);
+    expect(readFileSync(f, "utf8")).not.toMatch(/secret/);
+  });
+
   it("is capped, and compacts the file when it grows past the cap", async () => {
     const f = join(tmp, "capped.jsonl");
     const h = new History(f, 10);
