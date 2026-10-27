@@ -62,6 +62,7 @@ if (!push) {
   process.exit(0);
 }
 const head = git(APP, "rev-parse", "--short", "HEAD").trim();
-git(dir, "commit", "-q", "-m", `The wiki from corridorkey-desktop ${head} (docs/wiki/)`);
+// her public identity, never the machine's git email (GitHub refuses a private address on push)
+git(dir, "-c", "user.name=MarcelineVPQ", "-c", "user.email=25850221+MarcelineVPQ@users.noreply.github.com", "commit", "-q", "-m", `The wiki from corridorkey-desktop ${head} (docs/wiki/)`);
 git(dir, "push", "-q", "origin", "HEAD");
 console.log(`publish_wiki: published (corridorkey-desktop ${head})`);
