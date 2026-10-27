@@ -999,9 +999,10 @@ function registerIpc(): void {
     const p = pathArg(pathIn);
     if (p) shell.showItemInFolder(p);
   });
-  // a path's Copy button (src/ui/PathText.tsx): plain text only, bounded
+  // a path's Copy button (src/ui/PathText.tsx) and the Console's Copy output (≤ 2000 lines of ≤ 4000 characters):
+  // plain text only, bounded
   ipcMain.handle(IPC.copyText, (_e, textIn: unknown) => {
-    if (typeof textIn !== "string" || textIn.length === 0 || textIn.length > 4096) return false;
+    if (typeof textIn !== "string" || textIn.length === 0 || textIn.length > 8_500_000) return false;
     clipboard.writeText(textIn);
     return true;
   });

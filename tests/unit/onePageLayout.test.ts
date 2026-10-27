@@ -30,7 +30,7 @@ const allTsx = (dir = ""): string[] =>
 
 describe("one page layout, one accordion on every tab", () => {
   it("knows the rail pages", () => {
-    expect(railPages).toEqual(["queue", "engine", "settings", "about"]);
+    expect(railPages).toEqual(["queue", "engine", "console", "settings", "about"]);
   });
 
   it("the layout module has one page layout (SplitView) and nothing else that lays out a page", () => {

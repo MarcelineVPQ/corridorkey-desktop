@@ -29,7 +29,7 @@ export function setupNeeded(s: { install: InstallState; ffmpeg: FfmpegState; rus
 }
 
 // "setup" is the first start's page (pages/SetupPage.tsx): not on the rail, it opens by itself while setup has work
-export type PageId = "queue" | "engine" | "settings" | "about" | "setup";
+export type PageId = "queue" | "engine" | "console" | "settings" | "about" | "setup";
 
 export interface Task {
   id: string;

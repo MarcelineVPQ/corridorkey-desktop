@@ -10,7 +10,7 @@
 // press leads to it (tasks.ts). The behavior is railModel.ts.
 // Idle cost: none (CSS states; no timers, no polling; one keydown listener).
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { Activity, Cpu, Info, ListVideo, Lock, LockOpen, PanelRightClose, PanelRightOpen, Settings } from "lucide-react";
+import { Activity, Cpu, Info, ListVideo, Lock, LockOpen, PanelRightClose, PanelRightOpen, Settings, SquareTerminal } from "lucide-react";
 import type { AppState } from "../../shared/types";
 import type { PageId } from "../../shared/tasks";
 import { NO_VRAM_HELD } from "../../shared/texts";
@@ -20,7 +20,7 @@ import { useGlass } from "../glass/useGlass";
 import { CLEAR_GLASS_RAIL, REGULAR_GLASS } from "../glass/variants";
 import { gib } from "../format";
 
-const ICONS = { queue: ListVideo, engine: Activity, settings: Settings, about: Info } as const;
+const ICONS = { queue: ListVideo, engine: Activity, console: SquareTerminal, settings: Settings, about: Info } as const;
 
 export function AppRail(props: { state: AppState; page: PageId; pageDots: Partial<Record<PageId, string>>; onPress: (page: PageId) => void; glass: boolean; windowWidth: number }) {
   const { state, page, pageDots, onPress, glass, windowWidth } = props;

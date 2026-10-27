@@ -716,3 +716,497 @@ select {
     transition: none;
   }
 }
+
+/* ---- Console (ConsolePage.tsx, console/): one monospace face, colours from the tokens only ---- */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.console-page .page-bar .path-text {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-2);
+}
+.console-out {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 16px 6px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  background: var(--bg-0);
+}
+.console-intro {
+  margin: 0 0 12px;
+  color: var(--text-3);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+.console-intro code,
+.console-code {
+  font-family: var(--font-mono);
+  color: var(--text-1);
+}
+/* one command's block */
+.cblock {
+  margin: 0 0 10px;
+  border: 1px solid var(--border-1);
+  border-left: 3px solid var(--border-2);
+  border-radius: 8px;
+  background: var(--bg-1);
+}
+.cblock.tone-running {
+  border-left-color: var(--status-info);
+}
+.cblock.tone-ok {
+  border-left-color: var(--status-ok);
+}
+.cblock.tone-error {
+  border-left-color: var(--status-error);
+}
+.cblock.tone-stopped {
+  border-left-color: var(--status-warn);
+}
+.cblock.elevated {
+  background: var(--status-warn-soft);
+  border-color: var(--status-warn);
+}
+.cblock.child {
+  margin-left: 18px;
+}
+.cb-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 6px 10px;
+}
+.cb-line {
+  /* the command takes the row; status and buttons wrap under it when there's no room */
+  flex: 1 1 320px;
+  min-width: min(320px, 100%);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-1);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.cb-sudo,
+.cline-sudo {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--status-warn);
+  border-radius: 4px;
+  color: var(--status-warn);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cb-meta {
+  flex: none;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.cb-status {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.cb-status.running {
+  color: var(--status-info);
+}
+.cb-status.ok {
+  color: var(--accent-ink);
+}
+.cb-status.error {
+  color: var(--status-error);
+}
+.cb-status.stopped {
+  color: var(--status-warn);
+}
+.cb-exit {
+  color: var(--text-2);
+}
+/* what a non-zero exit code means, on its own line under the command */
+.cb-why {
+  order: 3;
+  flex: 1 0 100%;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.cb-why.error {
+  color: var(--status-error);
+}
+.cb-actions {
+  flex: none;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-family: var(--font-ui);
+}
+.cb-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px 6px;
+}
+.cb-progress .bar {
+  flex: 0 1 280px;
+}
+.cb-phase {
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.cb-out {
+  margin: 0;
+  padding: 6px 10px 8px;
+  border-top: 1px solid var(--border-1);
+  font: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-1);
+  user-select: text;
+  max-height: 60vh;
+  overflow: auto;
+}
+.l-err {
+  color: var(--status-error);
+}
+.l-info {
+  color: var(--text-3);
+}
+.cb-dir {
+  width: 100%;
+  border-collapse: collapse;
+  border-top: 1px solid var(--border-1);
+  user-select: text;
+}
+.cb-dir th,
+.cb-dir td {
+  padding: 2px 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+.cb-dir th {
+  color: var(--text-3);
+  font-weight: 600;
+}
+.cb-dir td:first-child {
+  width: 100%;
+  white-space: normal;
+  word-break: break-all;
+}
+.cb-dir td:nth-child(2) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+.cb-dir td:nth-child(3) {
+  color: var(--text-3);
+}
+.cb-dir tr.folder td:first-child {
+  color: var(--status-info);
+}
+.cb-paths {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 10px 8px;
+}
+.cb-path {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+/* the typed line's colours (from the parser's tokens) */
+.t-plain {
+  color: var(--text-1);
+}
+.t-command {
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+.t-flag {
+  color: var(--status-info);
+}
+.t-value,
+.t-string {
+  color: var(--text-1);
+}
+.t-path {
+  color: var(--text-1);
+  text-decoration: underline dotted var(--text-3);
+  text-underline-offset: 3px;
+}
+.t-error {
+  color: var(--status-error);
+  text-decoration: underline wavy var(--status-error);
+  text-underline-offset: 3px;
+}
+.t-danger {
+  color: var(--status-warn);
+  font-weight: 700;
+}
+.t-ghost {
+  color: var(--text-3);
+}
+/* the input line, pinned under the log */
+.cline {
+  position: relative;
+  padding: 8px 16px 10px;
+  border-top: 1px solid var(--border-1);
+  background: var(--bg-1);
+}
+.cline-row {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--border-2);
+  border-radius: 8px;
+  background: var(--bg-0);
+  font-family: var(--font-mono);
+  font-size: 14px;
+}
+.cline-row:focus-within {
+  border-color: var(--focus-ring);
+  box-shadow: 0 0 0 1px var(--focus-ring);
+}
+.cline.elevated .cline-row {
+  border-color: var(--status-warn);
+}
+.cline-prompt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px 0 10px;
+  max-width: 40%;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.cline-folder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cline-caret {
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+.cline.elevated .cline-caret {
+  color: var(--status-warn);
+}
+.cline-sudo {
+  margin-right: 0;
+}
+.cline-field {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.cline-layer,
+.cline-input {
+  font: inherit;
+  letter-spacing: normal;
+  padding: 8px 10px 8px 4px;
+  white-space: pre;
+}
+.cline-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.cline-input {
+  position: relative;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text-1);
+}
+.cline-input:focus-visible {
+  outline: 0;
+}
+.cline-input::selection {
+  background: var(--accent-soft);
+  color: transparent;
+}
+.cline-hint {
+  min-height: 1.45em;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.cline-hint.error {
+  color: var(--status-error);
+}
+/* the completion list (a listbox above the line) */
+.cline-list {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: calc(100% - 6px);
+  z-index: 5;
+  max-height: min(320px, 50vh);
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--border-2);
+  border-radius: 8px;
+  background: var(--bg-1);
+  box-shadow: 0 8px 24px var(--shadow);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.cline-opt {
+  display: flex;
+  gap: 14px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cline-opt:hover {
+  background: var(--bg-2);
+}
+.cline-opt.on {
+  background: var(--bg-3);
+  box-shadow: inset 2px 0 0 var(--focus-ring);
+}
+.opt-name {
+  flex: none;
+  width: var(--name-w, 16ch);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-1);
+}
+.k-command .opt-name {
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+.k-flag .opt-name {
+  color: var(--status-info);
+}
+.cline-opt.danger .opt-name {
+  color: var(--status-warn);
+  font-weight: 700;
+}
+.k-folder .opt-name {
+  color: var(--status-info);
+  font-weight: 600;
+}
+.opt-help {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-3);
+  font-family: var(--font-ui);
+}
+.cline-search {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.cs-label {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--status-info);
+}
+.cs-query {
+  padding: 0 6px;
+  border: 1px solid var(--border-2);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-1);
+  white-space: pre;
+}
+.cline-search.failed .cs-keys {
+  color: var(--status-error);
+}
+/* panel: the history list and the key reference */
+.console-search {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--border-2);
+  border-radius: 6px;
+  background: var(--bg-2);
+}
+.console-history {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.console-history button {
+  display: block;
+  width: 100%;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.console-history button:hover {
+  background: var(--bg-3);
+}
+.console-keys {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.console-keys th,
+.console-keys td {
+  padding: 4px 0;
+  vertical-align: top;
+  text-align: left;
+  border-top: 1px solid var(--border-1);
+}
+.console-keys tr:first-child :is(th, td) {
+  border-top: 0;
+}
+.console-keys th {
+  padding-right: 10px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+.console-keys td {
+  color: var(--text-2);
+}
+kbd {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 0 5px;
+  border: 1px solid var(--border-2);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--bg-2);
+  color: var(--text-1);
+}

@@ -2,6 +2,7 @@
 // edge (the house layout of the DS5 app and Sonata). Drop clips anywhere.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppState } from "../shared/types";
+import { mergeBlocks, type BlockList } from "./console/model";
 import { dots, jobToSelect, tasksOf, type PageId, setupNeeded } from "../shared/tasks";
 import { AppRail } from "./rail/AppRail";
 import { railPress } from "./rail/railModel";
@@ -10,6 +11,7 @@ import { usePref } from "./prefs";
 import { useTheme } from "./theme/useTheme";
 import { QueuePage } from "./pages/QueuePage";
 import { EnginePage } from "./pages/EnginePage";
+import { ConsolePage } from "./pages/ConsolePage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { AboutPage } from "./pages/AboutPage";
 import { SetupPage } from "./pages/SetupPage";
@@ -24,10 +26,13 @@ export function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [width, setWidth] = useState(window.innerWidth);
+  // the Console's output, kept here so it outlives a switch to another page
+  const [consoleBlocks, setConsoleBlocks] = useState<BlockList>({ blocks: [], clearedTo: 0 });
 
   useEffect(() => {
     void window.ck.getState().then(setState);
     const off = window.ck.onState(setState);
+    const offBlocks = window.ck.onConsoleBlocks((blocks) => setConsoleBlocks((old) => mergeBlocks(old, blocks)));
     // The GPU readout runs only while the window is shown (main process gates it).
     const vis = () => window.ck.setVisible(document.visibilityState === "visible");
     vis();
@@ -37,6 +42,7 @@ export function App() {
     window.addEventListener("resize", onResize);
     return () => {
       off();
+      offBlocks();
       document.removeEventListener("visibilitychange", vis);
       window.removeEventListener("resize", onResize);
     };
@@ -112,6 +118,7 @@ export function App() {
         <main className="shell-page">
           {page === "queue" && <QueuePage state={state} selected={selected} onSelect={setSelected} panelShown={panelShown("queue")} sectionTasks={d.sections} {...common} />}
           {page === "engine" && <EnginePage state={state} panelShown={panelShown("engine")} sectionTasks={d.sections} openSetup={() => setPage("setup")} {...common} />}
+          {page === "console" && <ConsolePage state={state} blocks={consoleBlocks} setBlocks={setConsoleBlocks} panelShown={panelShown("console")} {...common} />}
           {page === "settings" && <SettingsPage state={state} panelShown={panelShown("settings")} {...common} />}
           {page === "about" && <AboutPage version={state.version} panelShown={panelShown("about")} {...common} />}
           {page === "setup" && <SetupPage state={state} openQueue={() => setPage("queue")} openGuide={() => setPage("about")} />}
