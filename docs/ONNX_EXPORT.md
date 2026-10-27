@@ -414,8 +414,8 @@ RVM's input `state` is renamed `ck_state` (a name Core ML's ML Program parser re
 Graph outputs keep no shape (`fix_shapes.py` leaves them for ORT to infer): the ONNX checker refuses that as written;
 with the inferred output shapes filled in it passes.
 
-The published set is for 1280×1080 clips only (standard 1920×1080 HD and 4K have no Core ML set yet, BACKLOG
-row 60). From `2.0.0-onnx.4` (padded 1152×1280; the engine takes the smallest stage-1 window it has,
+The published set is for 1280×1080 clips only (4K has no Core ML set yet, BACKLOG row 60; the 1920×1080 files
+below are built, not yet published). From `2.0.0-onnx.4` (padded 1152×1280; the engine takes the smallest stage-1 window it has,
 4/2 low-memory): C-RADIO and MoGe at 4 frames per call (the low-memory prepass's chunk), RVM, stage 1 at 4 and 8, stage 2
 at 1; 1,089,814,318 bytes in seven files (`coreml.json` last). Built on the Linux PC (the graph rewrites are plain CPU
 work; on the 16 GB Mac C-RADIO's fold reached the memory gate's pressure limit at 8 GB): ORT's Core ML partitioner
@@ -424,8 +424,24 @@ work; on the 16 GB Mac C-RADIO's fold reached the memory gate's pressure limit a
 
 ```
 engine-rs/export/coreml/build_coreml_models.sh ~/.local/share/corridorkey-desktop/models/2.0.0-onnx.4 OUT 1152x1280 \
-  cradio:4 moge:4 rvm:1 stage1:4 stage2:1      # OUT/set: the five files, coreml.json, SHA256SUMS
+  cradio:4 moge:4 rvm:1 stage1:4 stage1:8 stage2:1   # OUT/set: the six files, coreml.json, SHA256SUMS
 tools/upload_model_set.sh OUT/set 2.0.0-onnx.4-coreml   # the release models-2.0.0-onnx.4-coreml (Marcy's OK first)
+```
+
+**1920×1080 clips** (row 60, built 2026-10-27, not yet published or tried on a Mac): the same six networks at
+1152×1920 (1080 pads to 1152, 1920 is already a multiple of 128: `clip.rs` `SHAPE_QUANTUM`), 1,092,898,613 bytes. The
+same script; C-RADIO's fold peaked at 5.3 GB (memrun). Two builds gave byte-identical files, and the 1152×1280 build
+of the same day reproduced the published files' SHA-256. The engine picks a size's files from `coreml.json` by the
+clip's padded size (a size the set lacks is refused, naming the sizes it has), so one `coreml.json` lists both sizes:
+`write_set.py` over a folder holding both builds' files writes it.
+
+```
+B=engine-rs/export/coreml; S=~/.local/share/corridorkey-desktop/models/2.0.0-onnx.4
+$B/build_coreml_models.sh $S OUT1280 1152x1280 cradio:4 moge:4 rvm:1 stage1:4 stage1:8 stage2:1
+$B/build_coreml_models.sh $S OUT1920 1152x1920 cradio:4 moge:4 rvm:1 stage1:4 stage1:8 stage2:1
+mkdir BOTH && ln OUT1280/build/ck2-*-coreml-*.onnx OUT1920/build/ck2-*-coreml-*.onnx BOTH/
+python -I $B/write_set.py BOTH SET $S              # SET: twelve files + coreml.json with both sizes, SHA256SUMS
+tools/upload_model_set.sh SET 2.0.0-onnx.4-coreml  # adds the six new files and replaces coreml.json (Marcy's OK first)
 ```
 
 The app's setup on macOS downloads it (electron/main/install.ts `COREML`, pinned by size and SHA-256) into
@@ -507,7 +523,7 @@ engine-rs/export/run.sh 8G  run_parity.py cmp REF.npz OUT.npz [GT_ALPHA_DIR]
 engine-rs/export/run.sh 16G ort_mem.py stage1 768 1280 4 prod_fp32         # memory probe
 engine-rs/export/gpu_validate_when_idle.sh     # guarded GPU validation (waits for a quiet GPU)
 engine-rs/export/build_trt_models.sh PROD OUT   # TensorRT set (CPU)
-engine-rs/export/coreml/build_coreml_models.sh PROD OUT 1152x1280 cradio:4 moge:4 rvm:1 stage1:4 stage2:1   # Core ML set (CPU)
+engine-rs/export/coreml/build_coreml_models.sh PROD OUT 1152x1280 cradio:4 moge:4 rvm:1 stage1:4 stage1:8 stage2:1   # Core ML set (CPU; also 1152x1920)
 engine-rs/export/run.sh 14G trt_netparity.py test REF.npz --models OUT --prec tensorrt-fp16 --ep ctx --cache DIR  # GPU, CK_TRT_BUILD=ck-trt-build
 ```
 

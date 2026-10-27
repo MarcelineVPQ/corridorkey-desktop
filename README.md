@@ -45,7 +45,7 @@ Everything planned lives in one list, [docs/BACKLOG.md](docs/BACKLOG.md), each i
 
 **Working on now: the Mac (Apple Silicon).** The Core ML engine runs every network on an M6 Mac mini, but stage 1
 needs more memory than a 16 GB Mac has at a 4-frame window; shorter windows are next to measure. Then setup installs
-the Core ML models [59], Core ML sets for 1920×1080 HD and 4K [60], the real-Mac gate against CUDA's mattes [24],
+the Core ML models [59], Core ML for 1920×1080 HD (built, to try on a Mac) and 4K [60], the real-Mac gate against CUDA's mattes [24],
 and self-update on the Mac [57].
 
 **Next, toward 1.0:**
@@ -81,7 +81,7 @@ none of them changes what a user sees today.
   graphics card with CUDA." (AMD would need ONNX Runtime's MIGraphX or DirectML build; not in 1.0.)
 - macOS 14 or newer on Apple Silicon (M1 or newer; the disk image). Intel Macs aren't supported.
 - Nothing else to set up: the engine comes with the app, and on first start the setup downloads the GPU runtime and
-  the CorridorKey models (a 4.86 GB download on Linux, 4.64 GB on Windows, 4.41 GB on macOS, once). If `ffmpeg` is
+  the CorridorKey models (a 4.86 GB download on Linux, 4.64 GB on Windows, 5.51 GB on macOS, once). If `ffmpeg` is
   missing, it offers to install it (apt or pacman on Linux, `winget` on Windows, Homebrew on macOS).
 - Optional, Linux: **TensorRT** (Engine settings, TensorRT; off by default) for about 1.9-2.2× the original's speed at
   HD and about 2.3-2.4× at 4K, with the same mattes (Speed, the same-day pair of 2026-10-26). Switching it on offers its own download: NVIDIA's TensorRT 10.16
@@ -113,9 +113,9 @@ instead of CUDA, and that path needs more development before it keys:
 - **Core ML models in setup** (backlog row 59): Core ML compiles for fixed sizes, so the Mac needs its own model set.
   It's published (release `models-2.0.0-onnx.4-coreml`) and setup downloads it on a Mac; the first Mac build brings that setup.
 - **The app asks for Core ML** (row 58): built, not yet tried on a real Mac.
-- **1280×1080 clips only** (row 60): the one Core ML set is compiled for a single frame size, 1280×1080 (padded
-  to 1152×1280). Standard 1920×1080 HD and 4K clips have no Core ML set yet: each needs its own set, measured on a Mac
-  (compile time, memory on 16 GB, speed).
+- **1280×1080 and 1920×1080 clips only** (row 60): Core ML compiles for fixed frame sizes, so the set has files for
+  1280×1080 clips (padded to 1152×1280) and standard 1920×1080 HD (padded to 1152×1920). The 1920×1080 files are
+  built but not yet tried on a Mac (memory on 16 GB, speed, mattes against CUDA). 4K has no Core ML set yet.
 - **Proven on a real Mac** (row 24): GitHub's runners are virtual Macs without the GPU or the Neural Engine, so Mac
   keying is measured on a real Apple Silicon Mac (an M6 Mac mini, `tools/mac_gate.sh`): mattes within fp16 rounding of
   CUDA on the same clips, and the speed. macOS is in 1.0 only if that gate passes; otherwise 1.0 is Linux and Windows
@@ -134,7 +134,7 @@ decimal GB: `du --si`):
 | Runtime | **2.4 GB**: ONNX Runtime + CUDA/cuDNN (a 1.6 GB download) | **7.6 GB** Python venv: PyTorch, NVIDIA libraries, Triton, other packages |
 | Models | **3.3 GB** (fp16) | **5.1 GB**: CorridorKey weights 2.7 GB + foundation models 2.4 GB |
 | **Total** | **5.9 GB** | **12.6 GB** |
-| Setup | Download one file; the app fetches the rest itself (4.86 GB on Linux, 4.64 GB on Windows, 4.41 GB on macOS) | Install Python, create a venv, pip install, run a download script |
+| Setup | Download one file; the app fetches the rest itself (4.86 GB on Linux, 4.64 GB on Windows, 5.51 GB on macOS) | Install Python, create a venv, pip install, run a download script |
 
 PyTorch's environment carries NVIDIA libraries the ONNX Runtime engine never uses (NCCL and
 cuSPARSELt, for multi-GPU and training), and the fp16 models are a third smaller.
@@ -849,7 +849,7 @@ CorridorKey writes only these folders (plus the results you ask for, next to you
 | What | Linux | Windows | macOS |
 | --- | --- | --- | --- |
 | The app | the AppImage you downloaded (and, after updates, the previous version next to it) | the install folder (Apps & features) | `CorridorKey.app` in Applications |
-| GPU runtime and models (~5.7 GB; ~4.4 GB on macOS, with the Core ML set) | `~/.local/share/corridorkey-desktop` | `%LOCALAPPDATA%\corridorkey-desktop` | `~/Library/Application Support/corridorkey-desktop` |
+| GPU runtime and models (~5.7 GB; ~5.5 GB on macOS, with the Core ML set) | `~/.local/share/corridorkey-desktop` | `%LOCALAPPDATA%\corridorkey-desktop` | `~/Library/Application Support/corridorkey-desktop` |
 | Thumbnails, stills, job temp files | `~/.cache/corridorkey-desktop` | `%LOCALAPPDATA%\corridorkey-desktop\cache` | `~/Library/Caches/corridorkey-desktop` |
 | Settings (a few KB) | `~/.config/corridorkey-desktop` | `%APPDATA%\corridorkey-desktop` | `~/Library/Application Support/corridorkey-desktop` (with the data) |
 

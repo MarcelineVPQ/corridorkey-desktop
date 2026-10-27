@@ -81,8 +81,8 @@ on its own rail icon. Not a system shell: its own commands only, each parsed and
   (docs/ENGINE_RUST.md).
 
 - macOS, ready for the first Mac build (this build has none): the app asks the engine for Core ML, and the setup
-  downloads the Core ML model set with the models (for 1280×1080 clips only: standard 1920×1080 HD and 4K have no
-  Core ML set yet, backlog row 60; 1.09 GB more, 4.41 GB in all; into the model set's own folder, checked by SHA-256,
+  downloads the Core ML model set with the models (for 1280×1080 and 1920×1080 clips; 4K has no Core ML set yet,
+  backlog row 60; 2.18 GB more, 5.51 GB in all; into the model set's own folder, checked by SHA-256,
   resumable; a Mac that already has the models gets it the next time the setup runs). An engine
   started on a Mac without Core ML now says so instead of asking for an NVIDIA card.
 - Core ML runs on the CPU and GPU by default (`CK_ENGINE_COREML_UNITS`, was all units): with the Neural Engine

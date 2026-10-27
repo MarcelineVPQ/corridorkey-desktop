@@ -128,7 +128,9 @@ impl ModelSet {
             }
         }
         let Some(files) = cm.fp16.get(&format!("{sh}x{sw}")) else {
-            let have: Vec<&str> = cm.fp16.keys().map(|k| k.as_str()).collect();
+            // coreml.json keys are HxW; the message says WxH, as for the frame
+            // loop: NOT-WORTH — the set's few sizes, for the message
+            let have: Vec<String> = cm.fp16.keys().map(|k| k.split_once('x').map_or(k.clone(), |(h, w)| format!("{w}x{h}"))).collect();
             return Err(format!(
                 "the Core ML set has no models for {sw}x{sh} frames (padded); it has {}",
                 if have.is_empty() { "none".to_string() } else { have.join(", ") }
@@ -747,7 +749,20 @@ mod tests {
         assert!(m.coreml_file("stage1", (1152, 1280), 8).unwrap_err().contains("missing"));
         let e = m.coreml_file("stage1", (1152, 1280), 6).unwrap_err();
         assert!(e.contains("6 frame(s)") && e.contains("4, 8 frame(s)"), "{e}");
-        assert!(m.coreml_file("stage1", (2176, 4096), 4).unwrap_err().contains("it has 1152x1280"));
+        assert!(m.coreml_file("stage1", (2176, 4096), 4).unwrap_err().contains("it has 1280x1152"));
+        // two sizes (1280x1080 and 1920x1080 clips): each size its own files; a third size names both
+        std::fs::write(dir.join("s1-1920-t4.onnx"), b"").unwrap();
+        std::fs::write(
+            dir.join("coreml.json"),
+            r#"{"format": 1, "source_set": "2.0.0-onnx.3", "fp16": {"1152x1280": {"stage1-t4": "s1-t4.onnx"}, "1152x1920": {"stage1-t4": "s1-1920-t4.onnx", "stage1-t8": "x.onnx"}}}"#,
+        )
+        .unwrap();
+        let m = ModelSet::open(&dir).unwrap();
+        assert_eq!(m.coreml_file("stage1", (1152, 1280), 4), Ok(dir.join("s1-t4.onnx")));
+        assert_eq!(m.coreml_file("stage1", (1152, 1920), 4), Ok(dir.join("s1-1920-t4.onnx")));
+        assert_eq!((m.coreml_batches("stage1", (1152, 1280)), m.coreml_batches("stage1", (1152, 1920))), (vec![4], vec![4, 8]));
+        let e = m.coreml_file("stage1", (2176, 4096), 4).unwrap_err();
+        assert!(e.contains("no models for 4096x2176") && e.contains("it has 1280x1152, 1920x1152"), "{e}");
         // built from another model set: its weights don't match
         std::fs::write(dir.join("manifest.json"), r#"{"version": "2.0.0-onnx.4"}"#).unwrap();
         let m = ModelSet::open(&dir).unwrap();
