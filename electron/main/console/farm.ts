@@ -168,7 +168,11 @@ export function farmExport(format: FarmFormat, jobs: readonly FarmJob[], env: Fa
   if (unranged.length) notes.push(`${unranged.join(", ")}: not exported (its frame range isn't known: the clip couldn't be read; ${format} needs it).`);
   const files: FarmExport["files"] = [];
   switch (format) {
-    case "openjd":
+    case "openjd": {
+      // a flag word goes into the template, where OpenJD reads {{ as the start of a format string (P4 senior review N7)
+      // loop: NOT-WORTH — the exported jobs' few flag words
+      const braces = ranged.flatMap(openjdExtra).find((w) => w.includes("{{"));
+      if (braces) return { files: [], notes: [], error: `${JSON.stringify(braces)}: OpenJD reads {{ in a job template as the start of a format string; change the value, then export again.` };
       // loop: NOT-WORTH — one job bundle per clip
       for (const j of ranged) files.push(...openjd(j, env));
       notes.push(`One job bundle per clip: openjd check <clip>/template.yaml, then deadline bundle submit <clip>. ${runtimeNote(env)}`);
@@ -176,6 +180,7 @@ export function farmExport(format: FarmFormat, jobs: readonly FarmJob[], env: Fa
       if (ranged.some((j) => j.clip.kind === "frames"))
         notes.push("A frame folder goes in as a DIRECTORY input (job attachments upload a folder that way); that combination isn't run on Deadline Cloud yet.");
       break;
+    }
     case "deadline":
       // loop: NOT-WORTH — four files per clip
       for (const j of ranged) files.push(...deadline(j, env));
@@ -212,11 +217,13 @@ export function farmExport(format: FarmFormat, jobs: readonly FarmJob[], env: Fa
   return { files, notes };
 }
 
+/** The flag words an OpenJD template's Key step takes: scene-linear and low-memory are the template's own parameters. */
+// loop: NOT-WORTH — a job's few flags
+const openjdExtra = (j: FarmJob): string[] => flagWords(farmFlags(j).filter(([n]) => n !== "linear" && n !== "no-linear" && n !== "low-vram"));
+
 /** An OpenJD job bundle: the template with the clip's other flags in its Key step, and its parameter values. */
 function openjd(j: FarmJob, env: FarmEnv): FarmExport["files"] {
-  // scene-linear and low-memory are the template's own parameters; every other flag goes in the Key step's arguments
-  // loop: NOT-WORTH — a job's few flags
-  const extra = flagWords(farmFlags(j).filter(([n]) => n !== "linear" && n !== "no-linear" && n !== "low-vram"));
+  const extra = openjdExtra(j);
   const anchor = '            - "{{Param.Outputs}}"\n';
   const at = openjdTemplate.indexOf(anchor) + anchor.length;
   // loop: NOT-WORTH — a job's few words

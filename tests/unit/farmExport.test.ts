@@ -245,6 +245,17 @@ describe("farm export: how a frame folder is read", () => {
 // senior review 2026-10-27 M1 (probe P1): a clip, folder or flag value with a new line put its own lines into the farm
 // files (the OpenCue script ran `touch PWNED`; Deadline's job info gained `Plugin=CommandLine`). Control characters are
 // refused, with the clip and why; other hostile characters reach each farm exactly as they are.
+describe("farm export: OpenJD format strings (P4 senior review 2026-10-27 N7, BACKLOG row 137)", () => {
+  it("a flag value with {{ is refused for OpenJD (it would be a format string in the template); other formats take it", () => {
+    const j = fj("sh010", { hintMode: "video", hintVideo: "/hints/{{Session.WorkingDirectory}}.mov" });
+    const x = farmExport("openjd", [j], env);
+    expect([x.error, x.files]).toEqual([expect.stringMatching(/\{\{Session.WorkingDirectory\}\}.*OpenJD reads \{\{/), []]);
+    expect(farmExport("shell", [j], env).error).toBeUndefined();
+    // a single brace is fine
+    expect(farmExport("openjd", [fj("sh010", { hintMode: "video", hintVideo: "/hints/{a}.mov" })], env).error).toBeUndefined();
+  });
+});
+
 describe("farm export: hostile names (review 2026-10-27 M1)", () => {
   const FORMATS = ["openjd", "deadline", "opencue", "flamenco", "shell"] as const;
   const hostile = (name: string): FarmJob => ({ ...fj("x"), name, clip: { path: `/shots/${name}.mov`, kind: "video", exrFrames: false } });

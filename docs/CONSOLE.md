@@ -118,7 +118,8 @@ missing there).
   (or a sequence and other frames) refuses the export, naming them: corridorkey would key them as one clip (M2). A clip whose name, path, results
   folder, a flag's value, the runtime's paths or a Deadline setting has a control character (a new line, a tab) is refused, with which and
   why: it would add lines to the farm's files (senior review 2026-10-27 M1); so are two clips with one name (compared
-  without case), whose job files would replace each other (S3). The folder goes through the write scope
+  without case), whose job files would replace each other (S3), and for OpenJD a flag's value with `{{` (the
+  template would read it as a format string: P4 senior review N7). The folder goes through the write scope
   (`-o` is a written path), and so does each file it writes, resolved (a linked folder inside that leads out is
   refused); a file name that is a link is refused, dangling or not, with sudo too, and each file is written as a new one
   renamed over the name, so a link raced in after the checks is replaced, never written through (M2). Files already
