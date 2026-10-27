@@ -142,6 +142,23 @@ fn help_and_version_exit_0() {
 }
 
 #[test]
+fn spec_is_json_for_tools_and_hidden_from_help() {
+    let o = run(&["__spec", "--json"]);
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o.stderr));
+    let s: Value = serde_json::from_slice(&o.stdout).unwrap();
+    let names: Vec<&str> = s["commands"].as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["render", "verify", "prepare", "info"]);
+    // loop: NOT-WORTH — two help screens
+    for args in [&["help"][..], &["--help"][..]] {
+        let o = run(args);
+        assert_eq!(o.status.code(), Some(0));
+        let help = text(&o.stdout);
+        assert!(help.contains("render") && !help.contains("__spec"), "{help}");
+    }
+    assert_eq!(run(&["__spec"]).status.code(), Some(2), "--json is required");
+}
+
+#[test]
 fn verify_finds_missing_and_cut_frames() {
     let d = scratch("verify");
     let pl = plates(&d.0, &[1, 2, 3]);

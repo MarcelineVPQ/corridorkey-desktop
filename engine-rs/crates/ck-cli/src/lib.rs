@@ -8,6 +8,7 @@ pub mod report;
 pub mod run;
 pub mod rundirs;
 pub mod signals;
+pub mod spec;
 
 /// The command line's version: the app's (package.json, via ck-core), the engine's too: one number for all.
 pub const VERSION: &str = ck_core::APP_VERSION;

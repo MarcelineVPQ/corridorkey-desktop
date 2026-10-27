@@ -43,6 +43,11 @@ argument exists: '--frames'").
 
 `verify` takes `render`'s arguments, so the render line with `verify` in place of `render` checks its own output.
 
+For tools: `corridorkey __spec --json` (hidden from the help) prints the command line itself as JSON: `version`,
+`about`, and `commands` (`name`, `about`, `examples`, `args`: `id`, `long`, `short`, `positional`, `value_name`,
+`possible_values`, `help`, `required`, `multiple`, `default`, `takes_value`, `hidden`). It walks the same parser the
+commands use, so it can't drift from them; the app's Console reads it for completion and hints.
+
 ## Frames
 
 `-F` / `--frames SPEC` (Nuke's), repeatable; pieces separated by commas or spaces:

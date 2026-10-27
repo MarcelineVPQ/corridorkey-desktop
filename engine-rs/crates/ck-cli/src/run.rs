@@ -43,6 +43,10 @@ pub fn main(argv: Vec<OsString>) -> i32 {
         }
     };
     let (name, sub) = m.subcommand().expect("a subcommand is required");
+    if name == crate::spec::NAME {
+        println!("{}", crate::spec::spec(&crate::args::command()));
+        return exit::DONE;
+    }
     // the card, before ONNX Runtime or the CUDA driver starts (no other thread exists yet)
     if let Some(v) = crate::cuda_visible(
         sub.try_get_one::<String>("gpu").ok().flatten().map(String::as_str),

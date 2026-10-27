@@ -205,6 +205,12 @@ pub fn command() -> Command {
                 .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("as JSON"))
                 .after_help("Examples:\n  corridorkey info --models ~/models/2.0.0-onnx.4\n  corridorkey info --json --device cpu"),
         )
+        .subcommand(
+            Command::new(crate::spec::NAME)
+                .hide(true)
+                .about("this command line's description as JSON, for tools (the app's Console)")
+                .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).required(true).help("as JSON")),
+        )
 }
 
 #[cfg(test)]
