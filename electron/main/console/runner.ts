@@ -12,7 +12,7 @@ import { posix, win32 } from "node:path";
 import { naturalCompare } from "../media";
 import { enumValue, parse, quoteArg, type Parsed, type ParseOptions } from "../../../src/shared/console/parse";
 import { EXIT_MEANINGS, fullName, type ConsoleArg, type Registry } from "../../../src/shared/console/registry";
-import type { ConsoleBlock, ConsoleEntry, ConsoleHistoryEntry, ConsoleSession, Job as QueueJob } from "../../../src/shared/types";
+import type { ConsoleBlock, ConsoleEntry, ConsoleHistoryEntry, ConsoleSession, DoctorRow, Job as QueueJob } from "../../../src/shared/types";
 import { farmExport, fileList, type FarmFormat, type FarmJob } from "./farm";
 import { complete } from "./complete";
 import type { Elevation } from "./elevation";
@@ -22,7 +22,7 @@ import { checkWrite, expandHome, fsErrorText, resolveReal, type PathDeps } from 
 import { expandHistory, hasExpansion } from "../../../src/shared/console/expand";
 import { frameToken, groupSequences, sequenceOf, type Sequence } from "../../../src/shared/console/sequences";
 import { WRITE_FOLDERS_MAX } from "../settings";
-import { fileSizeText } from "../../../src/shared/units";
+import { fileSizeText, gibBytes } from "../../../src/shared/units";
 
 /** Lines a block keeps (the newest); a long render's log can't grow the page or the pushes without bound. */
 export const CONSOLE_LINES_KEPT = 2000;
@@ -46,6 +46,10 @@ export interface ConsoleFs {
   readFile: (p: string, maxBytes: number) => Promise<string>;
   mkdir: (p: string) => Promise<void>;
   writeFile: (p: string, text: string) => Promise<void>;
+  /** may this process write in the folder (doctor) */
+  writable: (p: string) => Promise<boolean>;
+  /** free bytes on the folder's disk (doctor) */
+  freeBytes: (p: string) => Promise<number>;
 }
 
 /**
@@ -101,6 +105,8 @@ export interface ConsoleDeps {
   /** the second Ctrl+C / the quit: the child's whole process group (tree on Windows) */
   killTree?: (pid: number) => void;
   now?: () => number;
+  /** doctor's checks of the app's own (ffmpeg, TensorRT) and the folders the Console writes to, labelled */
+  doctor: () => { rows: DoctorRow[]; folders: { label: string; path: string }[] };
   /** the queue's jobs (farm export writes them with their settings) */
   jobs: () => readonly QueueJob[];
   /** the app's version: its corridorkey's too (built together, one number: ck-cli lib.rs VERSION) */
@@ -369,6 +375,8 @@ export class Console {
         return this.script(b, pos("file")[0], parent !== null);
       case "farm":
         return now(await this.farm(b, p, parent !== null));
+      case "doctor":
+        return now(await this.doctor(b, has("json")));
     }
     return now(this.finish(b, "refused", `${cmd.name} isn't a command this Console runs.`));
   }
@@ -536,6 +544,88 @@ export class Console {
       return this.finish(b, "done", ...entries.map((e) => e.name + (e.folder ? a.sep : "")));
     }
     return this.finish(b, "done", summary);
+  }
+
+  /**
+   * doctor: every check in one go, one row each (✓ ⚠ ✗) with the fix for a problem. The card, ONNX Runtime and the models
+   * come from `corridorkey info --json` (it loads the runtime and asks the driver; it never keys, so it takes no GPU slot);
+   * ffmpeg and TensorRT from the app's own checks; each write folder: there, writable, its disk's free space.
+   */
+  private async doctor(b: ConsoleBlock, json: boolean): Promise<ConsoleBlock> {
+    const rows: DoctorRow[] = [];
+    const bin = this.d.cli();
+    if (!bin)
+      rows.push({
+        check: "corridorkey",
+        status: "fail",
+        detail: "the command line isn't part of this copy of the app",
+        fix: "App: install CorridorKey again (corridorkey ships next to its engine, in resources/engine)",
+      });
+    else {
+      rows.push({ check: "corridorkey", status: "ok", detail: bin, fix: null });
+      rows.push(...infoRows(await this.cliInfo(bin)));
+    }
+    const app = this.d.doctor();
+    rows.push(...app.rows);
+    // loop: NOT-WORTH — a few folders, one async stat, access and statfs each
+    for (const f of app.folders) rows.push(await this.folderRow(f.label, f.path));
+    // loop: NOT-WORTH — the few rows
+    const failed = rows.some((r) => r.status === "fail");
+    b.exitCode = failed ? 1 : 0;
+    if (json) return this.finish(b, failed ? "failed" : "done", ...JSON.stringify(rows, null, 2).split("\n"));
+    // loop: NOT-WORTH — the few rows
+    const w = Math.max(...rows.map((r) => r.check.length));
+    const sym = { ok: "✓", warn: "⚠", fail: "✗" } as const;
+    // loop: NOT-WORTH — as above
+    const lines = rows.flatMap((r) => [`${sym[r.status]} ${r.check.padEnd(w)}  ${r.detail}`, ...(r.fix && r.status !== "ok" ? [`  ${" ".repeat(w)}  fix: ${r.fix}`] : [])]);
+    return this.finish(b, failed ? "failed" : "done", ...lines);
+  }
+
+  /** `corridorkey info --json`: its JSON, or what went wrong (its error line, without the exit code it prints). */
+  private cliInfo(bin: string): Promise<{ info: Record<string, unknown> } | { error: string }> {
+    return new Promise((resolve) => {
+      const child = this.spawnFn(bin, ["info", "--json"], { cwd: this.cwd, env: this.d.cliEnv(), shell: false, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+      let out = "";
+      let err = "";
+      child.stdout?.on("data", (d: Buffer) => (out += d.toString()));
+      child.stderr?.on("data", (d: Buffer) => (err += d.toString()));
+      // loop: NOT-WORTH — one wait per doctor [bounded: INFO_TIMEOUT_MS, then it is killed]
+      const timer = setTimeout(() => child.kill(), INFO_TIMEOUT_MS);
+      const end = (code: number | null, e?: Error) => {
+        clearTimeout(timer);
+        // loop: NOT-WORTH — info's few stderr lines
+        const last = err.trim().split(/\r?\n/).filter(Boolean).pop() ?? "";
+        if (e) return resolve({ error: `corridorkey couldn't start: ${e.message}` });
+        if (code !== 0) return resolve({ error: last.replace(/^ERROR: /, "").replace(/ \(exit \d+, [^)]*\)$/, "") || `corridorkey info ended with ${code === null ? "a signal" : `exit ${code}`}` });
+        try {
+          resolve({ info: JSON.parse(out) as Record<string, unknown> });
+        } catch {
+          // error: SHOWN — the row says it
+          resolve({ error: "corridorkey info printed no JSON" });
+        }
+      };
+      child.on("error", (e) => end(null, e));
+      child.on("close", (code) => end(code));
+    });
+  }
+
+  /** A folder the Console writes to: there, writable, and its disk's free space (✗ under 2 GiB, ⚠ under 20 GiB). */
+  private async folderRow(label: string, path: string): Promise<DoctorRow> {
+    // loop: NOT-WORTH — one async stat per folder
+    const st = await this.d.fs.stat(path).catch(() => null);
+    if (!st)
+      return {
+        check: label,
+        status: "warn",
+        detail: `${path} isn't there yet (the first job or command that writes there makes it)`,
+        fix: "App settings: choose another folder if this one was on a drive that is gone",
+      };
+    if (!st.isDirectory()) return { check: label, status: "fail", detail: `${path} is a file, not a folder`, fix: "App settings: choose a folder" };
+    if (!(await this.d.fs.writable(path))) return { check: label, status: "fail", detail: `${path} isn't writable`, fix: "App settings: choose a folder you can write to (or fix its permissions)" };
+    const free = await this.d.fs.freeBytes(path).catch(() => null);
+    const detail = `${path} · writable · ${free === null ? "free space unknown" : `${fileSizeText(free)} free`}`;
+    if (free !== null && free < DISK_LOW) return { check: label, status: free < DISK_FULL ? "fail" : "warn", detail, fix: "Free space on that disk, or App settings: choose a folder on another disk" };
+    return { check: label, status: "ok", detail, fix: null };
   }
 
   /**
@@ -1086,6 +1176,66 @@ export class Console {
     if (this.expiryTimer) clearTimeout(this.expiryTimer);
     this.expiryTimer = null;
   }
+}
+
+/** doctor: how long `corridorkey info` may take (it loads ONNX Runtime and asks the driver). */
+const INFO_TIMEOUT_MS = 30_000;
+/** doctor's free space marks: ✗ under 2 GiB (a render fails soon), ⚠ under 20 GiB (an EXR shot can take that). */
+const DISK_FULL = 2 * 2 ** 30;
+const DISK_LOW = 20 * 2 ** 30;
+
+const RUNTIME_FIX = "App: Engine page → Runtime and models (download the GPU runtime, or choose one it lists)";
+
+/** doctor's rows from `corridorkey info --json` (ck-cli run.rs info): the card, ONNX Runtime, the models. */
+function infoRows(r: { info: Record<string, unknown> } | { error: string }): DoctorRow[] {
+  if ("error" in r)
+    return [
+      { check: "ONNX Runtime", status: "fail", detail: r.error, fix: RUNTIME_FIX },
+      { check: "Graphics card", status: "warn", detail: "not checked: ONNX Runtime first", fix: RUNTIME_FIX },
+    ];
+  const i = r.info as {
+    onnxruntime?: string;
+    provider?: string | null;
+    precision?: string | null;
+    unavailable?: string | null;
+    gpu?: { name: string; driver: string; vram_total_mb: number } | null;
+    models?: { dir: string; set: string | null; assets: [string, boolean][] | null } | null;
+  };
+  const rows: DoctorRow[] = [];
+  if (i.gpu && i.provider && i.provider !== "cpu")
+    rows.push({
+      check: "Graphics card",
+      status: "ok",
+      detail: `${i.gpu.name} · driver ${i.gpu.driver} · ${gibBytes(i.gpu.vram_total_mb * 2 ** 20)} · ${i.provider} (${i.precision ?? "?"})`,
+      fix: null,
+    });
+  else if (i.provider === "cpu" || i.provider === "coreml")
+    rows.push({
+      check: "Graphics card",
+      status: i.provider === "cpu" ? "warn" : "ok",
+      detail: i.provider === "cpu" ? "none used: the CPU keys (slow)" : "Apple's Core ML",
+      fix: i.provider === "cpu" ? RUNTIME_FIX : null,
+    });
+  else
+    rows.push({
+      check: "Graphics card",
+      status: "fail",
+      detail: i.unavailable ?? "no usable graphics card",
+      fix: `${RUNTIME_FIX}; an NVIDIA card also needs its driver (nvidia-smi shows it)`,
+    });
+  rows.push({ check: "ONNX Runtime", status: "ok", detail: i.onnxruntime ?? "?", fix: null });
+  const MODELS_FIX = "App: Engine page → Runtime and models (download the models)";
+  if (!i.models) rows.push({ check: "Models", status: "fail", detail: "no model set", fix: MODELS_FIX });
+  else {
+    // loop: NOT-WORTH — five networks
+    const missing = (i.models.assets ?? []).filter(([, have]) => !have).map(([p]) => p);
+    rows.push(
+      missing.length
+        ? { check: "Models", status: "fail", detail: `missing: ${missing.join(", ")}`, fix: MODELS_FIX }
+        : { check: "Models", status: "ok", detail: `${i.models.set ?? "no manifest"} in ${i.models.dir}`, fix: null },
+    );
+  }
+  return rows;
 }
 
 /** The most lines `history` prints. */

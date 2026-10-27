@@ -62,7 +62,7 @@ App settings → Storage lists what the app keeps on this PC, each with its size
 ## Console
 
 The **Console** (its own icon on the rail) is a command line inside the app for people who live in one: the farm CLI's
-`render`, `verify`, `prepare` and `info` with the same flags, output and exit codes, plus `help`, `apropos`, `cd`, `pwd`,
+`render`, `verify`, `prepare` and `info` with the same flags, output and exit codes, plus `help`, `apropos`, `doctor`, `farm export`, `cd`, `pwd`,
 `dir` / `ls`, `allow`, `open` (shows a folder in the file manager), `cls`, `history`, `version`, `run` (a `.ckcmd` script of
 Console lines) and `sudo`. Other shells' words get a straight answer: `man` is `help`, `exit` says the Console stays
 open, `rm` that the Console never deletes files, `cat` and `echo` that they come later. Every command and flag comes
@@ -80,6 +80,11 @@ jobs, with their settings: `farm export openjd --queue -o ~/farm/sq01` (an OpenJ
 and plugin info, with the plugin), `opencue` (a submit script), `flamenco` (a job and the job type) or `shell` (shot
 lists and the line that runs them); name clips instead of `--queue` for some of them. It never replaces its files
 unless you say `sudo … --overwrite`.
+
+**doctor** checks this computer in one go: the corridorkey command line, the graphics card and its driver, ONNX
+Runtime, the models, TensorRT, ffmpeg, and each folder the Console writes to (there, writable, free space), one row
+each with ✓, ⚠ or ✗, and under each problem what to do (a command, or where in the app). It only asks; it never keys
+on the card. `doctor --json` prints the same as JSON.
 
 **Safety.** It is not a system shell: only its own commands, each one parsed and checked (no variables, pipes, globs
 or other programs). It **reads anywhere** you can, and **writes only into the folders you chose**: the results folder
@@ -155,4 +160,5 @@ sudo render sh010.mov -o ~/renders/sh010/ --overwrite
 verify -i plates/sh010.####.exr -o ~/renders/sh010/sh010_key.####.exr -F 1001-1100
 run nightly.ckcmd
 farm export openjd --queue -o ~/farm/sq01
+doctor
 ```

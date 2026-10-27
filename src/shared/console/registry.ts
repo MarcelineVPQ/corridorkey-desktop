@@ -245,6 +245,12 @@ const BUILTINS: ConsoleCommand[] = [
     ["run nightly.ckcmd"],
   ),
   builtin(
+    "doctor",
+    "check this computer in one go: the corridorkey command line, the graphics card and driver, ONNX Runtime, the models, TensorRT, ffmpeg, the folders the Console writes to and their free space; each problem with its fix",
+    [arg({ id: "json", long: "json", kind: "switch", help: "the checks as JSON" })],
+    ["doctor", "doctor --json"],
+  ),
+  builtin(
     "farm",
     "write ready-to-submit render farm jobs for clips in the queue, with their settings: OpenJD, Deadline 10, OpenCue, Flamenco or a shell shot list",
     [

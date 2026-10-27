@@ -84,6 +84,15 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   reads it: YAML, key=value, JSON, shell words), the runner's scope and sudo. `openjd check` and `openjd summary`
   passed on a generated bundle (openjd-cli in a scratch venv, 2026-10-27; it isn't installed for the tests, which
   check the bundle structurally).
+- **doctor** (`doctor --json`): every check in one go, one row each (✓ ok, ⚠ warning, ✗ problem) and under each problem
+  its exact fix (a Console line or an App action): the corridorkey command line (found), the graphics card and driver,
+  ONNX Runtime and the models (all three from `corridorkey info --json`: it loads the runtime and asks the driver, never
+  keys, so it takes no GPU slot and runs while the queue does; a runtime that doesn't load is its row, with the CLI's
+  own message), TensorRT (the Engine page's state: off, on but not downloaded, on and how many size ranges are built)
+  and ffmpeg (the app's check: ffmpeg, ffprobe and the encoders the outputs need) from `ConsoleDeps.doctor`, and each
+  folder the Console writes to (the results folder, the cache folder, the allowed ones): there, writable, its disk's
+  free space (✗ under 2 GiB, ⚠ under 20 GiB). It ends failed (exit 1) when a row is ✗, so a script can stop on it.
+  Tests inject the checks and a fake `info`.
 - **Output** goes to the page as blocks (`ConsoleBlock` in `src/shared/types.ts`): the line, its state and exit code,
   progress, the last 2000 lines, `dir`'s rows. The page keeps them quiet: a block's actions show on hover and on
   keyboard focus (`:focus-within`; opacity only, so Tab always reaches them; always shown without hover), a built-in's

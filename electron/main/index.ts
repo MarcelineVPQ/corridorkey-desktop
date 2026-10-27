@@ -3,7 +3,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, net, power
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { access, constants as fsConstants, mkdir, readdir, readFile, stat, statfs, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { EngineProcess, rustEngineEnv, type EngineReply } from "./engine";
@@ -41,6 +41,7 @@ import { holdAppImageMountUntilExit } from "./appImageQuit";
 import {
   LOG_SHOWN,
   type AppState,
+  type DoctorRow,
   type FfmpegState,
   type GpuInfo,
   type InstallState,
@@ -379,6 +380,18 @@ const appConsole = new Console({
     },
     // loop: NOT-WORTH — one async write per farm export file
     writeFile: (p, text) => writeFile(p, text, "utf8"),
+    // loop: NOT-WORTH — one async access check per doctor folder
+    writable: (p) =>
+      access(p, fsConstants.W_OK).then(
+        () => true,
+        // error: SHOWN — doctor says the folder isn't writable
+        () => false,
+      ),
+    // loop: NOT-WORTH — one async statfs per doctor folder
+    freeBytes: async (p) => {
+      const s = await statfs(p);
+      return s.bavail * s.bsize;
+    },
   },
   startDir: settings.outputRoot ?? homedir(),
   cli: () => findCli(enginePaths().binary, app.isPackaged ? null : resolve(app.getAppPath(), "engine-rs", "target", "dist")),
@@ -427,8 +440,39 @@ const appConsole = new Console({
   changed: (b) => consolePush.mark(b),
   sessionChanged: () => scheduleSend(),
   jobs: () => queue.jobs,
+  doctor: () => ({
+    rows: [trtDoctorRow(), ffmpegDoctorRow()],
+    // the folders the Console writes to (the queue's clip folders are made by their jobs)
+    folders: [
+      ...(settings.outputRoot ? [{ label: "Results folder", path: settings.outputRoot }] : []),
+      { label: "Cache folder", path: cacheDir },
+      // loop: NOT-WORTH — ≤ 100 folders
+      ...settings.consoleWriteFolders.map((f) => ({ label: "Allowed folder", path: f })),
+    ],
+  }),
   version: app.getVersion(),
 });
+
+/** doctor's TensorRT row: the Engine page's state (jobs ask for it only with the setting on and its parts there). */
+function trtDoctorRow(): DoctorRow {
+  const fix = "App: Engine page → TensorRT";
+  if (!trt.supported) return { check: "TensorRT", status: "ok", detail: "not on this system (jobs run on CUDA or Core ML)", fix: null };
+  if (!trt.on) return { check: "TensorRT", status: "ok", detail: `off (jobs run on CUDA; ${fix} turns it on)`, fix: null };
+  if (!trt.ready) return { check: "TensorRT", status: "warn", detail: "on, but its parts aren't all downloaded: jobs run on CUDA", fix: `${fix} → Download` };
+  return { check: "TensorRT", status: "ok", detail: `on · ${trtBuilt.length} size range${trtBuilt.length === 1 ? "" : "s"} built for this card`, fix: null };
+}
+
+/** doctor's ffmpeg row: the app's check (ffmpeg, ffprobe and the encoders the outputs need, ffmpeg.ts). */
+function ffmpegDoctorRow(): DoctorRow {
+  if (!ffmpeg.checked) return { check: "ffmpeg", status: "warn", detail: "not checked yet", fix: "App: Engine page → ffmpeg" };
+  if (ffmpeg.ok) return { check: "ffmpeg", status: "ok", detail: "ffmpeg and ffprobe, with the encoders the outputs need", fix: null };
+  return {
+    check: "ffmpeg",
+    status: "fail",
+    detail: ffmpeg.problem ?? "not usable",
+    fix: ffmpeg.canInstall ? `App: Engine page → ffmpeg → Install (${ffmpeg.command})` : (ffmpeg.note ?? ffmpeg.command),
+  };
+}
 
 function state(): AppState {
   return {

@@ -14,7 +14,7 @@ import { AuditLog, History } from "../../electron/main/console/logs";
 import { BlockPusher, PUSH_EVERY_MS } from "../../electron/main/console/push";
 import { consoleLineArg, consoleLinesArg, cursorArg, fromAppPage } from "../../electron/main/validate";
 import { makeRegistry } from "../../src/shared/console/registry";
-import { DEFAULT_OPTIONS, type ConsoleBlock, type Job } from "../../src/shared/types";
+import { DEFAULT_OPTIONS, type ConsoleBlock, type DoctorRow, type Job } from "../../src/shared/types";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "ck-console-run-")));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -83,6 +83,8 @@ function make(over: Partial<ConsoleDeps> = {}, files = mkdtempSync(join(root, "u
       readFile: (p) => readFile(p, "utf8"),
       mkdir: async (p) => void (await mkdir(p, { recursive: true })),
       writeFile: (p, text) => writeFile(p, text),
+      writable: async () => true,
+      freeBytes: async () => 2 ** 40,
     },
     startDir: shots,
     cli: () => cli,
@@ -115,6 +117,7 @@ function make(over: Partial<ConsoleDeps> = {}, files = mkdtempSync(join(root, "u
     killTree: (pid) => void killed.push(pid),
     now: () => t,
     jobs: () => queued,
+    doctor: () => ({ rows: [], folders: [] }),
     version: "1.0.0-dev.9",
     ...over,
   };
@@ -686,6 +689,8 @@ describe("review 2026-10-26 probes", () => {
         },
         mkdir: async (p) => void (await mkdir(p, { recursive: true })),
         writeFile: (p, text) => writeFile(p, text),
+        writable: async () => true,
+        freeBytes: async () => 2 ** 40,
       },
     });
     // loop: NOT-WORTH — three job files
@@ -748,6 +753,8 @@ describe("review 2026-10-26 probes", () => {
         readFile: async (p) => (await slow, readFile(p, "utf8")),
         mkdir: async (p) => void (await mkdir(p, { recursive: true })),
         writeFile: (p, text) => writeFile(p, text),
+        writable: async () => true,
+        freeBytes: async () => 2 ** 40,
       },
     });
     const script = c.run("run s.ckcmd");
@@ -978,6 +985,92 @@ describe("SME review 2026-10-26: sequences (M4, S1)", () => {
     const f = await c.run("dir -f");
     expect(f.entries!.filter((e) => e.name.startsWith("sh010_plate.1"))).toHaveLength(11);
     expect((await c.run("ls -1")).lines.map((l) => l.text)).toContain("sh010_plate.####.exr");
+  });
+});
+
+describe("Phase 4: doctor", () => {
+  const INFO_OK = {
+    corridorkey: "1.0.0",
+    onnxruntime: "1.23.0",
+    provider: "cuda",
+    precision: "fp16",
+    unavailable: null,
+    gpu: { name: "NVIDIA GeForce RTX 5080", driver: "590.44", vram_total_mb: 16303 },
+    tensorrt_available: true,
+    models: { dir: "/m/2.0.0-onnx.4", set: "2.0.0-onnx.4", assets: [["/m/2.0.0-onnx.4/a.onnx", true]] },
+    decoders: { ffmpeg: "7.1" },
+  };
+  const app = (over: Partial<DoctorRow>[] = []) => ({
+    rows: [{ check: "ffmpeg", status: "ok", detail: "ffmpeg 7.1 with libx264 and dnxhd", fix: null } as DoctorRow, ...(over as DoctorRow[])],
+    folders: [
+      { label: "Results folder", path: out },
+      { label: "Cache folder", path: join(root, "no-such-cache") },
+    ],
+  });
+  const fs4 = (free: number, writable = true) => ({
+    readdir: (p: string) => readdir(p, { withFileTypes: true }),
+    stat: (p: string) => stat(p),
+    readFile: (p: string) => readFile(p, "utf8"),
+    mkdir: async (p: string) => void (await mkdir(p, { recursive: true })),
+    writeFile: (p: string, text: string) => writeFile(p, text),
+    writable: async () => writable,
+    freeBytes: async () => free,
+  });
+  /** the CLI's info prints this JSON, then exits with `code` */
+  async function answer(json: unknown, code = 0, stderr: string[] = []) {
+    await new Promise((r) => setTimeout(r, 5));
+    await finish(spawned[0].child, json === null ? [] : JSON.stringify(json, null, 2).split("\n"), code, stderr);
+  }
+
+  it("one row per check with ✓ ⚠ ✗; info only (never render or prepare, never the card's slot); exit 0 when nothing fails", async () => {
+    const { c } = make({ doctor: () => app(), fs: fs4(500 * 2 ** 30) });
+    const p = c.run("doctor");
+    await answer(INFO_OK);
+    const b = await p;
+    expect(spawned[0].args).toEqual(["info", "--json"]);
+    expect(spawned[0].opts.shell).toBe(false);
+    expect(gpuTaken).toBe(0);
+    const text = b.lines.map((l) => l.text);
+    expect(text.find((l) => l.includes("Graphics card"))).toMatch(/^✓ Graphics card +NVIDIA GeForce RTX 5080 · driver 590.44 · 15.9 GiB · cuda \(fp16\)$/);
+    expect(text.find((l) => l.includes("Models"))).toMatch(/^✓ Models +2.0.0-onnx.4 in \/m\/2.0.0-onnx.4$/);
+    expect(text.find((l) => l.includes("Results folder"))).toMatch(/^✓ Results folder .*writable · 500 GiB free/);
+    // a folder made when something is written: a warning with what to do, not a failure
+    expect(text.find((l) => l.includes("Cache folder"))).toMatch(/^⚠ Cache folder .*isn't there yet/);
+    expect([b.state, b.exitCode]).toEqual(["done", 0]);
+  });
+
+  it("each problem says its fix; a failure ends the block failed (exit 1)", async () => {
+    const { c } = make({
+      doctor: () => app([{ check: "TensorRT", status: "warn", detail: "on, but its parts aren't all downloaded: jobs run on CUDA", fix: "App: Engine page → TensorRT → Download" }]),
+      fs: fs4(1 * 2 ** 30),
+    });
+    const p = c.run("doctor");
+    await answer({ ...INFO_OK, provider: null, gpu: null, unavailable: "no NVIDIA driver found", models: { dir: "/m", set: null, assets: [["/m/x.onnx", false]] } });
+    const b = await p;
+    const text = b.lines.map((l) => l.text);
+    const at = (s: string) => text.findIndex((l) => l.includes(s));
+    expect(text[at("Graphics card")]).toMatch(/^✗ Graphics card +no NVIDIA driver found$/);
+    expect(text[at("Graphics card") + 1]).toMatch(/^ +fix: /);
+    expect(text[at("Models")]).toMatch(/^✗ Models +missing: \/m\/x.onnx$/);
+    expect(text[at("Models") + 1]).toMatch(/fix: App: Engine page → Runtime and models \(download the models\)/);
+    expect(text[at("TensorRT") + 1]).toMatch(/fix: App: Engine page → TensorRT → Download/);
+    expect(text[at("Results folder")]).toMatch(/^✗ Results folder .*1.0 GiB free/);
+    expect([b.state, b.exitCode]).toEqual(["failed", 1]);
+  });
+
+  it("no corridorkey, or an info that fails, is a row of its own; --json prints the rows as JSON", async () => {
+    cli = null;
+    const { c } = make({ doctor: () => app(), fs: fs4(500 * 2 ** 30) });
+    const b = await c.run("doctor --json");
+    const rows = JSON.parse(b.lines.map((l) => l.text).join("\n")) as DoctorRow[];
+    expect(rows[0]).toMatchObject({ check: "corridorkey", status: "fail" });
+    expect(rows.map((r) => r.check)).toContain("ffmpeg");
+    expect(spawned).toEqual([]);
+    cli = "/app/resources/engine/corridorkey";
+    const p = c.run("doctor");
+    await answer(null, 7, ["ERROR: ONNX Runtime didn't load: libonnxruntime.so: not found (--ort LIB, or CK_ENGINE_ORT) (exit 7, assets)"]);
+    const f = await p;
+    expect(f.lines.map((l) => l.text).find((l) => l.includes("ONNX Runtime"))).toMatch(/^✗ ONNX Runtime +ONNX Runtime didn't load: libonnxruntime.so: not found/);
   });
 });
 

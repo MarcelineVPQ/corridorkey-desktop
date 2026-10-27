@@ -610,6 +610,14 @@ export interface ConsoleBlock {
   echo?: string | null;
 }
 
+/** One `doctor` check: ✓ ok, ⚠ warn, ✗ fail, what it found, and for a problem the exact fix (a Console line or an App action). */
+export interface DoctorRow {
+  check: string;
+  status: "ok" | "warn" | "fail";
+  detail: string;
+  fix: string | null;
+}
+
 export interface ConsoleCompletionItem {
   // the text that replaces start..end (quoted as needed)
   insert: string;
