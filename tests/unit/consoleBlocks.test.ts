@@ -22,6 +22,7 @@ import {
   isoTime,
   lineHint,
   lineWords,
+  rateText,
   sequenceCell,
   sequenceText,
   visibleBlocks,
@@ -454,5 +455,12 @@ describe("SME review 2026-10-27 N4 (row 143): a block's line wraps only between 
     // loop: NOT-WORTH — a few test words
     expect(w.map((x) => (typeof x === "string" ? x : x.map((s) => s.text).join("|")))).toEqual(["render", " ", "--codec", " ", "h2|64", " ", "--", " ", "a-b.mov"]);
     expect((w[4] as { kind: string }[]).map((s) => s.kind)).toEqual(["error", "plain"]);
+  });
+});
+
+describe("SME review 2026-10-26 N2 (row 119): the rate says what it measured", () => {
+  it("frames per second and over how many frames, no ETA", () => {
+    expect(rateText({ fps: 3.14, frames: 20 })).toBe("3.1 frames/s over the last 20 frames");
+    expect(rateText({ fps: 24.4, frames: 1 })).toBe("24 frames/s over the last 1 frame");
   });
 });

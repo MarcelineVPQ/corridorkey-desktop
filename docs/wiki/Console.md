@@ -30,7 +30,8 @@ render plate.####.exr -o ~/renders/sh010 --linear
 
 `render`, `verify`, `prepare` and `info` can be typed with or without `corridorkey` in front. The Console uses the
 Engine page's models and ONNX Runtime. `render` and `prepare` use the graphics card: they wait for the queue (and
-the queue waits for them). One Console command runs at a time; **Stop** or Ctrl+C stops it (a render stops cleanly
+the queue waits for them). A render's block shows its frames, percent and the measured rate ("3.1 frames/s over the
+last 20 frames", from the command line's own progress; no estimated time). One Console command runs at a time; **Stop** or Ctrl+C stops it (a render stops cleanly
 after the frame it is on, exit 143).
 
 ## Safety

@@ -74,7 +74,8 @@ missing there).
   and, for `render` without `--temp`, a temporary folder in the app's cache. A value starting with `-` goes joined to
   its flag (`--codec=-x`), so the CLI reads it as the value, as typed. The CLI's JSON events become the block's
   progress (frames handed to the writers, never an estimate), phase and failure; its exit code is shown with its
-  meaning (docs/CLI.md). Ctrl+C sends SIGTERM (the CLI stops cleanly after the frame it is on, 143); a second one kills
+  meaning (docs/CLI.md); while it runs, the measured rate (`measuredRate`: frames per second between the progress events
+  as received, over the last 20 frames or fewer so far; no ETA: SME review 2026-10-26 N2). Ctrl+C sends SIGTERM (the CLI stops cleanly after the frame it is on, 143); a second one kills
   the process group. On Windows (no SIGTERM for a console program, no process groups) the first one ends the tree with
   `taskkill /pid N /T /F` (System32's, by full path; the runner's own default there); the output stays safe (docs/CLI.md
   "Output safety"). One Console job at a time: a `run` script takes the slot before it reads its file, and a command

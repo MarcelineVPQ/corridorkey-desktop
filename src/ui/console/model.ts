@@ -158,6 +158,11 @@ export function childRow(b: ConsoleBlock, home: string): { mark: string; last: s
   return { mark, last: full === null ? null : shortenKnown(full, b.paths, home), full, source };
 }
 
+/** The measured rate, as measured: "3.1 frames/s over the last 20 frames" (SME review 2026-10-26 N2; no ETA). */
+export function rateText(r: { fps: number; frames: number }): string {
+  return `${r.fps < 10 ? r.fps.toFixed(1) : Math.round(r.fps)} frames/s over the last ${r.frames} frame${r.frames === 1 ? "" : "s"}`;
+}
+
 /** How long it took ("0.4 s", "2 min 05 s"); null while it runs. */
 export function duration(b: ConsoleBlock): string | null {
   // a queue job's echoed line ran nothing here: no time to show

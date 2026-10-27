@@ -11,7 +11,17 @@ import { PassThrough } from "node:stream";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { nextVersion, replaceFile } from "../../electron/main/console/paths";
-import { clipName, Console, CONSOLE_CHARS_KEPT, type ConsoleDeps, type ElevationRequest, type ScriptElevationRequest } from "../../electron/main/console/runner";
+import {
+  clipName,
+  Console,
+  CONSOLE_CHARS_KEPT,
+  type ConsoleDeps,
+  type ElevationRequest,
+  type ScriptElevationRequest,
+  measuredRate,
+  RATE_FRAMES,
+  type RateSample,
+} from "../../electron/main/console/runner";
 import { dropOnLockAndSleep, Elevation, LinuxLockWatch, LOCK_POLL_MS, parseLockedHint } from "../../electron/main/console/elevation";
 import { AuditLog, History } from "../../electron/main/console/logs";
 import { BlockPusher, PUSH_EVERY_MS } from "../../electron/main/console/push";
@@ -2437,5 +2447,33 @@ describe("SME reviews: cd completes folders", () => {
     expect(await items("dir pla")).toEqual(["plan.txt", "plate.####.exr", "plates/"]);
     await c.run("cd plates/sh010.####.exr");
     expect(c.session().cwd).toBe(join(d, "plates"));
+  });
+});
+
+describe("SME reviews: a measured frame rate", () => {
+  it("N2 (row 119): frames per second from the CLI's own events, over the last 20 frames (or fewer so far), never before two", () => {
+    const s: RateSample[] = [];
+    expect(measuredRate(s, 0, 0)).toBeNull();
+    expect(measuredRate(s, 2000, 4)).toEqual({ fps: 2, frames: 4 });
+    // loop: NOT-WORTH — a few test events, a frame a second from here
+    for (let f = 5; f <= 40; f++) measuredRate(s, 2000 + (f - 4) * 1000, f);
+    const r = measuredRate(s, 39_000, 41)!;
+    expect(r.frames).toBeGreaterThanOrEqual(RATE_FRAMES);
+    expect(r.frames).toBeLessThan(RATE_FRAMES + 2);
+    expect(r.fps).toBeCloseTo(1, 5);
+    expect(s.length).toBeLessThan(25);
+  });
+
+  it("N2 (row 119): the running block carries the rate as measured from its progress events", async () => {
+    const { c } = make();
+    const b = await c.run("render shot.mov -o ../out/rate");
+    const ch = spawned[0].child.stdout as PassThrough;
+    ch.write('{"event":"progress","percent":1,"done":1,"total":100}\n');
+    await new Promise((r) => setTimeout(r, 5));
+    t += 4000;
+    ch.write('{"event":"progress","percent":9,"done":9,"total":100}\n');
+    await new Promise((r) => setTimeout(r, 5));
+    expect(blocks.get(b.id)!.rate).toEqual({ fps: 2, frames: 8 });
+    await finish(spawned[0].child, [], 0);
   });
 });

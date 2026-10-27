@@ -2151,12 +2151,16 @@ export class Console {
     this.d.sessionChanged();
     this.d.changed(b);
     let failMessage: string | null = null;
+    // the progress events' (time, frames done), for the measured rate (SME review 2026-10-26 N2)
+    const samples: RateSample[] = [];
     // lifetime: OK — both readers end with the child's streams
     createInterface({ input: child.stdout! }).on("line", (l) => {
       const ev = jsonEvent(l);
       if (!ev) return this.note(b, "out", l);
-      if (ev.event === "progress") b.progress = { percent: num(ev.percent), done: num(ev.done), total: num(ev.total) };
-      else if (ev.event === "status") b.status = String(ev.text ?? "");
+      if (ev.event === "progress") {
+        b.progress = { percent: num(ev.percent), done: num(ev.done), total: num(ev.total) };
+        b.rate = measuredRate(samples, this.now(), b.progress.done);
+      } else if (ev.event === "status") b.status = String(ev.text ?? "");
       else if (ev.event === "fail") failMessage = `failed: ${String(ev.message ?? "")} (${String(ev.reason ?? "")})`;
       else return this.note(b, "out", l);
       this.d.changed(b);
@@ -2384,6 +2388,25 @@ export function clipName(input: string, platform: NodeJS.Platform): string {
   const stem = dot > 0 ? base.slice(0, base.length - trimmed.length + dot) : base;
   if (["input", "frames", "rgb"].includes(stem.toLowerCase())) return a.basename(a.dirname(p)) || stem;
   return stem;
+}
+
+/** The measured rate looks this many frames back (or as far as the run has gone). */
+export const RATE_FRAMES = 20;
+export type RateSample = { t: number; done: number };
+
+/**
+ * Frames per second from the CLI's own progress events, as the Console received them: the frames done since the
+ * oldest event kept (the newest one at least RATE_FRAMES back) over the time between. `samples` is kept short here.
+ * Null until two events a moment apart have frames between them.
+ */
+export function measuredRate(samples: RateSample[], t: number, done: number): { fps: number; frames: number } | null {
+  samples.push({ t, done });
+  // loop: NOT-WORTH — drops the samples older than needed, one or two per event [bounded: the samples kept]
+  while (samples.length > 2 && done - samples[1].done >= RATE_FRAMES) samples.shift();
+  const first = samples[0];
+  const frames = done - first.done;
+  const s = (t - first.t) / 1000;
+  return frames > 0 && s > 0 ? { fps: frames / s, frames } : null;
 }
 
 /** "1 file", "3 files" (SME review 2026-10-27 N3: "1 files"). */

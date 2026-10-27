@@ -10,7 +10,23 @@ import type { Registry } from "../../shared/console/registry";
 import type { ConsoleBlock } from "../../shared/types";
 import { ProgressBar } from "../ProgressBar";
 import { fileSizeText } from "../../shared/units";
-import { blockStatus, blockText, childOpens, childRow, compactBlock, DOCTOR_MARK, duration, entryTitle, errorSpans, isoTime, lineWords, sequenceCell, shortenKnown, writtenPaths } from "./model";
+import {
+  blockStatus,
+  blockText,
+  childOpens,
+  childRow,
+  compactBlock,
+  DOCTOR_MARK,
+  duration,
+  entryTitle,
+  errorSpans,
+  isoTime,
+  lineWords,
+  rateText,
+  sequenceCell,
+  shortenKnown,
+  writtenPaths,
+} from "./model";
 import { HomeContext } from "../PathText";
 
 const COPIED_MS = 1500;
@@ -123,6 +139,7 @@ function FullBlock({ b, registry, onReinsert, onCollapse }: BlockProps & { onCol
           {b.progress && <ProgressBar value={b.progress.done} max={b.progress.total} />}
           <span className="cb-phase">
             {b.progress && `${b.progress.done} / ${b.progress.total} frames · ${Math.floor(b.progress.percent)} %`}
+            {b.progress && b.rate && b.state === "running" && ` · ${rateText(b.rate)}`}
             {b.progress && b.status && " · "}
             {b.status}
           </span>

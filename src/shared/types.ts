@@ -609,6 +609,8 @@ export interface ConsoleBlock {
   finishedAt: number | null;
   // from the CLI's own JSON events: frames handed to the writers, never an estimate
   progress: { percent: number; done: number; total: number } | null;
+  // the frames per second measured over the last progress events (≤ RATE_FRAMES frames back), never an estimate
+  rate?: { fps: number; frames: number } | null;
   // the CLI's phase (loading the models, keying: window 3/10 done…)
   status: string | null;
   lines: ConsoleLine[];
