@@ -1,0 +1,167 @@
+# CorridorKey: key one whole shot per task (the app's matte, bit for bit). docs/CLI.md is the contract.
+# Open Job Description 2023-09 (AWS Deadline Cloud, or `openjd run` on one machine). farm/README.md "OpenJD".
+specificationVersion: jobtemplate-2023-09
+name: "CorridorKey: {{Param.OutputPattern}}"
+description: Keys one shot with corridorkey render (one task, the whole shot), then checks every frame with corridorkey verify.
+
+parameterDefinitions:
+  - name: Input
+    type: PATH
+    objectType: FILE
+    dataFlow: IN
+    description: "The clip: a movie, or one frame of the plate sequence written as a pattern (plates/sh010.####.exr). A pattern's folder must hold only that sequence."
+    userInterface:
+      control: CHOOSE_INPUT_FILE
+      label: Clip
+      groupLabel: Shot
+      fileFilters:
+        - label: EXR plates
+          patterns: ["*.exr"]
+        - label: Movies
+          patterns: ["*.mov", "*.mp4", "*.mxf", "*.mkv", "*.avi"]
+        - label: All files
+          patterns: ["*"]
+  - name: OutputDir
+    type: PATH
+    objectType: DIRECTORY
+    dataFlow: OUT
+    description: The folder the matte frames and the run's report go into.
+    userInterface:
+      control: CHOOSE_DIRECTORY
+      label: Output folder
+      groupLabel: Shot
+  - name: OutputPattern
+    type: STRING
+    default: key.####.exr
+    description: "The frames' file name: key.####.exr, key.%04d.exr or key.$F4.exr. With several outputs each adds its name before the number (key_alpha.1001.exr)."
+    userInterface:
+      label: Output file name
+      groupLabel: Shot
+  - name: Outputs
+    type: STRING
+    default: alpha,fg
+    description: "What to write, comma-separated: alpha, fg, cutout, checker."
+    userInterface:
+      label: Outputs
+      groupLabel: Shot
+  - name: Linear
+    type: STRING
+    default: "false"
+    allowedValues: ["true", "false"]
+    description: Scene-linear EXR plates (else read as display-coded, clipped to 0-1).
+    userInterface:
+      control: CHECK_BOX
+      label: Scene-linear plates
+      groupLabel: Shot
+  - name: ExistingFrames
+    type: STRING
+    default: --skip-existing
+    allowedValues: ["--skip-existing", "--overwrite"]
+    description: "Frames already at the output's names. --skip-existing: nothing to do when every frame is there and whole, else the shot is keyed again. --overwrite: always key and replace."
+    userInterface:
+      control: DROPDOWN_LIST
+      label: Frames already there
+      groupLabel: Shot
+  - name: LowVram
+    type: STRING
+    default: "false"
+    allowedValues: ["true", "false"]
+    description: One phase's networks at a time (less graphics memory, slower).
+    userInterface:
+      control: CHECK_BOX
+      label: Low-memory mode
+      groupLabel: Engine
+  - name: CorridorKey
+    type: STRING
+    default: corridorkey
+    description: The corridorkey command on the workers (on PATH, or its full path).
+    userInterface:
+      label: corridorkey command
+      groupLabel: Engine
+  - name: Models
+    type: PATH
+    objectType: DIRECTORY
+    dataFlow: NONE
+    description: The CorridorKey model set's folder on the workers (the app's is ~/.local/share/corridorkey-desktop/models/2.0.0-onnx.4).
+    userInterface:
+      control: CHOOSE_DIRECTORY
+      label: Models folder
+      groupLabel: Engine
+  - name: OnnxRuntime
+    type: PATH
+    objectType: FILE
+    dataFlow: NONE
+    description: ONNX Runtime's library on the workers (libonnxruntime.so / onnxruntime.dll; the app's GPU runtime download).
+    userInterface:
+      control: CHOOSE_INPUT_FILE
+      label: ONNX Runtime library
+      groupLabel: Engine
+
+steps:
+  - name: Key
+    script:
+      embeddedFiles:
+        # run options without a flag value to leave out (docs/CLI.md "--job"); the flags below win over it
+        - name: Options
+          type: TEXT
+          filename: options.json
+          data: '{"options": {"frame_dir_linear": {{Param.Linear}}, "low_vram": {{Param.LowVram}} } }'
+      actions:
+        onRun:
+          command: "{{Param.CorridorKey}}"
+          args:
+            - render
+            - --input
+            - "{{Param.Input}}"
+            - --output
+            - "{{Param.OutputDir}}/{{Param.OutputPattern}}"
+            - --outputs
+            - "{{Param.Outputs}}"
+            - --job
+            - "{{Task.File.Options}}"
+            - "{{Param.ExistingFrames}}"
+            - --models
+            - "{{Param.Models}}"
+            - --ort
+            - "{{Param.OnnxRuntime}}"
+            - --progress-format
+            - openjd
+            - --report
+            - "{{Param.OutputDir}}/corridorkey_report.json"
+          # SIGTERM: corridorkey stops after the frame or window it is on, leaves no frame at a final name, exit 143
+          cancelation:
+            mode: NOTIFY_THEN_TERMINATE
+    hostRequirements:
+      attributes:
+        - name: attr.worker.os.family
+          anyOf: [linux, windows]
+      amounts:
+        - name: amount.worker.gpu
+          min: 1
+        # MiB. README "Requirements": 8 GB or more. The engine picks its temporal window from the card's free memory;
+        # measured peaks are in README "Speed" (onnx.4, CUDA, 12 GB budget: 9.07 GiB at 1280x1080, 9.29 GiB at 4K).
+        # A number, not a job parameter: a format string here needs the FEATURE_BUNDLE_1 extension.
+        - name: amount.worker.gpu.memory
+          min: 8192
+
+  - name: Verify
+    dependencies:
+      - dependsOn: Key
+    script:
+      actions:
+        onRun:
+          command: "{{Param.CorridorKey}}"
+          args:
+            - verify
+            - --input
+            - "{{Param.Input}}"
+            - --output
+            - "{{Param.OutputDir}}/{{Param.OutputPattern}}"
+            - --outputs
+            - "{{Param.Outputs}}"
+            - --progress-format
+            - openjd
+    hostRequirements:
+      attributes:
+        - name: attr.worker.os.family
+          anyOf: [linux, windows]
