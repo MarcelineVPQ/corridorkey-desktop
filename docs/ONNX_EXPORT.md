@@ -448,7 +448,7 @@ The app's setup on macOS downloads it (electron/main/install.ts `COREML`, pinned
 `.partial-2.0.0-onnx.4-coreml`, then moves the files into the model set's folder, `coreml.json` last; a set
 installed without it gets it the next time the setup runs.
 
-## onnx.5: one masked attention (candidate `2.0.0-onnx.5`, built 2026-10-27, not measured)
+## onnx.5: one masked attention (candidate `2.0.0-onnx.5`, built and measured 2026-10-27)
 
 Why: AMD's MIGraphX can't load stage 1 or stage 2 of onnx.4 (docs/AMD.md on branch `amd`): ONNX `RMSNormalization`
 is unknown to it, and onnx_patches v2 splits every Swin block into four region groups whose sizes follow the input
@@ -522,8 +522,38 @@ ML set's numbers, only old against new on equal terms). Core ML partitions / nod
 | stage 2 TensorRT form | 91 / 576 | 39 / 100 |
 | C-RADIO fp16 | 29 / 138 | 29 / 138 |
 
-Not measured yet (test requests, `onnx5_parity.sh`): parity with onnx.4 and with upstream, speed and memory on
-CUDA / TensorRT / CPU, whether Apple's Neural Engine now compiles stage 2, and a MIGraphX run on an AMD card.
+**Measured 2026-10-27** (`onnx5_parity.sh`, Marcy's OK; RTX 5080, ORT 1.31, the engine at main c3864a1):
+
+- `torch` (PyTorch fp32, CPU, onnx5_patches against Corridor's unpatched code; 256×384, 384×640, 512×896 T=2,
+  768×1280 T=4): stage 1 baton max 1.7e-6 to 2.1e-6 (values up to 3.6), aux ≤ 8.3e-7; stage 2 ≤ 1.0e-6. v2's level.
+- `net`, ORT CPU, onnx.4 against onnx.5, same seeded inputs (256×384 T=2, 384×640 T=4, 768×1280 T=4): fp32 stage 1
+  baton ≤ 2.4e-6, stage 2 ≤ 4.5e-7; fp16 stage 1 baton ≤ 2.1e-3 (values up to 3.9; fp16's step there is 2e-3), aux
+  ≤ 4.9e-4, stage-2 matte ≤ 0.001/255; C-RADIO fp16 bit-identical. No non-finite values.
+- `cuda`, the same on ORT CUDA fp16 at 1152×1920 T=8 and 2176×3840 T=4: stage 1 baton ≤ 6.4e-3 (values up to 4.8),
+  aux ≤ 9.8e-4, stage-2 matte ≤ 0.016/255 (mean 0.002/255); C-RADIO bit-identical. 3 min, peak 6.7 GB on the card.
+- `engine` (the Rust engine on CUDA, automatic window, float EXR, onnx.4 then onnx.5 per clip; 64 min):
+
+| clip | size, frames | window | total s (4 → 5) | steady fps | peak VRAM GB | peak RSS GB | alpha max ×255 | alpha MAE | % px > 1/255 | sizzle (edge, 4 / 5) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| godiva_close | 960×720, 349 | 80/40 | 38.7 → 37.5 | 12.08 → 12.28 | 9.84 → 9.51 | 6.40 → 6.31 | 0.37 | 3.4e-5 | 0 | 0.01084 / 0.01084 |
+| locked_backdrop | 1280×1080, 80 | 48/24 low | 17.5 → 16.6 | 16.91 → 17.23 | 8.98 → 9.04 | 6.35 → 6.42 | 0.37 | 1.4e-5 | 0 | 0.02054 / 0.02054 |
+| metal_glasses | 1280×1080, 139 | 48/24 low | 26.7 → 25.9 | 16.77 → 17.10 | 9.04 → 9.05 | 6.52 → 6.57 | 0.50 | 1.7e-5 | 0 | 0.00926 / 0.00926 |
+| smoke | 1280×1080, 250 | 48/24 low | 47.5 → 45.9 | 16.69 → 16.99 | 9.04 → 9.04 | 6.59 → 6.63 | **1.12** | 2.4e-5 | 3e-7 | 0.01276 / 0.01276 |
+| walking_sitting | 1280×1080, 314 | 48/24 low | 59.4 → 58.2 | 16.60 → 16.89 | 9.04 → 9.04 | 6.59 → 6.58 | **3.24** | 9.4e-6 | 5e-4 | 0.03659 / 0.03658 |
+| with_motion_blur | 1280×1080, 50 | 48/24 low | 13.0 → 12.1 | 17.13 → 17.30 | 9.04 → 9.04 | 6.07 → 6.07 | 0.37 | 9.7e-6 | 0 | 0.03752 / 0.03750 |
+| 04_2c | 4096×2160, 120 | 8/4 | 171.6 → 168.0 | 0.78 → 0.79 | 10.82 → 10.82 | 7.46 → 7.21 | 0.50 | 1.2e-5 | 0 | 0.02049 / 0.02049 |
+| 04_5d | 4096×2160, 120 | 8/4 | 172.0 → 168.3 | 0.78 → 0.79 | 10.82 → 10.82 | 7.42 → 7.10 | **3.98** | 8.4e-6 | 7e-4 | 0.02521 / 0.02520 |
+| 04_5h | 4096×2160, 120 | 8/4 | 169.2 → 168.1 | 0.78 → 0.79 | 10.82 → 10.82 | 7.44 → 7.18 | 0.75 | 1.0e-5 | 0 | 0.01812 / 0.01812 |
+| 08_3a | 4096×2160, 120 | 8/4 | 172.9 → 167.9 | 0.77 → 0.79 | 10.82 → 10.82 | 7.40 → 7.23 | 0.62 | 6.9e-6 | 0 | 0.02149 / 0.02149 |
+
+  Sizzle (tools/temporal_stability.py, the static hair-edge band's mean frame-to-frame change) is equal or lower on
+  every clip; speed 1-7 % faster, graphics memory the same, host memory up to 0.3 GB lower at 4K. **The max bar
+  (≤ 1/255 against onnx.4) fails on 3 of 10 clips** (1.12, 3.24 and 3.98 /255), on a few hair-edge pixels: at most
+  0.0007 % of pixels over 1/255 (04_5d: about 60 pixels a frame), MAE ≤ 3.4e-5. onnx.4's own run-to-run spread and
+  its distance to the original (bf16) were not measured in this run, so these maxima have no floor to compare with.
+
+Not measured: TensorRT and CPU engine runs, whether Apple's Neural Engine now compiles stage 2, a MIGraphX run on an
+AMD card.
 
 ```
 cd engine-rs/export

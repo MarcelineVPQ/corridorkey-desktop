@@ -27,6 +27,8 @@ def feeds(piece, H, W, T, f16, rng):
 def run(path, feed, ep):
     prov = ["CUDAExecutionProvider", "CPUExecutionProvider"] if ep == "cuda" else ["CPUExecutionProvider"]
     s = ort.InferenceSession(path, providers=prov)
+    if ep == "cuda" and s.get_providers()[0] != "CUDAExecutionProvider":
+        raise SystemExit(f"CUDA provider not loaded for {path} (got {s.get_providers()}): set LD_LIBRARY_PATH")
     # loop: NOT-WORTH — a network's few inputs
     names = {i.name for i in s.get_inputs()}
     # loop: NOT-WORTH — one or two outputs
