@@ -45,6 +45,28 @@ const pattern = (j: FarmJob) => `${j.outputDir.replace(/[\\/]+$/, "")}/${j.name}
 /** POSIX shell words (the scripts and the extra-argument fields are read as a shell would). */
 // loop: NOT-WORTH — a command's few words
 const sh = (words: readonly string[]) => words.map((w) => (/^[\w@%+=:,./-]+$/.test(w) ? w : `'${w.replace(/'/g, `'\\''`)}'`)).join(" ");
+/**
+ * Words for a Windows-style argument string, as Python's subprocess.list2cmdline writes them (the Deadline plugin's own
+ * quote()): Deadline (.NET, on every system) splits the task's arguments by the MSVC rules, where `'` quotes nothing
+ * (senior review 2026-10-27 S4). Backslashes double only before a quote.
+ */
+// loop: NOT-WORTH — a command's few words
+const msvc = (words: readonly string[]) => words.map(msvcWord).join(" ");
+function msvcWord(w: string): string {
+  if (w !== "" && !/[\s"]/.test(w)) return w;
+  let out = '"';
+  let slashes = 0;
+  // loop: NOT-WORTH — one word's characters
+  for (const c of w) {
+    if (c === "\\") {
+      slashes++;
+      continue;
+    }
+    out += "\\".repeat(c === '"' ? slashes * 2 + 1 : slashes) + c;
+    slashes = 0;
+  }
+  return out + "\\".repeat(slashes * 2) + '"';
+}
 /** A YAML double-quoted scalar (JSON's string syntax is valid YAML). */
 const y = (s: string) => JSON.stringify(s);
 const runtimeWords = (env: FarmEnv) => [...(env.models ? ["--models", env.models] : []), ...(env.ort ? ["--ort", env.ort] : [])];
@@ -192,7 +214,7 @@ function deadline(j: FarmJob): FarmExport["files"] {
         ["Outputs", outputs(j)],
         ["Preroll", "0"],
         ...(maxVram ? [["MaxVram", maxVram] as [string, string]] : []),
-        ["ExtraArguments", sh(flagWords(flags))],
+        ["ExtraArguments", msvc(flagWords(flags))],
       ]),
     },
   ];

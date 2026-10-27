@@ -98,7 +98,7 @@ Job options (the plugin info file):
 | `Outputs` | `--outputs`, e.g. `alpha` or `alpha,fg` |
 | `Preroll` | `--preroll`, for chunked jobs only |
 | `MaxVram` | `--max-vram` GB |
-| `ExtraArguments` | any other flags, e.g. `--linear --tail 8` |
+| `ExtraArguments` | any other flags, e.g. `--linear --tail 8`; a value with a space in double quotes, as Windows programs read them (`--hint-video "/hints/my hint.mov"`: Deadline splits the line by the MSVC rules on every system, so single quotes don't group) |
 | `Command` | `render`, or `verify` |
 
 To check a render, submit a second job with `Command=verify`, the same options, the same `Frames`, `ChunkSize` equal

@@ -2,7 +2,9 @@
 // clip's frames, paths and flags. OpenJD: `openjd check` isn't installed here, so the bundle is checked structurally
 // (js-yaml; the 2023-09 schema's parameter and format-string rules that matter here); the template itself passes
 // `openjd check` (farm/README.md).
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { farmExport, type FarmJob } from "../../electron/main/console/farm";
 import { tokenize } from "../../src/shared/console/parse";
@@ -237,6 +239,38 @@ describe("farm export: two clips with one name (review 2026-10-27 S3)", () => {
       expect(farmExport(f, [a, b], env).error, f).toBe(`"/a/sh010.mov" and "/b/sh010.mov" are both named sh010: their job files would replace each other; export them into separate folders.`);
       expect(farmExport(f, [a, B], env).error, f).toMatch(/are both named/);
       expect(farmExport(f, [a, b], env).files).toEqual([]);
+    }
+  });
+});
+
+// senior review 2026-10-27 S4 (probe P1b): ExtraArguments was POSIX-quoted, but the Deadline plugin appends it to the
+// task's argument string, which Deadline (.NET) splits by the MSVC rules: '/hints/my hint.mov' became two arguments
+describe("farm export: Deadline's ExtraArguments (review 2026-10-27 S4)", () => {
+  /** the line split as farm/deadline10/test_quote.py's msvc_argv splits it (the plugin's own quoting test) */
+  const msvcArgv = (line: string) =>
+    JSON.parse(
+      execFileSync(
+        "python3",
+        [
+          "-I",
+          "-c",
+          "import sys, json; sys.path.insert(0, sys.argv[1]); from test_quote import msvc_argv; print(json.dumps(msvc_argv(sys.argv[2])))",
+          fileURLToPath(new URL("../../farm/deadline10", import.meta.url)),
+          line,
+        ],
+        { encoding: "utf8", timeout: 10_000 },
+      ),
+    ) as string[];
+
+  it("a hint path with a space (or quotes, backslashes) stays one argument as Deadline splits the string", () => {
+    // loop: NOT-WORTH — a test's few paths
+    for (const hint of ["/hints/my hint.mov", "D:\\my hints\\h.mov", '/hints/it\'s "x".mov', "D:\\hints dir\\", '/hints/a\\"b c.mov']) {
+      const e = farmExport("deadline", [fj("sh010", { hintMode: "video", hintVideo: hint, despillStrength: 0.3 })], env);
+      const extra = file(e, "sh010_plugin_info.txt")
+        .split("\n")
+        .find((l) => l.startsWith("ExtraArguments="))!
+        .slice("ExtraArguments=".length);
+      expect(msvcArgv(extra), extra).toEqual(["--despill", "0.3", "--hint-video", hint]);
     }
   });
 });
