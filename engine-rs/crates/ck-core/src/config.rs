@@ -33,7 +33,7 @@ impl Device {
 /// CK_ENGINE_COREML_UNITS: what Core ML may run the networks on (its MLComputeUnits). Default cpu-gpu: with the
 /// Neural Engine allowed (all), every session load compiled stage 2 for it again (~145 s each time, a new ~0.9 GB
 /// bundle in Core ML's cache, the compiled model in ours reused) and its first call passed 9.7 GB; on CPU + GPU it
-/// loads in 0.5-1.5 s and a whole HD job peaks at 1.8-3.2 GB, mattes within 1/255 of CUDA (Mac mini M6, 2026-10-27).
+/// loads in 0.5-1.5 s and a whole HD job peaks at 1.8-3.4 GB, mattes within 1/255 of CUDA (Mac mini M6, 2026-10-27).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CoremlUnits {
     /// CPU, GPU and Neural Engine (Core ML picks per layer)
