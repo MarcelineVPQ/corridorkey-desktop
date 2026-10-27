@@ -47,6 +47,8 @@ node tools/check_wiki.mjs --published "$wiki" || { echo "release: publish docs/w
 # cargo-about 0.9.2 lives with the other release tools (cargo install --locked --features cli cargo-about --root …)
 export CARGO_ABOUT="${CARGO_ABOUT:-$HOME/.local/share/corridorkey-release/cargo-about/bin/cargo-about}"
 "${CAP[@]}" node tools/gen_notices.mjs --check
+# every pinned model set on GitHub as install.ts pins it, with its licence files (online; tools/check_model_sets.mjs)
+GITHUB_TOKEN="$(gh auth token)" node tools/check_model_sets.mjs
 
 if [ "$state" != false ]; then
 NODE_OPTIONS=--max-old-space-size=4096 "${CAP[@]}" npm run -s check

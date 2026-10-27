@@ -107,6 +107,11 @@ spent 29 minutes waiting on a package mirror).
 4. If it fails partway, run it again: a draft release is picked up and finished, and once the release is
    published only the feeds are redone.
 
+**Release-only gates** (online, so not in `npm run gates`; `tools/release.sh` runs them in step 1):
+`tools/check_model_sets.mjs` checks every model set `install.ts` pins against its GitHub release `models-<set>`:
+each pinned file there at its size and SHA-256, and the licence files (LICENSE, NOTICE, ATTRIBUTION.md, and the
+base set's LICENSE-* on every derived set).
+
 ### macOS (Apple Silicon)
 
 There is no Mac here and no cross-build from Linux without Apple's SDK, so the macOS disk image is built on
