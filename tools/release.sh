@@ -2,24 +2,28 @@
 # Cut a release from this PC (Marcy 2026-10-24: build here, upload the release; GitHub doesn't build).
 #
 #   tools/release.sh            the version in package.json: X.Y.Z (Stable) or X.Y.Z-dev.N (Development)
+#   tools/release.sh --feeds    only the feeds of that version, published already (step 5 failed)
 #
-# 1. checks: on main, clean, in step with origin; package.json and the lock carry the version; a CHANGELOG
+# 1. checks: on main, clean, in step with origin; the version not released yet (no tag, no published release; --feeds:
+#    published); package.json and the lock carry the version; a CHANGELOG
 #    section for it, its header not saying draft / unreleased; the signing key is there; THIRD_PARTY_NOTICES.md is
 #    current (tools/gen_notices.mjs --check, which needs cargo-about on PATH or CARGO_ABOUT=<path>); the published
 #    wiki is docs/wiki/ (a read-only clone of the wiki repository compared by tools/check_wiki.mjs --published;
 #    tools/publish_wiki.mjs publishes it); every pinned model set on GitHub as pinned (tools/check_model_sets.mjs)
-# 2. npm run check, npm run check:engine and tools/check_targets.sh (the engine's Linux / Windows / macOS lint), then
+# 2. the docs-touch gate over the commits since the last release tag, npm run check, npm run check:engine and
+#    tools/check_targets.sh (the engine's Linux / Windows / macOS lint), then
 #    npm run dist:linux (the engine for glibc 2.28, then the AppImage) and npm run dist:win (the Windows engine
 #    cross-built here, then the NSIS installer through Wine), memory-capped
 # 3. SHA256SUMS / SHA512SUMS of both files and the notes (the CHANGELOG section)
-# 4. pushes main, creates the GitHub release as a draft on that commit (no tag yet), uploads, then publishes it,
-#    which makes the tag (Development = prerelease, never Latest). A failure anywhere here can simply be rerun.
+# 4. pushes main, creates the GitHub release as a draft on that commit (no tag yet; a draft left by a failed run is
+#    moved to this commit with these notes), uploads, then publishes it, which makes the tag (Development =
+#    prerelease, never Latest). A failure anywhere here can simply be rerun.
 # 5. the feeds: tools/build-feed.mjs from the published release, signed here with the key in
 #    ~/.config/corridorkey-release/feed-signing.pem (read into the environment, never printed),
 #    tools/verify-feed.mjs checks them exactly as the app does, then they are committed to main and pushed
 # 6. tools/verify-feed.mjs on the live feeds
 # Stops at the first failure; nothing is published before step 4. Rerunning after a failure finishes the job:
-# a draft release is picked up again, and with v$VERSION already published only the feeds are redone.
+# a draft release is picked up again; once v$VERSION is published, --feeds redoes only the feeds.
 # docs/RELEASING.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -33,10 +37,15 @@ else echo "release: version $v is neither X.Y.Z nor X.Y.Z-dev.N" >&2; exit 1; fi
 [ "$(node -p 'require("./package-lock.json").version')" = "$v" ] || { echo "release: package-lock.json isn't at $v" >&2; exit 1; }
 [ "$(git rev-parse --abbrev-ref HEAD)" = main ] || { echo "release: not on main" >&2; exit 1; }
 [ -z "$(git status --porcelain)" ] || { echo "release: uncommitted changes" >&2; exit 1; }
-git fetch -q origin main
+git fetch -q --tags origin main
 [ "$(git rev-list --count HEAD..origin/main)" = 0 ] || { echo "release: origin/main has commits this copy lacks" >&2; exit 1; }
-# none = new; true = a draft left by a failed run (finished now); false = published (only the feeds are redone)
+# none = new; true = a draft left by a failed run (finished now); false = published (--feeds: only the feeds redone)
 state="$(gh release view "v$v" --json isDraft -q .isDraft 2>/dev/null || echo none)"
+# a released version is refused (senior review 2026-10-27 N13: run before the bump, it re-signed the last release's
+# feeds); --feeds is only for a published one
+[ "$state" = false ] && [ "${1:-}" != --feeds ] && { echo "release: v$v is released already: bump the version first (docs/RELEASING.md step 1), or tools/release.sh --feeds to redo its feeds" >&2; exit 1; }
+[ "$state" != false ] && [ "${1:-}" = --feeds ] && { echo "release: --feeds: v$v isn't published" >&2; exit 1; }
+[ "$state" = none ] && git rev-parse -q --verify "refs/tags/v$v" >/dev/null && { echo "release: tag v$v exists without a release: bump the version first" >&2; exit 1; }
 grep -q "^## $v\( \|$\)" CHANGELOG.md || { echo "release: CHANGELOG.md has no '## $v' section" >&2; exit 1; }
 grep "^## $v\( \|$\)" CHANGELOG.md | grep -qiE 'draft|unreleased' && { echo "release: CHANGELOG.md's '## $v' header still says draft / unreleased" >&2; exit 1; }
 # the published wiki must be docs/wiki/ (docs/RELEASING.md "The wiki"): a read-only shallow clone, compared page by page
@@ -51,6 +60,8 @@ export CARGO_ABOUT="${CARGO_ABOUT:-$HOME/.local/share/corridorkey-release/cargo-
 GITHUB_TOKEN="$(gh auth token)" node tools/check_model_sets.mjs
 
 if [ "$state" != false ]; then
+# the docs-touch gate over this release's commits (npm run check reads origin/main..HEAD: nothing once pushed; S6)
+node tools/check_docs_touch.mjs "$(git describe --tags --abbrev=0 --match 'v*')..HEAD"
 NODE_OPTIONS=--max-old-space-size=4096 "${CAP[@]}" npm run -s check
 # the engine's own checks (cargo fmt, clippy -D warnings, cargo test) and its macOS / Windows lint (capped inside)
 systemd-run --user --scope --quiet --collect ${CK_SLICE:+--slice=$CK_SLICE} -p MemoryMax=12G -p MemorySwapMax=0 -- npm run -s check:engine
@@ -73,7 +84,9 @@ fi
 git push origin main
 flags=(--title "CorridorKey $v" --notes-file release/notes.md)
 if [ "$dev" = true ]; then flags+=(--prerelease --latest=false); else flags+=(--latest); fi
-[ "$state" = true ] || gh release create "v$v" --draft --target "$(git rev-parse HEAD)" "${flags[@]}"
+# a draft left by a failed run: moved to this commit with these notes, so the tag, files and notes agree (S5)
+if [ "$state" = true ]; then gh release edit "v$v" --target "$(git rev-parse HEAD)" "${flags[@]}"
+else gh release create "v$v" --draft --target "$(git rev-parse HEAD)" "${flags[@]}"; fi
 gh release upload "v$v" "release/$file" "release/$winfile" release/SHA256SUMS release/SHA512SUMS --clobber
 gh release edit "v$v" --draft=false
 git fetch -q origin "refs/tags/v$v:refs/tags/v$v"
@@ -88,7 +101,7 @@ for try in 1 2 3 4 5 6; do
   GITHUB_TOKEN="$(gh auth token)" node tools/build-feed.mjs --channel stable --out latest.json || [ $? -eq 2 ]
   GITHUB_TOKEN="$(gh auth token)" node tools/build-feed.mjs --channel dev --out latest-dev.json || [ $? -eq 2 ]
   [ -f "$mine" ] && [ "$(node -p "require('./$mine').version")" = "$v" ] && break
-  [ "$try" = 6 ] && { echo "release: $mine doesn't name $v yet; rerun tools/release.sh to finish the feeds" >&2; exit 1; }
+  [ "$try" = 6 ] && { echo "release: $mine doesn't name $v yet; rerun tools/release.sh --feeds to finish them" >&2; exit 1; }
   # loop: SERIAL-REQUIRED — waits between feed tries [bounded: 6 tries, 10 s apart]
   sleep 10
 done

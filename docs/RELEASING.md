@@ -86,9 +86,10 @@ spent 29 minutes waiting on a package mirror).
    Add its `## X.Y.Z-dev.N` section to `CHANGELOG.md` (the release notes are that section). Commit on `main`.
    Publish the wiki if `docs/wiki/` changed since it was last published (The wiki, below): the release refuses a
    published wiki that differs.
-2. `tools/release.sh`. It checks the version shape (`X.Y.Z` = Stable, `X.Y.Z-dev.N` = Development), the lock, a
+2. `tools/release.sh`. It checks the version shape (`X.Y.Z` = Stable, `X.Y.Z-dev.N` = Development), that it isn't
+   released yet (no tag, no published release: run before step 1 it refuses), the lock, a
    clean `main` in step with GitHub, the CHANGELOG section (its header must not say draft or unreleased) and the
-   signing key; runs `npm run check`, `npm run check:engine` and `tools/check_targets.sh` (the engine's macOS and
+   signing key; runs the docs-touch gate over the commits since the last `v*` tag, `npm run check`, `npm run check:engine` and `tools/check_targets.sh` (the engine's macOS and
    Windows lint), then `npm run dist:linux` (memory-capped; the engine is linked for glibc 2.28 with cargo-zigbuild, Zig in
    `~/.local/share/corridorkey-release/zig/venv`; then `tools/build_trt_builder.sh` builds TensorRT's engine builder
    `ck-trt-build` with Zig's C++ for glibc 2.28 and the AppImage ships it next to the engine. It links against
@@ -104,8 +105,8 @@ spent 29 minutes waiting on a package mirror).
    the AppImage and writes the feed, `tools/sign-feed.mjs` signs it, `tools/verify-feed.mjs` checks it exactly as
    the app does, and the changed feeds are committed to `main` and pushed.
 3. It ends with `node tools/verify-feed.mjs` on the live feeds, which must say OK for the channel you released.
-4. If it fails partway, run it again: a draft release is picked up and finished, and once the release is
-   published only the feeds are redone.
+4. If it fails partway, run it again: a draft release is picked up, moved to the current commit with the current
+   notes, and finished; once the release is published, `tools/release.sh --feeds` redoes only the feeds.
 
 **Release-only gates** (online, so not in `npm run gates`; `tools/release.sh` runs them in step 1):
 `tools/check_model_sets.mjs` checks every model set `install.ts` pins against its GitHub release `models-<set>`:
