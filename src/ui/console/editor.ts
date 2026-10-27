@@ -361,6 +361,8 @@ export function keyDown(s0: EditorState, k: Key, ctx: KeyContext): KeyResult {
     return ok(openList(s, c, 0));
   }
   if (!s.list && shown && plain && k.key === "Escape") return ok({ ...s, comp: null });
+  // Esc on the line, nothing open: clear it (PSReadLine's RevertLine; SME review 2026-10-26 N3); Ctrl+Y brings it back
+  if (plain && k.key === "Escape" && s.line) return ok({ ...at(s, "", 0), kill: s.line, hist: null, lastTab: null });
 
   // --- completion ---
   if (k.key === "Tab" && !k.ctrl && !k.alt && !k.meta) {

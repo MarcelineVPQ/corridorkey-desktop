@@ -392,3 +392,12 @@ describe("Ctrl+R and Ctrl+W never reach the default menu (senior review 2026-10-
         for (const key of ["r", "w", "R", "W"]) expect([name, key, mods.shift ?? false, press(s, key, mods).handled]).toEqual([name, key, mods.shift ?? false, true]);
   });
 });
+
+describe("SME reviews: the expert suggestions", () => {
+  it("N3 (row 120): Esc on the line clears it (PSReadLine), Ctrl+Y brings it back; an empty line passes Esc on", () => {
+    const r = press(typed("render shot.mov -o out"), "Escape");
+    expect([r.handled, r.state.line, r.state.cursor]).toEqual([true, "", 0]);
+    expect(press(r.state, "y", { ctrl: true }).state.line).toBe("render shot.mov -o out");
+    expect(press(initialEditor(), "Escape").handled).toBe(false);
+  });
+});

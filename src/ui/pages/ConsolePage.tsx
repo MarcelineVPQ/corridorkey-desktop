@@ -39,6 +39,7 @@ export const KEYS: [string, string][] = [
   ["Ctrl+Y", "Paste back what was cut last"],
   ["Ctrl+D", "Delete the character under the cursor (on an empty line: nothing)"],
   ["Ctrl+C", "Copy the selection; else stop the command; else clear the line"],
+  ["Esc", "Clear the line (Ctrl+Y brings it back)"],
   ["Ctrl+L, Cmd+K", "Clear the screen (cls also does)"],
   ["F2", "Completions inline or as a list"],
 ];
@@ -267,7 +268,7 @@ export function ConsolePage(props: {
         {() => (
           <table className="console-keys">
             <tbody>
-              {/* loop: NOT-WORTH — nineteen rows */}
+              {/* loop: NOT-WORTH — twenty rows */}
               {KEYS.map(([k, what]) => (
                 <tr key={k}>
                   <th scope="row">

@@ -246,6 +246,7 @@ first, then the commands); it never runs by itself.
 | Alt+. | Insert the last word of the line before |
 | `!!` `!N` `!-N` `!abc` `!$` `^a^b` | History shortcuts, as in bash (`sudo !!` too); the hint shows what Enter runs. A `!` inside a name (`sh010!.mov`) or before a frame token (`!$F4`) stays as typed |
 | Ctrl+C | Copy the selection; else stop the running command (again: at once); else clear the line |
+| Esc | Clear the line (Ctrl+Y brings it back) |
 | Ctrl+L, Cmd+K | Clear the screen (`cls` too) |
 | F2 | Switch completions between Tab and a list as you type (**Console settings → Completions**) |
 
