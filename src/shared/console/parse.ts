@@ -7,7 +7,7 @@
 // path separator and always literal (cmd's rule), so C:\shots\sh010 needs no quoting. `--` ends the options; an
 // unquoted `?` (or -h, --help, /?) asks for the command's help. Every token and error carries its source range
 // (UTF-16 offsets, the page's string indices).
-import { ANSWERS, commandNames, findCommand, fullName, suggest, type ConsoleArg, type ConsoleCommand, type Registry } from "./registry";
+import { ANSWERS, commandNames, MEANINGS, findCommand, fullName, suggest, type ConsoleArg, type ConsoleCommand, type Registry } from "./registry";
 
 export interface ParseOptions {
   /** Windows' rules: backslash literal */
@@ -144,11 +144,19 @@ const isHelp = (w: Word) => !w.quoted && ["?", "-h", "--help", "/?"].includes(w.
 const isVersion = (w: Word) => !w.quoted && (w.value === "--version" || w.value === "-V");
 const FRAMES = /^\d+(-\d+([x:]\d+)?)?([, ]+\d+(-\d+([x:]\d+)?)?)*$/;
 
+/** An enum's value as the CLI spells it (any case typed), or null when it isn't one. */
+export function enumValue(arg: ConsoleArg, v: string): string | null {
+  // loop: HOT-PATH-OK — an enum's few values, per value typed
+  return arg.values.find((x) => x.toLowerCase() === v.toLowerCase()) ?? null;
+}
+
 /** What is wrong with a flag's value, or null. */
 export function valueProblem(arg: ConsoleArg, v: string): string | null {
   const name = arg.long ? `--${arg.long}` : arg.short ? `-${arg.short}` : (arg.dos[0] ?? arg.valueName ?? arg.id);
-  if (arg.kind === "enum" && !arg.values.includes(v)) {
-    const s = suggest(v, arg.values);
+  // any case (EXR is exr: the Console passes the CLI's own spelling)
+  if (arg.kind === "enum" && enumValue(arg, v) === null) {
+    // a word with the same meaning first (gpu means auto, not cpu), else the closest spelling
+    const s = MEANINGS[arg.id]?.[v.toLowerCase()] ?? suggest(v, arg.values);
     return `${name} takes ${arg.values.join(", ")}, not '${v}'${s ? ` (did you mean ${s}?)` : ""}`;
   }
   if (arg.kind === "number") {

@@ -1012,3 +1012,17 @@ describe("SME review 2026-10-26: scripts and elevation (S11), pasted lines (S2)"
     expect(consoleLinesArg(["pwd", "dir"], 100)).toEqual(["pwd", "dir"]);
   });
 });
+
+describe("SME review 2026-10-26: values in any case (S12)", () => {
+  it("passes an enum's value to the CLI as the CLI spells it", async () => {
+    const { c } = make();
+    await c.run("render shot.mov -o ../out/k/ --format EXR --datatype Float");
+    expect(spawned[0].args).toEqual(expect.arrayContaining(["--format", "exr", "--datatype", "float"]));
+    expect(spawned[0].args).not.toContain("EXR");
+    await finish(spawned[0].child, [], 0);
+    // Tab completes in any case too
+    const r = await c.complete("render a.mov --format EX", 24);
+    // loop: NOT-WORTH — one item
+    expect(r.items.map((i) => i.insert)).toEqual(["exr"]);
+  });
+});

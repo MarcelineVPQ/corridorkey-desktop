@@ -10,7 +10,11 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   and for execution: words, `'…'` (literal), `"…"` (`\"` and `\\` on Linux and macOS), a backslash escaping the next
   character outside quotes on Linux and macOS (a literal path separator on Windows, so `C:\shots\sh010` needs no
   quotes), `--` ending the options, an unquoted `?` (or `-h`, `--help`, `/?`) for help. Tokens carry kinds and source
-  ranges; mistakes are errors with positions and a did-you-mean. No variables, globs, pipes or redirections.
+  ranges; mistakes are errors with positions and a did-you-mean. An enum's value is taken in any case (`--format EXR`)
+  and passed to the CLI as the CLI spells it (`exr`); a word that means one of its values (`MEANINGS` in registry.ts:
+  `--device gpu` → auto, `--format mp4` → video, `--datatype fp32` → float) is suggested by meaning, not by spelling,
+  and never taken in its place (a test checks every target against the CLI's spec). No variables, globs, pipes or
+  redirections.
 - **One registry.** `src/shared/console/registry.ts`: the built-ins and `corridorkey`'s commands. The CLI's part comes
   from `cliSpec.json`, which `tools/gen_cli_spec.mjs` writes from `corridorkey __spec --json` at build time (checked in;
   `tests/unit/cliSpec.test.ts` fails when it and the built binary differ). Each entry: name, aliases, arguments (kinds

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parse, quoteArg, tokenize, valueProblem } from "../../src/shared/console/parse";
-import { makeRegistry, suggest } from "../../src/shared/console/registry";
+import { makeRegistry, MEANINGS, suggest } from "../../src/shared/console/registry";
 
 const reg = makeRegistry();
 const posix = { windows: false };
@@ -329,5 +329,40 @@ describe("SME review 2026-10-26: ls and dir flags (M3)", () => {
     expect(parse("dir /o:x", reg, posix).errors[0].message).toMatch(/^\/o takes n, s, d/);
     // -1 is a value where the command has no such flag
     expect(parse("render a.mov --brightness -1", reg, posix).options[0].value).toBe("-1");
+  });
+});
+
+describe("SME review 2026-10-26: values by meaning (S12)", () => {
+  const render = reg.cli.subcommands.find((c) => c.name === "render")!;
+  const flag = (id: string) => render.args.find((a) => a.id === id)!;
+
+  it("takes an enum's value in any case", () => {
+    expect(parse("render a.mov -o out/ --format EXR --datatype Half", reg, posix).errors).toEqual([]);
+    expect(valueProblem(flag("device"), "CUDA")).toBeNull();
+  });
+
+  it("suggests by meaning where a word means one of the CLI's values (gpu: auto, not cpu)", () => {
+    expect(valueProblem(flag("device"), "gpu")).toBe("--device takes auto, cuda, cpu, coreml, not 'gpu' (did you mean auto?)");
+    expect(valueProblem(flag("format"), "mp4")).toMatch(/did you mean video\?/);
+    expect(valueProblem(flag("datatype"), "fp32")).toMatch(/did you mean float\?/);
+    // a typo with no meaning in the table: the closest spelling, as before
+    expect(valueProblem(flag("format"), "exe")).toMatch(/did you mean exr\?/);
+  });
+
+  it("every meaning names one of the CLI's own values for that flag (checked against the spec)", () => {
+    // loop: NOT-WORTH — three flags, a few words each
+    for (const [id, words] of Object.entries(MEANINGS)) {
+      // loop: NOT-WORTH — as above
+      for (const c of reg.cli.subcommands) {
+        const a = c.args.find((x) => x.id === id);
+        // loop: NOT-WORTH — as above
+        if (a) for (const target of Object.values(words)) expect(a.values, `${c.name} --${id} ${target}`).toContain(target);
+      }
+      // loop: NOT-WORTH — as above
+      expect(
+        reg.cli.subcommands.some((c) => c.args.some((x) => x.id === id)),
+        id,
+      ).toBe(true);
+    }
   });
 });

@@ -304,6 +304,17 @@ export const ANSWERS: Readonly<Record<string, string>> = {
   where: "corridorkey is the app's own: version prints its version, corridorkey info checks its engine",
 };
 
+/**
+ * Words with the meaning of one of the CLI's values, per argument id: suggested ("did you mean auto?"), never taken in
+ * its place (the Console accepts what the CLI accepts). Each target is the CLI's own value (a test checks it against
+ * the spec); docs/CLI.md says what each value means (--device's auto: the graphics card).
+ */
+export const MEANINGS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  device: { gpu: "auto", card: "auto", graphics: "auto", nvidia: "cuda", metal: "coreml", mac: "coreml", apple: "coreml" },
+  format: { mov: "video", mp4: "video", movie: "video", sequence: "exr", frames: "exr", openexr: "exr" },
+  datatype: { "16": "half", "32": "float", fp16: "half", fp32: "float", f16: "half", f32: "float" },
+};
+
 /** A command by name or alias; bare `render` / `verify` / `prepare` / `info` are corridorkey's. */
 export function findCommand(reg: Registry, word: string): ConsoleCommand | null {
   // loop: NOT-WORTH — a dozen commands per lookup

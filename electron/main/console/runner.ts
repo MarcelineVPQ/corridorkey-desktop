@@ -10,7 +10,7 @@ import type { Dirent, Stats } from "node:fs";
 import { createInterface } from "node:readline";
 import { posix, win32 } from "node:path";
 import { naturalCompare } from "../media";
-import { parse, quoteArg, type Parsed, type ParseOptions } from "../../../src/shared/console/parse";
+import { enumValue, parse, quoteArg, type Parsed, type ParseOptions } from "../../../src/shared/console/parse";
 import { EXIT_MEANINGS, fullName, type ConsoleArg, type Registry } from "../../../src/shared/console/registry";
 import type { ConsoleBlock, ConsoleEntry, ConsoleHistoryEntry, ConsoleSession } from "../../../src/shared/types";
 import { complete } from "./complete";
@@ -642,7 +642,8 @@ export class Console {
         argv.push(flag);
         continue;
       }
-      let v = o.arg.kind === "path" ? await pathValue(o.arg, o.value) : o.value;
+      // an enum's value as the CLI spells it (EXR → exr)
+      let v = o.arg.kind === "path" ? await pathValue(o.arg, o.value) : o.arg.kind === "enum" ? (enumValue(o.arg, o.value) ?? o.value) : o.value;
       if (o.arg.id === "models" || o.arg.id === "ort") {
         v = abs(v);
         if (!this.d.runtimeAllowed(o.arg.id, v))

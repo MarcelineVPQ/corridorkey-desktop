@@ -90,7 +90,8 @@ every system, Windows included; quitting the app stops it too. A screen reader h
 every line it prints.
 
 **Typing.** As you type, the line is coloured: commands, flags, paths, and mistakes underlined before you press
-Enter (an unknown command or flag with its "did you mean", a value out of range), a flag that replaces files in
+Enter (an unknown command or flag with its "did you mean", a value out of range; `--format EXR` is fine, and
+`--device gpu` asks "did you mean auto?", the graphics card), a flag that replaces files in
 amber. The line under the input explains the mistake, or the flag the cursor is on. A grey suggestion follows the
 cursor: your history first (only lines that would run), then the commands; **→** takes it, **Alt+→** one word of it;
 it never runs by itself. **Tab** completes commands, flags, values and paths (a frame sequence as one pattern, `sh010_plate.####.exr`, with its

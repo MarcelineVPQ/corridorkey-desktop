@@ -95,7 +95,8 @@ function nextPositional(cmd: ConsoleCommand, given: { arg: ConsoleArg }[]): Cons
 async function valuesFor(arg: ConsoleArg, prefix: string, cwd: string, d: CompleteDeps, opts: ParseOptions, lead: string): Promise<ConsoleCompletionItem[]> {
   if (arg.kind === "enum")
     // loop: NOT-WORTH — a few values
-    return arg.values.filter((v) => v.startsWith(prefix)).map((v) => ({ insert: lead + v, label: v, kind: "value", help: arg.help }));
+    // any case typed (EX → exr), as the parser takes it
+    return arg.values.filter((v) => v.startsWith(prefix.toLowerCase())).map((v) => ({ insert: lead + v, label: v, kind: "value", help: arg.help }));
   if (arg.kind === "command")
     // loop: NOT-WORTH — a dozen names
     return commandNames(d.registry)
