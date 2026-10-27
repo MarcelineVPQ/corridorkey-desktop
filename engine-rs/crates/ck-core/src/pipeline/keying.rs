@@ -6,7 +6,7 @@
 //!    temp_dir;
 //!  - `stage2_pass` (low-VRAM only): stage 2 over the stored states.
 //!
-//! Low-VRAM mode loads only each phase's networks (the next phase's load ahead on their own threads, CUDA only).
+//! Low-VRAM mode loads only each phase's networks (the next phase's load ahead on their own threads, CUDA and Core ML).
 use super::frames::{FrameSource, HintWindows, WindowReader};
 use super::network::{Loader, Network};
 use super::temps::{F16File, FeatFile, TempPaths};
@@ -111,6 +111,8 @@ struct WindowsIn {
 /// One stage-1 window's inputs made ahead (`stage1_windows`).
 struct WindowInputs {
     frames: Vec<Prepped>,
+    /// stage 1's rgb, already in the type stage 1 takes (converted on the input thread, not between card calls)
+    rgb: Data<'static>,
     hint_video: Option<Vec<Arc<Vec<f32>>>>,
     found: Found,
     rvm: Vec<half::f16>,
@@ -359,6 +361,9 @@ impl<L: Loader> Pipeline<L> {
         // each window's inputs that don't depend on the previous window (decoded frames, hint video, foundation
         // and RVM features, or the foundations' resized inputs) are made on their own thread while the card runs
         // the window before (at most one window ahead: a rendezvous channel)
+        // stage 1's rgb type, sent once stage 1 is loaded: the input thread decodes the first window meanwhile and
+        // converts it when the type arrives
+        let (rgb_type_tx, rgb_type_rx) = std::sync::mpsc::sync_channel::<bool>(1);
         let mut windows = {
             let mut reader = WindowReader::open(frames)?;
             let mut hints = match crate::clip::none_path(job.hint_video.as_deref()) {
@@ -370,6 +375,7 @@ impl<L: Loader> Pipeline<L> {
             let starts = starts.clone();
             let dec = window_decode_s.clone();
             let mut i = 0;
+            let mut rgb_f16: Option<bool> = None;
             Ahead::spawn("window-inputs", 0, move || {
                 let Some(&t0) = starts.get(i) else {
                     dec.set(reader.reader.seconds());
@@ -387,7 +393,15 @@ impl<L: Loader> Pipeline<L> {
                     Some((cf, mf)) => Found::Features(cf.get(t0, t1)?, mf.get(t0, t1)?),
                 };
                 let rvm = rvm_file.get(t0, t1)?;
-                Ok(Some(WindowInputs { frames, hint_video, found, rvm }))
+                let f16 = match rgb_f16 {
+                    Some(f) => f,
+                    // loop: SERIAL-REQUIRED — once per job, the type stage 1 takes [bounded: sent right after stage 1 loads; a failed load drops the sender and this errors]
+                    None => *rgb_f16.insert(rgb_type_rx.recv().map_err(|_| Error::engine("stage 1 didn't load".into()))?),
+                };
+                // loop: HOT-PATH-OK — ≤ 80 slice references; one parallel conversion per window
+                let rgb = Data::Bf16(frames.iter().map(|f| &f.model[..]).collect());
+                let rgb = if f16 { Data::F16(rgb.into_f16()) } else { Data::F32(rgb.into_f32()) };
+                Ok(Some(WindowInputs { frames, rgb, hint_video, found, rvm }))
             })?
         };
         let baton_frame = BATON_CH * h16 * w16;
@@ -406,6 +420,8 @@ impl<L: Loader> Pipeline<L> {
         // the hint is made in the type stage 1 takes; windows without any matte share one all-zero buffer, made the
         // first time one is needed
         let hint_f16 = self.net("stage1")?.wants_f16("hint");
+        // the input thread waits for it before converting the first window (it can't fail: the thread holds the receiver)
+        let _ = rgb_type_tx.send(self.net("stage1")?.wants_f16("rgb"));
         let (zeros16, zeros32) = (std::cell::OnceCell::<Vec<half::f16>>::new(), std::cell::OnceCell::<Vec<f32>>::new());
         let zero_len = chunk.min(t_all) * plane;
         sink.send(json!({"type": "progress", "stage": "keying"}));
@@ -415,7 +431,7 @@ impl<L: Loader> Pipeline<L> {
             let tw = Instant::now();
             let t1 = (t0 + chunk).min(t_all);
             let tc = t1 - t0;
-            let WindowInputs { frames, hint_video, found, rvm } =
+            let WindowInputs { frames, rgb, hint_video, found, rvm } =
                 windows.next_item()?.ok_or_else(|| Error::engine("the window input thread ended early".into()))?;
             // each frame's matte, if it has one (later sources win: the hint video, then the carry, then the
             // first-frame hint), and its quality
@@ -467,24 +483,21 @@ impl<L: Loader> Pipeline<L> {
                 Found::Inputs((radio, moge)) => self.foundation_run(tc, radio, moge, sh, sw)?,
                 Found::Features(c, m) => (c, m),
             };
-            // the model views only (the display views are done with); converted once, to the type stage 1 takes
-            // loop: HOT-PATH-OK — the window's frames (≤ 80): moves the model views out, the display views are dropped before the run
-            let models: Vec<Arc<Vec<half::bf16>>> = frames.into_iter().map(|f| f.model).collect();
+            // the frames are done with (stage 1's rgb was made from them on the input thread)
+            drop(frames);
             times.s1_in_s += tw.elapsed().as_secs_f64();
             if low_vram && i + 1 == starts.len() {
                 // stage 2 loads while the last stage-1 window runs
                 self.preload(key, &["stage2"]);
             }
             let outs = self.net("stage1")?.run(vec![
-                // loop: HOT-PATH-OK — ≤ 80 slice references; converted once inside the run
-                ("rgb", vec![1, tc, 3, sh, sw], Data::Bf16(models.iter().map(|m| &m[..]).collect())),
+                ("rgb", vec![1, tc, 3, sh, sw], rgb),
                 ("hint", vec![1, tc, 1, sh, sw], hint),
                 ("hint_quality", vec![1, tc], hq.into()),
                 ("moge", vec![1, tc, MOGE_CH, h64, w64], moge),
                 ("cradio", vec![1, tc, CRADIO_CH, h64, w64], cradio),
                 ("rvm", vec![1, tc, RVM_CH, h64, w64], Data::F16(rvm)),
             ])?;
-            drop(models);
             let tw = Instant::now();
             // loop: NOT-WORTH — two outputs per window
             let mut it = outs.into_iter();

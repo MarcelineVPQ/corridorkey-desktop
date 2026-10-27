@@ -505,12 +505,14 @@ impl<L: Loader> Pipeline<L> {
     /// Low-VRAM mode: start loading `pieces` (the next phase's networks) on their own thread while the current
     /// phase runs; `ensure` takes them. Their memory is within the job's budget by construction: the running
     /// phase's arena limits already leave room for their weights (`arena_limit`). Measured per load
-    /// (RTX 5080, fp16): C-RADIO 0.75 s, MoGe 0.11 s, stage 1 1.7 s, stage 2 0.55 s.
+    /// (RTX 5080, fp16): C-RADIO 0.75 s, MoGe 0.11 s, stage 1 1.7 s, stage 2 0.55 s. Core ML too (Mac mini M6: every
+    /// load was on the main thread, 1.9 s warm / 7.5 s cold per 12-frame job); its footprint is still to be measured
+    /// under tools/mac_memgate.c.
     fn preload(&mut self, key: &ModelKey, pieces: &[&'static str]) {
-        // CUDA only: TensorRT jobs don't stage, and on the CPU provider (tests) a session loaded on another thread
-        // left its host memory in that thread's malloc arena (measured: the CPU end-to-end run went from 5.3 GB
+        // CUDA and Core ML: TensorRT jobs don't stage, and on the CPU provider (tests) a session loaded on another
+        // thread left its host memory in that thread's malloc arena (measured: the CPU end-to-end run went from 5.3 GB
         // to past its 8 GB cap)
-        if key.provider != Provider::Cuda {
+        if !matches!(key.provider, Provider::Cuda | Provider::CoreMl) {
             return;
         }
         // loop: NOT-WORTH — at most two networks
@@ -519,7 +521,11 @@ impl<L: Loader> Pipeline<L> {
             if self.nets.contains_key(piece) || self.pending.iter().any(|(p, k, _)| *p == piece && k == key) {
                 continue;
             }
-            let Some(file) = self.models.file(piece, key.precision) else { continue };
+            let file = match &key.coreml {
+                Some(c) => c.files.get(piece).cloned(),
+                None => self.models.file(piece, key.precision),
+            };
+            let Some(file) = file else { continue };
             let cap = self.arena_limit(key, piece, true);
             self.loader.starting(piece);
             let (loader, prov, prec) = (self.loader.clone(), key.provider, key.precision);

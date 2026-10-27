@@ -196,6 +196,45 @@ fn low_vram_on_cuda_loads_the_next_phase_ahead_once() {
     }
 }
 
+/// A Core ML job's key: the set's (fake) files for every network, foundations at 4 frames per call.
+fn coreml_key() -> ModelKey {
+    // loop: NOT-WORTH — five networks
+    let files = crate::runtime::PIECES.iter().map(|p| (*p, std::path::PathBuf::from(format!("/set/{p}.onnx")))).collect();
+    let cm = crate::pipeline::CoremlFiles { files, foundation_batch: 4, units: "cpu-gpu", cache: std::path::PathBuf::from("/cache") };
+    ModelKey { coreml: Some(cm), ..key(Provider::CoreMl) }
+}
+
+#[test]
+fn low_vram_on_core_ml_loads_the_next_phase_ahead_once() {
+    // a Mac's loads were all on the main thread, between card calls (1.9 s warm / 7.5 s cold per 12-frame job)
+    let mut h = Harness::new(FakeCfg::new(SHAPE), 9, options(json!({})));
+    h.keying(&coreml_key(), None, 4, 2, true).res.unwrap();
+    assert_eq!(phase_order(&h.loader.runs()), vec!["rvm", "foundations", "stage1", "stage2"]);
+    let threads = h.loader.threads.lock().unwrap().clone();
+    assert_eq!(threads.len(), 5, "each network loaded once: {threads:?}");
+    // loop: NOT-WORTH — five loads
+    for (piece, name) in &threads {
+        // RVM's phase is the first: nothing runs before it to load it behind
+        assert_eq!(*name == format!("load-{piece}"), *piece != "rvm", "{piece} loaded on thread {name:?}");
+    }
+}
+
+#[test]
+fn stage_1_rgb_is_converted_on_the_input_thread_in_both_modes() {
+    // loop: NOT-WORTH — both modes
+    for low_vram in [true, false] {
+        let mut h = Harness::new(FakeCfg::new(SHAPE), 9, options(json!({})));
+        h.keying(&key(Provider::Cpu), None, 4, 2, low_vram).res.unwrap();
+        let s1 = h.loader.runs_of("stage1");
+        assert!(!s1.is_empty());
+        // loop: NOT-WORTH — a test job's stage-1 runs
+        for r in &s1 {
+            // bfloat16 handed to the run is converted there, on the main thread between card calls (37-128 ms a window on the Mac)
+            assert!(r.bf16.is_empty(), "low_vram {low_vram}: stage 1 got {:?} as bfloat16", r.bf16);
+        }
+    }
+}
+
 #[test]
 fn all_loaded_mode_loads_every_network_first_and_streams_stage_2() {
     let mut h = Harness::new(FakeCfg::new(SHAPE), 9, options(json!({})));

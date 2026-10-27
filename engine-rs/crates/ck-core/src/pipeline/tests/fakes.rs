@@ -50,6 +50,8 @@ pub(crate) struct Run {
     pub(crate) hash: u64,
     /// each input's first value
     pub(crate) firsts: Vec<f32>,
+    /// the inputs handed over as bfloat16 frames: converted inside the run, on the thread that calls it
+    pub(crate) bf16: Vec<String>,
 }
 
 impl Run {
@@ -102,6 +104,8 @@ pub(crate) struct FakeLoader {
     pub(crate) cfg: Arc<FakeCfg>,
     pub(crate) log: Arc<Mutex<Vec<Event>>>,
     pub(crate) caps: Arc<Mutex<Caps>>,
+    /// each load's thread name, in load order (a network loaded ahead is on its own `load-<piece>` thread)
+    pub(crate) threads: Arc<Mutex<Vec<(&'static str, String)>>>,
 }
 
 /// Each load's arena limit (the session's gpu_mem_limit), in load order.
@@ -109,7 +113,7 @@ pub(crate) type Caps = Vec<(&'static str, Option<u64>)>;
 
 impl FakeLoader {
     pub(crate) fn new(cfg: FakeCfg) -> FakeLoader {
-        FakeLoader { cfg: Arc::new(cfg), log: Arc::default(), caps: Arc::default() }
+        FakeLoader { cfg: Arc::new(cfg), log: Arc::default(), caps: Arc::default(), threads: Arc::default() }
     }
     pub(crate) fn events(&self) -> Vec<Event> {
         self.log.lock().unwrap().clone()
@@ -137,6 +141,7 @@ impl Loader for FakeLoader {
             return Err(e);
         }
         self.caps.lock().unwrap().push((piece, vram_cap));
+        self.threads.lock().unwrap().push((piece, std::thread::current().name().unwrap_or("").to_string()));
         self.log.lock().unwrap().push(Event::Load(piece, provider));
         Ok(FakeNet { piece, provider, cfg: self.cfg.clone(), log: self.log.clone(), counters: NetCounters::default(), calls: 0, shrink: false })
     }
@@ -196,8 +201,12 @@ impl Network for FakeNet {
         let mut h = Fnv::new();
         let mut shapes = Vec::new();
         let mut vals: Vec<Vec<f32>> = Vec::new();
+        let mut bf16 = Vec::new();
         // loop: NOT-WORTH — ≤ six inputs
         for (name, shape, data) in inputs {
+            if matches!(data, Data::Bf16(_)) {
+                bf16.push(name.to_string());
+            }
             // converted to the type the network takes, as ONNX Runtime's Net does
             let v: Vec<f32> = if self.wants_f16(name) {
                 // loop: HOT-PATH-OK — test tensors
@@ -214,7 +223,7 @@ impl Network for FakeNet {
         }
         // loop: NOT-WORTH — ≤ six inputs
         let firsts = vals.iter().map(|v| v.first().copied().unwrap_or(f32::NAN)).collect();
-        self.log.lock().unwrap().push(Event::Run(Run { piece: self.piece, shapes: shapes.clone(), hash: h.0, firsts }));
+        self.log.lock().unwrap().push(Event::Run(Run { piece: self.piece, shapes: shapes.clone(), hash: h.0, firsts, bf16 }));
         if let Some(e) = self.cfg.fail_run.as_ref().and_then(|f| f(self.piece, &shapes)) {
             return Err(e);
         }
