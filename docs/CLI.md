@@ -99,6 +99,13 @@ A name without a frame number (`-o out/key.exr`) is exit 2: give a folder or a p
 - The job writes into a hidden folder of its own beside the output (`.corridorkey-<pid>-<time>`, same drive). Only
   when the whole job is done are the requested frames renamed to their final names. A failed, stopped or killed run
   never leaves a frame at a final name, and two runs never share a folder.
+- Those renames are all or nothing. Frames already at the names (`--overwrite`) are first moved aside into the
+  hidden folder, then the new ones put in place; a rename is tried four times over 0.65 s (a reader holding a frame
+  on Windows, a share's hiccup). If one still fails, every rename done is undone (the old frames back at their names,
+  the new ones back in the hidden folder, then removed) and the run exits 4 saying which file: the output is as it
+  was before the run. Only if the undo fails as well is the hidden folder kept, and the message names it (the new
+  frames, and the old ones in its `.replaced`). A SIGKILL in the milliseconds of the renames can leave old frames in
+  `.replaced` too.
 - Each EXR frame is written to a hidden `.<name>.partial` and renamed into place (ck-core, the app's jobs too): a
   writer killed mid-frame never leaves a cut EXR at the frame's name.
 - Temporary files (the RVM features and states, GBs on long shots) go in a folder of the run's own under `--temp DIR`,

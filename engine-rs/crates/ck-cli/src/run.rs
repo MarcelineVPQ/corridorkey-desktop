@@ -150,7 +150,7 @@ impl Drop for RunDirs {
     }
 }
 
-/// One result file: where the engine writes it, where it goes.
+/// One result file: where the engine writes it (inside the staging folder), where it goes.
 struct Target {
     staged: PathBuf,
     target: PathBuf,
@@ -347,7 +347,7 @@ fn render(m: &ArgMatches, verify: bool, sink: &mut CliSink, report: &mut Report)
         let sfx = ck_core::job::suffix(name, job.despill_strength);
         if !job.exr {
             let file = format!("{clip}_{sfx}.{}", job.writer.codec.ext());
-            targets.push(Target { staged: staging.join(&file), target: target_dir.join(&file), exr: false });
+            targets.push(Target { staged: PathBuf::from(&file), target: target_dir.join(&file), exr: false });
             continue;
         }
         let folder = format!("{clip}_{sfx}_exr");
@@ -363,7 +363,7 @@ fn render(m: &ArgMatches, verify: bool, sink: &mut CliSink, report: &mut Report)
                 Some(p) => p.path(n),
                 None => target_dir.join(&folder).join(&file),
             };
-            targets.push(Target { staged: staging.join(&folder).join(&file), target, exr: true });
+            targets.push(Target { staged: Path::new(&folder).join(&file), target, exr: true });
         }
     }
     let settings = (
@@ -416,7 +416,7 @@ fn render(m: &ArgMatches, verify: bool, sink: &mut CliSink, report: &mut Report)
         set.dir.display(),
         set.version.as_deref().map(|v| format!(" ({v})")).unwrap_or_default()
     ));
-    let _dirs = RunDirs(vec![staging.clone(), temp.clone()]);
+    let mut dirs = RunDirs(vec![staging.clone(), temp.clone()]);
     // the output folder holds the staging folder; the results' own folders are made when they arrive
     let mkdir = |d: &Path| match d.as_os_str().is_empty() {
         true => Ok(()),
@@ -436,18 +436,83 @@ fn render(m: &ArgMatches, verify: bool, sink: &mut CliSink, report: &mut Report)
         return Err(f);
     }
     // the job is whole: its frames to their names (renames on one drive)
-    // loop: NOT-WORTH — one rename per target, once per run
-    for t in &targets {
-        if !t.staged.exists() {
-            return Err(fail(exit::ENGINE, format!("the engine didn't write {}", t.staged.display())));
+    if let Err((f, keep)) = place(&targets, &staging) {
+        if keep {
+            dirs.0.retain(|d| d != &staging);
         }
-        mkdir(t.target.parent().unwrap_or(Path::new("")))?;
-        std::fs::rename(&t.staged, &t.target).map_err(|e| fail(exit::OUTPUT, format!("can't put {} in place: {e}", t.target.display())))?;
+        return Err(f);
     }
     let _ = std::fs::rename(&settings.0, &settings.1);
     report.kept = kept;
     sink.note(&format!("wrote {} file(s) to {output}", targets.len()));
     Ok(())
+}
+
+/// A rename, tried again a few times when it fails (a reader holding the file on Windows, a network share's hiccup).
+fn rename_retry(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut wait = std::time::Duration::from_millis(50);
+    // loop: SERIAL-REQUIRED — retries one rename with a growing wait [bounded: 3 retries, 650 ms]
+    for _ in 0..3 {
+        if std::fs::rename(from, to).is_ok() {
+            return Ok(());
+        }
+        std::thread::sleep(wait);
+        wait *= 3;
+    }
+    std::fs::rename(from, to)
+}
+
+/// The job's files (`staged` inside `staging`) to their final names, all or nothing: frames already at those names
+/// are first moved aside into `staging`, then the new ones put in place; when a rename still fails after its retries,
+/// every step taken is undone (the new files back in `staging`, the old ones back at their names). Err: the failure,
+/// and whether `staging` must be kept because the undo failed too (it then holds frames that belong at the output).
+fn place(targets: &[Target], staging: &Path) -> Result<(), (Fail, bool)> {
+    let output = |m: String| (fail(exit::OUTPUT, m), false);
+    // loop: NOT-WORTH — one check per target, once per run
+    if let Some(t) = targets.iter().find(|t| !staging.join(&t.staged).exists()) {
+        return Err((fail(exit::ENGINE, format!("the engine didn't write {}", staging.join(&t.staged).display())), false));
+    }
+    // loop: NOT-WORTH — one folder per target, once per run
+    for d in targets.iter().filter_map(|t| t.target.parent()).filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(d).map_err(|e| output(format!("can't make the output folder {}: {e}", d.display())))?;
+    }
+    let aside = staging.join(".replaced");
+    // (from, to) of every rename done, undone in reverse on a failure
+    let mut done: Vec<(PathBuf, PathBuf)> = Vec::new();
+    let step = |from: PathBuf, to: PathBuf, done: &mut Vec<(PathBuf, PathBuf)>| match rename_retry(&from, &to) {
+        Ok(()) => {
+            done.push((from, to));
+            Ok(())
+        }
+        Err(e) if to.starts_with(&aside) => Err(format!("can't move {} aside to replace it: {e}", from.display())),
+        Err(e) => Err(format!("can't put {} in place: {e}", to.display())),
+    };
+    let mut res = std::fs::create_dir_all(&aside).map_err(|e| format!("can't make {}: {e}", aside.display()));
+    // loop: NOT-WORTH — one rename per frame already there, once per run
+    for (i, t) in targets.iter().enumerate().filter(|(_, t)| t.target.symlink_metadata().is_ok()) {
+        res = res.and_then(|()| step(t.target.clone(), aside.join(i.to_string()), &mut done));
+    }
+    // loop: NOT-WORTH — one rename per target, once per run
+    for t in targets {
+        res = res.and_then(|()| step(staging.join(&t.staged), t.target.clone(), &mut done));
+    }
+    let Err(why) = res else { return Ok(()) };
+    // loop: NOT-WORTH — undoes the renames done, once per failed run
+    let undo: Vec<String> = done.iter().rev().filter_map(|(from, to)| rename_retry(to, from).err().map(|e| format!("{}: {e}", from.display()))).collect();
+    if undo.is_empty() {
+        return Err(output(format!("{why}; nothing was changed at the output's names (retry the task)")));
+    }
+    Err((
+        fail(
+            exit::OUTPUT,
+            format!(
+                "{why}; undoing the other renames failed too ({}): {} keeps the new frames and, in .replaced, the old ones",
+                undo.join("; "),
+                staging.display()
+            ),
+        ),
+        true,
+    ))
 }
 
 /// Err (exit 143 / 130) when signal `sig` asked the command to stop: for a step without stop points of its own.
@@ -553,6 +618,64 @@ fn info(m: &ArgMatches) -> Result<(), Fail> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A scratch folder, removed when dropped.
+    struct Dir(PathBuf);
+
+    impl Drop for Dir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn scratch(tag: &str) -> Dir {
+        let p = std::env::temp_dir().join(format!("ck-cli-run-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).unwrap();
+        Dir(p)
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_rename_that_fails_part_way_leaves_the_old_frames_as_they_were() {
+        // farm review 2026-10-26 S2: with --overwrite, a rename failing part way left new frames before it and old ones
+        // after (a mixed shot). The placement is all or nothing: the old frames are back, the new ones staged.
+        use std::os::unix::fs::PermissionsExt;
+        let d = scratch("place");
+        let (staging, out, locked) = (d.0.join(".corridorkey-x"), d.0.join("out"), d.0.join("locked"));
+        // loop: NOT-WORTH — three folders
+        for dir in [&staging, &out, &locked] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        std::fs::write(staging.join("a.exr"), "new a").unwrap();
+        std::fs::write(staging.join("b.exr"), "new b").unwrap();
+        std::fs::write(staging.join("c.exr"), "new c").unwrap();
+        std::fs::write(out.join("a.exr"), "old a").unwrap();
+        std::fs::write(out.join("c.exr"), "old c").unwrap();
+        // b's folder takes no new names (a reader holding it on Windows, a permission on a farm's share)
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+        if std::fs::write(locked.join("probe"), "").is_ok() {
+            eprintln!("running as root: a read-only folder doesn't stop a rename; skipped");
+            return;
+        }
+        let t = |n: &str, dir: &Path| Target { staged: PathBuf::from(n), target: dir.join(n), exr: true };
+        let targets = [t("a.exr", &out), t("b.exr", &locked), t("c.exr", &out)];
+        let (f, keep) = place(&targets, &staging).unwrap_err();
+        assert!(!keep, "the undo worked: nothing to keep");
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(f.exit, exit::OUTPUT);
+        assert!(f.message.contains("b.exr"), "{}", f.message);
+        let read = |p: PathBuf| std::fs::read_to_string(p).unwrap_or_default();
+        assert_eq!((read(out.join("a.exr")), read(out.join("c.exr"))), ("old a".into(), "old c".into()), "the old frames, untouched or back");
+        assert!(!locked.join("b.exr").exists());
+        // loop: NOT-WORTH — three files
+        for n in ["a", "b", "c"] {
+            assert_eq!(read(staging.join(format!("{n}.exr"))), format!("new {n}"), "the new frame {n} still staged");
+        }
+        // all placed when nothing is in the way: the old frames replaced
+        place(&targets, &staging).unwrap();
+        assert_eq!((read(out.join("a.exr")), read(locked.join("b.exr")), read(out.join("c.exr"))), ("new a".into(), "new b".into(), "new c".into()));
+    }
 
     #[test]
     fn a_stop_during_the_tensorrt_build_ends_prepare_with_its_signal() {
