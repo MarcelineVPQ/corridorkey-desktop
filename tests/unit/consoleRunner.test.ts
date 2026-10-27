@@ -10,13 +10,13 @@ import { PassThrough } from "node:stream";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { nextVersion, replaceFile } from "../../electron/main/console/paths";
-import { clipName, Console, type ConsoleDeps, type ElevationRequest, type ScriptElevationRequest } from "../../electron/main/console/runner";
+import { clipName, Console, CONSOLE_CHARS_KEPT, type ConsoleDeps, type ElevationRequest, type ScriptElevationRequest } from "../../electron/main/console/runner";
 import { dropOnLockAndSleep, Elevation, LinuxLockWatch, LOCK_POLL_MS, parseLockedHint } from "../../electron/main/console/elevation";
 import { AuditLog, History } from "../../electron/main/console/logs";
 import { BlockPusher, PUSH_EVERY_MS } from "../../electron/main/console/push";
 import { consoleLineArg, consoleLinesArg, cursorArg, fromAppPage } from "../../electron/main/validate";
 import { makeRegistry } from "../../src/shared/console/registry";
-import { blockText } from "../../src/ui/console/model";
+import { blockText, mergeBlocks } from "../../src/ui/console/model";
 import { DEFAULT_OPTIONS, type ConsoleBlock, type DoctorRow, type Job } from "../../src/shared/types";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "ck-console-run-")));
@@ -666,7 +666,7 @@ describe("block pushes and IPC checks", () => {
     try {
       const sent: number[][] = [];
       const p = new BlockPusher((bs) => sent.push(bs.map((b) => b.id)));
-      const b = (id: number) => ({ id }) as ConsoleBlock;
+      const b = (id: number) => ({ id, lines: [], linesDropped: 0 }) as unknown as ConsoleBlock;
       p.mark(b(1));
       vi.advanceTimersByTime(PUSH_EVERY_MS * 3);
       expect(sent).toEqual([]);
@@ -686,6 +686,48 @@ describe("block pushes and IPC checks", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("N6 (BACKLOG row 111): a push carries only the lines appended since the last; the page puts them after its own", () => {
+    vi.useFakeTimers();
+    try {
+      const sent: ConsoleBlock[][] = [];
+      const p = new BlockPusher((bs) => sent.push(bs));
+      p.setShown(true);
+      const line = (n: number) => ({ kind: "out" as const, text: `line ${n}` });
+      const b = { id: 1, state: "running", lines: [line(0), line(1)], linesDropped: 0 } as unknown as ConsoleBlock;
+      p.mark(b);
+      vi.advanceTimersByTime(PUSH_EVERY_MS);
+      // two more, and the main process drops the first one
+      b.lines.push(line(2), line(3));
+      b.lines.shift();
+      b.linesDropped = 1;
+      p.mark(b);
+      vi.advanceTimersByTime(PUSH_EVERY_MS);
+      expect(sent.map((s) => [s[0].linesFrom, s[0].lines.map((l) => l.text)])).toEqual([
+        [0, ["line 0", "line 1"]],
+        [2, ["line 2", "line 3"]],
+      ]);
+      const page = mergeBlocks(mergeBlocks({ blocks: [], clearedTo: 0 }, sent[0]), sent[1]).blocks[0];
+      expect([page.linesDropped, page.lines.map((l) => l.text)]).toEqual([1, ["line 1", "line 2", "line 3"]]);
+      // a page that missed the start: what it got, the rest counted as not kept
+      const late = mergeBlocks({ blocks: [], clearedTo: 0 }, sent[1]).blocks[0];
+      expect([late.linesDropped, late.lines.map((l) => l.text)]).toEqual([2, ["line 2", "line 3"]]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("N6 (BACKLOG row 111): a block keeps at most CONSOLE_CHARS_KEPT characters, the newest whole lines", async () => {
+    const { c } = make();
+    const b = await c.run("render shot.mov -o ../out/n6/");
+    // loop: NOT-WORTH — a test's 100 lines
+    const long = Array.from({ length: 100 }, (_, i) => `${i}`.padEnd(3999, "x"));
+    await finish(spawned[0].child, [], 0, long);
+    const chars = b.lines.reduce((n, l) => n + l.text.length, 0);
+    expect(chars).toBeLessThanOrEqual(CONSOLE_CHARS_KEPT);
+    expect(b.linesDropped).toBeGreaterThan(0);
+    expect(b.lines.some((l) => l.text.startsWith("99x"))).toBe(true);
   });
 
   it("accepts only the app page's top frame, and checked arguments", () => {

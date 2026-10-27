@@ -127,7 +127,7 @@ function FullBlock({ b, registry, onReinsert, onCollapse }: BlockProps & { onCol
             // a known long path (dir's folder) shown short; the whole line on hover and in Copy output
             const shown = shortenKnown(l.text, b.paths, home);
             return (
-              <span key={i} className={`l-${l.kind}`} title={shown !== l.text ? l.text : undefined}>
+              <span key={b.linesDropped + i} className={`l-${l.kind}`} title={shown !== l.text ? l.text : undefined}>
                 {shown}
                 {"\n"}
               </span>

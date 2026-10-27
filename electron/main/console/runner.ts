@@ -32,6 +32,11 @@ import { fileSizeText, gibBytes } from "../../../src/shared/units";
 /** Lines a block keeps (the newest); a long render's log can't grow the page or the pushes without bound. */
 export const CONSOLE_LINES_KEPT = 2000;
 const LINE_CHARS = 4000;
+/**
+ * The characters a block keeps (the newest whole lines): with BLOCKS_KEPT blocks on the page, at most ~50 M
+ * characters in all, where 2000 lines of 4000 could make 1.6 G (senior review 2026-10-26 N6).
+ */
+export const CONSOLE_CHARS_KEPT = 256_000;
 /** dir / ls rows (a plate folder can hold 100 000 frames). */
 export const LIST_MAX = 5000;
 /** dir's stats in all (a sequence's size is its frames'): past these, a size says "?" */
@@ -173,6 +178,8 @@ export class Console {
   private status = 0;
   private job: Job | null = null;
   private nextId = 1;
+  /** the characters in each block's kept lines (CONSOLE_CHARS_KEPT) */
+  private readonly chars = new WeakMap<ConsoleBlock, number>();
   private expiryTimer: NodeJS.Timeout | null = null;
   private readonly spawnFn: SpawnFn;
   private readonly now: () => number;
@@ -435,8 +442,14 @@ export class Console {
   }
 
   private note(b: ConsoleBlock, kind: "out" | "err" | "info", text: string): void {
-    b.lines.push({ kind, text: text.length > LINE_CHARS ? text.slice(0, LINE_CHARS) + "…" : text });
-    if (b.lines.length > CONSOLE_LINES_KEPT) b.linesDropped += b.lines.splice(0, b.lines.length - CONSOLE_LINES_KEPT).length;
+    const t = text.length > LINE_CHARS ? text.slice(0, LINE_CHARS) + "…" : text;
+    b.lines.push({ kind, text: t });
+    let chars = (this.chars.get(b) ?? 0) + t.length;
+    let drop = 0;
+    // loop: HOT-PATH-OK — usually no turn; drops whole lines from the front past CONSOLE_LINES_KEPT or CONSOLE_CHARS_KEPT (the newest stays)
+    while (drop < b.lines.length - 1 && (b.lines.length - drop > CONSOLE_LINES_KEPT || chars > CONSOLE_CHARS_KEPT)) chars -= b.lines[drop++].text.length;
+    if (drop) b.linesDropped += b.lines.splice(0, drop).length;
+    this.chars.set(b, chars);
     if (b.state === "running") this.d.changed(b);
   }
 

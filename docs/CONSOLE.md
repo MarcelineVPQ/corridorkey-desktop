@@ -212,7 +212,9 @@ inner loop's words);
   networks; a model set info can't open is the Models row, a runtime that doesn't load the ONNX Runtime row); an
   isolated copy ran it against the real `corridorkey info` (CPU device).
 - **Output** goes to the page as blocks (`ConsoleBlock` in `src/shared/types.ts`): the line, its state and exit code,
-  progress, the last 2000 lines, `dir`'s rows, `doctor`'s rows. A program's commands (blocks with a parent) are one row
+  progress, the last 2000 lines (at most 256 000 characters, whole lines), `dir`'s rows, `doctor`'s rows. A running
+  block's pushes carry only the lines appended since the last one (`linesFrom`; `mergeBlocks` puts them after the
+  page's, lines keyed by their number in the block; senior review 2026-10-26 N6). A program's commands (blocks with a parent) are one row
   each (SME review 2026-10-27 S8; `childRow` / `childOpens` in model.ts): a button with ✓ / ✗ / ■, the line, its time
   and its last output line (its paths shortened as below, whole on hover), a filled-in line with its `from <what was
   typed>`; click, Enter or Space shows the whole block, whose header then has a visible Collapse button;

@@ -607,8 +607,11 @@ export interface ConsoleBlock {
   // the CLI's phase (loading the models, keying: window 3/10 done…)
   status: string | null;
   lines: ConsoleLine[];
-  // lines dropped at the front (CONSOLE_LINES_KEPT)
+  // lines dropped at the front (CONSOLE_LINES_KEPT, CONSOLE_CHARS_KEPT)
   linesDropped: number;
+  // in a push to the page: the number of the first of `lines` (counted from the block's first line, dropped ones
+  // included); a push carries only the lines appended since the last one (mergeBlocks puts them after the page's)
+  linesFrom?: number;
   entries: ConsoleEntry[] | null;
   // a refused line's mistakes, with their ranges in `line`
   errors: { message: string; start: number; end: number }[];

@@ -54,7 +54,7 @@ export function highlight(line: string, parsed: Parsed): Span[] {
   return out;
 }
 
-/** Blocks the page keeps (oldest dropped first); each keeps at most 2000 lines (the main process's cap). */
+/** Blocks the page keeps (oldest dropped first); each keeps at most 2000 lines and 256 000 characters (the main process's caps). */
 export const BLOCKS_KEPT = 200;
 
 export interface BlockList {
@@ -70,12 +70,26 @@ export function mergeBlocks(list: BlockList, incoming: readonly ConsoleBlock[]):
   let clearedTo = list.clearedTo;
   // loop: HOT-PATH-OK — the few blocks of one push
   for (const b of incoming) {
-    byId.set(b.id, b);
+    byId.set(b.id, withLines(byId.get(b.id), b));
     if (b.clear) clearedTo = Math.max(clearedTo, b.id);
   }
   // loop: HOT-PATH-OK — as above, sorted by id (the order they were typed)
   const blocks = [...byId.values()].sort((a, b) => a.id - b.id).slice(-BLOCKS_KEPT);
   return { blocks, clearedTo };
+}
+
+/**
+ * A pushed block with the page's earlier lines in front of the appended ones (`linesFrom`: the number of the first),
+ * then the front the main process dropped (its `linesDropped`) dropped here too. A block pushed whole has no
+ * `linesFrom`. Lines the page never got (it started after them) count as not kept.
+ */
+function withLines(old: ConsoleBlock | undefined, b: ConsoleBlock): ConsoleBlock {
+  if (b.linesFrom === undefined) return b;
+  const joins = old !== undefined && old.linesDropped <= b.linesFrom && b.linesFrom <= old.linesDropped + old.lines.length;
+  const start = joins ? old.linesDropped : b.linesFrom;
+  const lines = joins ? old.lines.slice(0, b.linesFrom - start).concat(b.lines) : b.lines;
+  const dropped = Math.max(b.linesDropped, start);
+  return { ...b, lines: lines.slice(dropped - start), linesDropped: dropped, linesFrom: undefined };
 }
 
 /** Ctrl+L: the screen is cleared at a block's edge (a command still running stays, whole). */
