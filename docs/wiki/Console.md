@@ -81,7 +81,8 @@ files must say `sudo`, and one dialog lists them all, with their `${…}` filled
 | Command | What it does |
 | --- | --- |
 | `render`, `verify`, `prepare`, `info` | the [command line](Command-Line)'s commands (also with `corridorkey` in front); `corridorkey --version` too |
-| `help [command]`, `help -k <term>` | the commands, one command's options and examples, or a search (`man` is `help`; `render ?` too) |
+| `help [command]`, `help -k <term>` | the commands, one command's options and examples, or a search (`render ?` too) |
+| `man <command>` | a command's manual page: every option in full (its values, limits, what it writes, what it can't go with), examples, exit status |
 | `apropos <term>` | search the commands and their options |
 | `doctor` | check this computer in one go, each problem with its fix ([below](#doctor)) |
 | `farm export <format>` | write the queue's clips as render farm jobs ([below](#farm-export)) |

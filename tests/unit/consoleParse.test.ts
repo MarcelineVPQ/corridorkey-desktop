@@ -275,9 +275,9 @@ describe("SME review 2026-10-26: foreign commands (S5)", () => {
     expect(first("cp a b")).toMatch(/doesn't copy or move/);
   });
 
-  it("man is help; open and start show a folder in the file manager", () => {
+  it("man is its own command (the long page, backlog row 130); open and start show a folder in the file manager", () => {
     const m = parse("man render", reg, posix);
-    expect([m.errors, m.command?.name, m.positionals[0]?.value]).toEqual([[], "help", "render"]);
+    expect([m.errors, m.command?.name, m.positionals[0]?.value]).toEqual([[], "man", "render"]);
     expect([parse("open .", reg, posix).command?.name, parse("start .", reg, win).command?.name]).toEqual(["open", "open"]);
   });
 });

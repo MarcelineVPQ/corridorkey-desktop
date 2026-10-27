@@ -30,6 +30,7 @@ import { consoleLineArg, consoleLinesArg, cursorArg, fromAppPage } from "../../e
 import { makeRegistry } from "../../src/shared/console/registry";
 import { leavesQuoteOpen } from "../../src/shared/console/script";
 import { blockText, mergeBlocks } from "../../src/ui/console/model";
+import { parseLine } from "../../src/shared/console/script";
 import { blockText } from "../../src/ui/console/model";
 import { exrFile } from "./exrBytes";
 import { DEFAULT_OPTIONS, type ConsoleBlock, type DoctorRow, type Job } from "../../src/shared/types";
@@ -2546,5 +2547,37 @@ describe("SME reviews: exrheader", () => {
     expect(b.lines.map((l) => l.text)).toContain("  compression  ZIP");
     const no = await c.run("exrheader notes.txt");
     expect([no.state, no.lines[0].text]).toEqual(["failed", "notes.txt isn't an OpenEXR file (its first bytes aren't the EXR magic number)."]);
+  });
+});
+
+describe("SME reviews: man pages", () => {
+  it("row 130: man <command> is the long page from the registry: every option with its facts, every example (each parses), the exit status", async () => {
+    const { c } = make();
+    const reg = makeRegistry();
+    // loop: NOT-WORTH — every command, once
+    for (const cmd of [...reg.commands.filter((x) => x !== reg.cli), ...reg.cli.subcommands]) {
+      const b = await c.run(`man ${cmd.name}`);
+      const text = b.lines.map((l) => l.text).join("\n");
+      expect(b.state, cmd.name).toBe("done");
+      expect(text, cmd.name).toMatch(/^NAME\n/);
+      // loop: NOT-WORTH — the command's arguments
+      for (const a of cmd.args) expect(text, `${cmd.name} ${a.id}`).toContain(a.positional ? (a.valueName ?? a.id) : a.long ? `--${a.long}` : a.short ? `-${a.short}` : a.dos[0]);
+      // loop: NOT-WORTH — the command's examples
+      for (const e of cmd.examples) {
+        expect(text).toContain(`    ${e}`);
+        // a built-in's examples are Console lines (the CLI's are farm lines: --progress-format is the Console's own)
+        if (cmd.kind === "builtin") expect(parseLine(e, reg, { windows: false }).errors, e).toEqual([]);
+      }
+      expect(text).toContain("EXIT STATUS");
+    }
+    const r = (await c.run("man render")).lines.map((l) => l.text);
+    expect(r).toContain("    -o, --output DIR|PATTERN");
+    expect(r).toContain("        (written: only into the folders the Console may write to (allow <folder> adds one))");
+    expect(r).toContain("        (replaces files: runs only as sudo, after you confirm it)");
+    expect(r).toContain("      9  verify: a requested frame is missing or not a whole EXR (re-render)");
+    expect(r.join("\n")).toMatch(/NOT IN THE CONSOLE\n {4}--progress-format/);
+    expect((await c.run("man")).state).toBe("refused");
+    expect((await c.run("man nothing")).state).toBe("refused");
+    expect((await c.run("man corridorkey")).lines[0].text).toBe("NAME");
   });
 });

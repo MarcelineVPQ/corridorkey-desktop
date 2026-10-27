@@ -18,7 +18,7 @@ import { farmExport, fileList, type FarmFormat, type FarmJob } from "./farm";
 import { EXR_HEADER_MAX, exrLines, parseExrHeader } from "./exr";
 import { complete } from "./complete";
 import type { Elevation } from "./elevation";
-import { commandHelp, findLines, overview } from "./help";
+import { commandHelp, findLines, manPage, overview } from "./help";
 import type { AuditLog, History } from "./logs";
 import { allowVerdict, answerWithin, checkWrite, expandHome, FS_ANSWER_MS, fsErrorText, nextVersion, resolveReal, serverNotAllowed, systemFolders, uncServer, type PathDeps } from "./paths";
 import { expandHistory, hasExpansion } from "../../../src/shared/console/expand";
@@ -611,6 +611,13 @@ export class Console {
         const keyword = p.options.find((o) => o.arg.id === "keyword")?.value;
         if (keyword) return now(this.finish(b, "done", ...findLines(this.d.registry, [keyword])));
         return now(this.finish(b, "done", ...(c ? commandHelp(this.d.registry, c) : overview(this.d.registry))));
+      }
+      case "man": {
+        const name = pos("command")[0];
+        if (!name) return now(this.finish(b, "refused", "What manual page? man <command> (help lists the commands)."));
+        const c = parse(name, this.d.registry, this.opts).command;
+        if (!c) return now(this.finish(b, "refused", `No manual page for ${name}: help lists the commands.`));
+        return now(this.finish(b, "done", ...manPage(this.d.registry, c)));
       }
       case "apropos":
         return now(this.finish(b, "done", ...findLines(this.d.registry, pos("term"))));

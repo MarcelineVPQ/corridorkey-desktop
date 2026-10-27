@@ -178,7 +178,12 @@ const BUILTINS: ConsoleCommand[] = [
       arg({ id: "keyword", short: "k", kind: "string", valueName: "TERM", help: "search the commands and their options instead (man -k)" }),
     ],
     ["help", "help render", "render ?", "help -k overwrite"],
-    ["man"],
+  ),
+  builtin(
+    "man",
+    "a command's manual page: what it does, every option in full (its values, limits, what it writes), examples, exit status",
+    [arg({ id: "command", kind: "command", positional: true, valueName: "COMMAND", help: "the command (corridorkey's too: man render)" })],
+    ["man render", "man dir", "man farm"],
   ),
   builtin(
     "apropos",

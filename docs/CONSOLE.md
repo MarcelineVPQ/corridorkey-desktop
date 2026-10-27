@@ -25,7 +25,10 @@ missing there).
   `render --skip-existing` (it keys the whole set again unless every frame is there and whole: docs/CLI.md "Output
   safety") are marked destructive, each argument carries the CLI's own `conflicts_with` (the parser marks `-F` with
   `-s`/`-e`, `-q` with `-v`, `--overwrite` with `--skip-existing`, `-i` with INPUT before Enter), `render`'s `-o`, `--report`, `--temp` (and `verify`'s and `prepare`'s `--report`) as written paths.
-- **Commands.** `help [command]` (also `command ?` and `man <command>`), `help -k <term>` / `apropos <term>` (search the help; `find` is
+- **Commands.** `help [command]` (also `command ?`), `man <command>` (help.ts `manPage`: the long page built from
+  the same registry, so it can't drift: NAME, SYNOPSIS, every argument with its values or limits, folder-only, written,
+  sudo, repeatable, required and its conflicts, the flags the Console sets itself, EXAMPLES, EXIT STATUS (the CLI's
+  codes, or a built-in's 0 / 1 / 2 / 130), SEE ALSO; backlog row 130), `help -k <term>` / `apropos <term>` (search the help; `find` is
   kept free for a file search and says so), `cd` (`cd -`: the folder before), `pwd`, `allow [folder]` and `allow-server [server]` (File scope, below), `open [path]` / `start` (the file
   manager shows it, as Show in folder does: `shell.showItemInFolder`, which never opens or runs a file), `dir` / `ls` (`-l -a -t -S -r -1`,
   combined like `-la`, `-h` taken as GNU's human sizes, which it always shows (`ls -lh`, `-ltrh`; `-h` alone is help), and
