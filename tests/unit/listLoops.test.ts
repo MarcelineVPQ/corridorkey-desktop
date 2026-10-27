@@ -12,7 +12,7 @@ describe("loop pass lister", () => {
   });
 
   it("covers every code root rule 7 names, the model export scripts too (loop pass 2026-10-26, finding 3)", () => {
-    expect(ROOTS).toEqual(expect.arrayContaining(["electron", "src", "engine", "engine-rs/crates", "engine-rs/export", "engine-rs/tools", "tools"]));
+    expect(ROOTS).toEqual(expect.arrayContaining(["electron", "src", "engine", "engine-rs/crates", "engine-rs/export", "engine-rs/tools", "tools", "farm"]));
   });
 
   it("lists Rust loops, chains, waits and threads, not the test module", () => {

@@ -41,7 +41,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 export const VERDICTS = ["PARALLELIZE", "BATCH", "SERIAL-REQUIRED", "HOT-PATH-OK", "FIX-HOT-PATH", "NOT-WORTH"];
-export const ROOTS = ["electron", "src", "engine", "engine-rs/crates", "engine-rs/export", "engine-rs/tools", "tools", ".hooks"];
+export const ROOTS = ["electron", "src", "engine", "engine-rs/crates", "engine-rs/export", "engine-rs/tools", "tools", ".hooks", "farm"];
 const VERDICT = new RegExp(`(//|#|\\{/\\*)\\s*loop: (${VERDICTS.join("|")}) — (.*?)\\s*(\\*/\\})?$`);
 
 /** The language of a file, or null when it isn't listed. */

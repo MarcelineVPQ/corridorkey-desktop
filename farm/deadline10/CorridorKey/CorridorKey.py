@@ -85,6 +85,7 @@ class CorridorKeyPlugin(DeadlinePlugin):
         """The first path of a config entry's ';'-separated list that exists here, path-mapped; '' if none is set."""
         # loop: NOT-WORTH — a few configured paths, once per task
         paths = [p.strip() for p in self.GetConfigEntryWithDefault(key, "").split(";") if p.strip()]
+        # loop: NOT-WORTH — a few configured paths, once per task
         for p in paths:
             p = RepositoryUtils.CheckPathMapping(p)
             if (os.path.isdir(p) if isDir else os.path.isfile(p)):

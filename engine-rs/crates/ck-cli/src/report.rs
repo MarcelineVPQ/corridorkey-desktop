@@ -88,6 +88,10 @@ impl Report {
     /// Write it to `path` (a temporary name, then renamed: a reader never sees half a report). Err: why not.
     pub fn write(&self, path: &Path) -> Result<(), String> {
         let text = serde_json::to_string_pretty(&self.to_json()).unwrap_or_default() + "\n";
+        // its folder too: a run that fails before the output folder exists still leaves its report
+        if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+            std::fs::create_dir_all(dir).map_err(|e| format!("can't write the report {}: {e}", path.display()))?;
+        }
         let part = path.with_file_name(format!(".{}.partial", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
         std::fs::write(&part, text).and_then(|()| std::fs::rename(&part, path)).map_err(|e| {
             let _ = std::fs::remove_file(&part);
@@ -98,6 +102,16 @@ impl Report {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_report_creates_its_folder() {
+        // farm submitters point --report into folders that may not exist yet (a run failing before the output folder)
+        let d = std::env::temp_dir().join(format!("ck-report-dir-{}", std::process::id()));
+        let path = d.join("not").join("yet").join("r.json");
+        Report::default().write(&path).unwrap();
+        assert!(path.is_file());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     use super::*;
 
     #[test]

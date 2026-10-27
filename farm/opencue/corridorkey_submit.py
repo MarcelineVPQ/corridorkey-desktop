@@ -56,6 +56,7 @@ def main():
     ap.add_argument("extra", nargs="*", help="after --: more corridorkey flags for both commands (docs/CLI.md)")
     a = ap.parse_args()
 
+    # loop: NOT-WORTH — the two ends of one range string, once per submission
     first, last = (int(x) for x in a.range.split("-"))
     if last < first:
         ap.error("--range: LAST is before FIRST")

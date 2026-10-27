@@ -17,6 +17,7 @@ set -u -o pipefail
 usage() { sed -n '4,5p' "$0" | sed 's/^# *//' >&2; exit 2; }
 
 gpus="" logs="corridorkey-farm-logs" existing="--skip-existing" shots=""
+# loop: NOT-WORTH — the command-line arguments, once per run
 while (($#)); do
     case "$1" in
         --gpus) gpus="${2:?--gpus needs a list, such as 0,1}"; shift 2 ;;
@@ -86,6 +87,7 @@ done
 trap '[[ -e "$stop" ]] || { touch "$stop"; for p in "${pids[@]}"; do kill -TERM -- "-$p" 2>/dev/null; done; }' INT TERM
 # loop: NOT-WORTH — waits for each lane; a signal interrupts wait, so wait again [bounded: each lane ends after its last shot]
 for p in "${pids[@]}"; do
+    # loop: SERIAL-REQUIRED — a signal interrupts wait, so wait again [bounded: the lane ends after its last shot]
     while kill -0 "$p" 2>/dev/null; do wait "$p"; done
 done
 rm -f "$stop"
