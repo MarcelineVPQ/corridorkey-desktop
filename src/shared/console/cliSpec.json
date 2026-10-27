@@ -1869,6 +1869,46 @@
         "corridorkey info --json --device cpu"
       ],
       "name": "info"
+    },
+    {
+      "about": "run a .ckcmd script of Console commands without the app's window (cron, a farm's pre-job): the Console's parser and rules",
+      "args": [
+        {
+          "conflicts_with": [],
+          "default": [],
+          "help": "go on after a command fails (the script still ends failed)",
+          "hidden": false,
+          "id": "keep-going",
+          "long": "keep-going",
+          "multiple": false,
+          "positional": false,
+          "possible_values": [],
+          "required": false,
+          "short": null,
+          "takes_value": false,
+          "value_name": null
+        },
+        {
+          "conflicts_with": [],
+          "default": [],
+          "help": "the script",
+          "hidden": false,
+          "id": "file",
+          "long": null,
+          "multiple": false,
+          "positional": true,
+          "possible_values": [],
+          "required": true,
+          "short": null,
+          "takes_value": true,
+          "value_name": "FILE.ckcmd"
+        }
+      ],
+      "examples": [
+        "corridorkey run nightly.ckcmd",
+        "corridorkey run --keep-going nightly.ckcmd"
+      ],
+      "name": "run"
     }
   ]
 }

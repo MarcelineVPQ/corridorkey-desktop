@@ -48,6 +48,10 @@ pub fn main(argv: Vec<OsString>) -> i32 {
         println!("{}", crate::spec::spec(&crate::args::command()));
         return exit::DONE;
     }
+    // a Console script: the app's own runner (headless.rs), nothing of the engine here
+    if name == "run" {
+        return crate::headless::run(sub);
+    }
     // the card, before ONNX Runtime or the CUDA driver starts (no other thread exists yet)
     if let Some(v) = crate::cuda_visible(
         sub.try_get_one::<String>("gpu").ok().flatten().map(String::as_str),

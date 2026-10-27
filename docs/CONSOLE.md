@@ -72,6 +72,10 @@ missing there).
   `kill` is Ctrl+C, `-9` the second Ctrl+C; any other job id or a pid is refused: it never signals another program),
   `grep [-i] [-v] TERM`, `count`, and `head` / `tail` without a FILE: the filters after a `|` (alone, `grep` and
   `count` say so; backlog row 127, below),
+  `corridorkey run` typed here is refused with the `run` line to type (the same runner); from outside the app it is
+  `electron/main/console/headless.ts` (docs/CLI.md "Commands", backlog row 151: the Console with the app's settings,
+  `confirm` / `confirmScript` / `confirmAllow` answering no with the reason on stderr, no queue, `takeGpu` free, each
+  block's lines printed as they come, `Printer`; exit = the script's status),
   `history [N|term]` (`--audit`: the elevated log), `version` (also `corridorkey --version`, `render --version`: the app's
   version, which its corridorkey shares; answered without running it), `run [--keep-going] <file.ckcmd>` (a script: Scripting, below; no script
   inside a script; its elevation: Security rules below). Several lines pasted at once are never joined: the page offers them as a script (Enter runs them in

@@ -36,6 +36,7 @@ A standalone farm archive per system is planned with the release packaging; unti
 | `corridorkey verify` | check that every requested frame is there and reads as a whole EXR (exit 0, or 9) |
 | `corridorkey prepare` | check the models, ONNX Runtime, the card, its free memory and ffmpeg before a farm's tasks start; `--tensorrt-size WxH` builds TensorRT for that size once |
 | `corridorkey info` | the version, model set, ONNX Runtime, provider, card, OpenColorIO and decoders (`--json`) |
+| `corridorkey run` | run a [Console](Console) script (`.ckcmd`) without the app's window: from cron, or as a farm's pre-job |
 | `corridorkey help [COMMAND]` | the help; `corridorkey COMMAND -h` too, with examples |
 
 ```sh
@@ -50,6 +51,9 @@ corridorkey prepare --models /opt/ck/models/2.0.0-onnx.4 --ort /opt/ck/runtime/l
 
 # what this machine has
 corridorkey info --json
+
+# a Console script from cron, the same commands and rules as in the app (--keep-going: on past a failure)
+corridorkey run --keep-going ~/scripts/nightly.ckcmd
 ```
 
 Options are GNU style: `--frames 1001-1100` or `--frames=1001-1100`; short ones `-F 1001-1100`. `--` ends the options
@@ -59,6 +63,13 @@ argument exists: '--frames'").
 `verify` takes `render`'s arguments, so the render line with `verify` in place of `render` checks its own output. It
 prints each missing or cut file (`missing or incomplete: <path>`), then the frames as ranges, ready for a requeue:
 `missing frames: 1012-1015, 1040 (re-render them: -F 1012-1015,1040)`.
+
+`corridorkey run nightly.ckcmd` runs a [Console](Console#scripting) script with the app's own Console: the same
+commands, checks and folders it may write in (the app's settings: the results folder, the cache, the folders you
+allowed), the same audit log. It never replaces files: no one is there to confirm a `sudo` line, so a script that
+needs one stops before anything runs (write into the next free version instead, `-o key/sh010_v###/`). It needs the
+app installed next to it (exit 7 on a worker with only `corridorkey`), prints each command's output as it goes and
+exits as the script ended. A farm's cancel (SIGTERM) stops it as Ctrl+C stops the Console.
 
 For tools: `corridorkey __spec --json` prints the whole command line as JSON (every command, flag, value and
 example). The app's Console reads it, and this wiki's gate checks this page against it.

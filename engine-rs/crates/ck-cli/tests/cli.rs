@@ -147,7 +147,7 @@ fn spec_is_json_for_tools_and_hidden_from_help() {
     assert_eq!(o.status.code(), Some(0), "{}", text(&o.stderr));
     let s: Value = serde_json::from_slice(&o.stdout).unwrap();
     let names: Vec<&str> = s["commands"].as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["render", "verify", "prepare", "info"]);
+    assert_eq!(names, ["render", "verify", "prepare", "info", "run"]);
     // loop: NOT-WORTH — two help screens
     for args in [&["help"][..], &["--help"][..]] {
         let o = run(args);

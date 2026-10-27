@@ -2100,6 +2100,9 @@ export class Console {
   private async cli(b: ConsoleBlock, p: Parsed, inScript: boolean): Promise<{ block: ConsoleBlock; done: Promise<ConsoleBlock> }> {
     const now = (x: ConsoleBlock) => ({ block: x, done: Promise.resolve(x) });
     const cmd = p.command!;
+    // corridorkey run is this runner, started from outside the app: here the Console's own run is the same thing
+    if (cmd.name === "run")
+      return now(this.finish(b, "refused", `corridorkey run is for outside the app (cron, a farm's pre-job); here, type run ${p.positionals[0]?.value ?? "<file>"} (the same runner and rules).`));
     const bin = this.d.cli();
     if (!bin) return now(this.finish(b, "refused", "The corridorkey command line isn't part of this copy of the app (it ships next to the engine, in resources/engine)."));
     if (this.job && !(inScript && (this.job.block.id === b.parent || this.job.block.id === b.id)))

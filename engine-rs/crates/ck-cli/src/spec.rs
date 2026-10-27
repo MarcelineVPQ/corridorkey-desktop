@@ -71,7 +71,7 @@ mod tests {
         assert_eq!(s["version"], crate::VERSION);
         let cmds = s["commands"].as_array().unwrap();
         let names: Vec<&str> = cmds.iter().map(|c| c["name"].as_str().unwrap()).collect();
-        assert_eq!(names, ["render", "verify", "prepare", "info"], "and never the hidden {NAME}");
+        assert_eq!(names, ["render", "verify", "prepare", "info", "run"], "and never the hidden {NAME}");
         // loop: NOT-WORTH — four subcommands
         for c in cmds {
             assert!(c["about"].as_str().is_some_and(|a| !a.is_empty()), "{c}");
@@ -96,6 +96,10 @@ mod tests {
         assert_eq!(render.iter().find(|a| a["long"] == "overwrite").unwrap()["takes_value"], false);
         assert!(find(cmds, "info")["args"].as_array().unwrap().iter().any(|a| a["long"] == "json"));
         assert!(find(cmds, "prepare")["args"].as_array().unwrap().iter().any(|a| a["long"] == "tensorrt-size"));
+        // run: a script's file and --keep-going (backlog row 151)
+        let run = find(cmds, "run")["args"].as_array().unwrap();
+        assert!(run.iter().any(|a| a["id"] == "file" && a["positional"] == true && a["required"] == true));
+        assert!(run.iter().any(|a| a["long"] == "keep-going" && a["takes_value"] == false));
         // the conflicts the parser enforces (the Console marks them before Enter)
         let conflicts = |id: &str| render.iter().find(|a| a["id"] == id).unwrap()["conflicts_with"].clone();
         assert_eq!(conflicts("start"), json!(["frames"]));

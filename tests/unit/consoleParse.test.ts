@@ -204,7 +204,7 @@ describe("parse", () => {
 
 describe("registry", () => {
   it("has every CLI subcommand, marks render --overwrite destructive and the written paths", () => {
-    expect(reg.cli.subcommands.map((c) => c.name)).toEqual(["render", "verify", "prepare", "info"]);
+    expect(reg.cli.subcommands.map((c) => c.name)).toEqual(["render", "verify", "prepare", "info", "run"]);
     const render = reg.cli.subcommands[0];
     const a = (id: string) => render.args.find((x) => x.id === id)!;
     expect([a("overwrite").destructive, a("output").writes, a("report").writes, a("temp").writes, a("clip").writes]).toEqual([true, true, true, true, false]);

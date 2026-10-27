@@ -4,6 +4,7 @@ pub mod appinstall;
 pub mod args;
 pub mod exit;
 pub mod frames;
+pub mod headless;
 pub mod progress;
 pub mod report;
 pub mod run;

@@ -285,7 +285,12 @@ export const entryName = (e: ConsoleEntry): string => (e.folder ? `${e.name}/` :
 /** Copy output: what the block printed, as text; a listing as the table shows it (name, size, modified). */
 export function blockText(b: ConsoleBlock): string {
   // loop: NOT-WORTH — ≤ 2000 lines, per Copy press
-  const lines = b.lines.map((l) => l.text);
+  return [...b.lines.map((l) => l.text), ...blockTable(b)].join("\n");
+}
+
+/** A block's table as text lines (a listing: name, size, modified; doctor's rows): Copy output, `corridorkey run`. */
+export function blockTable(b: ConsoleBlock): string[] {
+  const lines: string[] = [];
   if (b.entries?.length) {
     // loop: NOT-WORTH — ≤ 5000 rows, per Copy press
     const rows = b.entries.map((e) => [entryName(e), e.folder ? "folder" : fileSizeText(e.bytes), isoTime(e.modified)]);
@@ -295,7 +300,7 @@ export function blockText(b: ConsoleBlock): string {
     for (const r of [["Name", "Size", "Modified"], ...rows]) lines.push(`${r[0].padEnd(w)}  ${r[1].padEnd(10)}  ${r[2]}`.trimEnd());
   }
   if (b.doctor?.length) lines.push(...doctorText(b.doctor));
-  return lines.join("\n");
+  return lines;
 }
 
 export const DOCTOR_MARK = { ok: "✓", warn: "⚠", fail: "✗" } as const;

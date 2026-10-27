@@ -210,6 +210,15 @@ pub fn command() -> Command {
                 .after_help("Examples:\n  corridorkey info --models ~/models/2.0.0-onnx.4\n  corridorkey info --json --device cpu"),
         )
         .subcommand(
+            Command::new("run")
+                .about("run a .ckcmd script of Console commands without the app's window (cron, a farm's pre-job): the Console's parser and rules")
+                .arg(Arg::new("keep-going").long("keep-going").action(ArgAction::SetTrue).help("go on after a command fails (the script still ends failed)"))
+                .arg(Arg::new("file").value_name("FILE.ckcmd").required(true).help("the script"))
+                .after_help(
+                    "Examples:\n  corridorkey run nightly.ckcmd\n  corridorkey run --keep-going nightly.ckcmd\n\nIt runs the app's own Console code, so the app must be installed next to it (exit 7 when it isn't). It writes only into the folders the app's settings allow, never replaces files (no one is there to confirm a sudo line), and exits as the script ended.",
+                ),
+        )
+        .subcommand(
             Command::new(crate::spec::NAME)
                 .hide(true)
                 .about("this command line's description as JSON, for tools (the app's Console)")

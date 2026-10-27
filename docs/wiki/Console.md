@@ -218,7 +218,9 @@ itself.
 **Script files** (`.ckcmd`) hold the same, over several lines; `#` starts a comment. `run nightly.ckcmd` stops at the
 first command that fails (not one on the left of `&&` / `||` or in an `if`'s condition) and says the line;
 `run --keep-going nightly.ckcmd` goes on and still ends failed. A typed line goes on after a failure, as bash does.
-Pasting several lines offers them as a script (Enter runs them in order, Esc keeps the first line). A program runs at
+Outside the app, `corridorkey run nightly.ckcmd` runs the same script from cron or as a farm's pre-job ([Command
+line](Command-Line#commands)): the same commands and rules, the app's folders and audit log, never a line that replaces
+files (no one is there to confirm it). Pasting several lines offers them as a script (Enter runs them in order, Esc keeps the first line). A program runs at
 most 10 000 commands, and Ctrl+C stops it after the command it is in.
 
 ## doctor
