@@ -102,7 +102,8 @@ The engine runs `ffmpeg` / `ffprobe` from the system: they are not bundled.
   TensorRT cache root, e.g. `~/Library/Caches/corridorkey-desktop/coreml`; one folder per ORT version, units and
   file). Core ML compiles for fixed shapes, so it runs the **Core ML set**: `coreml.json` in the models folder lists
   one file per network, padded size and frames per call (`engine-rs/export/coreml/build_coreml_models.sh`; the
-  files keep their weights in the shipped `.onnx.data`). A job whose size or window the set lacks is refused
+  files keep their weights in the shipped `.onnx.data`; on a Mac the app's setup downloads the set into the model
+  set's folder, docs/ONNX_EXPORT.md "Core ML set"). A job whose size or window the set lacks is refused
   (bad-request naming what the set has); without a window the job takes the set's smallest, low-memory. The low-memory
   prepass's last C-RADIO / MoGe chunk is padded to the fixed batch with copies of its last frame (batch items are
   independent; only its own frames are kept). Sessions are made with ORT's CPU fallback off

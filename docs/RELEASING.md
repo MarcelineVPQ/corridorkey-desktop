@@ -125,6 +125,10 @@ fails unless codesign, stapler and Gatekeeper accept the app as a notarized Deve
 are in `~/.config/corridorkey-release/apple/` and Marcy's vault; the certificate is renewed before it expires
 (a new .p12 into `MAC_CSC_LINK`). Without the variables (a local `npm run dist:mac`) the image is unsigned.
 
+The Core ML model set the Mac setup downloads (`models-2.0.0-onnx.4-coreml`, docs/ONNX_EXPORT.md "Core ML set") is
+published once, before the first Mac build that pins it: `tools/upload_model_set.sh DIR 2.0.0-onnx.4-coreml` (the
+same script publishes the TensorRT set, `2.0.0-onnx.4-trt`), with Marcy's OK.
+
 Development builds ship one feature at a time on the Development channel; a stable release goes out when its
 planned set is done and Marcy has done her QC (the DS5 rhythm).
 

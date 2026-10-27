@@ -381,7 +381,7 @@ export interface InstallState {
   needRuntime: boolean;
   needModels: boolean;
   bytes: number;
-  // each part's download size (shown before the start)
+  // each part's download size, what is still missing (shown before the start; the models include the Core ML set on macOS)
   runtimeBytes: number;
   modelsBytes: number;
   // the system can run the engine on its graphics hardware (an NVIDIA driver; Apple Silicon on macOS), else why not

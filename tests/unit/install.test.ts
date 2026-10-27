@@ -7,6 +7,8 @@ import { deflateRawSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { downloadVerified } from "../../electron/main/download";
 import {
+  COREML,
+  coremlFor,
   installNeeds,
   keepFromWheel,
   keepTensorrt,
@@ -163,7 +165,18 @@ describe("first-run install", () => {
     const has = (p: string[]) => (x: string) => p.includes(x);
     const linux: Catalog = { runtime: RUNTIME, models: MODELS };
     expect(installNeeds("/d", has([]), linux).bytes).toBe(RUNTIME.wheels.reduce((n, w) => n + w.size, 0) + MODELS.files.reduce((n, f) => n + f.size, 0));
-    expect(installNeeds("/d", has([`/d/runtime/${RUNTIME.name}`, `/d/models/${MODELS.name}`]), linux)).toEqual({ runtime: false, models: false, bytes: 0 });
+    expect(installNeeds("/d", has([`/d/runtime/${RUNTIME.name}`, `/d/models/${MODELS.name}`]), linux)).toEqual({ runtime: false, models: false, coreml: false, bytes: 0 });
+  });
+
+  // BACKLOG row 59: on a Mac the Core ML set belongs to the models; a set installed without it still needs it
+  it("on macOS, needs the Core ML set until its coreml.json is in the model set's folder", () => {
+    const has = (p: string[]) => (x: string) => p.includes(x);
+    const mac: Catalog = { runtime: RUNTIME_MAC, models: MODELS, coreml: COREML };
+    const set = `/d/models/${MODELS.name}`;
+    const cmBytes = COREML.files.reduce((n, f) => n + f.size, 0);
+    expect(installNeeds("/d", has([`/d/runtime/${RUNTIME_MAC.name}`, set]), mac)).toEqual({ runtime: false, models: false, coreml: true, bytes: cmBytes });
+    expect(installNeeds("/d", has([`/d/runtime/${RUNTIME_MAC.name}`]), mac).bytes).toBe(MODELS.files.reduce((n, f) => n + f.size, 0) + cmBytes);
+    expect(installNeeds("/d", has([`/d/runtime/${RUNTIME_MAC.name}`, set, `${set}/coreml.json`]), mac)).toEqual({ runtime: false, models: false, coreml: false, bytes: 0 });
   });
 });
 
@@ -300,6 +313,58 @@ describe("runInstall", () => {
     await expect(runInstall(tight, deps(400), catalog())).rejects.toThrow("not enough free disk space");
     rmSync(data, { recursive: true, force: true });
     rmSync(tight, { recursive: true, force: true });
+  });
+
+  // the Core ML set ("m1-coreml"): its files go into the model set's own folder, coreml.json last
+  const coremlCatalog = (): Catalog => {
+    const serve = (name: string, body: Buffer) => {
+      files[name] = body;
+      return { file: name, url: `${base}/${name}`, size: body.length, sha256: sha(body) };
+    };
+    return { ...catalog(), coreml: { name: "m1-coreml", files: [serve("c-t4.onnx", Buffer.from("C".repeat(200))), serve("coreml.json", Buffer.from('{"format": 1}'))] } };
+  };
+
+  it("on macOS, installs the Core ML set into the model set's own folder", async () => {
+    const data = mkdtempSync(join(tmpdir(), "ck-run-"));
+    mkdirSync(join(data, "runtime", "rt"), { recursive: true });
+    asked.length = 0;
+    await runInstall(data, deps(), coremlCatalog());
+    expect(asked).toEqual(["a.onnx", "b.onnx", "c-t4.onnx", "coreml.json"]);
+    // loop: NOT-WORTH — four files
+    for (const f of ["a.onnx", "b.onnx", "c-t4.onnx", "coreml.json"]) expect(existsSync(join(data, "models", "m1", f))).toBe(true);
+    expect(readdirSync(join(data, "models"))).toEqual(["m1"]);
+    expect(installNeeds(data, existsSync, coremlCatalog())).toMatchObject({ models: false, coreml: false, bytes: 0 });
+    rmSync(data, { recursive: true, force: true });
+  });
+
+  it("adds the Core ML set to a model set installed without it, keeping what a stopped download finished", async () => {
+    const data = mkdtempSync(join(tmpdir(), "ck-run-"));
+    mkdirSync(join(data, "runtime", "rt"), { recursive: true });
+    mkdirSync(join(data, "models", "m1"), { recursive: true });
+    // loop: NOT-WORTH — two files
+    for (const f of ["a.onnx", "b.onnx"]) writeFileSync(join(data, "models", "m1", f), files[f]);
+    mkdirSync(join(data, "models", ".partial-m1-coreml"), { recursive: true });
+    writeFileSync(join(data, "models", ".partial-m1-coreml", "c-t4.onnx"), "C".repeat(200));
+    asked.length = 0;
+    const steps: string[] = [];
+    await runInstall(data, { ...deps(), progress: (_d: number, _t: number, step: string) => steps.push(step) }, coremlCatalog());
+    expect(asked).toEqual(["coreml.json"]);
+    expect(steps.at(-1)).toBe("Downloading the Core ML models (coreml.json)");
+    expect(existsSync(join(data, "models", "m1", "c-t4.onnx")) && existsSync(join(data, "models", "m1", "coreml.json"))).toBe(true);
+    expect(existsSync(join(data, "models", ".partial-m1-coreml"))).toBe(false);
+    rmSync(data, { recursive: true, force: true });
+  });
+
+  it("refuses a Core ML file whose checksum is wrong and leaves no coreml.json", async () => {
+    const data = mkdtempSync(join(tmpdir(), "ck-run-"));
+    mkdirSync(join(data, "runtime", "rt"), { recursive: true });
+    mkdirSync(join(data, "models", "m1"), { recursive: true });
+    const bad = coremlCatalog();
+    bad.coreml!.files[0] = { ...bad.coreml!.files[0], sha256: "0".repeat(64) };
+    await expect(runInstall(data, deps(), bad)).rejects.toThrow();
+    expect(existsSync(join(data, "models", "m1", "coreml.json"))).toBe(false);
+    expect(existsSync(join(data, "models", "m1", "c-t4.onnx"))).toBe(false);
+    rmSync(data, { recursive: true, force: true });
   });
 
   // TensorRT on top of an installed runtime ("rt") and model set ("m1", whose a.onnx doubles as a TensorRT file)
@@ -472,9 +537,11 @@ describe("TensorRT catalogue and rules", () => {
   // hard-coded pass 2026-10-26 S1: the README's and the in-app guide's download sizes are the pinned files' sums
   it("states each system's setup download as the sum of its pinned files", () => {
     // loop: NOT-WORTH — a dozen sizes per system
-    const gb = (r: { wheels: { size: number }[] }) => ((r.wheels.reduce((n, w) => n + w.size, 0) + MODELS.files.reduce((n, f) => n + f.size, 0)) / 1e9).toFixed(2);
-    const text = `${gb(RUNTIME)} GB download on Linux, ${gb(RUNTIME_WIN)} GB on Windows, ${gb(RUNTIME_MAC)} GB on macOS, once`;
-    expect(text).toBe("4.86 GB download on Linux, 4.64 GB on Windows, 3.32 GB on macOS, once");
+    const sum = (d: { size: number }[]) => d.reduce((n, x) => n + x.size, 0);
+    // macOS adds the Core ML set
+    const gb = (r: { wheels: { size: number }[] }, extra: { size: number }[] = []) => ((sum(r.wheels) + sum(MODELS.files) + sum(extra)) / 1e9).toFixed(2);
+    const text = `${gb(RUNTIME)} GB download on Linux, ${gb(RUNTIME_WIN)} GB on Windows, ${gb(RUNTIME_MAC, COREML.files)} GB on macOS, once`;
+    expect(text).toBe("4.86 GB download on Linux, 4.64 GB on Windows, 4.28 GB on macOS, once");
     // loop: NOT-WORTH — two documents
     for (const doc of ["../../README.md", "../../docs/GUIDE.md"]) expect(readFileSync(new URL(doc, import.meta.url), "utf8")).toContain(text);
   });
@@ -518,6 +585,22 @@ describe("TensorRT catalogue and rules", () => {
     // loop: NOT-WORTH — three cases
     for (const missing of all) expect(trtReady(ort, "/d/models/m1", has(all.filter((x) => x !== missing)))).toBe(false);
     expect(trtReady(null, "/d/models/m1", has(all))).toBe(false);
+  });
+});
+
+describe("Core ML catalogue", () => {
+  it("pins the Core ML set's release by URL, size and SHA-256, built from the shipped model set, macOS only", () => {
+    expect(COREML.name).toBe(`${MODELS.name}-coreml`);
+    for (const f of COREML.files) {
+      expect(f.url).toBe(`https://github.com/MarcelineVPQ/corridorkey-desktop/releases/download/models-${COREML.name}/${f.file}`);
+      expect(f.sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(f.file === "coreml.json" || /^ck2-(cradio|moge|rvm|stage1|stage2)-fp16-coreml-\d+x\d+-t\d+\.onnx$/.test(f.file)).toBe(true);
+    }
+    // the list goes last: its arrival is the mark that the set is whole
+    expect(COREML.files.at(-1)?.file).toBe("coreml.json");
+    expect(coremlFor("darwin")).toBe(COREML);
+    expect(coremlFor("linux")).toBeUndefined();
+    expect(coremlFor("win32")).toBeUndefined();
   });
 });
 

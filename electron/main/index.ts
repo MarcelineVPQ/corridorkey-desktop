@@ -18,7 +18,6 @@ import { addToPathList, APP_DIR, appDirs, engineBinName, isMac, isWin, ortLibrar
 import { HOMEBREW_DIRS, checkFfmpeg, ffmpegState, installFfmpeg, planFor, readOsRelease, wingetFfmpegDirs } from "./ffmpeg";
 import { PROGRESS_EVERY_MS } from "./updateFlow";
 import {
-  MODELS_BYTES,
   RUNTIME_BYTES,
   TRT_BYTES,
   freeBytes,
@@ -138,10 +137,11 @@ function installIdle(): InstallState {
   return {
     dir: enginePlaces().data,
     needRuntime: need.runtime,
-    needModels: need.models,
+    // the Core ML set (macOS) counts as part of the models
+    needModels: need.models || need.coreml,
     bytes: need.bytes,
     runtimeBytes: RUNTIME_BYTES,
-    modelsBytes: MODELS_BYTES,
+    modelsBytes: need.bytes - (need.runtime ? RUNTIME_BYTES : 0),
     gpuOk: sys.ok,
     gpuProblem: sys.problem,
     runtimeWhat: sys.runtime,

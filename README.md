@@ -81,7 +81,7 @@ none of them changes what a user sees today.
   graphics card with CUDA." (AMD would need ONNX Runtime's MIGraphX or DirectML build; not in 1.0.)
 - macOS 14 or newer on Apple Silicon (M1 or newer; the disk image). Intel Macs aren't supported.
 - Nothing else to set up: the engine comes with the app, and on first start the setup downloads the GPU runtime and
-  the CorridorKey models (a 4.86 GB download on Linux, 4.64 GB on Windows, 3.32 GB on macOS, once). If `ffmpeg` is
+  the CorridorKey models (a 4.86 GB download on Linux, 4.64 GB on Windows, 4.28 GB on macOS, once). If `ffmpeg` is
   missing, it offers to install it (apt or pacman on Linux, `winget` on Windows, Homebrew on macOS).
 - Optional, Linux: **TensorRT** (Engine settings, TensorRT; off by default) for about 1.9-2.2× the original's speed at
   HD and about 2.3-2.4× at 4K, with the same mattes (Speed, the same-day pair of 2026-10-26). Switching it on offers its own download: NVIDIA's TensorRT 10.16
@@ -133,7 +133,7 @@ decimal GB: `du --si`):
 | Runtime | **2.4 GB**: ONNX Runtime + CUDA/cuDNN (a 1.6 GB download) | **7.6 GB** Python venv: PyTorch, NVIDIA libraries, Triton, other packages |
 | Models | **3.3 GB** (fp16) | **5.1 GB**: CorridorKey weights 2.7 GB + foundation models 2.4 GB |
 | **Total** | **5.9 GB** | **12.6 GB** |
-| Setup | Download one file; the app fetches the rest itself (4.86 GB on Linux, 4.64 GB on Windows, 3.32 GB on macOS) | Install Python, create a venv, pip install, run a download script |
+| Setup | Download one file; the app fetches the rest itself (4.86 GB on Linux, 4.64 GB on Windows, 4.28 GB on macOS) | Install Python, create a venv, pip install, run a download script |
 
 PyTorch's environment carries NVIDIA libraries the ONNX Runtime engine never uses (NCCL and
 cuSPARSELt, for multi-GPU and training), and the fp16 models are a third smaller.

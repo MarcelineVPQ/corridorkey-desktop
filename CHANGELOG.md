@@ -80,6 +80,11 @@ on its own rail icon. Not a system shell: its own commands only, each parsed and
   12 and 16 GB cards keep their windows. Not yet measured on a card's whole free memory without a limit
   (docs/ENGINE_RUST.md).
 
+- macOS, ready for the first Mac build (this build has none): the app asks the engine for Core ML, and the setup
+  downloads the Core ML model set with the models (0.95 GB more, 4.28 GB in all; into the model set's own folder,
+  checked by SHA-256, resumable; a Mac that already has the models gets it the next time the setup runs). An engine
+  started on a Mac without Core ML now says so instead of asking for an NVIDIA card.
+
 **Fixed**
 
 - Appearance → Glass showed no glass in installed builds: the security policy blocked its displacement maps.

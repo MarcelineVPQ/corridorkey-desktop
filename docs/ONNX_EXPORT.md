@@ -404,6 +404,33 @@ Not used, recorded: TensorRT pure FP32 (TF32 off) doesn't build RVM or stage 2 a
 any implementation"); the weakly typed BF16 build of the fp32 files fails in stage 1 (type inference of the
 ConvTranspose).
 
+## Core ML set (`coreml/build_coreml_models.sh`, published as `2.0.0-onnx.4-coreml`, 2026-10-27)
+
+For corridorkey-engine's `--device coreml` (macOS, BACKLOG rows 24 and 59). Fixed-shape copies of the shipped fp16
+files, rewritten so ONNX Runtime's Core ML provider takes every node (the steps in the script's header); each keeps
+its weights in the shipped set's `ck2-<piece>-fp16.onnx.data` (checked by `write_set.py`), so the files go into the
+model set's own folder (ONNX Runtime refuses external weights outside the model's folder: a symlinked set fails).
+RVM's input `state` is renamed `ck_state` (a name Core ML's ML Program parser reserves; the engine maps it back).
+Graph outputs keep no shape (`fix_shapes.py` leaves them for ORT to infer): the ONNX checker refuses that as written;
+with the inferred output shapes filled in it passes.
+
+The published HD set, from `2.0.0-onnx.4` (padded 1152×1280; the engine takes the smallest stage-1 window it has,
+4/2 low-memory): C-RADIO and MoGe at 4 frames per call (the low-memory prepass's chunk), RVM, stage 1 at 4, stage 2
+at 1; 951,572,211 bytes in six files (`coreml.json` last). Built on the Linux PC (the graph rewrites are plain CPU
+work; on the 16 GB Mac C-RADIO's fold reached the memory gate's pressure limit at 8 GB): ORT's Core ML partitioner
+(Linux build) puts every node of every file on Core ML in one partition, and the files are byte-identical to the
+2026-10-26 rebuild (sha256), so the build is reproducible.
+
+```
+engine-rs/export/coreml/build_coreml_models.sh ~/.local/share/corridorkey-desktop/models/2.0.0-onnx.4 OUT 1152x1280 \
+  cradio:4 moge:4 rvm:1 stage1:4 stage2:1      # OUT/set: the five files, coreml.json, SHA256SUMS
+tools/upload_model_set.sh OUT/set 2.0.0-onnx.4-coreml   # the release models-2.0.0-onnx.4-coreml (Marcy's OK first)
+```
+
+The app's setup on macOS downloads it (electron/main/install.ts `COREML`, pinned by size and SHA-256) into
+`.partial-2.0.0-onnx.4-coreml`, then moves the files into the model set's folder, `coreml.json` last; a set
+installed without it gets it the next time the setup runs.
+
 ## Test clips
 
 Procedural (`make_clip.py`), so they carry no rights and come with a ground-truth alpha. Each has
@@ -479,6 +506,7 @@ engine-rs/export/run.sh 8G  run_parity.py cmp REF.npz OUT.npz [GT_ALPHA_DIR]
 engine-rs/export/run.sh 16G ort_mem.py stage1 768 1280 4 prod_fp32         # memory probe
 engine-rs/export/gpu_validate_when_idle.sh     # guarded GPU validation (waits for a quiet GPU)
 engine-rs/export/build_trt_models.sh PROD OUT   # TensorRT set (CPU)
+engine-rs/export/coreml/build_coreml_models.sh PROD OUT 1152x1280 cradio:4 moge:4 rvm:1 stage1:4 stage2:1   # Core ML set (CPU)
 engine-rs/export/run.sh 14G trt_netparity.py test REF.npz --models OUT --prec tensorrt-fp16 --ep ctx --cache DIR  # GPU, CK_TRT_BUILD=ck-trt-build
 ```
 

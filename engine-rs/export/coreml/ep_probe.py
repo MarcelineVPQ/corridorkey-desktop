@@ -1,4 +1,6 @@
-"""Run the real ORT 1.31 Core ML EP partitioner (Linux build: model is generated, never executed).
+"""Run the real ORT 1.31 Core ML EP partitioner (Linux build: model is generated, never executed; on a Mac the model
+is also compiled). COREML_PROBE_UNITS: Core ML's MLComputeUnits (default ALL; CPUAndGPU on a 16 GB Mac, where ALL
+compiles for the Neural Engine and can run out of memory).
 usage: ep_probe.py MODEL.onnx [MLProgram|NeuralNetwork] [static0|static1]  -> verbose log on stderr"""
 import sys, os, time, onnxruntime as ort
 model = sys.argv[1]
@@ -16,6 +18,7 @@ for kv in os.environ.get("FREE_DIMS", "").split(","):
         so.add_free_dimension_override_by_name(k, int(v))
 t = time.time()
 s = ort.InferenceSession(model, so, providers=[("CoreMLExecutionProvider",
-        {"ModelFormat": fmt, "RequireStaticInputShapes": "1" if static == "static1" else "0", "ModelCacheDirectory": cache}),
+        {"ModelFormat": fmt, "RequireStaticInputShapes": "1" if static == "static1" else "0", "ModelCacheDirectory": cache,
+         "MLComputeUnits": os.environ.get("COREML_PROBE_UNITS", "ALL")}),
         "CPUExecutionProvider"])
 print("SESSION_OK", model, fmt, static, f"{time.time()-t:.1f}s", file=sys.stderr)

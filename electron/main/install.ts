@@ -260,6 +260,27 @@ export const MODELS = {
   ],
 };
 
+// macOS: the Core ML set (BACKLOG row 59), fixed-shape copies of the five networks for ONNX Runtime's Core ML provider
+// (engine-rs/export/coreml), from release models-<set>-coreml. They keep their weights in the model set's own
+// .onnx.data files, so they go into the model set's folder (ONNX Runtime reads external weights only from the model's
+// own folder: a symlink fails); the engine finds them through coreml.json, which goes last.
+const COREML_SET = `${MODEL_SET}-coreml`;
+const coremlModel = inRelease(COREML_SET);
+export const COREML = {
+  name: COREML_SET,
+  files: [
+    coremlModel("ck2-cradio-fp16-coreml-1152x1280-t4.onnx", 289815741, "2c5a42844993c9c9bd9f97e3191ffc32f6bb45171ae25f039c7cf0987443fc39"),
+    coremlModel("ck2-moge-fp16-coreml-1152x1280-t4.onnx", 172035616, "e04b8594da157a56fe2b9c52e0e47077e2773d0e4f7a30bc60ed848d3dc76666"),
+    coremlModel("ck2-rvm-fp16-coreml-1152x1280-t1.onnx", 66811967, "c0cedf0b9d11eff3ea156153b6df22834412946f38f0a2a2f5f1a3d9304b1d08"),
+    coremlModel("ck2-stage1-fp16-coreml-1152x1280-t4.onnx", 135921658, "c802c2b81198c4bc9715b7181f8bf2ce8e69da502b2a557546104853a27d6d8f"),
+    coremlModel("ck2-stage2-fp16-coreml-1152x1280-t1.onnx", 286986834, "a48a93e87b394a14d43039782f87b327e26cac01be62e7411aca93e8c0ea0e81"),
+    // last: the engine finds the set by it, and the install counts it as done once it is there
+    coremlModel("coreml.json", 395, "21cb1f77683b444e159c6085032592616d8b8ef2f18a3915630f36eb4b9e1c7a"),
+  ],
+};
+/** The Core ML set this system downloads with the models (macOS only). */
+export const coremlFor = (platform: NodeJS.Platform) => (platform === "darwin" ? COREML : undefined);
+
 // loop: NOT-WORTH — sums a dozen sizes, once per plan
 const total = (d: Download[]) => d.reduce((n, x) => n + x.size, 0);
 // the install's refusals, the same for the runtime and models and for TensorRT's parts
@@ -269,20 +290,29 @@ const noLibraries = (file: string) => new Error(`${file} had none of the expecte
 // loop: NOT-WORTH — one stat per planned file, once per install start
 const already = (path: string, size: number) => Math.min(size, statSync(path, { throwIfNoEntry: false })?.size ?? 0);
 export const RUNTIME_BYTES = total(runtimeFor(PLATFORM).wheels);
-export const MODELS_BYTES = total(MODELS.files);
 
-/** What gets installed: the pinned runtime and model set (tests pass a small one). */
+/** What gets installed: the pinned runtime and model set, and on macOS the Core ML set (tests pass a small one). */
 export interface Catalog {
   runtime: { name: string; wheels: Download[] };
   models: { name: string; files: Download[] };
+  coreml?: { name: string; files: Download[] };
 }
-const CATALOG: Catalog = { runtime: runtimeFor(PLATFORM), models: MODELS };
+const CATALOG: Catalog = { runtime: runtimeFor(PLATFORM), models: MODELS, coreml: coremlFor(PLATFORM) };
 
-/** What is still to install: each set is there once its folder is (the rename is the last step). */
-export function installNeeds(data: string, exists: (p: string) => boolean = existsSync, c: Catalog = CATALOG): { runtime: boolean; models: boolean; bytes: number } {
+/**
+ * What is still to install: each set is there once its folder is (the rename is the last step); the Core ML set once
+ * its coreml.json is in the model set's folder (moved there last).
+ */
+export function installNeeds(data: string, exists: (p: string) => boolean = existsSync, c: Catalog = CATALOG): { runtime: boolean; models: boolean; coreml: boolean; bytes: number } {
   const runtime = !exists(join(data, RUNTIME_DIR, c.runtime.name));
   const models = !exists(join(data, MODELS_DIR, c.models.name));
-  return { runtime, models, bytes: (runtime ? total(c.runtime.wheels) : 0) + (models ? total(c.models.files) : 0) };
+  const coreml = !!c.coreml && !exists(join(data, MODELS_DIR, c.models.name, "coreml.json"));
+  return {
+    runtime,
+    models,
+    coreml,
+    bytes: (runtime ? total(c.runtime.wheels) : 0) + (models ? total(c.models.files) : 0) + (coreml && c.coreml ? total(c.coreml.files) : 0),
+  };
 }
 
 export interface InstallDeps {
@@ -345,8 +375,10 @@ export async function runInstall(data: string, deps: InstallDeps, c: Catalog = C
   const have =
     (need.runtime ? RUNTIME.wheels.reduce((n, w) => n + already(join(downloads, w.file), w.size), 0) : 0) +
     // loop: NOT-WORTH — as above
-    (need.models ? MODELS.files.reduce((n, f) => n + already(join(data, MODELS_DIR, `.partial-${MODELS.name}`, f.file), f.size), 0) : 0);
-  const needRoom = (need.runtime ? total(RUNTIME.wheels) * 2.5 : 0) + (need.models ? total(MODELS.files) : 0) - have;
+    (need.models ? MODELS.files.reduce((n, f) => n + already(join(data, MODELS_DIR, `.partial-${MODELS.name}`, f.file), f.size), 0) : 0) +
+    // loop: NOT-WORTH — as above
+    (need.coreml && c.coreml ? c.coreml.files.reduce((n, f) => n + already(join(data, MODELS_DIR, `.partial-${c.coreml!.name}`, f.file), f.size), 0) : 0);
+  const needRoom = (need.runtime ? total(RUNTIME.wheels) * 2.5 : 0) + (need.models ? total(MODELS.files) : 0) + (need.coreml && c.coreml ? total(c.coreml.files) : 0) - have;
   if (room !== null && room < needRoom) throw noRoom(needRoom, data, room);
   // loop: NOT-WORTH — one mkdir per install
   mkdirSync(downloads, { recursive: true });
@@ -384,6 +416,19 @@ export async function runInstall(data: string, deps: InstallDeps, c: Catalog = C
     for (const f of MODELS.files) await fetchOne(f, `Downloading the CorridorKey models (${f.file})`, join(partial, f.file));
     // loop: NOT-WORTH — one rename: the model set appears whole
     renameSync(partial, join(data, MODELS_DIR, MODELS.name));
+  }
+  // macOS: the Core ML set, into the model set's folder (also added to a set installed without it), coreml.json last
+  if (need.coreml && c.coreml) {
+    const partial = join(data, MODELS_DIR, `.partial-${c.coreml.name}`);
+    const set = join(data, MODELS_DIR, MODELS.name);
+    // loop: NOT-WORTH — one mkdir per install
+    mkdirSync(partial, { recursive: true });
+    // loop: SERIAL-REQUIRED — one file at a time, see fetchOne (a file a stopped install finished is checked and kept)
+    for (const f of c.coreml.files) await fetchOne(f, `Downloading the Core ML models (${f.file})`, join(partial, f.file));
+    // loop: NOT-WORTH — six local renames in the list's order, coreml.json last: the set counts as installed from there
+    for (const f of c.coreml.files) renameSync(join(partial, f.file), join(set, f.file));
+    // loop: NOT-WORTH — removes the emptied folder
+    rmSync(partial, { recursive: true, force: true });
   }
   // loop: NOT-WORTH — one readdir of the (now empty) downloads folder
   if (readdirSync(downloads).length === 0) rmSync(downloads, { recursive: true, force: true });
