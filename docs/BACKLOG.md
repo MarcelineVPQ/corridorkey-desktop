@@ -8,7 +8,7 @@ same commit as the work.
 | 1 | Electron shell: clip queue, per-clip settings, run with real progress, results | plan | built, in 1.0.0-dev.1 |
 | 2 | Engine install from inside the app: the engine inside the AppImage; first run downloads the GPU runtime (ONNX Runtime + CUDA/cuDNN wheels) and the fp16 models (GitHub Release files on this repo) into ~/.local/share/corridorkey-desktop, with licence, progress and checksums; Sonata pattern | plan, rule 10; finish plan 2026-10-24 phase 1 | built, in 1.0.0-dev.1 on Linux and Windows (Engine page lists what is found: Automatic = newest, Browse… for anything else); the macOS Core ML set is row 59 |
 | 3 | ONNX Runtime engine, decided on the spike's numbers | `engine-rs/export` | measuring |
-| 4 | Make hints in the app: mark the subject on a frame (no Resolve Magic Mask needed) | launch video 2026-10-21 | idea |
+| 4 | **Make hints in the app: a mask painter.** Mark the subject on a frame by hand (paint in / paint out, brush size, over the plate in the viewer), saved as the clip's hint, so no Resolve Magic Mask is needed; also touch up a problem shot's hint. Seen working in greenyamao's CorridorKey-2.0-GUI ("manually select what to cut out") | launch video 2026-10-21; Marcy 2026-10-27 ("mask painter is a go") | agreed |
 | 5 | Window control with a live VRAM estimate (runtime's own table), labelled as an estimate | launch video | merged into row 41 (2026-10-25, duplicate) |
 | 6 | Quick single-frame preview before the full temporal render | launch video | merged into row 39 (2026-10-25, duplicate) |
 | 7 | Review tools: A/B wipe vs the plate, alpha-only view with gamma boost, loupe, frame step / flip-flop | launch video (Marion's notes: hair flicker, soft edges) | idea |
