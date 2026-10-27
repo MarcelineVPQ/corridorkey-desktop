@@ -140,9 +140,14 @@ and models are there (`electron/main/settings.ts` `checkRustEngine`); the Engine
 ## Graphics memory
 
 `vram_budget_gb` (run option) caps the job: the automatic window's budget is min(free + own, budget), and
-each CUDA session's arena limit is the budget minus the CUDA context (measured after the first session),
-the other networks' weights (size on disk) and a 0.5 GiB reserve (measured: without it the process peaked
-0.17-0.22 GiB over a 12 GiB budget). While stage 1 and stage 2 are both loaded (normal mode) their arenas give
+each CUDA session's arena limit (its own weights and working memory) is the budget minus the CUDA context
+(measured after the first session), the weights (size on disk) of the other networks loaded while that arena holds
+working memory, and a 0.5 GiB reserve (measured: without it the process peaked 0.17-0.22 GiB over a 12 GiB budget).
+In normal mode those are all four others; in low-VRAM mode its own phase's and the next phase's, loaded ahead
+(`sharing` in pipeline/mod.rs: RVM with C-RADIO + MoGe, C-RADIO / MoGe with each other and stage 1, stage 1 with
+stage 2, stage 2 alone). Until 2026-10-27 low-VRAM arenas left room for all five networks: at a 4 GiB budget 1/1
+windows the estimate fits failed `oom` with the process at 1.33-1.78 GiB (RTX 2070 SUPER); now HD and 4K 1/1 run
+at 4 GiB, peaks 1.95 and 3.19 GiB (RTX 5080). While stage 1 and stage 2 are both loaded (normal mode) their arenas give
 their working memory back after every run, so their peaks don't add up; in the low-VRAM phases a network has
 the card to itself and keeps its arena (a shrunk arena allocates again on the next run: with the onnx.1
 models stage 2 took 159 ms per call that way, and without shrinking its ConvTranspose asked for 5.77 GB and

@@ -520,3 +520,71 @@ fn bad_frame_ranges_are_refused() {
     gap.num_frames = 3;
     assert_eq!(gap.select_range(&r(67, 69, 0), true, false).unwrap_err().code.as_str(), "bad-request");
 }
+
+/// The 2.0.0-onnx.4 fp16 networks' sizes on disk (.onnx + .data, bytes), measured 2026-10-27.
+const WEIGHTS: [(&str, u64); 5] = [("cradio", 1_725_204_048), ("moge", 178_173_376), ("rvm", 67_485_130), ("stage1", 926_574_332), ("stage2", 405_244_331)];
+
+/// A job at a budget of `cap` bytes on CUDA with the onnx.4 sizes (the CUDA context measured at 0.33 GiB): each
+/// network's arena limit and the networks loaded at any time while its arena held working memory (its first run to
+/// its drop).
+fn budget_job(cap: u64, low_vram: bool) -> Vec<(&'static str, u64, BTreeSet<&'static str>)> {
+    let mut h = Harness::new(FakeCfg::new(SHAPE), 9, options(json!({})));
+    // loop: NOT-WORTH — five files
+    for (p, n) in WEIGHTS {
+        std::fs::File::options().write(true).open(h._dir.0.join(format!("models/{p}_fp32.onnx"))).unwrap().set_len(n).unwrap();
+    }
+    h.pipe.gpu_overhead = Some(354_334_801);
+    let k = ModelKey { vram_cap: Some(cap), ..key(Provider::Cuda) };
+    h.keying(&k, None, 1, 1, low_vram).res.unwrap();
+    let events = h.loader.events();
+    let caps = h.loader.caps.lock().unwrap().clone();
+    // loop: NOT-WORTH — five networks
+    caps.into_iter()
+        .map(|(p, cap)| {
+            let first_run = events.iter().position(|e| matches!(e, Event::Run(r) if r.piece == p)).unwrap();
+            let dropped = events.iter().position(|e| matches!(e, Event::Drop(d) if *d == p)).unwrap_or(events.len());
+            // loop: NOT-WORTH — a test job's events
+            let shared = events
+                .iter()
+                .enumerate()
+                .filter_map(|(i, e)| match e {
+                    Event::Load(q, _) if *q != p && i < dropped => {
+                        let gone = events[i..].iter().position(|e| matches!(e, Event::Drop(d) if d == q)).map(|j| i + j).unwrap_or(events.len());
+                        (gone > first_run).then_some(*q)
+                    }
+                    _ => None,
+                })
+                .collect();
+            (p, cap.unwrap(), shared)
+        })
+        .collect()
+}
+
+/// RTX 2070 SUPER 2026-10-27: low-VRAM manual 1/1 windows at a 4 GiB budget (estimate 2.04-2.31 GiB) failed `oom`
+/// in stage 1 / stage 2 with the process at 1.33-1.78 GiB: every arena left room for all five networks' weights,
+/// though a low-VRAM phase shares the card with at most its own phase's and the next phase's networks.
+#[test]
+fn low_vram_arenas_leave_room_only_for_the_networks_sharing_the_card() {
+    let weight = |p: &str| WEIGHTS.iter().find(|(q, _)| *q == p).unwrap().1;
+    let (reserve, ctx) = (512u64 << 20, 354_334_801u64);
+    // the HD window this job is: its estimate fits the budget
+    let est = crate::vram::estimate_peak_vram_gb(1280.0 * 1152.0 / 1e6, 1, true);
+    assert!(est * crate::vram::MARGIN_SCALE + crate::vram::MARGIN_GB <= 4.0, "estimate {est} GiB");
+    // low-VRAM at 4 GiB; normal mode (unchanged) at 12 GiB, where the reserve was measured
+    for (cap, low_vram) in [(4u64 << 30, true), (12 << 30, false)] {
+        let limits = budget_job(cap, low_vram);
+        assert_eq!(limits.len(), 5, "low_vram {low_vram}");
+        // loop: NOT-WORTH — five networks
+        for (p, limit, shared) in limits {
+            // loop: NOT-WORTH — ≤ four networks
+            let others: u64 = shared.iter().map(|q| weight(q)).sum();
+            // within the budget: the context, the weights loaded beside it, its arena and the reserve
+            assert!(ctx + others + limit + reserve <= cap, "{p} (low_vram {low_vram}): limit {limit}, sharing {shared:?}");
+            // and no smaller than that: the job's estimate fits in what the budget leaves
+            assert_eq!(ctx + others + limit + reserve, cap, "{p} (low_vram {low_vram}): limit {limit}, sharing {shared:?}");
+            if low_vram {
+                assert!((ctx + others + limit) as f64 >= est * 1073741824.0, "{p}: limit {limit} below the estimate {est} GiB");
+            }
+        }
+    }
+}

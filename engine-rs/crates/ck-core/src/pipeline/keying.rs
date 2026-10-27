@@ -216,7 +216,7 @@ impl<L: Loader> Pipeline<L> {
             self.unload();
         }
         let first: &[&'static str] = if plan.low_vram { &["rvm"] } else { &crate::runtime::PIECES };
-        self.ensure(key, first, ctx.trt, sink, LOAD_STAGE)?;
+        self.ensure(key, first, plan.low_vram, ctx.trt, sink, LOAD_STAGE)?;
         if key.provider == Provider::TensorRt {
             self.send_trt_provider(sink);
         }
@@ -295,7 +295,7 @@ impl<L: Loader> Pipeline<L> {
         let (sh, sw) = (meta.shape_h, meta.shape_w);
         let (h64, w64) = (sh / 64, sw / 64);
         self.unload();
-        self.ensure(key, &["cradio", "moge"], ctx.trt, sink, LOAD_STAGE)?;
+        self.ensure(key, &["cradio", "moge"], true, ctx.trt, sink, LOAD_STAGE)?;
         // stage 1 loads while the foundations run
         self.preload(key, &["stage1"]);
         sink.send(json!({"type": "progress", "stage": "foundations"}));
@@ -401,7 +401,7 @@ impl<L: Loader> Pipeline<L> {
         if low_vram {
             // stage 1 loads while the first window's inputs are made
             self.unload();
-            self.ensure(key, &["stage1"], ctx.trt, sink, LOAD_STAGE)?;
+            self.ensure(key, &["stage1"], true, ctx.trt, sink, LOAD_STAGE)?;
         }
         // the hint is made in the type stage 1 takes; windows without any matte share one all-zero buffer, made the
         // first time one is needed
@@ -555,7 +555,7 @@ impl<L: Loader> Pipeline<L> {
         // only the written frames get stage 2 (a ranged job's warm-up frames are read past, its tail not read)
         let write = meta.write_range();
         self.unload();
-        self.ensure(&plan.key, &["stage2"], ctx.trt, sink, LOAD_STAGE)?;
+        self.ensure(&plan.key, &["stage2"], true, ctx.trt, sink, LOAD_STAGE)?;
         // frames and stored states read and made into stage-2 inputs on their own thread, ahead of the card
         let mut reader = Prefetch::new("s2-decode", frames.open(false)?, 8)?;
         // the frame converted here, on the producer thread, to the type stage 2 takes

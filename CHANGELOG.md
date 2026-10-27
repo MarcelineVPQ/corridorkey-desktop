@@ -87,6 +87,11 @@ on its own rail icon. Not a system shell: its own commands only, each parsed and
 - The Results stills showed faint green lines in black areas (the still's conversion from the engine's 10-bit video
   rounded near-black to green; the outputs themselves were clean): stills are now converted to RGB first, black stays
   black.
+- A low-VRAM job under a graphics-memory budget could run out of memory well inside it (RTX 2070 SUPER at 4 GB:
+  1/1 windows the estimate fits failed with the engine at 1.3-1.8 GB): each network's memory left room for all five
+  networks, though a low-VRAM phase only shares the card with its own and the next phase's. It now leaves room for
+  those; normal mode is unchanged. Measured on an RTX 5080 at 4 GB: HD and 4K low-VRAM 1/1 now run, peaks 1.95 and
+  3.19 GiB.
 
 **Docs**
 

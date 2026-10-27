@@ -99,11 +99,15 @@ impl FakeCfg {
 pub(crate) struct FakeLoader {
     pub(crate) cfg: Arc<FakeCfg>,
     pub(crate) log: Arc<Mutex<Vec<Event>>>,
+    pub(crate) caps: Arc<Mutex<Caps>>,
 }
+
+/// Each load's arena limit (the session's gpu_mem_limit), in load order.
+pub(crate) type Caps = Vec<(&'static str, Option<u64>)>;
 
 impl FakeLoader {
     pub(crate) fn new(cfg: FakeCfg) -> FakeLoader {
-        FakeLoader { cfg: Arc::new(cfg), log: Arc::default() }
+        FakeLoader { cfg: Arc::new(cfg), log: Arc::default(), caps: Arc::default() }
     }
     pub(crate) fn events(&self) -> Vec<Event> {
         self.log.lock().unwrap().clone()
@@ -126,10 +130,11 @@ impl FakeLoader {
 
 impl Loader for FakeLoader {
     type Net = FakeNet;
-    fn load(&self, piece: &'static str, provider: Provider, _file: &Path, _vram_cap: Option<u64>) -> Result<FakeNet, Error> {
+    fn load(&self, piece: &'static str, provider: Provider, _file: &Path, vram_cap: Option<u64>) -> Result<FakeNet, Error> {
         if let Some(e) = self.cfg.fail_load.as_ref().and_then(|f| f(piece, provider)) {
             return Err(e);
         }
+        self.caps.lock().unwrap().push((piece, vram_cap));
         self.log.lock().unwrap().push(Event::Load(piece, provider));
         Ok(FakeNet { piece, provider, cfg: self.cfg.clone(), log: self.log.clone(), counters: NetCounters::default(), calls: 0, shrink: false })
     }

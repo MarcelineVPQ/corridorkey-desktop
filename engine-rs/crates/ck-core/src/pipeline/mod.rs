@@ -307,11 +307,13 @@ impl<L: Loader> Pipeline<L> {
         }
     }
 
-    /// Make sure `pieces` are loaded for `key` (anything loaded for another key is dropped first).
+    /// Make sure `pieces` are loaded for `key` (anything loaded for another key is dropped first); `low_vram`: a
+    /// low-VRAM phase's networks (their arena limits, `arena_limit`).
     fn ensure(
         &mut self,
         key: &ModelKey,
         pieces: &[&'static str],
+        low_vram: bool,
         trt: Option<&dyn Fn(&str) -> TrtSettings>,
         sink: &mut dyn Sink,
         job_stage: &str,
@@ -351,7 +353,7 @@ impl<L: Loader> Pipeline<L> {
             };
             let t = Instant::now();
             let settings = trt.map(|f| f(piece));
-            let cap = self.arena_limit(key, piece);
+            let cap = self.arena_limit(key, piece, low_vram);
             let net = if key.provider == Provider::TensorRt {
                 // the engine trt_prepare built (or found); a network without one runs on CUDA with the normal file
                 // (the same precision), and the `provider` reply says why
@@ -470,8 +472,8 @@ impl<L: Loader> Pipeline<L> {
     }
 
     /// Low-VRAM mode: start loading `pieces` (the next phase's networks) on their own thread while the current
-    /// phase runs; `ensure` takes them. Their memory is within the job's budget by construction: every session's
-    /// arena limit already leaves room for all the other networks' weights (`arena_limit`). Measured per load
+    /// phase runs; `ensure` takes them. Their memory is within the job's budget by construction: the running
+    /// phase's arena limits already leave room for their weights (`arena_limit`). Measured per load
     /// (RTX 5080, fp16): C-RADIO 0.75 s, MoGe 0.11 s, stage 1 1.7 s, stage 2 0.55 s.
     fn preload(&mut self, key: &ModelKey, pieces: &[&'static str]) {
         // CUDA only: TensorRT jobs don't stage, and on the CPU provider (tests) a session loaded on another thread
@@ -487,7 +489,7 @@ impl<L: Loader> Pipeline<L> {
                 continue;
             }
             let Some(file) = self.models.file(piece, key.precision) else { continue };
-            let cap = self.arena_limit(key, piece);
+            let cap = self.arena_limit(key, piece, true);
             let (loader, prov, prec) = (self.loader.clone(), key.provider, key.precision);
             // loop: PARALLELIZE — the next low-VRAM phase's network loads while this phase runs (measured: 1.3-1.5 s less per job)
             let started = crate::ahead::spawn_named(&format!("load-{piece}"), move || {
@@ -531,14 +533,14 @@ impl<L: Loader> Pipeline<L> {
         }
     }
 
-    /// The job's budget for one session's arena, so the whole process stays within it: the budget minus the
-    /// CUDA context (measured after the first session; 0.5 GiB assumed until then), minus every other network's
-    /// weights (their size on disk), minus a 0.5 GiB reserve (measured: without it the process peaked 0.17-0.22 GiB
-    /// over a 12 GiB budget: memory the arenas don't account for). The arenas give their working memory back after
-    /// each run.
-    fn arena_limit(&self, key: &ModelKey, piece: &str) -> Option<u64> {
+    /// The job's budget for one session's arena (its own weights and its working memory), so the whole process
+    /// stays within it: the budget minus the CUDA context (measured after the first session; 0.5 GiB assumed until
+    /// then), minus the weights (their size on disk) of the other networks loaded while this arena holds working
+    /// memory (`sharing`), minus a 0.5 GiB reserve (measured: without it the process peaked 0.17-0.22 GiB over a
+    /// 12 GiB budget: memory the arenas don't account for).
+    fn arena_limit(&self, key: &ModelKey, piece: &str, low_vram: bool) -> Option<u64> {
         let cap = key.vram_cap?;
-        let others: u64 = crate::runtime::PIECES
+        let others: u64 = sharing(piece, low_vram)
             .iter()
             .filter(|p| **p != piece)
             .filter_map(|p| self.models.file(p, key.precision))
@@ -648,7 +650,7 @@ impl Pipeline<OrtLoader> {
         // phase). The automatic budget is free + own memory, the same either way.
         // (Core ML: its files depend on the clip's size, so they load after the probe)
         if job.manual && !job.low_vram && !job.tensorrt && provider != Provider::CoreMl {
-            self.ensure(&base_key, &crate::runtime::PIECES, None, sink, "load")?;
+            self.ensure(&base_key, &crate::runtime::PIECES, false, None, sink, "load")?;
         }
         sink.send(json!({"type": "progress", "stage": "probe"}));
         std::fs::create_dir_all(&job.temp_dir).map_err(|e| Error::write("the temporary folder", &job.temp_dir, &e))?;
@@ -1226,6 +1228,21 @@ impl Pipeline<OrtLoader> {
             }
         }
         Ok(())
+    }
+}
+
+/// The networks loaded while `piece`'s arena holds working memory (from its first run until it is dropped): all
+/// five in normal mode; in low-VRAM mode its own phase's and the ones loaded ahead for the next phase while it runs
+/// (`preload`): RVM with the foundations, the foundations with each other and stage 1, stage 1 with stage 2, stage 2
+/// alone. RTX 2070 SUPER 2026-10-27: leaving room for all five starved the low-VRAM arenas at a 4 GiB budget (1/1
+/// windows, estimate 2.04-2.31 GiB, failed `oom` with the process at 1.33-1.78 GiB).
+fn sharing(piece: &str, low_vram: bool) -> &'static [&'static str] {
+    match (low_vram, piece) {
+        (false, _) => &crate::runtime::PIECES,
+        (true, "rvm") => &["cradio", "moge"],
+        (true, "cradio" | "moge") => &["cradio", "moge", "stage1"],
+        (true, "stage1") => &["stage2"],
+        (true, _) => &[],
     }
 }
 
