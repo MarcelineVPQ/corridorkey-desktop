@@ -463,6 +463,16 @@ fn a_tail_is_keyed_after_the_range_and_not_written() {
 }
 
 #[test]
+fn an_absurd_tail_or_preroll_clamps_to_the_shot() {
+    // farm review 2026-10-26 S3: `--tail 18446744073709549568` overflowed `b + tail` (a panic, exit 8)
+    let mut meta = FakeFrames { n: 56, first: 0, shape: SHAPE, fail_at: None }.meta();
+    meta.source = crate::clip::Source::Video(PathBuf::from("/c/shot.mp4"));
+    let range = crate::job::FrameRange { start: 1016, end: 1026, preroll: usize::MAX, tail: usize::MAX };
+    meta.select_range(&range, true, false).unwrap();
+    assert_eq!((meta.start_frame, meta.num_frames, meta.write_range()), (0, 56, 15..26));
+}
+
+#[test]
 fn a_whole_shot_job_is_unchanged() {
     // no range: every frame written, numbered as before (the pinned digests above are the outputs, unchanged)
     let meta = FakeFrames { n: 9, first: 0, shape: SHAPE, fail_at: None }.meta();

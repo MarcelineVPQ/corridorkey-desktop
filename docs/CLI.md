@@ -118,7 +118,7 @@ A name without a frame number (`-o out/key.exr`) is exit 2: give a folder or a p
 | `-i`, `--input INPUT` (or the first argument) | `input` | the clip |
 | `-o`, `--output DIR\|PATTERN` | `output_dir` | where the results go (above) |
 | `-F`, `--frames SPEC`; `-s`, `--start N`; `-e`, `--end N` | `frame_start`, `frame_end` | the frames to write (above) |
-| `--preroll N`, `--tail N` | `preroll`, `tail` | warm-up frames keyed and never written (above) |
+| `--preroll N`, `--tail N` | `preroll`, `tail` | warm-up frames keyed and never written (above; at most 100000 each) |
 | `--outputs LIST` | `outputs` | `alpha`, `fg`, `cutout`, `checker`, comma-separated (`alpha,fg`) |
 | `--format exr\|video` | `output_format` | EXR sequences (**the default here**; the app's is video) or videos (whole shots only) |
 | `--datatype half\|float` | `exr_dtype` | EXR pixel type (half) |

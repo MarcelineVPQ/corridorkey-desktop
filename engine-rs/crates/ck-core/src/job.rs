@@ -203,6 +203,9 @@ fn whole(o: &serde_json::Map<String, Value>, k: &str) -> Result<Option<u64>, Err
     }
 }
 
+/// The most warm-up (`preroll`) or tail frames a range may ask for: more is a typo (and `b + tail` would overflow).
+pub const MAX_WARMUP: u64 = 100_000;
+
 /// The frame range options (FrameRange): both ends or neither; `preroll` / `tail` only with them; not with
 /// `num_frames` or a `start_mode` other than begin (those pick their own part of the clip).
 fn frame_range(o: &serde_json::Map<String, Value>, num_frames: i64, start_mode: crate::clip::StartMode) -> Result<Option<FrameRange>, Error> {
@@ -215,6 +218,12 @@ fn frame_range(o: &serde_json::Map<String, Value>, num_frames: i64, start_mode: 
     };
     if start > end {
         return Err(Error::bad_request(format!("frame_start ({start}) is after frame_end ({end})")));
+    }
+    // loop: NOT-WORTH — two options
+    for (k, v) in [("preroll", preroll), ("tail", tail)] {
+        if v.is_some_and(|v| v > MAX_WARMUP) {
+            return Err(Error::bad_request(format!("{k} must be at most {MAX_WARMUP} frames, got {}", v.unwrap_or(0))));
+        }
     }
     if num_frames > 0 || start_mode != crate::clip::StartMode::Begin {
         return Err(Error::bad_request("frame_start / frame_end don't combine with num_frames or start_mode: the range picks the frames".into()));
@@ -555,6 +564,15 @@ mod tests {
             json!({"frame_start": 1, "frame_end": 5, "start_mode": "middle"}),
         ] {
             assert_eq!(parse(&req(o.clone())).unwrap_err().code.as_str(), "bad-request", "{o}");
+        }
+        // warm-up past MAX_WARMUP is a typo, not a request (farm review 2026-10-26 S3)
+        let c = parse(&req(json!({"frame_start": 1, "frame_end": 5, "preroll": MAX_WARMUP, "tail": MAX_WARMUP}))).unwrap();
+        assert_eq!(c.frame_range.map(|r| (r.preroll, r.tail)), Some((100_000, 100_000)));
+        // loop: NOT-WORTH — both options
+        for k in ["preroll", "tail"] {
+            let e = parse(&req(json!({"frame_start": 1, "frame_end": 5, k: 18446744073709549568u64}))).unwrap_err();
+            assert_eq!(e.code.as_str(), "bad-request");
+            assert!(e.message.contains(&format!("{k} must be at most 100000 frames")), "{}", e.message);
         }
         let e = parse(&req(json!({"frame_start": 90, "frame_end": 80}))).unwrap_err();
         assert!(e.message.contains("frame_start (90) is after frame_end (80)"), "{}", e.message);

@@ -164,7 +164,7 @@ impl ClipMeta {
         if !exr {
             return Err(Error::bad_request("a video output can't be split; use EXR for a range (or key the whole shot)".into()));
         }
-        let (k0, k1) = (a.saturating_sub(r.preroll), (b + r.tail).min(n - 1));
+        let (k0, k1) = (a.saturating_sub(r.preroll), b.saturating_add(r.tail).min(n - 1));
         if first_frame_hint && k0 > 0 {
             return Err(Error::bad_request(format!(
                 "the first-frame hint belongs to the shot's first frame ({first}), but this range is keyed from frame {}: drop the hint for this chunk (it relies on its warm-up frames instead)",
