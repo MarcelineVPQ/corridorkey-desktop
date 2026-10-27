@@ -115,12 +115,13 @@ async function valuesFor(arg: ConsoleArg, prefix: string, cwd: string, d: Comple
       .sort()
       .map((n) => ({ insert: lead + n, label: n, kind: "command", help: findCommand(d.registry, n)?.about ?? "" }));
   // loop: NOT-WORTH — at most COMPLETIONS_MAX items, once per Tab
-  if (arg.kind === "path") return (await paths(prefix, cwd, d, opts)).map((i) => ({ ...i, insert: lead + i.insert }));
+  if (arg.kind === "path") return (await paths(prefix, cwd, d, opts, arg.folderOnly)).map((i) => ({ ...i, insert: lead + i.insert }));
   return [];
 }
 
-/** Files and folders starting with the typed name, in the typed folder (relative to the Console's folder). */
-async function paths(prefix: string, cwd: string, d: CompleteDeps, opts: ParseOptions): Promise<ConsoleCompletionItem[]> {
+/** Files and folders starting with the typed name, in the typed folder (relative to the Console's folder); `folders`:
+ * folders only (cd, pushd: SME review 2026-10-26 N1; a typed frame pattern still goes to its folder). */
+async function paths(prefix: string, cwd: string, d: CompleteDeps, opts: ParseOptions, folderOnly = false): Promise<ConsoleCompletionItem[]> {
   const a = d.platform === "win32" ? win32 : posix;
   const cut = Math.max(prefix.lastIndexOf("/"), opts.windows ? prefix.lastIndexOf("\\") : -1);
   const dirPart = prefix.slice(0, cut + 1);
@@ -165,6 +166,12 @@ async function paths(prefix: string, cwd: string, d: CompleteDeps, opts: ParseOp
     kind,
     help,
   });
+  if (folderOnly)
+    // loop: NOT-WORTH — the matching folders, once per Tab
+    return [...folders]
+      .map((n) => item(n, "folder", ""))
+      .sort((x, y) => naturalCompare(x.label, y.label))
+      .slice(0, COMPLETIONS_MAX);
   const items = [
     // loop: NOT-WORTH — the sequences found
     ...sequences.map((q) => item(q.pattern, "file", `frames ${q.range} (${q.count})${q.missing ? `, missing ${q.missing}` : ""}`)),

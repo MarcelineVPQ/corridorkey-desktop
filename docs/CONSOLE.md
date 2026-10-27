@@ -34,7 +34,8 @@ missing there).
   refused; a quoted word or a variable's value is a name; a real folder with `[` in its name is itself: SME review
   2026-10-27 S1); a frame sequence is one row,
   `sh010_plate.####.exr  1001-1100 · 96 frames · missing 1047`, `-f` lists its frames: `src/shared/console/sequences.ts`,
-  which Tab completion uses too: one candidate per sequence, never one per frame; grouped as lsseq and ck-cli's
+  which Tab completion uses too: one candidate per sequence, never one per frame (a folder-only argument, `cd`, `pushd`,
+  `allow`, `bookmark`'s folder, `du`, `tree`, offers folders only: `ConsoleArg.folderOnly`, SME review 2026-10-26 N1); grouped as lsseq and ck-cli's
   `frame_of` read a folder: an unpadded run, `frame.1` … `frame.120` (`frame.#.exr 1-120`), and a run that outgrows its
   padding, `sim.9999` `sim.10000`, are one sequence, while `a.0001` and `a.01` are two (SME review 2026-10-27 M2)), `cls` / `clear`. **Sequences
   everywhere:** a path whose file name is a frame pattern, `plate.####.exr`, `plate.%04d.exr`, `plate.$F4.exr` or

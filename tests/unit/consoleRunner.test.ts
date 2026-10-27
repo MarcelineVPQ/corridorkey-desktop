@@ -2418,3 +2418,24 @@ describe("SME reviews: shell reflexes, source, ? in a name", () => {
     expect((await c.run("render ?")).lines[0].text).toMatch(/^usage: corridorkey render/);
   });
 });
+
+describe("SME reviews: cd completes folders", () => {
+  it("N1 (row 118): Tab after cd / pushd / allow offers folders only; dir still offers files and sequences; cd <pattern> goes to its folder", async () => {
+    const { c } = make();
+    const d = mkdtempSync(join(root, "tab-"));
+    mkdirSync(join(d, "plates"));
+    writeFileSync(join(d, "plate.1001.exr"), "x");
+    writeFileSync(join(d, "plate.1002.exr"), "x");
+    writeFileSync(join(d, "plan.txt"), "x");
+    writeFileSync(join(d, "plates", "sh010.1001.exr"), "x");
+    writeFileSync(join(d, "plates", "sh010.1002.exr"), "x");
+    await c.run(`cd ${d}`);
+    const items = async (line: string) => (await c.complete(line, line.length)).items.map((i) => i.insert);
+    expect(await items("cd pla")).toEqual(["plates/"]);
+    expect(await items("pushd pla")).toEqual(["plates/"]);
+    expect(await items("allow pla")).toEqual(["plates/"]);
+    expect(await items("dir pla")).toEqual(["plan.txt", "plate.####.exr", "plates/"]);
+    await c.run("cd plates/sh010.####.exr");
+    expect(c.session().cwd).toBe(join(d, "plates"));
+  });
+});

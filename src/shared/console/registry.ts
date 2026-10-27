@@ -33,6 +33,8 @@ export interface ConsoleArg {
   conflicts: readonly string[];
   /** DOS spellings (dir's /w, /b, /a, /o:d), read on every system */
   dos: readonly string[];
+  /** a path that must be a folder (cd, pushd): Tab offers folders only (SME review 2026-10-26 N1) */
+  folderOnly: boolean;
 }
 
 export interface ConsoleCommand {
@@ -128,6 +130,7 @@ function cliCommand(c: SpecCommand): ConsoleCommand {
       refused: REFUSED[a.id] ?? null,
       conflicts: a.conflicts_with ?? [],
       dos: [],
+      folderOnly: false,
     })),
     examples: c.examples,
     kind: "cli",
@@ -152,6 +155,7 @@ const arg = (a: ArgIn): ConsoleArg => ({
   refused: null,
   conflicts: [],
   dos: [],
+  folderOnly: false,
   ...a,
 });
 const builtin = (name: string, about: string, args: ConsoleArg[], examples: string[], aliases: string[] = []): ConsoleCommand => ({
@@ -185,8 +189,8 @@ const BUILTINS: ConsoleCommand[] = [
   builtin(
     "cd",
     "change the Console's current folder (none: your home folder)",
-    [arg({ id: "folder", kind: "path", positional: true, valueName: "FOLDER", help: "the folder" })],
-    ["cd ~/shots/sh010", "cd .."],
+    [arg({ id: "folder", kind: "path", positional: true, folderOnly: true, valueName: "FOLDER", help: "the folder (or a frame pattern: its folder)" })],
+    ["cd ~/shots/sh010", "cd ..", "cd plates/sh010.####.exr"],
   ),
   builtin("pwd", "print the current folder", [], ["pwd"]),
   builtin(
@@ -194,7 +198,7 @@ const BUILTINS: ConsoleCommand[] = [
     "name a folder (none: the current one) so cd @name goes there; -d removes one; alone: the bookmarks",
     [
       arg({ id: "name", kind: "string", positional: true, valueName: "NAME", help: "the bookmark's name (letters, digits, _ . -)" }),
-      arg({ id: "folder", kind: "path", positional: true, valueName: "FOLDER", help: "the folder (default: the current one)" }),
+      arg({ id: "folder", kind: "path", positional: true, folderOnly: true, valueName: "FOLDER", help: "the folder (default: the current one)" }),
       arg({ id: "delete", short: "d", kind: "switch", help: "remove the bookmark" }),
     ],
     ["bookmark sh010", "bookmark plates ~/shots/sh010/plates", "cd @sh010", "bookmark -d sh010"],
@@ -210,7 +214,7 @@ const BUILTINS: ConsoleCommand[] = [
   builtin(
     "pushd",
     "go to a folder and remember the one you were in (popd comes back); alone: swap the two newest",
-    [arg({ id: "folder", kind: "path", positional: true, valueName: "FOLDER", help: "the folder" })],
+    [arg({ id: "folder", kind: "path", positional: true, folderOnly: true, valueName: "FOLDER", help: "the folder" })],
     ["pushd ~/renders", "pushd @sh010", "pushd"],
   ),
   builtin("popd", "go back to the folder pushd remembered last", [], ["popd"]),
@@ -264,7 +268,7 @@ const BUILTINS: ConsoleCommand[] = [
   builtin(
     "allow",
     "let the Console write in a folder (and every folder inside it), after you confirm; none: the folders allowed",
-    [arg({ id: "folder", kind: "path", positional: true, valueName: "FOLDER", help: "the folder (App settings → Console removes it again)" })],
+    [arg({ id: "folder", kind: "path", positional: true, folderOnly: true, valueName: "FOLDER", help: "the folder (App settings → Console removes it again)" })],
     ["allow /mnt/show/sq01", "allow"],
     ["trust"],
   ),
@@ -342,14 +346,14 @@ const BUILTINS: ConsoleCommand[] = [
   builtin(
     "du",
     "how much the folders take on disk: each folder inside, then the total",
-    [arg({ id: "folders", kind: "path", positional: true, multiple: true, valueName: "FOLDER", help: "the folder (default: the current one)" })],
+    [arg({ id: "folders", kind: "path", positional: true, multiple: true, folderOnly: true, valueName: "FOLDER", help: "the folder (default: the current one)" })],
     ["du", "du ~/renders"],
   ),
   builtin(
     "tree",
     "a folder and the folders inside it, as a tree (sequences as one row)",
     [
-      arg({ id: "folder", kind: "path", positional: true, valueName: "FOLDER", help: "the folder (default: the current one)" }),
+      arg({ id: "folder", kind: "path", positional: true, folderOnly: true, valueName: "FOLDER", help: "the folder (default: the current one)" }),
       arg({ id: "level", short: "L", kind: "number", integer: true, valueName: "N", help: "how deep (default 2, at most 6)" }),
       arg({ id: "all", short: "a", kind: "switch", help: "dot files too" }),
     ],

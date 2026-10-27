@@ -238,7 +238,7 @@ first, then the commands); it never runs by itself.
 | Keys | What they do |
 | --- | --- |
 | Enter | Run the line |
-| Tab | Complete commands, flags, values, paths and `@bookmarks`; again (or when it's ambiguous) for the list |
+| Tab | Complete commands, flags, values, paths and `@bookmarks` (after `cd`, `pushd`, `allow`, `du`, `tree`: folders only); again (or when it's ambiguous) for the list |
 | Ctrl+Space | Open the list |
 | →, End, Ctrl+F | Take the grey suggestion; Alt+→ (Alt+F) one word of it |
 | ↑ ↓, Ctrl+P Ctrl+N | Earlier lines that start with what you typed |
