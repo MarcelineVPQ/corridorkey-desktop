@@ -603,4 +603,22 @@ describe("review 2026-10-26 probes", () => {
     expect([s.elevated, confirms.length, spawned.length]).toEqual([true, 1, 1]);
     await finish(spawned[0].child, [], 0);
   });
+
+  it("P5 (M4): on Windows, without an injected killTree, cancel, a second cancel and quit end the tree with taskkill", async () => {
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => true);
+    try {
+      const { c } = win({ killTree: undefined });
+      await c.run("render shot.mov -o D:\\results\\a");
+      c.cancel();
+      c.cancel();
+      // the quit: its own cancel, then the grace's kill
+      await c.shutdown(10);
+      const taskkill = spawned.slice(1);
+      expect(taskkill.map((s) => [s.cmd, s.args, s.opts.shell])).toEqual(Array(4).fill(["C:\\Windows\\System32\\taskkill.exe", ["/pid", "4242", "/T", "/F"], false]));
+      expect(kill).not.toHaveBeenCalled();
+      await finish(spawned[0].child, [], 1);
+    } finally {
+      kill.mockRestore();
+    }
+  });
 });

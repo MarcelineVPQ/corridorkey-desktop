@@ -607,6 +607,15 @@ export class Console {
 
   private killTree(pid: number): void {
     if (this.d.killTree) return this.d.killTree(pid);
+    if (this.d.paths.platform === "win32") {
+      // Windows has no process groups (a negative pid does nothing there): taskkill ends the tree, as engine.ts does;
+      // by its full path (a bare name would be looked for in the current folder first)
+      const child = this.job?.child;
+      const taskkill = win32.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe");
+      // loop: NOT-WORTH — one taskkill per cancel [bounded: taskkill ends by itself]
+      this.spawnFn(taskkill, ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true, shell: false }).on("error", () => child?.kill());
+      return;
+    }
     try {
       process.kill(-pid, "SIGKILL");
     } catch {
