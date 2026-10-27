@@ -100,6 +100,7 @@ files must say `sudo`, and one dialog lists them all, with their `${…}` filled
 | `du [folder…]` | how much each folder takes on disk |
 | `tree [folder] [-L N] [-a]` | the folders as a tree, a frame sequence as one row |
 | `watch [-n S] <command>` | run a command that reads (`dir`, `du`, `verify`…) again every S seconds (default 10) in one block; Ctrl+C stops it |
+| `jobs`, `wait`, `kill [-9]` | the Console's one running job (`%1`): list it, wait for it to end (with its exit status), stop it as Ctrl+C does (`-9`: at once); never another program |
 | `time <command>` | run a command and say how long it took (a render's frames per second too) |
 | `run [--keep-going] <file.ckcmd>` | run a script ([below](#scripting)); `source` is the same command |
 | `history [N or term]` | the lines typed before, numbered, with when and how each ended; `history --audit` the elevation log |

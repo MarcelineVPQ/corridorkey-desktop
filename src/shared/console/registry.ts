@@ -339,6 +339,19 @@ const BUILTINS: ConsoleCommand[] = [
     ],
     ["watch dir key/", "watch -n 30 verify -i plates/sh010.####.exr -o key/sh010.####.exr", "watch -n 5 du ~/renders"],
   ),
+  builtin("jobs", "the Console's running job (one at a time: a run, a script, a watch), with how long it has run and its progress", [], ["jobs"]),
+  builtin(
+    "wait",
+    "wait for the Console's running job to end; ends as it did (its exit status)",
+    [arg({ id: "job", kind: "string", positional: true, valueName: "%1", help: "the job (there is only %1)" })],
+    ["wait", "wait %1"],
+  ),
+  builtin(
+    "kill",
+    "stop the Console's running job, as Ctrl+C does (cleanly, after the frame it is on); -9: at once. Never another program",
+    [arg({ id: "now", short: "9", kind: "switch", help: "at once (as a second Ctrl+C)" }), arg({ id: "job", kind: "string", positional: true, valueName: "%1", help: "the job (there is only %1)" })],
+    ["kill", "kill %1", "kill -9 %1"],
+  ),
   builtin(
     "cat",
     "print a text file (its first 2000 lines; a binary file is refused)",

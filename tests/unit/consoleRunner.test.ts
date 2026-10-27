@@ -2659,3 +2659,36 @@ describe("SME reviews: watch", () => {
     expect(spawned).toHaveLength(0);
   });
 });
+
+describe("SME reviews: jobs, wait, kill", () => {
+  it("row 129: jobs lists the one running job; wait ends with its status; kill stops it as Ctrl+C does, -9 at once", async () => {
+    const { c } = make();
+    expect((await c.run("jobs")).lines[0].text).toBe("No Console job running (the queue's jobs are on the Queue page).");
+    const r = await c.run("render shot.mov -o ../out/jobs");
+    (spawned[0].child.stdout as PassThrough).write('{"event":"progress","percent":10,"done":10,"total":100}\n');
+    await new Promise((x) => setTimeout(x, 5));
+    t += 125_000;
+    expect((await c.run("jobs")).lines[0].text).toBe("[1]  running 2 min 05 s, 10/100 frames  render shot.mov -o ../out/jobs");
+    const w = await c.run("wait %1");
+    expect(w.state).toBe("running");
+    const k = await c.run("kill");
+    expect(k.lines[0].text).toBe("Stopping (after the frame it is on): render shot.mov -o ../out/jobs");
+    expect(spawned[0].child.signals).toEqual(["SIGTERM"]);
+    await finish(spawned[0].child, [], 143);
+    await new Promise((x) => setTimeout(x, 5));
+    expect(blocks.get(r.id)!.state).toBe("cancelled");
+    expect([blocks.get(w.id)!.state, blocks.get(w.id)!.exitCode, blocks.get(w.id)!.lines[0].text]).toEqual(["failed", 143, "render shot.mov -o ../out/jobs: cancelled (exit 143)"]);
+    // -9: at once (the second Ctrl+C: the process group)
+    await c.run("render shot.mov -o ../out/jobs2");
+    await c.run("kill -9 %1");
+    expect(killed).toEqual([4242]);
+    await finish(spawned[1].child, [], null);
+  });
+
+  it("row 129: kill and wait take only the Console's own job (%1), never another program's pid", async () => {
+    const { c } = make();
+    expect((await c.run("kill 4242")).lines[0].text).toMatch(/takes the Console's own job, %1 .* never signals another program/);
+    expect((await c.run("wait")).lines[0].text).toBe("No Console job running.");
+    expect(killed).toEqual([]);
+  });
+});

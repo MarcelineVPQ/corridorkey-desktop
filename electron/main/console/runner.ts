@@ -187,6 +187,8 @@ export class Console {
   /** the last command's exit status (`${status}`) */
   private status = 0;
   private job: Job | null = null;
+  /** the typed line that holds the slot now, and when it ends (wait) */
+  private current: { id: number; done: Promise<ConsoleBlock> } | null = null;
   private nextId = 1;
   /** the characters in each block's kept lines (CONSOLE_CHARS_KEPT) */
   private readonly chars = new WeakMap<ConsoleBlock, number>();
@@ -309,13 +311,15 @@ export class Console {
     // kept with its folder (a leading space: not kept), and how it ended once it has; with its ${name}s as typed (a
     // later !! fills them in again)
     const n = this.d.history.add(line, this.cwd);
-    const ended = (r: { done: Promise<ConsoleBlock> }) =>
+    const ended = (r: { block: ConsoleBlock; done: Promise<ConsoleBlock> }) => {
+      if (r.block.state === "running") this.current = { id: r.block.id, done: r.done };
       // loop: NOT-WORTH — one async history append per line's end [bounded: a local file write]
       void r.done.then(async (b) => {
         this.status = statusOf(b);
         const k = await n;
         if (k !== null) await this.d.history.ended(k, b.exitCode, b.state);
       });
+    };
     // ; && || for if time: the line runs as a script (script.ts), each command filled in and checked when it runs
     const prog = parseProgram(line, this.opts);
     if ("error" in prog || isCompound(prog.list)) {
@@ -701,6 +705,29 @@ export class Console {
         return this.script(b, pos("file")[0], parent !== null, has("keep-going"));
       case "time":
         return now(this.finish(b, "refused", "time goes first on the line: time sudo render …"));
+      case "jobs":
+        return now(this.jobsList(b));
+      case "kill":
+      case "wait": {
+        const which = pos("job")[0];
+        if (which !== undefined && !/^%?1$/.test(which)) return now(this.finish(b, "refused", `${cmd.name} takes the Console's own job, %1 (jobs lists it); it never signals another program.`));
+        if (!this.job) return now(this.finish(b, "done", "No Console job running."));
+        if (cmd.name === "kill") {
+          const line = this.job.block.line;
+          this.cancel();
+          if (has("now")) this.cancel();
+          return now(this.finish(b, "done", `${has("now") ? "Stopped at once" : "Stopping (after the frame it is on)"}: ${line}`));
+        }
+        const cur = this.current;
+        if (!cur || cur.id !== this.job.block.id) return now(this.finish(b, "failed", "The running job isn't one typed here: Ctrl+C or kill stops it."));
+        // the job ends as it ends; wait then says how (its status is wait's)
+        // loop: NOT-WORTH — one wait for the running job [bounded: the job's own end; Ctrl+C or kill ends it]
+        const done = cur.done.then((end) => {
+          b.exitCode = statusOf(end);
+          return this.finish(b, b.exitCode === 0 ? "done" : "failed", `${end.line.split("\n")[0]}: ${end.state}${end.exitCode !== null ? ` (exit ${end.exitCode})` : ""}`);
+        });
+        return { block: b, done };
+      }
       case "watch": {
         // the command as typed: the rest of the line from its first word
         // loop: NOT-WORTH — the line's few positionals
@@ -740,6 +767,16 @@ export class Console {
         return now(await this.doctor(b, has("json")));
     }
     return now(this.finish(b, "refused", `${cmd.name} isn't a command this Console runs.`));
+  }
+
+  /** jobs (backlog row 129): the Console's one running job, [1], with its time and progress; none is said. */
+  private jobsList(b: ConsoleBlock): ConsoleBlock {
+    const j = this.job;
+    if (!j) return this.finish(b, "done", "No Console job running (the queue's jobs are on the Queue page).");
+    const s = Math.max(0, (this.now() - j.block.startedAt) / 1000);
+    const took = s < 60 ? `${Math.round(s)} s` : `${Math.floor(s / 60)} min ${String(Math.round(s % 60)).padStart(2, "0")} s`;
+    const pr = j.block.progress ? `, ${j.block.progress.done}/${j.block.progress.total} frames` : "";
+    return this.finish(b, "done", `[1]  running ${took}${pr}${j.cancels ? ", stopping" : ""}  ${j.block.line.split("\n")[0]}`);
   }
 
   /**
@@ -1761,7 +1798,9 @@ export class Console {
     const job: Job = { block: b, child: null, cancels: 0 };
     this.job = job;
     this.d.sessionChanged();
-    return (await this.runText(b, job, lines.join("\n"), "pasted", false)).block;
+    const r = await this.runText(b, job, lines.join("\n"), "pasted", false);
+    if (r.block.state === "running") this.current = { id: r.block.id, done: r.done };
+    return r.block;
   }
 
   /** A script's text: read as a program (script.ts), then run as one; a mistake in it runs nothing. */

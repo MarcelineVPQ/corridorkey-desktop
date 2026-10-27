@@ -67,6 +67,9 @@ missing there).
   `every N s · run K at HH:MM:SS`; the interval 2-3600 s from one run's end to the next start; it holds the one slot
   (a verify inside runs as its child: `inScript` for the held block's own id); Ctrl+C or the quit ends the wait at
   once (`Job.wake`), else it stops itself after 12 hours; never in a script),
+  `jobs`, `wait [%1]`, `kill [-9] [%1]` (backlog row 129: the Console's one job only, the slot's: a run, a script, a
+  watch; `jobs` its line, time and progress; `wait` ends when the typed line holding the slot ends, with its status;
+  `kill` is Ctrl+C, `-9` the second Ctrl+C; any other job id or a pid is refused: it never signals another program),
   `grep [-i] [-v] TERM`, `count`, and `head` / `tail` without a FILE: the filters after a `|` (alone, `grep` and
   `count` say so; backlog row 127, below),
   `history [N|term]` (`--audit`: the elevated log), `version` (also `corridorkey --version`, `render --version`: the app's
