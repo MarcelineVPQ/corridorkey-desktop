@@ -45,8 +45,8 @@ Everything planned lives in one list, [docs/BACKLOG.md](docs/BACKLOG.md), each i
 
 **Working on now: the Mac (Apple Silicon).** The Core ML engine runs every network on an M6 Mac mini, but stage 1
 needs more memory than a 16 GB Mac has at a 4-frame window; shorter windows are next to measure. Then setup installs
-the Core ML models [59], a 4K Core ML set [60], the real-Mac gate against CUDA's mattes [24], and self-update on the
-Mac [57].
+the Core ML models [59], Core ML sets for 1920×1080 HD and 4K [60], the real-Mac gate against CUDA's mattes [24],
+and self-update on the Mac [57].
 
 **Next, toward 1.0:**
 - Keying on a real Windows PC with an NVIDIA card (only tested in a virtual machine so far)
@@ -113,8 +113,9 @@ instead of CUDA, and that path needs more development before it keys:
 - **Core ML models in setup** (backlog row 59): Core ML compiles for fixed sizes, so the Mac needs its own model set.
   It's published (release `models-2.0.0-onnx.4-coreml`) and setup downloads it on a Mac; the first Mac build brings that setup.
 - **The app asks for Core ML** (row 58): built, not yet tried on a real Mac.
-- **HD only** (row 60): the one Core ML set is for HD (clips up to 1280×1080). 4K needs its own set or per-size
-  builds in the engine, measured on a Mac (compile time, memory on 16 GB, speed).
+- **1280×1080 clips only** (row 60): the one Core ML set is compiled for a single frame size, 1280×1080 (padded
+  to 1152×1280). Standard 1920×1080 HD and 4K clips have no Core ML set yet: each needs its own set, measured on a Mac
+  (compile time, memory on 16 GB, speed).
 - **Proven on a real Mac** (row 24): GitHub's runners are virtual Macs without the GPU or the Neural Engine, so Mac
   keying is measured on a real Apple Silicon Mac (an M6 Mac mini, `tools/mac_gate.sh`): mattes within fp16 rounding of
   CUDA on the same clips, and the speed. macOS is in 1.0 only if that gate passes; otherwise 1.0 is Linux and Windows
@@ -848,7 +849,7 @@ CorridorKey writes only these folders (plus the results you ask for, next to you
 | What | Linux | Windows | macOS |
 | --- | --- | --- | --- |
 | The app | the AppImage you downloaded (and, after updates, the previous version next to it) | the install folder (Apps & features) | `CorridorKey.app` in Applications |
-| GPU runtime and models (~5.7 GB; ~3.3 GB on macOS) | `~/.local/share/corridorkey-desktop` | `%LOCALAPPDATA%\corridorkey-desktop` | `~/Library/Application Support/corridorkey-desktop` |
+| GPU runtime and models (~5.7 GB; ~4.4 GB on macOS, with the Core ML set) | `~/.local/share/corridorkey-desktop` | `%LOCALAPPDATA%\corridorkey-desktop` | `~/Library/Application Support/corridorkey-desktop` |
 | Thumbnails, stills, job temp files | `~/.cache/corridorkey-desktop` | `%LOCALAPPDATA%\corridorkey-desktop\cache` | `~/Library/Caches/corridorkey-desktop` |
 | Settings (a few KB) | `~/.config/corridorkey-desktop` | `%APPDATA%\corridorkey-desktop` | `~/Library/Application Support/corridorkey-desktop` (with the data) |
 

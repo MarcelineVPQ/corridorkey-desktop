@@ -97,7 +97,7 @@ The engine runs `ffmpeg` / `ffprobe` from the system: they are not bundled.
 - `--device coreml` (macOS only; elsewhere the engine stops with an error) runs ONNX Runtime's Core ML provider
   (BACKLOG row 24, phase 1): ML Program format, fp16, compute units `CK_ENGINE_COREML_UNITS` (all | cpu-gpu |
   cpu-ane | cpu; default cpu-gpu: with the Neural Engine allowed, every load of stage 2 compiled it again for ~145 s
-  and its first call passed 9.7 GB on a 16 GB Mac; on CPU + GPU an HD job peaks at 1.8-3.2 GB, "Core ML on a 16 GB
+  and its first call passed 9.7 GB on a 16 GB Mac; on CPU + GPU a 1280×1080 job peaks at 1.8-3.4 GB, "Core ML on a 16 GB
   Mac" below), compiled models cached under `CK_ENGINE_COREML_CACHE` (default `coreml` next to the
   TensorRT cache root, e.g. `~/Library/Caches/corridorkey-desktop/coreml`; one folder per ORT version, units and
   file). Core ML compiles for fixed shapes, so it runs the **Core ML set**: `coreml.json` in the models folder lists
@@ -382,8 +382,8 @@ in the mode it had before this table; the rule is lifted once TensorRT's normal-
 ## Core ML on a 16 GB Mac (2026-10-27, Mac mini M6, macOS 27.0.1)
 
 Every run under `tools/mac_memgate.c` (phys_footprint of the job's process tree, swap growth, memory pressure; killed
-past 9 GB, +512 MB swap or pressure warn). 04_5d_hd (1280×1080, padded 1152×1280), EXR float, alpha + fg, the HD Core
-ML set, Firefox and the desktop running beside it (about 12 GB available at the start).
+past 9 GB, +512 MB swap or pressure warn). 04_5d_hd (1280×1080, padded 1152×1280), EXR float, alpha + fg, the Core
+ML set (1280×1080 clips only), Firefox and the desktop running beside it (about 12 GB available at the start).
 
 - **Compute units `all` (the default until this date): unusable on 16 GB.** Each load of stage 2 took 145-188 s with
   ORT's compiled model already in its cache (`compiled_model.mlmodelc` untouched): Core ML compiled it for the Neural

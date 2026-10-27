@@ -81,9 +81,14 @@ on its own rail icon. Not a system shell: its own commands only, each parsed and
   (docs/ENGINE_RUST.md).
 
 - macOS, ready for the first Mac build (this build has none): the app asks the engine for Core ML, and the setup
-  downloads the Core ML model set with the models (1.09 GB more, 4.41 GB in all; into the model set's own folder,
-  checked by SHA-256, resumable; a Mac that already has the models gets it the next time the setup runs). An engine
+  downloads the Core ML model set with the models (for 1280×1080 clips only: standard 1920×1080 HD and 4K have no
+  Core ML set yet, backlog row 60; 1.09 GB more, 4.41 GB in all; into the model set's own folder, checked by SHA-256,
+  resumable; a Mac that already has the models gets it the next time the setup runs). An engine
   started on a Mac without Core ML now says so instead of asking for an NVIDIA card.
+- Core ML runs on the CPU and GPU by default (`CK_ENGINE_COREML_UNITS`, was all units): with the Neural Engine
+  allowed, Core ML compiled stage 2 again on every load (145-188 s) and its first call passed 9.7 GB, more than a 16 GB
+  Mac has. On CPU + GPU a 1280×1080 job peaks at 1.8-3.4 GB up to window 8/4, its mattes within 1/255 of CUDA's
+  (measured on an M6 Mac mini, 2026-10-27; docs/ENGINE_RUST.md "Core ML on a 16 GB Mac").
 
 **Fixed**
 
@@ -129,8 +134,8 @@ screen keyer, on its own Rust + ONNX Runtime engine, for Linux and Windows (macO
   Intel cards aren't supported, and nothing falls back to the CPU. Keying on Windows is untested on a real NVIDIA PC
   (below).
 - **No macOS build in this one.** The Mac's Core ML engine can't key yet: setup doesn't install the Core ML models
-  (backlog row 59), the Core ML set is HD only (row 60), and stage 1 needs more memory under Core ML than a 16 GB Mac
-  has at a 4-frame window (measured on an M6 Mac mini, 2026-10-26; shorter windows not yet; row 24). README, "macOS, honestly", lists
+  (backlog row 59), the Core ML set covers only 1280×1080 clips (row 60), and stage 1 needs more memory under Core ML
+  than a 16 GB Mac has at a 4-frame window (measured on an M6 Mac mini, 2026-10-26; shorter windows not yet; row 24). README, "macOS, honestly", lists
   what's left.
 
 **What's in it:**

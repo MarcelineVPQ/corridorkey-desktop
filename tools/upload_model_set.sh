@@ -32,7 +32,7 @@ case "$SET" in
     mapfile -t FILES < <(ls ck2-*-fp16-coreml-*.onnx coreml.json 2>/dev/null | sort)
     LIST=coreml.json
     TITLE="Models ${SET%-coreml} (Core ML, fp16)"
-    WHAT="CorridorKey 2.0 prepared for Apple's Core ML, for CorridorKey Desktop on Macs with Apple Silicon: model set \`$SET\`, fp16, fixed shapes (HD clips: 1152x1280 padded), every node on ONNX Runtime's Core ML provider (docs/ENGINE_RUST.md, \`--device coreml\`). The files keep their weights in model set \`${SET%-coreml}\`'s \`.onnx.data\` files, so they go into that set's folder. The app's setup downloads these on a Mac and checks every file's SHA-256 (listed below). You don't need to download them by hand."
+    WHAT="CorridorKey 2.0 prepared for Apple's Core ML, for CorridorKey Desktop on Macs with Apple Silicon: model set \`$SET\`, fp16, fixed shapes (1280×1080 clips only, padded to 1152×1280), every node on ONNX Runtime's Core ML provider (docs/ENGINE_RUST.md, \`--device coreml\`). The files keep their weights in model set \`${SET%-coreml}\`'s \`.onnx.data\` files, so they go into that set's folder. The app's setup downloads these on a Mac and checks every file's SHA-256 (listed below). You don't need to download them by hand."
     HOW="\`engine-rs/export/coreml/build_coreml_models.sh\` (docs/ONNX_EXPORT.md, \"Core ML set\")"
     ;;
   *)
