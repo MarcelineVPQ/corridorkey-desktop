@@ -13,6 +13,7 @@ import type { EngineReply } from "./engine";
 import type { EngineHandle } from "./queue";
 import type { PrebuildRange, TrtPrebuild } from "../../src/shared/types";
 import { buildFraction, trtSizeKey, TRT_PIECES, type TrtSize } from "../../src/shared/trt";
+import { ENGINE_FAILED } from "../../src/shared/texts";
 
 // the 4K range, whose network build times are measured (README, Speed, 0.0.7-dev): its bar moves by them
 const KEY_4K = trtSizeKey(4096, 2160);
@@ -250,7 +251,7 @@ export class Prebuilder {
       // error: SHOWN — the TensorRT section says the build couldn't start, and why
       if (this.proc !== proc) return;
       this.proc = null;
-      return this.set({ status: "error", startedAt: null, note: `The engine didn't start: ${(e as Error).message}` });
+      return this.set({ status: "error", startedAt: null, note: `${ENGINE_FAILED}: ${(e as Error).message}` });
     }
     if (this.proc === proc) this.next();
   }
