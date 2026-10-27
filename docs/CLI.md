@@ -186,6 +186,19 @@ Values are checked as the engine checks the protocol's options; a bad one is exi
 | `--gpu N\|UUID` | `CUDA_VISIBLE_DEVICES`, `CUE_GPU_CORES` | the card, an index in CUDA's order or a `GPU-…` / `MIG-…` UUID (Nuke's `--gpu`). It sets `CUDA_VISIBLE_DEVICES` before the runtime starts. Without it a `CUDA_VISIBLE_DEVICES` already set is the farm's choice; without both, OpenCue's booking (`CUE_GPU_CORES`) gives its first card |
 | `-t`, `--threads N` | `CK_ENGINE_THREADS` | CPU threads per network (0: ONNX Runtime's choice) |
 
+**The app's own install.** Without `--models` and `CK_ENGINE_MODELS` (or `--ort`, `CK_ENGINE_ORT` and
+`ORT_DYLIB_PATH`), `render`, `prepare` and `info` use what the app installed, by the Engine page's "Automatic" rule:
+the newest model set in `<data>/models/` (one with `models.json`, newest by its manifest's `created`) and the newest
+ONNX Runtime in `<data>/runtime/<name>/onnxruntime/capi/` (by version). `<data>` is the app's data folder:
+`$XDG_DATA_HOME/corridorkey-desktop` (else `~/.local/share/corridorkey-desktop`) on Linux,
+`%LOCALAPPDATA%\corridorkey-desktop` on Windows, `~/Library/Application Support/corridorkey-desktop` on macOS. It says
+what it found on stderr (`corridorkey: no --models given: using the app's model set …`; not with `-q`), so the
+Queue's **Copy as command** line runs pasted into a terminal as it is. The runtime's CUDA and TensorRT library folders
+come with it, as the app adds them: on Linux the CLI starts itself again once with them on `LD_LIBRARY_PATH` (read
+only when a program starts); on Windows they go on `PATH`. A flag or variable you give always wins; with no app
+install it says what is missing, as before (exit 7). Code: `crates/ck-cli/src/appinstall.rs` (P4 SME review
+2026-10-27 S2).
+
 Every other engine knob is its `CK_ENGINE_*` variable ([ENGINE_RUST.md](ENGINE_RUST.md) "Knobs"), as for the engine.
 `prepare` also takes `--tensorrt-size WxH` and `--max-vram GB`; `info` takes `--json`.
 
@@ -267,7 +280,8 @@ say where it is (`loading the models`, `reading the clip`, `building TensorRT`, 
 ## Tests
 
 `cargo test -p ck-cli` (no models or card): frame specs and patterns, flags, exit codes, progress lines, the report,
-the binary's usage errors, `verify`, `--skip-existing` / `--overwrite`, an orphaned task. With a model set (CPU, about
+the binary's usage errors, `verify`, `--skip-existing` / `--overwrite`, an orphaned task, the fallback to the app's
+install (a fake one in a temp folder). With a model set (CPU, about
 40 s), the ignored end-to-end tests: a whole shot and a stepped list against the engine protocol, bit for bit, and a
 SIGTERM mid-run:
 

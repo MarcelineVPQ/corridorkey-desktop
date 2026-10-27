@@ -25,9 +25,15 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
 - **Commands.** `help [command]` (also `command ?` and `man <command>`), `help -k <term>` / `apropos <term>` (search the help; `find` is
   kept free for a file search and says so), `cd` (`cd -`: the folder before), `pwd`, `allow [folder]` (File scope, below), `open [path]` / `start` (the file
   manager shows it, as Show in folder does: `shell.showItemInFolder`, which never opens or runs a file), `dir` / `ls` (`-l -a -t -S -r -1`,
-  combined like `-la`, and DOS's `/w /b /a /o:d` on every system; dot files only with `-a`; a frame sequence is one row,
+  combined like `-la`, `-h` taken as GNU's human sizes, which it always shows (`ls -lh`, `-ltrh`; `-h` alone is help), and
+  DOS's `/w /b /a /o:d` on every system; dot files only with `-a`; a file-name pattern typed unquoted, `ls *.exr`,
+  `dir plates/sh0?0_*.exr`, lists what it matches there, by name as `for`'s globs do (a pattern in a folder name is
+  refused; a quoted word or a variable's value is a name; a real folder with `[` in its name is itself: SME review
+  2026-10-27 S1); a frame sequence is one row,
   `sh010_plate.####.exr  1001-1100 · 96 frames · missing 1047`, `-f` lists its frames: `src/shared/console/sequences.ts`,
-  which Tab completion uses too: one candidate per sequence, never one per frame), `cls` / `clear`. **Sequences
+  which Tab completion uses too: one candidate per sequence, never one per frame; grouped as lsseq and ck-cli's
+  `frame_of` read a folder: an unpadded run, `frame.1` … `frame.120` (`frame.#.exr 1-120`), and a run that outgrows its
+  padding, `sim.9999` `sim.10000`, are one sequence, while `a.0001` and `a.01` are two (SME review 2026-10-27 M2)), `cls` / `clear`. **Sequences
   everywhere:** a path whose file name is a frame pattern, `plate.####.exr`, `plate.%04d.exr`, `plate.$F4.exr` or
   `plate.@@@@.exr` (one digit per `@`; the frames read as ck-cli's `frame_of` reads them), is one item with its frame
   set to every built-in that takes a path: `dir <pattern>` lists that sequence's row (`-f` its frames), `open
@@ -70,30 +76,47 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   2026-10-27 M3): on Linux and macOS in `'…'` (a `'` as `'\''`), where bash and zsh expand nothing; on Windows in
   `"…"`, and a path with `%`, `!`, `$`, a backtick or `"` gets no line at all (no quoting stops cmd.exe's `%…%` or
   PowerShell's `$` inside `"…"`): the Queue says why instead of the button, and nothing is echoed. A control character
-  gives no line on any system.
+  gives no line on any system. The line carries no runtime: pasted into a terminal, `corridorkey` falls back to the app's
+  own install (docs/CLI.md "The runtime"; SME review 2026-10-27 S2), and in the Console its environment is the Engine
+  page's, so the fallback never applies there.
   `tests/unit/jobCommand.test.ts` parses the line with the Console's parser, maps it with ck-cli's own `RUN_OPTIONS`
   (read from args.rs) and checks the engine gets exactly the options the queue sends.
 - **Farm export.** `farm export <openjd|deadline|opencue|flamenco|shell> [clips…|--queue] -o <folder>` writes the
   queued clips (named by path or file name; a clip not in the queue is refused: its settings come from the queue) as
   ready-to-submit jobs from the farm/ templates (bundled at build time, `electron/main/console/farm.ts`): an OpenJD job
-  bundle per clip (`<clip>/template.yaml` with the clip's other flags in its Key step, `parameter_values.yaml`), Deadline
-  10's job and plugin info (and the `CorridorKey/` plugin), an OpenCue `<clip>_opencue.sh` calling
-  `corridorkey_submit.py` (beside it) with the shot's range and the booking from the job's `--max-vram`, a Flamenco job
-  (`<clip>.flamenco.json` for `POST /api/v3/jobs`, and `scripts/corridorkey.js`), or shot lists for the shell farm (one
-  per set of flags) with `run-shots.sh`. One task per shot (the app's matte); the farm writes EXR frames
-  (`<results folder>/<clip>.####.exr`; a clip set to video says so); the models and ONNX Runtime are this computer's
-  (the block says to change them for the workers); Deadline and OpenCue need the shot's frame range (a video from
-  1001, a frame folder by its files): a clip without one is left out, and said. A clip whose name, path, results
-  folder, a flag's value or the runtime's paths has a control character (a new line, a tab) is refused, with which and
+  bundle per clip (`<clip>/template.yaml` with the clip's other flags in its Key step, `parameter_values.yaml`; a frame
+  folder's Input is `objectType: DIRECTORY`, chosen as a folder, not yet run on Deadline Cloud and said so: S7), Deadline
+  10's job and plugin info and a Verify job's (`<clip>_verify_*`, Command=verify, submitted after the render with
+  `deadlinecommand -SubmitMultipleJobs -dependent`), all in one batch, the export folder's name, with the `CorridorKey/`
+  plugin (S4), an OpenCue `<clip>_opencue.sh` calling `corridorkey_submit.py` (beside it) with the shot's range and the
+  booking from the job's `--max-vram`, a Flamenco job (`<clip>.flamenco.json` for `POST /api/v3/jobs`, and
+  `scripts/corridorkey.js`), or shot lists for the shell farm (one per set of flags) with `run-shots.sh`, which runs every
+  list (one failing doesn't stop the next; it exits 1 when any did), each logging into `logs/<list>/` (S6). One task per
+  shot (the app's matte). **Where the frames land** (SME review 2026-10-27 M1): every format gives corridorkey the
+  queue's own `-o <results folder>`, the CLI's folder layout, so the farm's frames are the GUI's and Copy as command's,
+  `<results>/<clip>_<output>_exr/<clip>_<output>.####.exr` (a clip set to video says the farm writes EXR); Deadline names
+  each output's folder and frames (`OutputDirectoryN` / `OutputFilenameN`, the shot's padding) and the block says where
+  they land. **Frames already there**: one policy, replaced (`--overwrite` in every format; a farm retries a task, and the
+  retry must replace what its first try wrote), said in the block (S5). **Options**: `--models DIR` and `--ort LIB` are
+  the workers' paths (a kept variable works: `--models ${farm_models}`); without them the jobs carry this computer's and
+  the block names them as this computer's (S3; Deadline's paths live in its plugin's settings). Deadline: `--group`
+  (your GPU group: without one the block warns the job may reach a worker without a card), `--pool` (none: the
+  repository's default) and `--priority` (0-100, default 50). Flamenco: `--platform linux|windows|darwin`, the
+  submitter's (its two-way variables translate paths from it), default this computer's (S5). **Ranges**: Deadline and
+  OpenCue need the shot's (a video from 1001; a frame folder from all of its frames, as corridorkey numbers them:
+  `folderRange` in sequences.ts): a clip without one is left out, and said; a frame folder holding several sequences
+  (or a sequence and other frames) refuses the export, naming them: corridorkey would key them as one clip (M2). A clip whose name, path, results
+  folder, a flag's value, the runtime's paths or a Deadline setting has a control character (a new line, a tab) is refused, with which and
   why: it would add lines to the farm's files (senior review 2026-10-27 M1); so are two clips with one name (compared
   without case), whose job files would replace each other (S3). The folder goes through the write scope
   (`-o` is a written path), and so does each file it writes, resolved (a linked folder inside that leads out is
   refused); a file name that is a link is refused, dangling or not, with sudo too, and each file is written as a new one
   renamed over the name, so a link raced in after the checks is replaced, never written through (M2). Files already
   there are refused unless `sudo farm export … --overwrite` (the same elevation, dialog and audit as render's). Tests: `tests/unit/farmExport.test.ts` (each format parsed as its farm
-  reads it: YAML, key=value, JSON, shell words), the runner's scope and sudo. `openjd check` and `openjd summary`
-  passed on a generated bundle (openjd-cli in a scratch venv, 2026-10-27; it isn't installed for the tests, which
-  check the bundle structurally).
+  reads it: YAML, key=value, JSON, shell words; `run-shots.sh` run by `/bin/sh` with a stub), the runner's scope and
+  sudo. `openjd check` and `openjd summary` (with the exported values) passed on a movie's and a frame folder's bundle
+  (openjd-cli 0.8.0 in a scratch venv, 2026-10-27; it isn't installed for the tests, which check the bundle
+  structurally).
 - **Bookmarks and jumping.** `bookmark <name> [folder]` names a folder (the current one by default; a frame
   pattern's folder), `bookmark -d <name>` removes it, `bookmarks` (or `bookmark` alone) lists them; `@name` (and
   `@name/more`) is that folder for `cd`, `pushd`, `dir`, `open`, `allow` and `bookmark`, and Tab completes `@na` to
@@ -114,7 +137,14 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   variable becomes ONE quoted word (on Windows `'…'` when the value has a `"`; a value with both quote marks is
   refused there): a value never splits into words and is never read as a flag, `sudo`, `?`, `--` or a command's name,
   so the flags a line has (and its destructive ones) are the ones typed, and the parser and the file scope check the
-  filled-in line as any other. The Console's own are read-only: `${cwd}`, `${home}`, `${date}` (YYYY-MM-DD),
+  filled-in line as any other. **In a `for` word** (`forWords` in vars.ts; SME review 2026-10-27 M3) the value is never a
+  pattern either, but what was typed around it still is: `for f in ${show}/*.exr` is the files there, and a value's own
+  `*`, `?`, `[` or frame token is just a character (each character is marked typed-unquoted or not; only typed ones make
+  a glob or a frame pattern). **Lists** (S10): `${name[@]}`, a whole unquoted word of a `for`, is the value split at
+  spaces, tabs and new lines, each piece one item (`set shots="sh010 sh020"`, `for s in ${shots[@]}`), never a flag or
+  a pattern; a `${name}` with white space stays one item (zsh's rule) and the block says how to split it; `[@]`
+  anywhere else is refused with why. A list is a plain value, so `set -p` keeps one; an item can't hold a space (give
+  such names as words of their own). The Console's own are read-only: `${cwd}`, `${home}`, `${date}` (YYYY-MM-DD),
   `${time}` (HH-MM-SS: safe in a file name everywhere) and `${status}` (the last line's exit status: its exit code,
   else 0 done, 2 refused, 130 stopped, 1 failed). Typed lines and each script line are filled in when they run (after
   history expansion, as in bash); the block shows the line that ran and `from <what was typed>`, and the history keeps
@@ -134,7 +164,9 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   (`${name}`, the loop's variable over the session's) and parsed and checked by the one parser when it runs, as its own
   block under the program's. **for**'s words: an unquoted word with `*`, `?` or `[…]` in its file name is the files
   that match there (by name; dot files only for a pattern starting with `.`; a pattern in a folder name is refused),
-  an unquoted frame pattern (`plates/sh010.####.exr`, `%04d`, `$F4`, `@@@@`) its frames' files, anything else itself;
+  an unquoted frame pattern (`plates/sh010.####.exr`, `%04d`, `$F4`, `@@@@`) its frames' files, anything else itself
+(only the characters typed unquoted count, a variable's value never: Variables above; a loop's variable fills in an
+inner loop's words);
   a pattern that matches nothing is an error (zsh's rule, never the pattern itself); at most 10 000 items (counted
   before they are added); a variable's value is never a pattern. **At most 10 000 commands in one program**, loops
   inside loops included (each is a block on the page; past it the program stops, failed, and says so), and the event
@@ -175,7 +207,10 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   networks; a model set info can't open is the Models row, a runtime that doesn't load the ONNX Runtime row); an
   isolated copy ran it against the real `corridorkey info` (CPU device).
 - **Output** goes to the page as blocks (`ConsoleBlock` in `src/shared/types.ts`): the line, its state and exit code,
-  progress, the last 2000 lines, `dir`'s rows, `doctor`'s rows. A listing's Name column takes the room and stays on one
+  progress, the last 2000 lines, `dir`'s rows, `doctor`'s rows. A program's commands (blocks with a parent) are one row
+  each (SME review 2026-10-27 S8; `childRow` / `childOpens` in model.ts): a button with ✓ / ✗ / ■, the line, its time
+  and its last output line; click, Enter or Space shows the whole block, whose header then has a visible Collapse button;
+  one that runs, failed or was refused shows whole on its own. A listing's Name column takes the room and stays on one
   line (a long name or a sequence's gaps end in …, never broken inside a number; the whole text on hover and in Copy
   output); `doctor` is a table (mark, check, detail, a problem's fix on its own line under its detail); `tree`'s
   lines are a drawing (`nowrap`: never wrapped, the block scrolls sideways); the absolute paths a block names (`paths`,
@@ -247,7 +282,12 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   it can't be read (no logind, no busctl, not in a login session) the window losing focus drops it instead: safety
   over the Alt+Tab loop. The read answered on Marcy's KDE desktop (`b false`); a real lock wasn't triggered on her
   screen to test it, the decision logic is tested with a fake reader. A line the file scope refuses is refused before any dialog. `sudo` on a line that replaces
-  nothing says so ("sudo isn't needed for this") and runs it as it is; the hint drops "(needs sudo)" once `sudo` is on
+  nothing says so ("sudo isn't needed for this") and runs it as it is. **The next free version** (SME review
+  2026-10-27 S9, a complement to the model, not a change): a folder in `render`'s `-o` named with `v` and `#`s,
+  `-o key/sh010_v###/` (a separator follows it, so it is never a frame pattern's file name), becomes the next number its
+  parent doesn't have (`sh010_v004` when v001-v003 are there; padded to the #s; `nextVersion` in paths.ts): it replaces
+  nothing, so it needs no sudo; the file scope checks the resolved path as any other, the block says it
+  (`-o: the next free version is …`) and the audit log keeps it (`version`, the line and the path); the hint drops "(needs sudo)" once `sudo` is on
   the line. **Scripts** (`run`, pasted lines) never use, extend or grant the session's elevation: before any line runs,
   a line that replaces files must say `sudo` (else the whole script is refused), and all such lines are listed in ONE
   native dialog (confirmed: they run without asking again; cancelled: nothing runs), audited as `granted` / `refused`
@@ -259,7 +299,8 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   deletes comes with the first command that deletes in bulk; none does yet. A native message box has no text field,
   so it needs a dialog of the main process's own.)
 - **Audit log** (`userData/console-audit.jsonl`): every elevation granted, refused or dropped (and why), every
-  elevated command's argv, resolved targets and exit code, and every write folder allowed or removed. The `granted` and `run` entries are written before the
+  elevated command's argv, resolved targets and exit code, every write folder allowed or removed, and every next free
+  version a render's `-o` was given. The `granted` and `run` entries are written before the
   command runs; when either can't be written the command is refused (never elevated unlogged). Only ever opened to append; the app never rewrites or
   prunes it. `history --audit` shows its end.
 
@@ -277,6 +318,11 @@ Phase 4 senior review (docs/REVIEW_CONSOLE_P4_2026-10-27.md) proved its findings
 names per farm format and Deadline's argument split (`farmExport.test.ts`), the shell-safe copied line read back by
 `/bin/sh` (`jobCommand.test.ts`), the 30 000-line program (`consoleScript.test.ts`), and in `consoleRunner.test.ts`
 links in the export folder, a program's throws, budget and Ctrl+C, the long built-ins' slot, the script confirmation's
-filled-in lines and targets, and the Linux screen-lock watch ("review 2026-10-27" blocks).
+filled-in lines and targets, and the Linux screen-lock watch ("review 2026-10-27" blocks). The Phase 4 SME review
+(docs/REVIEW_CONSOLE_P4_SME_2026-10-27.md) left its probes as tests too: the unpadded and past-9999 folders
+(`consoleSequences.test.ts`, the Deadline export in `consoleRunner.test.ts`), the farm's `-o` against the queue's and
+each format's wrangler items (`farmExport.test.ts`), `${dir}/*.exr` and the list (`consoleRunner.test.ts`,
+`consoleVars.test.ts`), `ls *.exr` / `ls -lh`, the next free version, the program's rows (`consoleBlocks.test.ts`, the
+block rendered to markup) and the CLI's fallback (ck-cli `appinstall.rs` and `tests/cli.rs`).
 The page (`consoleBlocks.test.ts`): the output is a plain region; one polite `role="status"` says each command's
 start and end (`announcement()`), never its streamed lines.

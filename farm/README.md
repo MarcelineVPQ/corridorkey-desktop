@@ -10,7 +10,29 @@ Every submitter needs, on each worker: the `corridorkey` command, the model set'
 Runtime's library (`--ort`), ffmpeg for movie inputs, and an NVIDIA card. `corridorkey prepare` checks a worker.
 
 The app's Console writes these for the clips in its queue, with their settings: `farm export <openjd|deadline|opencue|flamenco|shell>
---queue -o <folder>` (docs/CONSOLE.md "Farm export").
+--queue -o <folder>` (docs/CONSOLE.md "Farm export"). What it writes:
+
+- **Where the frames land.** Each job renders `-o <the clip's results folder>`, the same folder the app's queue and its
+  Copy as command use, so the farm's frames are the app's: `<results>/<clip>_alpha_exr/<clip>_alpha.1001.exr` (one
+  folder per output). Deadline's `OutputDirectoryN` / `OutputFilenameN` name each output, so the Monitor's View Output
+  opens them.
+- **Frames already there are replaced** in every format (`--overwrite`): a farm retries a task, and the retry must
+  replace what its first try wrote. The export's notes say so.
+- **The workers' paths**: `--models <folder> --ort <library>` (a kept Console variable works:
+  `--models ${farm_models}`). Without them the jobs carry the paths of the computer that exported them, and the notes
+  say that plainly. (A worker with the app installed needs neither: `corridorkey` falls back to the app's own models
+  and runtime, docs/CLI.md "The runtime".)
+- **Deadline**: a Verify job per clip after its render (`<clip>_verify_job_info.txt`, `Command=verify`), both in one
+  batch named after the export folder: submit them with
+  `deadlinecommand -SubmitMultipleJobs -dependent -job <clip>_job_info.txt <clip>_plugin_info.txt -job <clip>_verify_job_info.txt <clip>_verify_plugin_info.txt`.
+  `--group <your GPU group>` keeps the job on workers with a graphics card (without it the notes warn), `--pool` and
+  `--priority` (default 50).
+- **Flamenco**: `submitter_platform` is `--platform linux|windows|darwin` (default the exporting computer's): the
+  Manager's two-way variables translate paths from it.
+- **Shell**: `run-shots.sh` runs every shot list in turn, each logging into `logs/<list>/` (the farm script numbers a
+  list's logs from 0), runs the next list even when one fails, and exits 1 when any shot failed.
+- **OpenJD**: a frame folder's `Input` is `objectType: DIRECTORY` (job attachments upload a folder that way); not run on
+  Deadline Cloud yet. A folder that holds several sequences is refused at export: corridorkey keys a whole folder.
 
 ## OpenJD
 

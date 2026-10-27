@@ -69,8 +69,9 @@ The **Console** (its own icon on the rail) is a command line inside the app for 
 open, `rm` that the Console never deletes files, `less` that `cat` and `tail` show a file. Every command and flag comes
 from the `corridorkey` CLI's own definitions, so the Console and the farm never differ. `help` lists the commands,
 `help render` or `render ?` explains one with examples, `help -k overwrite` (or `apropos overwrite`) searches them. The
-shell reflexes work: `ls -la`, `ls -tr`, `dir /o:-d`, `cd -`; `dir` shows a frame sequence as one row with its range
-and gaps (`dir -f` lists the frames). A frame pattern is one item everywhere: `dir plates/sh010.####.exr` (or
+shell reflexes work: `ls -la`, `ls -lh`, `ls -tr`, `ls *.exr`, `dir /o:-d`, `cd -`; `dir` shows a frame sequence as one
+row with its range and gaps, as `lsseq` does (`frame.1.exr` … `frame.120.exr` is one sequence, `frame.#.exr 1-120`;
+`dir -f` lists the frames). A frame pattern is one item everywhere: `dir plates/sh010.####.exr` (or
 `%04d`, `$F4`, `@@@@`) lists that sequence, `open` shows its first frame, `cd` goes to its folder, and `verify` ends
 with the missing frames as ranges you can paste into `-F` (`missing frames: 1012-1015, 1040`).
 
@@ -78,10 +79,15 @@ with the missing frames as ranges you can paste into `-F` (`missing frames: 1012
 `corridorkey render …` line, marked "from the queue" (turn it off in **Console settings → Show GUI jobs as
 commands**); **Copy as command** on a clip in the Queue copies it, quoted so a terminal runs nothing hidden in a file
 name (on Windows a path with `%`, `!`, `$` or a backtick has no command line: cmd.exe and PowerShell would read it, and
-the Queue says so). `farm export` writes the queue's clips as farm
+the Queue says so). Pasted into a terminal it runs with the app's own models and ONNX Runtime (the newest of each the
+app installed; `corridorkey` says which), unless you give `--models` / `--ort`. `farm export` writes the queue's clips as farm
 jobs, with their settings: `farm export openjd --queue -o ~/farm/sq01` (an OpenJD job bundle per clip), `deadline` (job
 and plugin info, with the plugin), `opencue` (a submit script), `flamenco` (a job and the job type) or `shell` (shot
-lists and the line that runs them); name clips instead of `--queue` for some of them. It never replaces its files
+lists and the line that runs them); name clips instead of `--queue` for some of them. The farm writes the frames where
+the queue does (`<results>/<clip>_alpha_exr/<clip>_alpha.1001.exr`), every format replaces frames already there (a farm
+retries tasks), and a frame folder holding several sequences is refused. `--models` and `--ort` give the workers' paths
+(else the jobs carry this computer's, and the block says so); Deadline takes `--group` (your GPU group), `--pool` and
+`--priority`, and gets a Verify job after each render; Flamenco takes `--platform`. It never replaces its own job files
 unless you say `sudo … --overwrite`.
 
 **Getting around.** `bookmark sh010` names the folder you are in (`bookmark plates ~/shots/sh010/plates` another
@@ -93,7 +99,10 @@ goes somewhere and remembers where you were, `popd` comes back, `dirs` lists the
 
 **Variables.** `set shot=sh010` (and `set -p show=/mnt/show` to keep it after a restart), then `${shot}` in any line:
 `dir ${show}/${shot}/plates`. Only `${name}` with braces is a variable, so `$F4`, `%04d`, `####` and `@@@@` in file
-names stay as they are; inside `'…'` nothing is filled in. A value is always one word (spaces and all), never a flag.
+names stay as they are; inside `'…'` nothing is filled in. A value is always one word (spaces and all), never a flag
+and never a pattern: `for f in ${show}/*.exr` still matches the `*` you typed, but a `*` inside the value is just a
+character. A list is a value with spaces split by a loop: `set shots="sh010 sh020 sh030"`, then
+`for s in ${shots[@]}; do …; done` (each word one item; `${shots}` alone stays one item).
 `set` lists them, `unset shot` removes one, `echo ${shot}` prints it; `${cwd}`, `${home}`, `${date}`, `${time}` and
 `${status}` (the last command's exit code) are the Console's own. The block shows the line as it ran and what you
 typed.
@@ -103,7 +112,9 @@ typed.
 frames: `for s in sh010 sh020; do cd @${s}; render plate.mov -o ~/renders/${s}; done`, `for f in plates/*.exr; do …;
 done` (the files that match, by name; a pattern that matches nothing runs nothing), `for f in plates/sh010.####.exr; do
 …; done` (each frame). `if verify -i … -o …; then echo ok; else echo missing; fi` decides on the last exit code. `time
-render …` says how long it took and the frames per second. Script files (`run nightly.ckcmd`) use the same, over
+render …` says how long it took and the frames per second. Inside a script each command is one row (✓ or ✗, the line,
+its time, its last line of output); click it or press Enter on it for the whole block, and one that fails opens on its
+own. Script files (`run nightly.ckcmd`) use the same, over
 several lines; a script stops at the first command that fails (not one on the left of `&&` / `||` or in an `if`),
 `run --keep-going` goes on and still ends failed; a typed line goes on. There are no pipes: the Console's commands
 never pass text to each other or to the system. A line with `;`, `&&`, `||`, `for`, `if` or `time` runs as a script:
@@ -136,7 +147,9 @@ where **Drop elevation** ends it (as does `sudo -k`, locking the screen, the com
 logged (`history --audit`); one the log can't record doesn't run. A script (`run`, or several lines you paste: the
 Console offers to run them in order, Enter runs, Esc keeps the first) never uses the Console's elevation: its lines that
 replace files must say `sudo`, and one dialog lists them all before anything runs. `sudo` on a line that replaces
-nothing says it isn't needed. A `--job` file runs only once the Console has read
+nothing says it isn't needed. To render again without replacing anything, version the folder: `render … -o
+~/renders/sh010_v###/` picks the next free version (`sh010_v004` when v001-v003 are there), so no sudo; the block says
+which, and the audit log keeps it. A `--job` file runs only once the Console has read
 and checked it, and its output and temporary folders are fixed when it starts. **Stop** (or Ctrl+C) ends a command on
 every system, Windows included; quitting the app stops it too. A screen reader hears each command's start and end, not
 every line it prints.
@@ -203,7 +216,12 @@ sudo render sh010.mov -o ~/renders/sh010/ --overwrite
 verify -i plates/sh010.####.exr -o ~/renders/sh010/sh010_key.####.exr -F 1001-1100
 run nightly.ckcmd
 for s in sh010 sh020; do cd @${s} && time render plate.mov -o ~/renders/${s}; done
+for f in ${show}/sh010/plates/*.exr; do echo ${f}; done
+set shots="sh010 sh020 sh030"
+for s in ${shots[@]}; do cd @${s} && render plate.mov -o ~/renders/${s}_v###/; done
+ls -lh *.exr
 tree -L 2 ~/shots/sh010
 farm export openjd --queue -o ~/farm/sq01
+farm export deadline --queue -o ~/farm/sq01 --group gpu --models /opt/ck/models --ort /opt/ck/libonnxruntime.so
 doctor
 ```
