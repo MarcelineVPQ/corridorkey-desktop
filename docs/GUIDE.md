@@ -58,3 +58,64 @@ App settings → Appearance: **System**, **Light**, **Dark** or **Desktop** (you
 ## Storage
 
 App settings → Storage lists what the app keeps on this PC, each with its size, **Open** (shows the folder in your file manager) and **Remove…**. The **cache folder** holds clip thumbnails, result stills and the TensorRT engines built for your card; each job's working files, which a low-memory job reads every frame, stay in the system's cache folder on this PC wherever the cache folder is. Under it, the sizes per clip in the queue (with its job's working files while it runs), the stills of clips no longer in the queue (pruned at start: older than 30 days or past 500 MB), and the TensorRT engines per resolution range. **Change…** picks another location: the app makes its own `corridorkey-desktop` folder there (never writing into the folder you picked itself) and asks whether to **move the files** (each file is copied, checked against the original by size and SHA-256, and only then removed from the old folder; on any error nothing is removed and the cache stays where it was) or **start fresh** (the old cache files are deleted; thumbnails and stills are made again, TensorRT engines are built again on the next TensorRT job). **Default** goes back to the system's cache folder the same way. Not while the queue or a download runs.
+
+## Console
+
+The **Console** (its own icon on the rail) is a command line inside the app for people who live in one: the farm CLI's
+`render`, `verify`, `prepare` and `info` with the same flags, output and exit codes, plus `help`, `find`, `cd`, `pwd`,
+`dir` / `ls`, `cls`, `history`, `run` (a `.ckcmd` script of Console lines) and `sudo`. Every command and flag comes
+from the `corridorkey` CLI's own definitions, so the Console and the farm never differ. `help` lists the commands,
+`help render` or `render ?` explains one with examples, `find overwrite` searches them.
+
+**Safety.** It is not a system shell: only its own commands, each one parsed and checked (no variables, pipes, globs
+or other programs). It **reads anywhere** you can, and **writes only into the folders you chose**: the results folder
+(App settings), the cache folder, and the queued clips' results folders; anything else is refused with the reason,
+before anything runs. A command that **replaces files** (`render … --overwrite`) runs only as `sudo render …`: a
+dialog names the exact command and the files there now; confirmed, the Console stays elevated for 5 minutes (each
+elevated command extends it, never past 15), shown by a badge with its countdown in the bar and in **Session**,
+where **Drop elevation** ends it (as does `sudo -k`, the window losing focus, or quitting). Elevated commands are
+logged (`history --audit`).
+
+**Typing.** As you type, the line is coloured: commands, flags, paths, and mistakes underlined before you press
+Enter (an unknown command or flag with its "did you mean", a value out of range), a flag that replaces files in
+amber. The line under the input explains the mistake, or the flag the cursor is on. A grey suggestion follows the
+cursor: your history first (only lines that would run), then the commands; **→** takes it, **Alt+→** one word of it;
+it never runs by itself. **Tab** completes commands, flags, values and paths; when several fit it adds what they
+share, and a second Tab opens the list. **Console settings → Completions → List** shows the list as you type
+instead (**F2** switches).
+
+**Keys** (also in the panel's Keys section):
+
+| Keys | What they do |
+| --- | --- |
+| Enter | Run the line |
+| Tab | Complete; again (or when it's ambiguous) for the list |
+| Tab, Shift+Tab, ↑ ↓ | Move in the list; Enter takes the item, Esc puts the line back |
+| Ctrl+Space | Open the list |
+| →, End, Ctrl+F | Take the grey suggestion |
+| Alt+→, Alt+F | Take one word of it (else a word forward) |
+| ↑ ↓ | Earlier lines that start with what you typed |
+| Ctrl+R | Search the history as you type; again for older; Enter runs; Esc or Ctrl+G cancels |
+| Ctrl+A, Ctrl+E | Start, end of the line |
+| Alt+B, Alt+← | A word back |
+| Ctrl+U, Ctrl+K, Ctrl+W | Delete to the start, to the end, the word before |
+| Ctrl+C | Copy the selection; else stop the running command (again: at once); else clear the line |
+| Ctrl+L | Clear the screen (`cls` too); a running command's block stays |
+| F2 | Completions inline or as a list |
+
+**Output.** Each command is a block: the line, its state (running, done, failed, refused, stopped), the exit code
+and what it means, the CLI's progress (frames handed to the writers) and phase, and what it printed. **Copy
+command**, **Copy output** and **Re-run** (puts the line back in the input to edit; it never runs by itself) are on
+every block; a render's output folder and report open with **Show in folder**. Elevated blocks are marked amber.
+**History** in the panel searches every line you typed; a click puts one back.
+
+Examples:
+
+```
+cd ~/shots/sh010
+dir plates
+render -i plates/sh010.####.exr -o ~/renders/sh010/sh010_key.####.exr -F 1001-1100 --outputs alpha,fg
+sudo render sh010.mov -o ~/renders/sh010/ --overwrite
+verify -i plates/sh010.####.exr -o ~/renders/sh010/sh010_key.####.exr -F 1001-1100
+run nightly.ckcmd
+```

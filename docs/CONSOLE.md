@@ -1,8 +1,8 @@
 # The Console (main process)
 
 The Console tab (BACKLOG row 95) is a command line inside the app for power users: its own command set, never a system
-shell. This page is the main process side, `electron/main/console/` and `src/shared/console/`; the page itself comes
-in phase 3 of the plan.
+shell. This page is the main process side, `electron/main/console/` and `src/shared/console/`; the page is
+`src/ui/pages/ConsolePage.tsx` and `src/ui/console/` (its use: docs/GUIDE.md "Console").
 
 ## Design
 
