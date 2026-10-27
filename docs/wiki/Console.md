@@ -124,7 +124,10 @@ output** has them too). `ls -f` lists every frame. Houdini's pre-roll, `sim.-010
 their padding (`sim.9999`, `sim.10000`) are one sequence. A frame pattern, `plate.####.exr`, `plate.%04d.exr`,
 `plate.$F4.exr` or `plate.@@@@.exr` (one digit per `@`), is one item everywhere: `ls plates/sh010.####.exr` lists that
 sequence, `open` shows its first frame, `cd` goes to its folder. Tab completes a sequence as one pattern. `verify` ends
-with the missing frames as ranges you can paste into `-F` (`missing frames: 1012-1015, 1040`).
+with the missing frames as ranges you can paste into `-F` (`missing frames: 1012-1015, 1040`), and its block offers
+**Re-render missing**: it puts `render` with the same flags and `-F 1012-1015,1040` in the input for you to check and
+run (`sudo … --overwrite` when a listed frame is there but not whole: only those frames are replaced). It never runs
+by itself.
 
 The listing flags you know work: `ls -la`, `ls -lh`, `ls -tr`, `ls -S`, `ls -1`, `ls *.exr`, `dir /o:-d`, `dir /b`.
 
@@ -267,9 +270,9 @@ A screen reader hears each command's start and end, not every line it prints.
 # key every shot of a sequence, each into the next free version
 for s in sh010 sh020 sh030; do cd @${s} && render plate.####.exr -o ~/renders/${s}_v###/ --linear; done
 
-# check a render and re-render only what's missing
+# check a render and re-render only what's missing (Re-render missing on the verify block types the second line)
 verify -i plates/sh010.####.exr -o key/sh010.####.exr
-sudo render -i plates/sh010.####.exr -o key/sh010.####.exr -F 1012-1015,1040 --overwrite
+render --input plates/sh010.####.exr --output key/sh010.####.exr --frames 1012-1015,1040
 
 # a nightly script that stops at the first failure
 run nightly.ckcmd

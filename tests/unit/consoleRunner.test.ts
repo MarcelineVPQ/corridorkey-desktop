@@ -2487,3 +2487,26 @@ describe("SME reviews: Copy as farm line", () => {
     await finish(spawned[0].child, [], 0);
   });
 });
+
+describe("SME reviews: Re-render missing", () => {
+  it("SME N6 / P4 N7 (rows 123, 146): a failed verify offers render with its flags and -F <the ranges>, never running it", async () => {
+    const { c } = make();
+    const b = await c.run("verify -i plate.####.exr -o ../out/key.####.exr -F 1001-1100 --outputs alpha");
+    await finish(spawned[0].child, ["missing or incomplete: ../out/nothere.1012.exr", "missing frames: 1012-1015, 1040 (re-render them: -F 1012-1015,1040)"], 9);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(blocks.get(b.id)!.rerender).toBe("render --input plate.####.exr --output ../out/key.####.exr --outputs alpha --frames 1012-1015,1040");
+    expect(spawned).toHaveLength(1);
+  });
+
+  it("SME N6 / P4 N7: a listed frame that is there but not whole makes it sudo … --overwrite (only those frames); a verify that passed offers nothing", async () => {
+    const { c } = make();
+    writeFileSync(join(out, "sh010", "half.1012.exr"), "x");
+    const b = await c.run("verify -i plate.####.exr -o ../out/sh010/half.####.exr");
+    await finish(spawned[0].child, [`missing or incomplete: ${join(out, "sh010", "half.1012.exr")}`, "missing frames: 1012 (re-render them: -F 1012)"], 9);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(blocks.get(b.id)!.rerender).toBe("sudo render --input plate.####.exr --output ../out/sh010/half.####.exr --overwrite --frames 1012");
+    const ok = await c.run("verify -i plate.####.exr -o ../out/sh010/half.####.exr");
+    await finish(spawned[1].child, [], 0);
+    expect(blocks.get(ok.id)!.rerender ?? null).toBeNull();
+  });
+});

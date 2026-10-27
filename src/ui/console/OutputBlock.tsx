@@ -141,6 +141,11 @@ function FullBlock({ b, registry, windows, onReinsert, onCollapse }: BlockProps 
           <button type="button" className="copy-btn" title="Put this line back in the input to edit or run it" onClick={() => onReinsert(b.line)}>
             <CornerDownLeft size={13} aria-hidden /> Re-run
           </button>
+          {b.rerender && (
+            <button type="button" className="copy-btn" title={`Put the render line for the missing frames in the input (never runs it): ${b.rerender}`} onClick={() => onReinsert(b.rerender!)}>
+              <CornerDownLeft size={13} aria-hidden /> Re-render missing
+            </button>
+          )}
         </span>
       </header>
       {(b.progress || (b.state === "running" && b.status)) && (

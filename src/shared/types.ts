@@ -602,6 +602,9 @@ export interface ConsoleBlock {
   argv: string[] | null;
   // the same as the user asked for it, without the Console's own --progress-format and --temp (Copy as farm line)
   command?: string[] | null;
+  // a failed verify (exit 9): the render line for its missing frames (-F <ranges>), which Re-render missing puts in the
+  // input (never runs it)
+  rerender?: string | null;
   elevated: boolean;
   state: "running" | "done" | "failed" | "refused" | "cancelled";
   exitCode: number | null;

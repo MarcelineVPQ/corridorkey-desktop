@@ -2186,17 +2186,70 @@ export class Console {
           const cancelled = job.cancels > 0 && code !== 0;
           this.d.sessionChanged();
           const state = code === 0 ? "done" : cancelled ? "cancelled" : "failed";
-          if (!b.elevated) return resolve(this.finish(b, state));
-          // loop: NOT-WORTH — one async append per elevated command's end [bounded: a local file write]
-          void this.d.audit.append({ event: "exit", argv, exit: code }).then((ok) => {
-            if (!ok) this.note(b, "err", "The audit log couldn't record this command's exit.");
-            resolve(this.finish(b, state));
-          });
+          const close = () => {
+            if (!b.elevated) return resolve(this.finish(b, state));
+            // loop: NOT-WORTH — one async append per elevated command's end [bounded: a local file write]
+            void this.d.audit.append({ event: "exit", argv, exit: code }).then((ok) => {
+              if (!ok) this.note(b, "err", "The audit log couldn't record this command's exit.");
+              resolve(this.finish(b, state));
+            });
+          };
+          // a verify that found frames missing: the render line for them (SME reviews 2026-10-26 N6, 2026-10-27 N7)
+          if (argv[0] === "verify" && code === 9)
+            // loop: NOT-WORTH — one async check per failed verify [bounded: RERENDER_STATS stats]
+            void this.rerenderLine(b).then((l) => {
+              b.rerender = l;
+              close();
+            });
+          else close();
         };
         child.on("error", (e) => end(null, null, e));
         child.on("close", (code, signal) => end(code, signal));
       }),
     };
+  }
+
+  /**
+   * A failed verify's render line for its missing frames: its own flags as asked, `render` for `verify`, its frame
+   * range (-F / -s / -e) replaced by the CLI's `re-render them: -F <ranges>`; a listed frame that is there but not whole
+   * needs replacing, so the line then says `sudo … --overwrite` (only the requested frames are replaced). Null when
+   * the CLI printed no ranges (a video's frames, the lines dropped).
+   */
+  private async rerenderLine(b: ConsoleBlock): Promise<string | null> {
+    // loop: NOT-WORTH — a block's lines (≤ CONSOLE_LINES_KEPT), once per failed verify
+    const ranges = b.lines.map((l) => /\(re-render them: -F ([0-9,-]+)\)$/.exec(l.text)?.[1]).find(Boolean);
+    if (!ranges || !b.command) return null;
+    const words: string[] = [];
+    // loop: NOT-WORTH — the command's few words
+    for (let i = 1; i < b.command.length; i++) {
+      const w = b.command[i];
+      if (w === "--frames" || w === "--start" || w === "--end") {
+        i++;
+        continue;
+      }
+      if (w === "--") {
+        words.push("--frames", ranges, ...b.command.slice(i));
+        break;
+      }
+      words.push(w);
+    }
+    if (!words.includes("--frames")) words.push("--frames", ranges);
+    const a = this.d.paths.platform === "win32" ? win32 : posix;
+    // loop: NOT-WORTH — the files the CLI listed, one async stat each [bounded: RERENDER_STATS]
+    const listed = b.lines
+      .map((l) => /^missing or incomplete: (.+)$/.exec(l.text)?.[1])
+      .filter((p): p is string => !!p)
+      .slice(0, RERENDER_STATS);
+    let partial = false;
+    // loop: NOT-WORTH — as above; stops at the first that is there
+    for (const p of listed) {
+      partial = (await this.d.fs.stat(a.resolve(b.cwd, p)).catch(() => null)) !== null;
+      if (partial) break;
+    }
+    if (partial) words.splice(words.indexOf("--frames"), 0, "--overwrite");
+    // loop: NOT-WORTH — the line's few words
+    const line = ["render", ...words].map((w) => (w === "--" ? w : quoteArg(w, this.opts))).join(" ");
+    return partial ? `sudo ${line}` : line;
   }
 
   private killTree(pid: number): void {
@@ -2390,6 +2443,9 @@ export function clipName(input: string, platform: NodeJS.Platform): string {
   if (["input", "frames", "rgb"].includes(stem.toLowerCase())) return a.basename(a.dirname(p)) || stem;
   return stem;
 }
+
+/** Re-render missing: the files a failed verify listed that are stat'ed, at most (one there is enough). */
+const RERENDER_STATS = 1000;
 
 /** The measured rate looks this many frames back (or as far as the run has gone). */
 export const RATE_FRAMES = 20;

@@ -49,7 +49,9 @@ missing there).
   <pattern>` shows its first frame, `cd` and `allow` take its folder; a pattern with no frame says so with the `dir`
   line to type (`sequenceOf` in sequences.ts). `verify`'s missing frames come from the CLI as ranges, ready for a
   requeue (`missing frames: 1012-1015, 1040 (re-render them: -F 1012-1015,1040)`, docs/CLI.md); the block shows
-  them as its last lines. (`@` is the Console's: corridorkey itself reads `####`, `%04d` and `$F4`.)
+  them as its last lines and offers **Re-render missing** (`rerender`: its `command` with `render` for `verify`, its
+  `--frames` / `--start` / `--end` replaced by those ranges; `sudo … --overwrite` when a `missing or incomplete:` file
+  is there, at most 1000 stat'ed; the page puts the line in the input, never runs it: SME reviews N6, P4 N7). (`@` is the Console's: corridorkey itself reads `####`, `%04d` and `$F4`.)
   `history [N|term]` (`--audit`: the elevated log), `version` (also `corridorkey --version`, `render --version`: the app's
   version, which its corridorkey shares; answered without running it), `run [--keep-going] <file.ckcmd>` (a script: Scripting, below; no script
   inside a script; its elevation: Security rules below). Several lines pasted at once are never joined: the page offers them as a script (Enter runs them in
