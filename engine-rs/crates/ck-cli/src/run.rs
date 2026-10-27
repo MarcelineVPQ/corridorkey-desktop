@@ -608,14 +608,17 @@ mod tests {
     use super::*;
 
     /// A scratch folder, removed when dropped.
+    #[cfg(unix)]
     struct Dir(PathBuf);
 
+    #[cfg(unix)]
     impl Drop for Dir {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
     }
 
+    #[cfg(unix)]
     fn scratch(tag: &str) -> Dir {
         let p = std::env::temp_dir().join(format!("ck-cli-run-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);

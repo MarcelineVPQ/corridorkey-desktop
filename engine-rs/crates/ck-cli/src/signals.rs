@@ -1,7 +1,8 @@
 //! SIGTERM (a farm's cancel) and SIGINT (Ctrl+C) ask the run to stop after the current frame
 //! (ck_core::pipeline::Sink::stop_requested); the run then removes its temporary files and exits 143 / 130. A second
 //! signal while stopping ends the process at once (128 + the signal), as a shell user expects of a second Ctrl+C.
-//! Windows: Ctrl+C is SIGINT; Ctrl+Break, closing the console, log-off and shut-down are SIGTERM.
+//! Windows: Ctrl+C is SIGINT; Ctrl+Break, closing the console, log-off and shut-down are SIGTERM (the last three give
+//! the run at most 4.5 s to stop: the system ends the process after that).
 use std::sync::atomic::{AtomicI32, Ordering};
 
 /// The signal that asked for a stop (0: none yet).
@@ -56,14 +57,21 @@ mod sys {
         fn ExitProcess(code: u32) -> !;
     }
     const CTRL_C_EVENT: u32 = 0;
+    const CTRL_BREAK_EVENT: u32 = 1;
 
     unsafe extern "system" fn handler(event: u32) -> i32 {
         let sig = if event == CTRL_C_EVENT { 2 } else { 15 };
         if super::on_signal(sig) {
             ExitProcess(128 + sig as u32);
         }
-        // handled: the run stops after its current frame (Windows ends the process itself a few seconds after a
-        // console close, log-off or shut-down)
+        // Ctrl+C / Ctrl+Break: handled, the run stops after its current frame. Closing the console, log-off and
+        // shut-down end the process as soon as this handler returns (Microsoft's HandlerRoutine docs; the system
+        // waits at most 5 s for a close, more for log-off and shut-down), so it waits here instead: the main thread
+        // stops the run, removes its folders and exits 143, which ends this thread with the process (farm review S7)
+        if event > CTRL_BREAK_EVENT {
+            // loop: SERIAL-REQUIRED — the console's close waits for the run's own stop [bounded: 4.5 s, inside the 5 s]
+            std::thread::sleep(std::time::Duration::from_millis(4500));
+        }
         1
     }
 

@@ -204,7 +204,10 @@ specific, never 33 or 137 (OpenCue's retry codes).
 run's folders are removed, then exit 143 / 130. A TensorRT build (`prepare --tensorrt-size`, or a job's own) stops
 before the next network's build (one takes minutes; the engines already built are kept), and `prepare` then exits
 143 / 130 without printing `ready`. A second signal ends it at once. On Windows Ctrl+C is SIGINT and
-Ctrl+Break, closing the console, log-off and shut-down are SIGTERM. Farms send SIGKILL after their grace time: the
+Ctrl+Break, closing the console, log-off and shut-down are SIGTERM. Windows ends a process 5 s after a console close
+(Microsoft's HandlerRoutine docs), so for those three the run has 4.5 s to stop and clean up; a stop that takes
+longer (a long window on a slow card) ends like a SIGKILL: the output stays safe, the hidden folders are left for the
+next run's sweep. Farms send SIGKILL after their grace time: the
 output stays safe (above), only the hidden folders are left.
 
 **No parent watch.** Unlike `corridorkey-engine` (which ends with the app), `corridorkey` keeps running when its parent
