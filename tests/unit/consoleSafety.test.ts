@@ -127,7 +127,7 @@ describe("path policy (logic, Windows and macOS rules)", () => {
   it("refuses a path it can't resolve (no permission), saying why", async () => {
     const d: PathDeps = { platform: "linux", home: "/h", realpath: async () => Promise.reject(Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })) };
     const r = await checkWrite("/x/y", "/", ["/x"], d);
-    expect(!r.ok && r.reason).toMatch(/can't be checked: EACCES/);
+    expect(!r.ok && r.reason).toMatch(/can't be checked: you have no permission to open/);
   });
 });
 

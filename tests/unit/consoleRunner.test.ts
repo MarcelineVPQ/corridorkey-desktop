@@ -69,6 +69,7 @@ let runtimeOk: boolean;
 let allowedFolders: string[];
 let allowAsked: string[];
 let allowAnswer: boolean;
+let shown: string[];
 
 function make(over: Partial<ConsoleDeps> = {}, files = mkdtempSync(join(root, "user-"))) {
   const deps: ConsoleDeps = {
@@ -89,6 +90,7 @@ function make(over: Partial<ConsoleDeps> = {}, files = mkdtempSync(join(root, "u
     allowed: () => allowedFolders,
     setAllowed: (f) => void (allowedFolders = f),
     confirmAllow: async (f) => (allowAsked.push(f), allowAnswer),
+    showInFolder: (p) => void shown.push(p),
     takeGpu: () => {
       if (gpuRefusal) return gpuRefusal;
       gpuTaken++;
@@ -121,6 +123,7 @@ beforeEach(() => {
   allowedFolders = [];
   allowAsked = [];
   allowAnswer = true;
+  shown = [];
   gpuTaken = 0;
   gpuReleased = 0;
   gpuRefusal = null;
@@ -791,6 +794,31 @@ describe("SME review 2026-10-26", () => {
     expect((await c.run("render --version")).lines.map((l) => l.text)).toEqual(["corridorkey-render 1.0.0-dev.9"]);
     expect((await c.run("version")).lines[0].text).toBe("CorridorKey 1.0.0-dev.9 (the app and its corridorkey command line: one version)");
     expect(spawned).toHaveLength(0);
+  });
+});
+
+describe("SME review 2026-10-26: plain errors (S4) and open (S5)", () => {
+  it("built-ins say what is wrong in words, and what to type, never Node's ENOENT text", async () => {
+    const { c } = make();
+    const cd = await c.run("cd nowhere");
+    expect(cd.lines[0].text).toBe(`Can't go to nowhere: ${join(shots, "nowhere")} isn't there. pwd says where you are, dir lists the folders here, Tab completes a name.`);
+    const into = await c.run('cd "shot.mov/x"');
+    expect(into.lines[0].text).toMatch(/a part of .* is a file, not a folder/);
+    const ls = await c.run("ls nowhere");
+    expect(ls.lines[0].text).toBe(`Can't list ${join(shots, "nowhere")}: ${join(shots, "nowhere")} isn't there. dir alone lists the current folder; Tab completes a name.`);
+    const script = await c.run("run missing.ckcmd");
+    expect(script.lines[0].text).toMatch(/^Can't read the script: .*missing\.ckcmd isn't there\./);
+    // loop: NOT-WORTH — four blocks
+    for (const b of [cd, into, ls, script]) expect(b.lines[0].text).not.toMatch(/ENOENT|ENOTDIR|scandir|stat '/);
+  });
+
+  it("open . shows the folder in the file manager (never opens a file); a missing path says so", async () => {
+    const { c } = make();
+    expect((await c.run("open .")).state).toBe("done");
+    expect((await c.run('start "shot.mov"')).state).toBe("done");
+    expect(shown).toEqual([shots, join(shots, "shot.mov")]);
+    expect((await c.run("open nope")).lines[0].text).toMatch(/^Can't show it: .*nope isn't there/);
+    expect(spawned).toEqual([]);
   });
 });
 

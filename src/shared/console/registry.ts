@@ -174,6 +174,7 @@ const BUILTINS: ConsoleCommand[] = [
       arg({ id: "keyword", short: "k", kind: "string", valueName: "TERM", help: "search the commands and their options instead (man -k)" }),
     ],
     ["help", "help render", "render ?", "help -k overwrite"],
+    ["man"],
   ),
   builtin(
     "apropos",
@@ -219,6 +220,13 @@ const BUILTINS: ConsoleCommand[] = [
     ["allow /mnt/show/sq01", "allow"],
     ["trust"],
   ),
+  builtin(
+    "open",
+    "show a folder (or a file) in the file manager, as Show in folder does; it never opens or runs a file",
+    [arg({ id: "path", kind: "path", positional: true, valueName: "PATH", help: "what to show (default: the current folder)" })],
+    ["open .", "start plates"],
+    ["start"],
+  ),
   builtin("cls", "clear the screen", [], ["cls"], ["clear"]),
   builtin("version", "the app's version, which is its corridorkey command line's (also corridorkey --version)", [], ["version", "corridorkey --version"]),
   builtin(
@@ -258,11 +266,39 @@ export function makeRegistry(spec: CliSpec = cliSpec as CliSpec): Registry {
 }
 
 /**
- * Words a line can't start with, and what to type instead: names other command lines use for something else, kept
- * free here (find: a file search in a later version).
+ * Words a line can't start with, and what to type instead: other command lines' names, each with an answer for what
+ * it would do there (find: kept free for a file search in a later version; rm: the Console never deletes).
  */
+const NEVER_DELETES = "the Console never deletes files (render's --overwrite replaces only its own outputs, as sudo); delete them in your file manager (open . shows this folder there)";
+const NO_COPY = "the Console doesn't copy or move files; render -o writes its outputs where you say";
+const SHOW_FILE = "showing a file's text (cat, type) comes in a later version (the Console's Phase 4); open <file> shows it in the file manager";
+const STAYS_OPEN = "the Console stays open (it is a tab: the rail leaves it); cls or Ctrl+L clears the screen";
 export const ANSWERS: Readonly<Record<string, string>> = {
   find: "find (a file search) comes in a later version; to search the commands and their options: help -k <term> (or apropos <term>)",
+  exit: STAYS_OPEN,
+  quit: STAYS_OPEN,
+  logout: STAYS_OPEN,
+  rm: NEVER_DELETES,
+  rmdir: NEVER_DELETES,
+  del: NEVER_DELETES,
+  erase: NEVER_DELETES,
+  rd: NEVER_DELETES,
+  unlink: NEVER_DELETES,
+  cp: NO_COPY,
+  copy: NO_COPY,
+  mv: NO_COPY,
+  move: NO_COPY,
+  ren: NO_COPY,
+  rename: NO_COPY,
+  cat: SHOW_FILE,
+  type: SHOW_FILE,
+  more: SHOW_FILE,
+  less: SHOW_FILE,
+  head: SHOW_FILE,
+  tail: SHOW_FILE,
+  echo: "echo comes in a later version (the Console's Phase 4); nothing here has variables to print yet",
+  which: "corridorkey is the app's own: version prints its version, corridorkey info checks its engine",
+  where: "corridorkey is the app's own: version prints its version, corridorkey info checks its engine",
 };
 
 /** A command by name or alias; bare `render` / `verify` / `prepare` / `info` are corridorkey's. */

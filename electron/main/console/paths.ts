@@ -57,6 +57,34 @@ export function isInside(child: string, root: string, platform: NodeJS.Platform)
   return rel === "" || (rel !== ".." && !rel.startsWith(".." + a.sep) && !a.isAbsolute(rel));
 }
 
+/**
+ * A file system error in plain words (never Node's "ENOENT: no such file or directory, stat '…'"): what is wrong with
+ * `path`. The caller adds what to type.
+ */
+export function fsErrorText(e: unknown, path: string): string {
+  switch ((e as NodeJS.ErrnoException | null)?.code) {
+    case "ENOENT":
+      return `${path} isn't there`;
+    case "ENOTDIR":
+      return `a part of ${path} is a file, not a folder`;
+    case "EACCES":
+    case "EPERM":
+      return `you have no permission to open ${path}`;
+    case "EISDIR":
+      return `${path} is a folder, not a file`;
+    case "ELOOP":
+      return `${path}: its links lead round in a circle`;
+    case "ENAMETOOLONG":
+      return `${path}: the name is too long`;
+    case "EBUSY":
+    case "EIO":
+    case "ETIMEDOUT":
+      return `${path} didn't answer (a drive or network share that is busy or gone)`;
+  }
+  // an error of the app's own ("not a file", "larger than …") is plain already; Node's keep their text after the code
+  return `${path}: ${String((e as Error)?.message ?? e).replace(/^[A-Z]+: /, "")}`;
+}
+
 export type WriteCheck = { ok: true; path: string } | { ok: false; path: string; reason: string };
 
 /** May the Console write (or delete) at `p`? Yes only inside one of `roots` (each resolved too). */
@@ -66,7 +94,7 @@ export async function checkWrite(p: string, cwd: string, roots: readonly string[
     path = await resolveReal(p, cwd, d);
   } catch (e) {
     // error: SHOWN — the refusal says why the path couldn't be resolved
-    return { ok: false, path: p, reason: `${p} can't be checked: ${(e as Error).message}` };
+    return { ok: false, path: p, reason: `${p} can't be checked: ${fsErrorText(e, p)}` };
   }
   const real: string[] = [];
   // loop: NOT-WORTH — a few chosen folders (the queue's clips), one async realpath each, per write checked

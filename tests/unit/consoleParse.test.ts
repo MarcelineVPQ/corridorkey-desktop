@@ -259,6 +259,24 @@ describe("SME review 2026-10-26", () => {
   });
 });
 
+describe("SME review 2026-10-26: foreign commands (S5)", () => {
+  it("answers what other command lines' names would do, instead of 'unknown command'", () => {
+    const first = (l: string) => parse(l, reg, posix).errors.map((e) => e.message)[0];
+    expect([first("rm -rf plates"), first("del *.exr"), first("RMDIR x")]).toEqual(Array(3).fill(expect.stringMatching(/^the Console never deletes files/)));
+    expect(first("exit")).toMatch(/stays open/);
+    expect(first("quit")).toMatch(/stays open/);
+    expect(first("echo hi")).toMatch(/^echo comes in a later version \(the Console's Phase 4\)/);
+    expect([first("cat a.txt"), first("type a.txt")]).toEqual(Array(2).fill(expect.stringMatching(/later version \(the Console's Phase 4\)/)));
+    expect(first("cp a b")).toMatch(/doesn't copy or move/);
+  });
+
+  it("man is help; open and start show a folder in the file manager", () => {
+    const m = parse("man render", reg, posix);
+    expect([m.errors, m.command?.name, m.positionals[0]?.value]).toEqual([[], "help", "render"]);
+    expect([parse("open .", reg, posix).command?.name, parse("start .", reg, win).command?.name]).toEqual(["open", "open"]);
+  });
+});
+
 describe("SME review 2026-10-26: the CLI's conflicts", () => {
   it("S3: flags the CLI can't take together are marked before Enter, from the CLI's own spec", () => {
     const msg = (l: string) => parse(l, reg, posix).errors.map((e) => e.message);

@@ -17,7 +17,7 @@ import { complete } from "./complete";
 import type { Elevation } from "./elevation";
 import { commandHelp, findLines, overview } from "./help";
 import type { AuditLog, History } from "./logs";
-import { checkWrite, expandHome, resolveReal, type PathDeps } from "./paths";
+import { checkWrite, expandHome, fsErrorText, resolveReal, type PathDeps } from "./paths";
 import { groupSequences } from "../../../src/shared/console/sequences";
 import { WRITE_FOLDERS_MAX } from "../settings";
 import { fileSizeText } from "../../../src/shared/units";
@@ -76,6 +76,8 @@ export interface ConsoleDeps {
   allowed: () => readonly string[];
   /** saves them (index.ts: settings, persisted) */
   setAllowed: (folders: string[]) => void;
+  /** open / start: the file manager shows the path (index.ts: shell.showItemInFolder; it never opens or runs a file) */
+  showInFolder: (path: string) => void;
   /** `allow`'s native confirmation, naming the folder; true: confirmed */
   confirmAllow: (folder: string) => Promise<boolean>;
   /** take the graphics card for a job: null when taken, else why not (the queue runs) */
@@ -285,6 +287,15 @@ export class Console {
       }
       case "dir":
         return now(await this.dir(b, pos("folder")[0], p));
+      case "open": {
+        const a = this.d.paths.platform === "win32" ? win32 : posix;
+        const path = a.resolve(this.cwd, expandHome(pos("path")[0] ?? ".", this.d.paths));
+        // loop: NOT-WORTH — one async stat per open
+        const st = await this.d.fs.stat(path).catch((e: unknown) => e as Error);
+        if (st instanceof Error) return now(this.finish(b, "failed", `Can't show it: ${fsErrorText(st, path)}. Tab completes a name.`));
+        this.d.showInFolder(path);
+        return now(this.finish(b, "done"));
+      }
       case "allow":
         return now(await this.allow(b, pos("folder")[0]));
       case "version":
@@ -308,14 +319,14 @@ export class Console {
       if (this.prevCwd === null) return this.finish(b, "failed", "No previous folder yet: cd - goes back to the folder you were in before the last cd.");
       to = this.prevCwd;
     }
-    let dir: string;
+    let dir = "";
     try {
       dir = await resolveReal(to ?? this.d.paths.home, this.cwd, this.d.paths);
       // loop: NOT-WORTH — one async stat per cd
       if (!(await this.d.fs.stat(dir)).isDirectory()) return this.finish(b, "failed", `${dir} isn't a folder.`);
     } catch (e) {
       // error: SHOWN — the block says why
-      return this.finish(b, "failed", `Can't go to ${to}: ${(e as Error).message}`);
+      return this.finish(b, "failed", `Can't go to ${to ?? "~"}: ${fsErrorText(e, dir || to || this.d.paths.home)}. pwd says where you are, dir lists the folders here, Tab completes a name.`);
     }
     this.prevCwd = this.cwd;
     this.cwd = dir;
@@ -334,14 +345,14 @@ export class Console {
       // loop: NOT-WORTH — ≤ 100 folders
       return this.finish(b, "done", "The Console may also write in (App settings → Console removes them):", ...list.map((f) => `  ${f}`));
     }
-    let dir: string;
+    let dir = "";
     try {
       dir = await resolveReal(folder, this.cwd, this.d.paths);
       // loop: NOT-WORTH — one async stat per allow
       if (!(await this.d.fs.stat(dir)).isDirectory()) return this.finish(b, "failed", `${dir} isn't a folder: allow takes a folder (it covers every folder inside it).`);
     } catch (e) {
       // error: SHOWN — the block says why
-      return this.finish(b, "failed", `Can't allow ${folder}: ${(e as Error).message}`);
+      return this.finish(b, "failed", `Can't allow ${folder}: ${fsErrorText(e, dir || folder)}. Tab completes a folder's name.`);
     }
     if ((await checkWrite(dir, this.cwd, this.d.writeRoots(), this.d.paths)).ok) return this.finish(b, "done", `The Console may already write in ${dir}.`);
     if (list.length >= WRITE_FOLDERS_MAX) return this.finish(b, "refused", `${WRITE_FOLDERS_MAX} folders are allowed already: remove one in App settings → Console first.`);
@@ -383,7 +394,7 @@ export class Console {
       names = await this.d.fs.readdir(dir);
     } catch (e) {
       // error: SHOWN — the block says why
-      return this.finish(b, "failed", `Can't list ${dir}: ${(e as Error).message}`);
+      return this.finish(b, "failed", `Can't list ${dir}: ${fsErrorText(e, dir)}. dir alone lists the current folder; Tab completes a name.`);
     }
     // dot files only with -a (ls's rule; dir /a)
     const all = has("all");
@@ -489,7 +500,7 @@ export class Console {
       this.job = null;
       this.d.sessionChanged();
       // error: SHOWN — the block says why
-      return now(this.finish(b, "failed", `Can't read ${path}: ${(e as Error).message}`));
+      return now(this.finish(b, "failed", `Can't read the script: ${fsErrorText(e, path)}. dir lists the files here; Tab completes a name.`));
     }
     const done = (async () => {
       let failed: ConsoleBlock | null = null;
@@ -619,7 +630,7 @@ export class Console {
         await this.d.fs.mkdir(temp);
       } catch (e) {
         // error: SHOWN — the block says why
-        return now(this.finish(b, "failed", `Can't make ${temp}: ${(e as Error).message}`));
+        return now(this.finish(b, "failed", `Can't make the temporary folder: ${fsErrorText(e, temp)}. --temp <folder> names another one.`));
       }
     }
     // every elevated command is logged before it runs: unlogged, it doesn't run
@@ -649,7 +660,9 @@ export class Console {
       job = JSON.parse(await this.d.fs.readFile(abs, FILE_MAX));
     } catch (e) {
       // error: SHOWN — refused with the reason: what isn't checked doesn't run
-      refusals.push(`--job: can't check ${path} (${(e as Error).message}); the Console runs a job file only once it has read and checked it`);
+      refusals.push(
+        `--job: can't check it: ${e instanceof SyntaxError ? `${path} isn't valid JSON (${e.message})` : fsErrorText(e, path)}; the Console runs a job file only once it has read and checked it`,
+      );
       return [];
     }
     const fields = job && typeof job === "object" ? (job as { input?: unknown; output_dir?: unknown; temp_dir?: unknown }) : {};

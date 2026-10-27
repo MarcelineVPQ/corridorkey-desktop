@@ -384,6 +384,7 @@ const appConsole = new Console({
     scheduleSend();
   },
   confirmAllow,
+  showInFolder: (p) => shell.showItemInFolder(p),
   takeGpu: () => {
     if (queue.running || queue.engineEnding) return "The queue is keying on the graphics card: wait for it, or stop it, then run this.";
     if (cacheMoving) return "The cache folder is moving: wait for it, then run this.";

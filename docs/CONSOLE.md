@@ -18,15 +18,20 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   `render --skip-existing` (it keys the whole set again unless every frame is there and whole: docs/CLI.md "Output
   safety") are marked destructive, each argument carries the CLI's own `conflicts_with` (the parser marks `-F` with
   `-s`/`-e`, `-q` with `-v`, `--overwrite` with `--skip-existing`, `-i` with INPUT before Enter), `render`'s `-o`, `--report`, `--temp` (and `verify`'s and `prepare`'s `--report`) as written paths.
-- **Commands.** `help [command]` (also `command ?`), `help -k <term>` / `apropos <term>` (search the help; `find` is
-  kept free for a file search and says so), `cd` (`cd -`: the folder before), `pwd`, `allow [folder]` (File scope, below), `dir` / `ls` (`-l -a -t -S -r -1`,
+- **Commands.** `help [command]` (also `command ?` and `man <command>`), `help -k <term>` / `apropos <term>` (search the help; `find` is
+  kept free for a file search and says so), `cd` (`cd -`: the folder before), `pwd`, `allow [folder]` (File scope, below), `open [path]` / `start` (the file
+  manager shows it, as Show in folder does: `shell.showItemInFolder`, which never opens or runs a file), `dir` / `ls` (`-l -a -t -S -r -1`,
   combined like `-la`, and DOS's `/w /b /a /o:d` on every system; dot files only with `-a`; a frame sequence is one row,
   `sh010_plate.####.exr  1001-1100 · 96 frames · missing 1047`, `-f` lists its frames: `src/shared/console/sequences.ts`,
   which Tab completion uses too: one candidate per sequence, never one per frame), `cls` / `clear`,
   `history` (`--audit`: the elevated log), `version` (also `corridorkey --version`, `render --version`: the app's
   version, which its corridorkey shares; answered without running it), `run <file.ckcmd>` (a script of Console lines, one per line, `#` comments;
   each line through the same checks; stops at the first that fails; no script inside a script), `sudo <command>`,
-  `sudo -k`, and `corridorkey render | verify | prepare | info` (also bare `render` …).
+  `sudo -k`, and `corridorkey render | verify | prepare | info` (also bare `render` …). Other command lines' names get
+  an answer instead of "unknown command" (`ANSWERS` in registry.ts): `exit` / `quit` (the Console stays open), `rm` /
+  `del` / `rmdir` (the Console never deletes files), `cp` / `mv`, `cat` / `type` / `echo` (a later version, Phase 4),
+  `which`. Built-ins say a file system error in words with what to type (`fsErrorText` in paths.ts), never Node's
+  `ENOENT: …, stat '…'`.
 - **Running corridorkey.** The shipped binary (`engineFind.ts findCli`) is spawned with an argv, `shell: false`, its own
   process group, the engine's environment (`rustEngineEnv`, the app's models, runtime and TensorRT cache), in the
   Console's folder (on Windows corridorkey takes the current folder out of its DLL search first, `SetDllDirectoryW("")`
