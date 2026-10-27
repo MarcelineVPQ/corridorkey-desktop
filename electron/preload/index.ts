@@ -15,7 +15,6 @@ const api: CorridorKeyApi = {
   addPaths: (paths) => ipcRenderer.invoke(IPC.addPaths, paths),
   pickClips: (kind) => ipcRenderer.invoke(IPC.pickClips, kind),
   pickFile: (kind) => ipcRenderer.invoke(IPC.pickFile, kind),
-  pickCheckout: () => ipcRenderer.invoke(IPC.pickCheckout),
   pickRustEngine: (what) => ipcRenderer.invoke(IPC.pickRustEngine, what),
   setRustEngine: (what, path) => ipcRenderer.invoke(IPC.setRustEngine, what, path),
   installFfmpeg: () => ipcRenderer.invoke(IPC.installFfmpeg),

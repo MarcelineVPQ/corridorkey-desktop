@@ -40,7 +40,6 @@ export function processName(cmdline: string): string {
   const lower = cmdline.toLowerCase();
   if (/mount_sonata|sonata\.appimage/.test(lower)) return "Sonata";
   if (/sonata-align|sonata_align|sonata-engine/.test(lower)) return "Sonata's word timing";
-  if (/ck_engine\.py/.test(lower)) return "CorridorKey engine";
   const first = cmdline.split("\0")[0] || cmdline;
   // either separator: Linux paths, and Windows' as nvidia-smi gives them
   return first.split(/[\\/]/).pop() || "unknown";

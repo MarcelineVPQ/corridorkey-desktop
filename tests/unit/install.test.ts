@@ -500,12 +500,11 @@ describe("TensorRT catalogue and rules", () => {
       expect(keepTensorrt(drop)).toBe(false);
   });
 
-  it("asks the engine for TensorRT only on Linux, with the setting on, the Rust engine and the parts installed", () => {
-    const yes = { platform: "linux" as const, setting: true, engine: "rust" as const, ready: true };
+  it("asks the engine for TensorRT only on Linux, with the setting on and the parts installed", () => {
+    const yes = { platform: "linux" as const, setting: true, ready: true };
     expect(useTensorrt(yes)).toBe(true);
     expect(useTensorrt({ ...yes, ready: false })).toBe(false);
     expect(useTensorrt({ ...yes, setting: false })).toBe(false);
-    expect(useTensorrt({ ...yes, engine: "python" })).toBe(false);
     expect(useTensorrt({ ...yes, platform: "win32" })).toBe(false);
     expect(useTensorrt({ ...yes, platform: "darwin" })).toBe(false);
     expect([trtSupported("linux"), trtSupported("win32"), trtSupported("darwin")]).toEqual([true, false, false]);

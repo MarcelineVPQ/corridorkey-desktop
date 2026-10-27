@@ -1,8 +1,6 @@
 // Client for the CorridorKey engine (docs/ENGINE_PROTOCOL.md): JSON lines over
-// the child's stdin/stdout, the Sonata helper pattern. Two engines speak it:
-// the Rust one on ONNX Runtime (engine-rs/, `corridorkey-engine --models DIR`,
-// the default when it is set up) and the PyTorch one (engine/ck_engine.py run
-// with a CorridorKey2.0 checkout's venv), kept as the Rust engine's benchmark reference (Marcy 2026-10-22).
+// the child's stdin/stdout, the Sonata helper pattern. The engine is the Rust one on
+// ONNX Runtime (engine-rs/, `corridorkey-engine --models DIR`).
 //
 // lifetime: at most ONE engine process. Spawned when the queue starts, sent
 // `quit` when the queue ends (a loaded model holds GBs of graphics memory:
@@ -16,22 +14,13 @@ import { existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export const PROTOCOL = 1;
-const PING_TIMEOUT_MS = 120_000; // PyTorch engine: importing torch + CUDA init; more when the disk cache is cold
+const PING_TIMEOUT_MS = 120_000; // loading ONNX Runtime + CUDA init; more when the disk cache is cold
 const QUIT_GRACE_MS = 10_000;
 const STDERR_LINES = 40;
 
 export type EngineReply = { type: string; id?: string; [key: string]: unknown };
 
-export interface PythonLaunch {
-  kind?: "python";
-  python: string;
-  script: string;
-  packageRoot: string;
-  env: NodeJS.ProcessEnv;
-}
-
-export interface RustLaunch {
-  kind: "rust";
+export interface EngineLaunch {
   binary: string;
   models: string;
   // libonnxruntime.so for the GPU build (null: the engine's own, or CK_ENGINE_ORT)
@@ -43,19 +32,7 @@ export interface RustLaunch {
   trtBuild?: string | null;
 }
 
-export type EngineLaunch = PythonLaunch | RustLaunch;
-
 export type SpawnFn = (cmd: string, args: string[], opts: SpawnOptions) => ChildProcess;
-
-/** The engine's environment: ours minus what an AppImage/Electron sets that breaks a venv (Sonata's helperEnv). */
-export function engineEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const out: NodeJS.ProcessEnv = { ...env };
-  // loop: NOT-WORTH — six names, once per engine spawn
-  for (const k of ["LD_LIBRARY_PATH", "LD_PRELOAD", "PYTHONHOME", "PYTHONPATH", "PYTHONSTARTUP", "ELECTRON_RUN_AS_NODE"]) delete out[k];
-  out.PYTHONUNBUFFERED = "1";
-  out.PYTHONDONTWRITEBYTECODE = "1";
-  return out;
-}
 
 /**
  * The Rust engine's environment: ours minus what an AppImage/Electron sets, plus the folders of
@@ -113,17 +90,14 @@ export function rustEngineEnv(
 
 /** The command line and environment of an engine launch. */
 export function launchCommand(launch: EngineLaunch): { cmd: string; args: string[]; env: NodeJS.ProcessEnv } {
-  if (launch.kind === "rust") {
-    const args = ["--models", launch.models];
-    if (launch.ort) args.push("--ort", launch.ort);
-    const env = rustEngineEnv(launch.env, launch.ort);
-    // TensorRT engines go to the app's own cache folder on every system (engine-rs pipeline.rs trt_root)
-    if (launch.trtCache && !launch.env.CK_ENGINE_TRT_CACHE) env.CK_ENGINE_TRT_CACHE = launch.trtCache;
-    // the builder the app ships next to the engine (the engine also looks there itself; a dev engine has none beside it)
-    if (launch.trtBuild && !launch.env.CK_ENGINE_TRT_BUILD) env.CK_ENGINE_TRT_BUILD = launch.trtBuild;
-    return { cmd: launch.binary, args, env };
-  }
-  return { cmd: launch.python, args: ["-u", launch.script, "--package-root", launch.packageRoot], env: engineEnv(launch.env) };
+  const args = ["--models", launch.models];
+  if (launch.ort) args.push("--ort", launch.ort);
+  const env = rustEngineEnv(launch.env, launch.ort);
+  // TensorRT engines go to the app's own cache folder on every system (engine-rs pipeline.rs trt_root)
+  if (launch.trtCache && !launch.env.CK_ENGINE_TRT_CACHE) env.CK_ENGINE_TRT_CACHE = launch.trtCache;
+  // the builder the app ships next to the engine (the engine also looks there itself; a dev engine has none beside it)
+  if (launch.trtBuild && !launch.env.CK_ENGINE_TRT_BUILD) env.CK_ENGINE_TRT_BUILD = launch.trtBuild;
+  return { cmd: launch.binary, args, env };
 }
 
 export class EngineProcess {

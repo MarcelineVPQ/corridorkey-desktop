@@ -4,10 +4,11 @@ A free desktop app for CorridorKey 2.0 (Corridor Digital's AI keyer): Linux, Win
 Built to **Marcy's 17 basic rules for programming applications** (memory
 `marcys-15-basic-rules`); they are the standard here, with these specifics:
 
-- **Engine/app contract (rule 10):** the app never imports the model. Two engines speak
-  `docs/ENGINE_PROTOCOL.md` (the Sonata helper pattern): the Rust engine on ONNX Runtime
-  (`engine-rs/`, docs/ENGINE_RUST.md; the default when set up) and `engine/ck_engine.py`, which runs
-  the upstream runtime unchanged from a CorridorKey2.0 checkout (kept permanently as the benchmark reference for the Rust engine, Marcy 2026-10-22).
+- **Engine/app contract (rule 10):** the app never imports the model. It runs the Rust engine on ONNX Runtime
+  only (`engine-rs/`, docs/ENGINE_RUST.md), which speaks `docs/ENGINE_PROTOCOL.md` (the Sonata helper pattern);
+  nothing PyTorch ships in the app. The original stays the benchmark reference through the tools:
+  `tools/vs_original.sh` and `tools/engine_bench.mjs python` run it from its CorridorKey2.0 checkout and venv via
+  `tools/reference/ck_engine.py` (the upstream runtime unchanged behind the protocol; Marcy 2026-10-22).
   Protocol changes: additive fields, bump `PROTOCOL` only for what the app must know.
 - **Accuracy (rule 1):** every number on screen comes from an engine reply (frames handed to
   the writers, the window really used, the free memory it saw). Never estimate progress in the app.
@@ -32,5 +33,5 @@ Built to **Marcy's 17 basic rules for programming applications** (memory
 - **npm:** the system npm 9 (and npm 10) crash in peer resolution on this set; `.npmrc` has
   `legacy-peer-deps=true`. Run Electron's `node node_modules/electron/install.js` if the binary is missing.
 
-Commands: `npm run dev` · `npm run build` · `npm run check` (typecheck, format, gates, unit + engine tests) ·
+Commands: `npm run dev` · `npm run build` · `npm run check` (typecheck, format, gates, unit + reference-engine tests) ·
 `npm run check:engine` (engine-rs: cargo fmt --check, clippy -D warnings, cargo test).

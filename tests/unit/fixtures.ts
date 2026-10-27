@@ -107,9 +107,8 @@ export const ffmpegState = (over: Partial<FfmpegState> = {}): FfmpegState => ({
   ...over,
 });
 
-/** The saved settings: a CorridorKey2.0 checkout at /ck, everything else as on a first start. */
+/** The saved settings, as on a first start. */
 export const settings = (over: Partial<Settings> = {}): Settings => ({
-  corridorKeyRoot: "/ck",
   lastOptions: DEFAULT_OPTIONS,
   appearance: DEFAULT_APPEARANCE,
   outputRoot: null,
@@ -137,8 +136,7 @@ const updateState = (): UpdateState => ({
 });
 
 /**
- * The whole app state: the PyTorch reference engine set up from /ck (the ONNX Runtime engine not, its first
- * problem being the engine program), the install and ffmpeg done, TensorRT off, no jobs, the engine stopped.
+ * The whole app state: the engine set up, the install and ffmpeg done, TensorRT off, no jobs, the engine stopped.
  */
 export const appState = (over: Partial<AppState> = {}): AppState => ({
   version: "0.1.0-dev.1",
@@ -148,9 +146,7 @@ export const appState = (over: Partial<AppState> = {}): AppState => ({
   gpu: null,
   gpuError: null,
   settings: settings(),
-  checkout: { ok: true, problems: [] },
-  rustEngine: { ok: false, problems: ["Choose the CorridorKey engine program (corridorkey-engine)."] },
-  engineKind: "python",
+  rustEngine: { ok: true, problems: [] },
   engineFiles: { binary: [], models: [], ort: [] },
   ffmpeg: ffmpegState(),
   install: installState(),

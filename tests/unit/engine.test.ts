@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import type { ChildProcess } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { EngineProcess, engineEnv, launchCommand, rustEngineEnv } from "../../electron/main/engine";
+import { EngineProcess, launchCommand, rustEngineEnv } from "../../electron/main/engine";
 
 function fakeChild(onLine: (line: string, out: PassThrough) => void): ChildProcess {
   const child = new EventEmitter() as ChildProcess;
@@ -19,7 +19,7 @@ function fakeChild(onLine: (line: string, out: PassThrough) => void): ChildProce
   return child;
 }
 
-const launch = { python: "/py", script: "/s.py", packageRoot: "/ck", env: {} };
+const launch = { binary: "/e/corridorkey-engine", models: "/m", ort: null, env: {} };
 
 describe("EngineProcess", () => {
   it("resolves the pong and forwards other replies", async () => {
@@ -57,43 +57,31 @@ describe("EngineProcess", () => {
     );
     await expect(p.start()).rejects.toThrow(/couldn't answer the ping: internal error: boom/);
   });
-
-  it("strips variables that break a venv", () => {
-    const env = engineEnv({ LD_LIBRARY_PATH: "/x", PYTHONPATH: "/y", HOME: "/h" });
-    expect(env).toEqual({ HOME: "/h", PYTHONUNBUFFERED: "1", PYTHONDONTWRITEBYTECODE: "1" });
-  });
 });
 
 describe("engine launch", () => {
-  it("runs the PyTorch engine with its venv and checkout", () => {
-    const c = launchCommand({ python: "/ck/venv/bin/python", script: "/app/engine/ck_engine.py", packageRoot: "/ck", env: { PYTHONPATH: "/x", HOME: "/h" } });
-    expect(c.cmd).toBe("/ck/venv/bin/python");
-    expect(c.args).toEqual(["-u", "/app/engine/ck_engine.py", "--package-root", "/ck"]);
-    expect(c.env.PYTHONPATH).toBeUndefined();
-  });
-
   it("runs the Rust engine with its models (and ONNX Runtime's library)", () => {
-    const c = launchCommand({ kind: "rust", binary: "/e/corridorkey-engine", models: "/m", ort: null, env: { HOME: "/h", LD_PRELOAD: "/bad.so" } });
+    const c = launchCommand({ binary: "/e/corridorkey-engine", models: "/m", ort: null, env: { HOME: "/h", LD_PRELOAD: "/bad.so" } });
     expect([c.cmd, ...c.args]).toEqual(["/e/corridorkey-engine", "--models", "/m"]);
     // the engine ends with this app (proc.rs end_with_parent): it gets the app's pid
     expect(c.env).toEqual({ HOME: "/h", CK_ENGINE_PARENT_PID: String(process.pid) });
-    const g = launchCommand({ kind: "rust", binary: "/e/corridorkey-engine", models: "/m", ort: "/o/libonnxruntime.so", env: {} });
+    const g = launchCommand({ binary: "/e/corridorkey-engine", models: "/m", ort: "/o/libonnxruntime.so", env: {} });
     expect(g.args).toEqual(["--models", "/m", "--ort", "/o/libonnxruntime.so"]);
   });
 
   it("points the Rust engine's TensorRT cache at the app's cache folder, unless the environment says otherwise", () => {
-    const c = launchCommand({ kind: "rust", binary: "/e/corridorkey-engine", models: "/m", ort: null, env: {}, trtCache: "/c/corridorkey-desktop/tensorrt" });
+    const c = launchCommand({ binary: "/e/corridorkey-engine", models: "/m", ort: null, env: {}, trtCache: "/c/corridorkey-desktop/tensorrt" });
     expect(c.env.CK_ENGINE_TRT_CACHE).toBe("/c/corridorkey-desktop/tensorrt");
-    const o = launchCommand({ kind: "rust", binary: "/e/corridorkey-engine", models: "/m", ort: null, env: { CK_ENGINE_TRT_CACHE: "/mine" }, trtCache: "/c/t" });
+    const o = launchCommand({ binary: "/e/corridorkey-engine", models: "/m", ort: null, env: { CK_ENGINE_TRT_CACHE: "/mine" }, trtCache: "/c/t" });
     expect(o.env.CK_ENGINE_TRT_CACHE).toBe("/mine");
   });
 
   it("hands the Rust engine the shipped TensorRT builder, unless the environment names one", () => {
-    const c = launchCommand({ kind: "rust", binary: "/e/corridorkey-engine", models: "/m", ort: null, env: {}, trtBuild: "/e/ck-trt-build" });
+    const c = launchCommand({ binary: "/e/corridorkey-engine", models: "/m", ort: null, env: {}, trtBuild: "/e/ck-trt-build" });
     expect(c.env.CK_ENGINE_TRT_BUILD).toBe("/e/ck-trt-build");
-    const o = launchCommand({ kind: "rust", binary: "/e/corridorkey-engine", models: "/m", ort: null, env: { CK_ENGINE_TRT_BUILD: "/mine" }, trtBuild: "/e/ck-trt-build" });
+    const o = launchCommand({ binary: "/e/corridorkey-engine", models: "/m", ort: null, env: { CK_ENGINE_TRT_BUILD: "/mine" }, trtBuild: "/e/ck-trt-build" });
     expect(o.env.CK_ENGINE_TRT_BUILD).toBe("/mine");
-    expect(launchCommand({ kind: "rust", binary: "/e/corridorkey-engine", models: "/m", ort: null, env: {}, trtBuild: null }).env).not.toHaveProperty("CK_ENGINE_TRT_BUILD");
+    expect(launchCommand({ binary: "/e/corridorkey-engine", models: "/m", ort: null, env: {}, trtBuild: null }).env).not.toHaveProperty("CK_ENGINE_TRT_BUILD");
   });
 
   it("finds the CUDA, cuDNN and TensorRT libraries of a pip-wheel layout next to ONNX Runtime", () => {

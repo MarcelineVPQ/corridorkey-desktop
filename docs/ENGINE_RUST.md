@@ -2,7 +2,8 @@
 
 `engine-rs/` is CorridorKey's engine in Rust on ONNX Runtime (Marcy 2026-10-21: Rust + ORT is the
 house engine stack). It speaks [ENGINE_PROTOCOL.md](ENGINE_PROTOCOL.md) exactly like the PyTorch engine
-(`engine/ck_engine.py`), which stays as the benchmark reference (Marcy 2026-10-22). Measured on 2026-10-21; every
+(`tools/reference/ck_engine.py`, not part of the app), which stays as the benchmark reference for the comparison
+tools (Marcy 2026-10-22). Measured on 2026-10-21; every
 number below comes from a run whose command is given or from the tests.
 
 ## Architecture
@@ -133,9 +134,8 @@ The engine runs `ffmpeg` / `ffprobe` from the system: they are not bundled.
 The engine ships inside the AppImage (`resources/engine/`); its GPU runtime and models are downloaded on first start
 into `~/.local/share/corridorkey-desktop` (`electron/main/install.ts`, Engine page, Runtime and models). The Engine
 page lists every copy it finds (`electron/main/engineFind.ts`; Automatic = the newest, Browse… for anything else);
-`CK_ENGINE_BIN` / `CK_ENGINE_MODELS` / `CK_ENGINE_ORT` override the lists. The queue runs the Rust engine when its
-program and models are there, else the PyTorch engine from a CorridorKey2.0 checkout if one is chosen (the benchmark
-reference; `electron/main/settings.ts` `chooseEngine`). The Engine page says which engine is in use.
+`CK_ENGINE_BIN` / `CK_ENGINE_MODELS` / `CK_ENGINE_ORT` override the lists. The queue runs when the engine's program
+and models are there (`electron/main/settings.ts` `checkRustEngine`); the Engine page says whether it is set up.
 
 ## Graphics memory
 

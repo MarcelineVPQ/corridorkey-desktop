@@ -152,7 +152,7 @@ export interface MemoryInfo {
 // What ran the job (the engine's `provider` reply, docs/ENGINE_PROTOCOL.md), plus why the app didn't ask for
 // TensorRT when it didn't (the app's own decision at the job's start: the setting, the parts, the engine).
 export interface JobTech {
-  // cuda | tensorrt | tensorrt+cuda | cpu | coreml (null: the engine sent no provider reply, e.g. the PyTorch engine)
+  // cuda | tensorrt | tensorrt+cuda | cpu | coreml (null: the engine sent no provider reply)
   provider: string | null;
   precision: string | null;
   tensorrtRequested: boolean;
@@ -260,10 +260,7 @@ export interface Pong {
   device: string;
   gpu: string | null;
   vramTotalMb: number | null;
-  // the PyTorch engine
-  python: string | null;
-  torch: string | null;
-  // the Rust engine (ONNX Runtime): its version, provider (cuda / cpu) and precision (fp16 / fp32)
+  // ONNX Runtime: its version, provider (cuda / cpu) and precision (fp16 / fp32)
   ort: string | null;
   provider: string | null;
   precision: string | null;
@@ -308,8 +305,6 @@ export interface Appearance {
 export const DEFAULT_APPEARANCE: Appearance = { theme: "system", accent: "builtin", glass: false };
 
 export interface Settings {
-  // The CorridorKey2.0 checkout: corridorkey/, weights/, vfms/, venv/.
-  corridorKeyRoot: string | null;
   lastOptions: JobOptions;
   appearance: Appearance;
   // null: results go next to each clip (out_<clip>); else into this folder
@@ -329,8 +324,6 @@ export interface Settings {
   // system's cache folder (platform.ts appDirs), backlog row 44
   cacheRoot: string | null;
 }
-
-export type EngineKind = "rust" | "python";
 
 // The app's own updates (electron/main/updater). null feed = no release
 // channel set up yet (the repo has no releases): App settings says so.
@@ -511,10 +504,8 @@ export interface AppState {
   gpu: GpuInfo | null;
   gpuError: string | null;
   settings: Settings;
-  checkout: CheckoutCheck;
-  // the Rust engine's setup, and which engine the queue uses (null: none is set up)
+  // the Rust engine's setup (ok: the queue can run)
   rustEngine: CheckoutCheck;
-  engineKind: EngineKind | null;
   // what the Engine page's lists offer, and the paths the engine runs with (a setting of null = Automatic)
   engineFiles: EngineFiles;
   ffmpeg: FfmpegState;
@@ -547,7 +538,6 @@ export interface CorridorKeyApi {
   // "files": video files; "folder": frame sequences and folders of clips (one dialog can't pick both)
   pickClips(kind: "files" | "folder"): Promise<void>;
   pickFile(kind: HintFileKind): Promise<string | null>;
-  pickCheckout(): Promise<void>;
   pickRustEngine(what: EngineFileKind): Promise<void>;
   // null = Automatic; a path must be one the list offers (or the current setting)
   setRustEngine(what: EngineFileKind, path: string | null): Promise<void>;

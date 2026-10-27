@@ -1,6 +1,6 @@
 """Protocol tests for ck_engine.serve, with a fake engine (no torch, no GPU).
 
-Run: python3 -I -m unittest discover -s engine -p 'test_*.py'
+Run: python3 -I -m unittest discover -s tools/reference -p 'test_*.py'
 """
 import io
 import json

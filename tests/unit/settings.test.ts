@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { checkRustEngine, chooseEngine, loadSettings } from "../../electron/main/settings";
+import { checkRustEngine, loadSettings } from "../../electron/main/settings";
 
 const files = (list: string[]) => {
   const set = new Set(list);
@@ -35,27 +35,27 @@ describe("Rust engine setup", () => {
     expect(checkRustEngine("/e/b", "/m", null, f.exists, f.list).ok).toBe(true);
   });
 
-  it("prefers the Rust engine, falls back to the PyTorch checkout", () => {
-    const ok = { ok: true, problems: [] };
-    const no = { ok: false, problems: ["x"] };
-    expect(chooseEngine(ok, ok)).toBe("rust");
-    expect(chooseEngine(no, ok)).toBe("python");
-    expect(chooseEngine(no, no)).toBeNull();
-  });
-
   it("keeps TensorRT off unless the file says true", () => {
     const dir = mkdtempSync(join(tmpdir(), "ck-settings-"));
     const f = join(dir, "settings.json");
-    expect(loadSettings(f, {}).tensorrt).toBe(false);
+    expect(loadSettings(f).tensorrt).toBe(false);
     writeFileSync(f, JSON.stringify({ tensorrt: "yes" }));
-    expect(loadSettings(f, {}).tensorrt).toBe(false);
+    expect(loadSettings(f).tensorrt).toBe(false);
     writeFileSync(f, JSON.stringify({ tensorrt: true }));
-    expect(loadSettings(f, {}).tensorrt).toBe(true);
+    expect(loadSettings(f).tensorrt).toBe(true);
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("never loads the CK_ENGINE_* overrides into the saved settings (they'd stick after the variable is gone)", () => {
-    const s = loadSettings("/nonexistent/settings.json", { CK_ENGINE_BIN: "/e/b", CK_ENGINE_MODELS: "/m" });
-    expect([s.engineBinary, s.modelsDir, s.ortLibrary]).toEqual([null, null, null]);
+  it("loads a settings file that still names the removed PyTorch engine's checkout, and drops the key", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ck-settings-"));
+    try {
+      const f = join(dir, "settings.json");
+      writeFileSync(f, JSON.stringify({ corridorKeyRoot: "/ck", outputRoot: "/out", tensorrt: true }));
+      const s = loadSettings(f);
+      expect(s).toMatchObject({ outputRoot: "/out", tensorrt: true });
+      expect(s).not.toHaveProperty("corridorKeyRoot");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

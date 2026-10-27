@@ -85,7 +85,6 @@ export function QueuePage(props: {
             sectionTasks={props.sectionTasks}
             queueRunning={state.queueRunning}
             platform={state.system.platform}
-            engineKind={state.engineKind}
             tensorrt={state.tensorrt}
             onChange={(o) => void window.ck.setJobOptions(job.id, o)}
           />

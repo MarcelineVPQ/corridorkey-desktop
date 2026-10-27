@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- The app runs only its Rust + ONNX Runtime engine: the PyTorch engine is gone from it (the Engine page's
+  "Benchmark reference" section, its CorridorKey2.0 folder setting, and the PyTorch-only limits on a clip's codec,
+  internal resolution and input precision). A settings file that still names the folder loads as before; the key is
+  dropped. Comparisons with Corridor's original stay in the repository's tools (`tools/vs_original.sh`,
+  `tools/engine_bench.mjs`), which run it from its own checkout and venv.
+
 ## 1.0.0-dev.1
 
 The first development build of 1.0: a free desktop app for CorridorKey 2.0, Corridor Digital's AI green and blue

@@ -163,7 +163,7 @@ if [ "$REHEARSE" = 1 ]; then
   MEM_OURS=12 MEM_ORIG=${MEM_ORIG:-12}
 else
   OURS_BENCH=(rust --bin "$ENGINE" --models "$MODELS" --ort "$ORT" --env "LD_LIBRARY_PATH=$LD" --device cuda --stall-s 900)
-  ORIG_BENCH=(python --python "$ORIG_PY" --script "$REPO/engine/ck_engine.py" --package-root "$ORIG_ROOT" --stall-s 900)
+  ORIG_BENCH=(python --python "$ORIG_PY" --script "$REPO/tools/reference/ck_engine.py" --package-root "$ORIG_ROOT" --stall-s 900)
   OURS_CMD=("$ENGINE" --models "$MODELS" --ort "$ORT" --device cuda)
   MEM_OURS=$([ "$HAS_4K" = 1 ] && echo 18 || echo 12)
   MEM_ORIG=${MEM_ORIG:-$([ "$HAS_4K" = 1 ] && echo 24 || echo 16)}
@@ -546,7 +546,7 @@ s_robust() {
   if [ "$REHEARSE" = 1 ]; then
     args+=(--cpu --frames 4 --deadline 3600 --full-kb 16)
   else
-    orig_json=$("$PY" -I -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "$ORIG_PY" -u "$REPO/engine/ck_engine.py" --package-root "$ORIG_ROOT")
+    orig_json=$("$PY" -I -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "$ORIG_PY" -u "$REPO/tools/reference/ck_engine.py" --package-root "$ORIG_ROOT")
     cli_json=$("$PY" -I -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "$ORIG_PY" -u "$ORIG_ROOT/infer.py")
     args+=(--original "$orig_json" --original-cli "$cli_json" --original-root "$ORIG_ROOT")
   fi

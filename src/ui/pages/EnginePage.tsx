@@ -1,10 +1,9 @@
-// Engine: what runs the model. Main view: which engine the queue uses, the
-// engine as it last answered, each engine's files, the graphics card (read
+// Engine: what runs the model. Main view: whether the engine is set up, the
+// engine as it last answered, its files, the graphics card (read
 // only while a job runs). Panel: the first-run install (GPU runtime and models),
-// ffmpeg (checked, and installed on request), the lists of engine files found
-// (Automatic = the newest, Browse… for anything else), and the CorridorKey
-// checkout the PyTorch engine (the benchmark reference) runs from.
-import { Check, Cpu, Download, Film, FolderOpen, FolderCog, ListChecks, X, Zap } from "lucide-react";
+// ffmpeg (checked, and installed on request), and the lists of engine files found
+// (Automatic = the newest, Browse… for anything else).
+import { Check, Cpu, Download, Film, ListChecks, X, Zap } from "lucide-react";
 import type { AppState, EngineFileKind } from "../../shared/types";
 import { installMissing } from "../../shared/tasks";
 import { downloadingStatus, ENGINE_FAILED, NO_VRAM_HELD } from "../../shared/texts";
@@ -14,7 +13,6 @@ import { Stat } from "../JobView";
 import { gib } from "../format";
 import { FfmpegBox, InstallBox, installPct, TrtBox } from "../setup/SetupParts";
 import { PathText } from "../PathText";
-import { More } from "../More";
 
 export function EnginePage(props: {
   state: AppState;
@@ -28,9 +26,7 @@ export function EnginePage(props: {
 }) {
   const { state } = props;
   const p = state.engine.pong;
-  const root = state.settings.corridorKeyRoot;
   const st = state.settings;
-  const kind = state.engineKind;
   const rust = state.rustEngine;
   const ff = state.ffmpeg;
   const inst = state.install;
@@ -123,13 +119,11 @@ export function EnginePage(props: {
         )}
         <MainBlock title="Engine in use">
           <p className="hint-text">
-            {kind === "rust"
+            {rust.ok
               ? "The CorridorKey engine on ONNX Runtime."
-              : kind === "python"
-                ? "The PyTorch engine from your CorridorKey2.0 folder. Set up the ONNX Runtime engine to use it instead."
-                : needInstall
-                  ? "Not installed yet: the setup downloads the GPU runtime and the models."
-                  : "None set up yet: no engine program or models found. Choose them in the panel."}
+              : needInstall
+                ? "Not installed yet: the setup downloads the GPU runtime and the models."
+                : "None set up yet: no engine program or models found. Choose them in the panel."}
           </p>
           <button type="button" className="btn small" onClick={props.openSetup}>
             <ListChecks size={14} /> Open the setup
@@ -140,9 +134,9 @@ export function EnginePage(props: {
             <div className="stats">
               <Stat k="State" v={{ stopped: `Idle · ${NO_VRAM_HELD}`, starting: "Starting", ready: "Running the queue", failed: "Failed" }[state.engine.status]} />
               <Stat k="Engine" v={`${p.engine} ${p.version} · protocol ${p.protocol}`} />
-              {p.torch ? <Stat k="Python / PyTorch" v={`${p.python ?? "?"} · ${p.torch}`} /> : <Stat k="Runtime" v={`ONNX Runtime ${p.ort ?? "?"} · ${p.provider ?? "?"} · ${p.precision ?? "?"}`} />}
+              <Stat k="Runtime" v={`ONNX Runtime ${p.ort ?? "?"} · ${p.provider ?? "?"} · ${p.precision ?? "?"}`} />
               <Stat k="Graphics card" v={p.gpu ? `${p.gpu}${p.vramTotalMb ? ` · ${gib(p.vramTotalMb)}` : ""}` : "none found"} />
-              {trt.supported && !p.torch && <Stat k="TensorRT" v={trt.on ? (trt.ready ? "On: jobs ask for it" : "On, not installed: jobs run on CUDA") : "Off"} />}
+              {trt.supported && <Stat k="TensorRT" v={trt.on ? (trt.ready ? "On: jobs ask for it" : "On, not installed: jobs run on CUDA") : "Off"} />}
             </div>
           ) : (
             <p className="hint-text">Not started yet this session. It starts with the queue and quits when the queue is done, so it holds no graphics memory while idle.</p>
@@ -151,7 +145,7 @@ export function EnginePage(props: {
         <MainBlock title="ONNX Runtime engine files">
           {/* before the first install nothing is wrong yet: the setup installs them (no red "missing" lines) */}
           {needInstall && !rust.ok ? <p className="hint-text">The setup's first step installs them.</p> : checks(rust, "Engine program and the five networks found")}
-          {p && !p.torch && (
+          {p && (
             <ul className="check-list">
               {/* loop: NOT-WORTH — five networks per render */}
               {Object.entries(p.assets).map(([k, ok]) => (
@@ -211,45 +205,12 @@ export function EnginePage(props: {
       >
         {() => <FfmpegBox ff={ff} />}
       </Section>
-      <Section id="onnx" icon={Cpu} title="ONNX Runtime engine" status={rust.ok ? (kind === "rust" ? "in use" : "set up") : "not set up"} task={props.sectionTasks["engine/onnx"] ?? null}>
+      <Section id="onnx" icon={Cpu} title="ONNX Runtime engine" status={rust.ok ? "in use" : "not set up"} task={props.sectionTasks["engine/onnx"] ?? null}>
         {() => (
           <>
             {pick("binary", "Engine program", st.engineBinary, state.system.engineBin)}
             {pick("models", "Models folder", st.modelsDir, "The five CorridorKey ONNX networks (C-RADIO, MoGe, RVM, stage 1, stage 2)")}
             {pick("ort", "ONNX Runtime library", st.ortLibrary, `${state.system.ortLib}, the graphics card build`)}
-          </>
-        )}
-      </Section>
-      <Section id="folder" icon={FolderCog} title="Benchmark reference (advanced)" status={root ? (state.checkout.ok ? "set up" : "incomplete") : "not used"} task={null}>
-        {() => (
-          <>
-            <p className="hint-text">Not needed to use CorridorKey: it runs Corridor&apos;s original (PyTorch), to compare speed and quality.</p>
-            <More>
-              <p className="hint-text">It runs Corridor&apos;s original CorridorKey 2.0 from a CorridorKey2.0 checkout, so speed and quality can be compared on the same machine (README, Speed).</p>
-            </More>
-            <Row label="CorridorKey2.0 checkout" hint="The original's folder, with its venv and weights">
-              <div className="file-pick">
-                <button type="button" className="btn small" onClick={() => window.ck.pickCheckout()}>
-                  <FolderOpen size={14} /> Choose…
-                </button>
-                {root && <PathText path={root} />}
-              </div>
-            </Row>
-            {root &&
-              (state.checkout.ok ? (
-                <div className="check-line ok">
-                  <Check size={15} aria-hidden /> Code, Python environment, weights and foundation models found
-                </div>
-              ) : (
-                <ul className="check-list">
-                  {/* loop: NOT-WORTH — a few problems per render */}
-                  {state.checkout.problems.map((m) => (
-                    <li key={m} className="hint-text">
-                      Not usable yet: {m}
-                    </li>
-                  ))}
-                </ul>
-              ))}
           </>
         )}
       </Section>

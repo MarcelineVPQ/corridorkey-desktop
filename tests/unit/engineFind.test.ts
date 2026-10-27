@@ -85,10 +85,9 @@ describe("finding the engine's files", () => {
   });
 
   it("titles the window with CorridorKey's own version and the engine", () => {
-    expect(windowTitle("rust", "2.0.0-onnx.3")).toBe("CorridorKey 2.0 — Rust + ONNX");
-    expect(windowTitle("rust", "2.1.0-onnx.1")).toBe("CorridorKey 2.1 — Rust + ONNX");
-    expect(windowTitle(null, null)).toBe("CorridorKey — Rust + ONNX");
-    expect(windowTitle("python", "2.0.0-onnx.3")).toBe("CorridorKey — PyTorch (reference)");
+    expect(windowTitle("2.0.0-onnx.3")).toBe("CorridorKey 2.0 — Rust + ONNX");
+    expect(windowTitle("2.1.0-onnx.1")).toBe("CorridorKey 2.1 — Rust + ONNX");
+    expect(windowTitle(null)).toBe("CorridorKey — Rust + ONNX");
   });
 
   it("finds nothing when nothing is installed", () => {

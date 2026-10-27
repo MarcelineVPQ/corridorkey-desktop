@@ -3,7 +3,7 @@
 // changes what the run does (rule 4). Locked once the clip has run.
 import { Clapperboard, Film, FolderOpen, Layers, MemoryStick, Scaling, SunMedium, Wand2, X, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { EngineKind, HintFileKind, Job, JobOptions, MemoryChoice, MemoryEstimate, MemoryEstimateResult, ModelScale, OutputName, TrtState, VideoCodec, WindowEstimate } from "../shared/types";
+import type { HintFileKind, Job, JobOptions, MemoryChoice, MemoryEstimate, MemoryEstimateResult, ModelScale, OutputName, TrtState, VideoCodec, WindowEstimate } from "../shared/types";
 import { LINEAR_RANGES, MANUAL_WINDOWS, OUTPUT_NAMES, VRAM_LIMIT_AUTO_HELP, scaledSize, videoCodecsFor, vramLimitChoices, withCutoutAlpha } from "../shared/types";
 import { gibBytes } from "../shared/units";
 import { AS_USED } from "../shared/texts";
@@ -47,7 +47,6 @@ export function JobSettings({
   sectionTasks,
   queueRunning,
   platform,
-  engineKind,
   tensorrt,
   onChange,
 }: {
@@ -56,7 +55,6 @@ export function JobSettings({
   sectionTasks: Record<string, string>;
   queueRunning: boolean;
   platform: string;
-  engineKind: EngineKind | null;
   // the TensorRT setting and what is built (a waiting clip's line); absent: no line
   tensorrt?: TrtState;
   onChange: (o: JobOptions) => void;
@@ -67,9 +65,8 @@ export function JobSettings({
   const video = o.outputFormat === "video";
   const alphaForCutout = video && o.outputs.includes("cutout");
   const codecs = videoCodecsFor(platform);
-  // the PyTorch reference engine writes the original's H.264 CRF 12 whatever is chosen (it never gets video_codec)
-  const codec: VideoCodec = engineKind === "python" ? "h264-crf12" : o.videoCodec;
-  const pickable = engineKind !== "python" && codecs.length > 1;
+  const codec: VideoCodec = o.videoCodec;
+  const pickable = codecs.length > 1;
   const locked = job.status !== "waiting" ? AS_USED : null;
   const pick = async (kind: HintFileKind) => {
     const path = await window.ck.pickFile(kind);
@@ -88,32 +85,26 @@ export function JobSettings({
   const memStatus = (o.memory.auto ? "Automatic · from free graphics memory" : `Manual · ${o.memory.hannChunk}/${o.memory.hannStride}${o.memory.lowVram ? " · low-memory" : ""}`) + memLimit;
   // loop: HOT-PATH-OK — ≤ four outputs per render
   const outStatus = `${o.outputs.map((x) => OUTPUT_TEXT[x].label).join(", ")} · ${video ? CODEC_TEXT[codec].short : `EXR ${o.exrDtype}`}`;
-  // the PyTorch reference engine runs the original's runtime, which stops at any scale but full (no output resize)
-  const scale: ModelScale = engineKind === "python" ? 1 : o.modelScale;
+  const scale: ModelScale = o.modelScale;
   const { width: cw, height: ch } = job.clip;
   const inside = cw && ch ? `${scaledSize(cw, scale)}×${scaledSize(ch, scale)}` : null;
   const scaleStatus = scale === 1 ? `Full${cw && ch ? ` · ${cw}×${ch}` : ""}` : `${SCALE_TEXT[scale]}${inside ? ` · the networks run at ${inside}` : ""}`;
   const scaleHint =
-    engineKind === "python"
-      ? "The PyTorch reference engine runs at full resolution only (the original stops at other scales)"
-      : scale === 1
-        ? "The networks run at the clip's own size"
-        : `Faster and lighter; the result is resized back to ${cw && ch ? `${cw}×${ch}` : "the clip's size"} (Lanczos, as the original), with less edge detail`;
-  // input precision (backlog row 27): off = CorridorKey 2.0's own 8-bit read; the PyTorch engine always reads that way
-  const deep = engineKind !== "python" && o.deepInput;
+    scale === 1
+      ? "The networks run at the clip's own size"
+      : `Faster and lighter; the result is resized back to ${cw && ch ? `${cw}×${ch}` : "the clip's size"} (Lanczos, as the original), with less edge detail`;
+  // input precision (backlog row 27): off = CorridorKey 2.0's own 8-bit read
+  const deep = o.deepInput;
   const deepStatus = deep ? "16-bit · differs from CorridorKey 2.0" : "8-bit · as CorridorKey 2.0 reads it";
-  const deepHint =
-    engineKind === "python"
-      ? "The PyTorch reference engine reads as the original: 8 bits"
-      : deep
-        ? "10/12-bit video and 16-bit PNG reach the model in full; 8-bit clips and EXR are the same either way"
-        : "Off: the same 8-bit read as CorridorKey 2.0, byte for byte. On keeps every bit of 10/12-bit video and 16-bit PNG";
+  const deepHint = deep
+    ? "10/12-bit video and 16-bit PNG reach the model in full; 8-bit clips and EXR are the same either way"
+    : "Off: the same 8-bit read as CorridorKey 2.0, byte for byte. On keeps every bit of 10/12-bit video and 16-bit PNG";
   const linearSet = o.linearBrightness !== 1 || o.linearContrast !== 1;
   const linearStatus = linearSet
     ? `Brightness ${o.linearBrightness.toFixed(2)} · contrast ${o.linearContrast.toFixed(2)}${o.linearContrast !== 1 ? ` around ${o.linearContrastPivot.toFixed(2)}` : ""}`
     : "Off · as shot";
 
-  const trtPlan = job.status === "waiting" && tensorrt ? trtPlanFor(job, tensorrt, engineKind) : null;
+  const trtPlan = job.status === "waiting" && tensorrt ? trtPlanFor(job, tensorrt) : null;
 
   return (
     <Accordion page="queue" focus={focus}>
@@ -183,11 +174,11 @@ export function JobSettings({
               />
             </Row>
             {video && (
-              <Row label="Codec" hint={engineKind === "python" ? "The PyTorch reference engine writes only this" : CODEC_TEXT[codec].hint} htmlFor={pickable ? "codec" : undefined}>
+              <Row label="Codec" hint={CODEC_TEXT[codec].hint} htmlFor={pickable ? "codec" : undefined}>
                 {!pickable ? (
                   <span>
                     {CODEC_TEXT[codec].label}
-                    {engineKind !== "python" && platform === "darwin" ? " · ProRes 4444 XQ comes with the Mac release" : ""}
+                    {platform === "darwin" ? " · ProRes 4444 XQ comes with the Mac release" : ""}
                   </span>
                 ) : (
                   <select id="codec" value={codec} onChange={(e) => set({ videoCodec: e.target.value as VideoCodec })}>
@@ -255,11 +246,7 @@ export function JobSettings({
       <Section id="resolution" icon={Scaling} title="Internal resolution" status={scaleStatus} disabled={locked}>
         {() => (
           <Row label="Resolution" hint={scaleHint}>
-            {engineKind === "python" ? (
-              <span>Full</span>
-            ) : (
-              <Segmented label="Internal resolution" value={String(o.modelScale)} options={SCALE_OPTIONS} onChange={(v) => set({ modelScale: Number(v) as ModelScale })} />
-            )}
+            <Segmented label="Internal resolution" value={String(o.modelScale)} options={SCALE_OPTIONS} onChange={(v) => set({ modelScale: Number(v) as ModelScale })} />
           </Row>
         )}
       </Section>
@@ -267,14 +254,10 @@ export function JobSettings({
       <Section id="input-depth" icon={Layers} title="Input precision" status={deepStatus} disabled={locked}>
         {() => (
           <Row label="Bit depth" hint={deepHint}>
-            {engineKind === "python" ? (
-              <span>8-bit</span>
-            ) : (
-              <label className="checks">
-                <input type="checkbox" checked={o.deepInput} onChange={(e) => set({ deepInput: e.target.checked })} />
-                Read 10/12-bit plates at 16 bits (differs from CorridorKey 2.0)
-              </label>
-            )}
+            <label className="checks">
+              <input type="checkbox" checked={o.deepInput} onChange={(e) => set({ deepInput: e.target.checked })} />
+              Read 10/12-bit plates at 16 bits (differs from CorridorKey 2.0)
+            </label>
           </Row>
         )}
       </Section>
@@ -374,11 +357,10 @@ export function JobSettings({
  * What a waiting clip will ask for and run on, before it runs: the setting, the parts, whether its size's TensorRT
  * range is built (the cache). Null where TensorRT doesn't exist (Windows, macOS).
  */
-export function trtPlanFor(job: Job, trt: TrtState, engineKind: EngineKind | null): { status: string; text: string; build?: TrtSize } | null {
+export function trtPlanFor(job: Job, trt: TrtState): { status: string; text: string; build?: TrtSize } | null {
   if (!trt.supported) return null;
   const { width, height } = job.clip;
   const key = width && height && job.options.modelScale === 1 ? trtSizeKey(width, height) : null;
-  if (engineKind !== "rust") return { status: "Not with this engine · CUDA", text: "TensorRT runs on the ONNX Runtime engine only; this clip runs on the PyTorch engine." };
   if (!trt.on) return { status: "Off · runs on CUDA", text: "TensorRT is off, so this clip runs on CUDA." };
   if (!trt.ready) return { status: "On, not installed · runs on CUDA", text: "TensorRT's parts aren't installed, so this clip runs on CUDA." };
   if (job.options.modelScale !== 1)

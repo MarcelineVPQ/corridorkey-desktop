@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""CorridorKey desktop engine: JSON lines over stdio (desktop/docs/ENGINE_PROTOCOL.md).
+"""The original CorridorKey 2.0 behind the engine protocol: JSON lines over stdio (docs/ENGINE_PROTOCOL.md).
+Not part of the app: the comparison tools run it (tools/vs_original.sh, tools/engine_bench.mjs python).
 
 Same pattern as Sonata's alignment helper: stdout carries ONLY protocol replies;
 logs, tracebacks and library warnings go to stderr. The model's own prints are
@@ -10,7 +11,7 @@ from wrapping the runtime's own functions and writers in its module namespace,
 so nothing here re-implements inference and an upstream update needs no merge.
 
 Run with the CorridorKey checkout's own venv:
-  <CorridorKey2.0>/venv/bin/python engine/ck_engine.py --package-root <CorridorKey2.0>
+  <CorridorKey2.0>/venv/bin/python tools/reference/ck_engine.py --package-root <CorridorKey2.0>
 """
 
 from __future__ import annotations

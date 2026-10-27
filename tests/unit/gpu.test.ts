@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { isOurs, otherGpuUsers, parentPid, parseApps, parseGpuLine, processName } from "../../electron/main/gpu";
-import { checkCheckout } from "../../electron/main/settings";
 
 describe("the app's own GPU processes", () => {
   it("counts the TensorRT builder the engine started as ours, not as another program", () => {
@@ -32,16 +31,6 @@ describe("nvidia-smi parsing", () => {
     expect(processName("/tmp/.mount_SonataXy/sonata\0--x")).toBe("Sonata");
     expect(processName("/home/u/.local/share/sonata-align/venv/bin/python\0server.py")).toBe("Sonata's word timing");
     expect(processName("/usr/bin/blender\0-b")).toBe("blender");
-  });
-});
-
-describe("checkCheckout", () => {
-  it("lists exactly what is missing", () => {
-    const have = new Set(["/ck/corridorkey/runtime.py", "/ck/venv/bin/python"]);
-    const r = checkCheckout("/ck", (p) => have.has(p));
-    expect(r.ok).toBe(false);
-    expect(r.problems).toHaveLength(3);
-    expect(checkCheckout(null).problems[0]).toMatch(/Choose/);
   });
 });
 

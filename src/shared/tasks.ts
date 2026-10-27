@@ -10,7 +10,7 @@
 // and a rail press (opens the page at the first waiting section) all read it.
 // Tasks are derived from the app state, so they clear themselves when the
 // state is fixed. Nothing else draws a dot or badge (the .task look).
-import type { AppState, EngineKind, FfmpegState, InstallState, Job } from "./types";
+import type { AppState, CheckoutCheck, FfmpegState, InstallState, Job } from "./types";
 import { CANT_READ_CLIP, ENGINE_FAILED, INSTALL_STEP } from "./texts";
 
 /** The runtime or the models are missing from the data folder (what the install box offers to download). */
@@ -18,13 +18,13 @@ export function installMissing(install: InstallState): boolean {
   return install.needRuntime || install.needModels;
 }
 
-/** The first-run install is still to do: files missing and no engine ready (a PyTorch reference engine counts). */
-export function installNeeded(s: { install: InstallState; engineKind: EngineKind | null }): boolean {
-  return installMissing(s.install) && !s.engineKind;
+/** The first-run install is still to do: files missing and no engine ready. */
+export function installNeeded(s: { install: InstallState; rustEngine: CheckoutCheck }): boolean {
+  return installMissing(s.install) && !s.rustEngine.ok;
 }
 
 /** Whether setup still has something to do (the setup page opens by itself at start while it does). */
-export function setupNeeded(s: { install: InstallState; ffmpeg: FfmpegState; engineKind: EngineKind | null }): boolean {
+export function setupNeeded(s: { install: InstallState; ffmpeg: FfmpegState; rustEngine: CheckoutCheck }): boolean {
   return installNeeded(s) || (s.ffmpeg.checked && !s.ffmpeg.ok);
 }
 
@@ -51,7 +51,7 @@ export function missingInput(job: Job): string | null {
 
 /** Why Start queue can't start now (null: it can); the button is disabled with this as its reason. */
 export function startBlocked(state: AppState): string | null {
-  if (!state.engineKind) return "Set up the engine first (Engine page)";
+  if (!state.rustEngine.ok) return "Set up the engine first (Engine page)";
   if (!state.ffmpeg.ok) return state.ffmpeg.checked ? "Install ffmpeg first (Engine page)" : "Checking ffmpeg…";
   // a job writes its TensorRT engines into the cache folder (its working files stay in the system's: jobTempDir)
   if (state.cache?.moving) return "Moving the cache folder… the queue can start when it's done";
@@ -74,8 +74,8 @@ export function tasksOf(state: AppState): Task[] {
         text: state.install.error ? `The install stopped: ${state.install.error}` : INSTALL_STEP,
       });
   }
-  // no engine set up: the ONNX Runtime engine is the one to set up (the PyTorch checkout still works meanwhile)
-  else if (!state.engineKind) tasks.push({ id: "engine-setup", page: "engine", section: "onnx", level: "task", text: state.rustEngine?.problems[0] ?? "Set up the CorridorKey engine" });
+  // no engine set up
+  else if (!state.rustEngine.ok) tasks.push({ id: "engine-setup", page: "engine", section: "onnx", level: "task", text: state.rustEngine?.problems[0] ?? "Set up the CorridorKey engine" });
   // TensorRT switched on but its parts aren't there (once the runtime and models are): jobs run on CUDA meanwhile
   const trt = state.tensorrt;
   if (trt?.on && !installMissing(state.install) && (trt.needLibs || trt.needProvider || trt.needModels) && trt.status !== "running")

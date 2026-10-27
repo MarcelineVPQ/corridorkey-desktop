@@ -5,7 +5,6 @@ export const IPC = {
   addPaths: "ck:add-paths",
   pickClips: "ck:pick-clips",
   pickFile: "ck:pick-file",
-  pickCheckout: "ck:pick-checkout",
   pickRustEngine: "ck:pick-rust-engine",
   setRustEngine: "ck:set-rust-engine",
   installFfmpeg: "ck:install-ffmpeg",

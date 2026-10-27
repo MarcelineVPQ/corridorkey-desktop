@@ -464,7 +464,7 @@ def build(out):
           "engine still answering, or a clean stop), **partial** = handled but not cleanly (an error that doesn't name the cause, a "
           "Python traceback for the user), **fail** = crash, hang, wrong result, left running. "
           "Through the protocol (the app's way) for both; through the original's own CLI (`infer.py`) where it can be.", "",
-          "| Case | CorridorKey Desktop | Original (protocol: engine/ck_engine.py) | Original (its CLI: infer.py) |", "|---|---|---|---|"]
+          "| Case | CorridorKey Desktop | Original (protocol: tools/reference/ck_engine.py) | Original (its CLI: infer.py) |", "|---|---|---|---|"]
     counts = {}
     # loop: NOT-WORTH — a handful of cases
     for case in rob.get("cases", []):

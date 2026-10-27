@@ -49,7 +49,6 @@ body:
       options:
         - Rust + ONNX (the default)
         - Rust + ONNX with TensorRT
-        - PyTorch (the original, from a checkout)
   - type: textarea
     id: log
     attributes:

@@ -61,11 +61,10 @@ describe("TensorRT ranges as the engine has them", () => {
 });
 
 describe("why a job doesn't ask for TensorRT", () => {
-  const yes = { platform: "linux" as const, setting: true, engine: "rust" as const, ready: true };
-  it("names the setting, the engine or the parts, and nothing where TensorRT doesn't exist", () => {
+  const yes = { platform: "linux" as const, setting: true, ready: true };
+  it("names the setting or the parts, and nothing where TensorRT doesn't exist", () => {
     expect(tensorrtWhyNot(yes)).toBeNull();
     expect(tensorrtWhyNot({ ...yes, setting: false })).toMatch(/off/);
-    expect(tensorrtWhyNot({ ...yes, engine: "python" })).toMatch(/ONNX Runtime engine only/);
     // 08_3a, 2026-10-25: the parts arrived 1.5 minutes after the job ended
     expect(tensorrtWhyNot({ ...yes, ready: false })).toMatch(/parts weren't installed/);
     expect(tensorrtWhyNot({ ...yes, platform: "win32", setting: false })).toBeNull();

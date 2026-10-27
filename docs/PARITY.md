@@ -40,8 +40,8 @@ original's runtime with exactly that helper patched in (`engine-rs/tools/ref_ori
 - Range: the original takes any scale above 0; the engine takes above 0 up to 2.0 (2.0 = 4× the pixels: a 4K clip
   at 2.0 is 8K inside the networks); a scale whose padded size is 128 px or less on a side is refused in words, as at
   1.0. App: per clip, Queue → Internal resolution: Full / ¾ / ½ / ¼ (the plugin's choices), with the size the networks
-  run at; the Manual memory picker's estimate follows it. The PyTorch reference engine refuses any scale but 1.0 up
-  front (`input` error) instead of failing after its RVM pass; the app shows Full only with it.
+  run at; the Manual memory picker's estimate follows it. The PyTorch reference engine (`tools/reference/ck_engine.py`,
+  the comparison tools only) refuses any scale but 1.0 up front (`input` error) instead of failing after its RVM pass.
 
 **`--linear_brightness`, `--linear_contrast`, `--linear_contrast_pivot`: ported.** `gain * (pivot + contrast *
 (linear - pivot))` on the model's linear input, its inverse on the decoded foreground, float32 as numpy and torch run

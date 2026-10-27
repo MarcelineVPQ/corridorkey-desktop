@@ -37,8 +37,8 @@ function harness(opts: { pongProtocol?: number; failStart?: boolean; slowStart?:
           opts.slowStart
             ? new Promise((_r, j) => (rejectStart = j))
             : opts.failStart
-              ? Promise.reject(new Error("no python"))
-              : Promise.resolve({ type: "pong", protocol: opts.pongProtocol ?? 1, version: "0.1.0", engine: "pytorch", device: "cuda" }),
+              ? Promise.reject(new Error("no engine"))
+              : Promise.resolve({ type: "pong", protocol: opts.pongProtocol ?? 1, version: "0.1.0", engine: "onnxruntime", device: "cuda" }),
         send: (m) => sent.push(m),
         quit: () => quits++,
         kill: () => {
@@ -391,36 +391,29 @@ describe("engineOptions", () => {
     expect(engineOptions({ ...DEFAULT_OPTIONS, vramLimitGb: 6, memory: { auto: false, hannChunk: 8, hannStride: 4, lowVram: true } }, "video")).toMatchObject({ vram_budget_gb: 6, hann_chunk: 8 });
   });
 
-  it("asks for TensorRT only when told to (never false-but-present: the PyTorch engine never sees the key)", () => {
+  it("asks for TensorRT only when told to (never false-but-present)", () => {
     expect(engineOptions(DEFAULT_OPTIONS, "video")).not.toHaveProperty("tensorrt");
     expect(engineOptions(DEFAULT_OPTIONS, "video", false)).not.toHaveProperty("tensorrt");
     expect(engineOptions(DEFAULT_OPTIONS, "video", true)).toMatchObject({ tensorrt: true });
   });
 
-  it("sends the video codec to the Rust engine only, and only for video outputs", () => {
-    expect(engineOptions(DEFAULT_OPTIONS, "video", false, true)).toMatchObject({ video_codec: "h264-lossless" });
-    expect(engineOptions({ ...DEFAULT_OPTIONS, videoCodec: "dnxhr444" }, "video", false, true)).toMatchObject({ video_codec: "dnxhr444" });
-    // the PyTorch reference engine writes H.264 CRF 12 whatever the job says: it never sees the key
-    expect(engineOptions(DEFAULT_OPTIONS, "video", false, false)).not.toHaveProperty("video_codec");
-    expect(engineOptions({ ...DEFAULT_OPTIONS, outputFormat: "exr" }, "video", false, true)).not.toHaveProperty("video_codec");
+  it("sends the video codec only for video outputs", () => {
+    expect(engineOptions(DEFAULT_OPTIONS, "video")).toMatchObject({ video_codec: "h264-lossless" });
+    expect(engineOptions({ ...DEFAULT_OPTIONS, videoCodec: "dnxhr444" }, "video")).toMatchObject({ video_codec: "dnxhr444" });
+    expect(engineOptions({ ...DEFAULT_OPTIONS, outputFormat: "exr" }, "video")).not.toHaveProperty("video_codec");
   });
 
-  it("sends 16-bit input reading to the Rust engine only when asked (backlog row 27)", () => {
+  it("sends 16-bit input reading only when asked (backlog row 27)", () => {
     // the default is CorridorKey 2.0's own 8-bit read: no key at all
-    expect(engineOptions(DEFAULT_OPTIONS, "video", false, true)).not.toHaveProperty("input_bit_depth");
-    expect(engineOptions({ ...DEFAULT_OPTIONS, deepInput: true }, "frames", false, true)).toMatchObject({ input_bit_depth: "16" });
-    // the PyTorch reference engine reads as the original, always
-    expect(engineOptions({ ...DEFAULT_OPTIONS, deepInput: true }, "video", false, false)).not.toHaveProperty("input_bit_depth");
+    expect(engineOptions(DEFAULT_OPTIONS, "video")).not.toHaveProperty("input_bit_depth");
+    expect(engineOptions({ ...DEFAULT_OPTIONS, deepInput: true }, "frames")).toMatchObject({ input_bit_depth: "16" });
   });
 
   it("sends the internal resolution when not full, and the linear adjust for video clips when set (backlog rows 42, 45)", () => {
     const d = engineOptions(DEFAULT_OPTIONS, "video");
     expect(d).not.toHaveProperty("model_scale");
     expect(d).not.toHaveProperty("linear_brightness");
-    expect(engineOptions({ ...DEFAULT_OPTIONS, modelScale: 0.5 }, "frames", false, true)).toMatchObject({ model_scale: 0.5 });
-    // the PyTorch reference engine runs at full (its panel says "Full") and refuses any other scale as an input error
-    // (bug hunt 2026-10-26 P1: a clip set to ½ under the Rust engine failed on the PyTorch engine)
-    expect(engineOptions({ ...DEFAULT_OPTIONS, modelScale: 0.5 }, "frames", false, false)).not.toHaveProperty("model_scale");
+    expect(engineOptions({ ...DEFAULT_OPTIONS, modelScale: 0.5 }, "frames")).toMatchObject({ model_scale: 0.5 });
     const lin = { ...DEFAULT_OPTIONS, linearBrightness: 1.5, linearContrast: 1.2, linearContrastPivot: 0.25 };
     expect(engineOptions(lin, "video")).toMatchObject({ linear_brightness: 1.5, linear_contrast: 1.2, linear_contrast_pivot: 0.25 });
     // a frame folder: the original ignores the adjust there, so it is never sent

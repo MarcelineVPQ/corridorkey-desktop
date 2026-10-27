@@ -5,6 +5,8 @@ import { appState as state, clipInfo, ffmpegState, installState, job, trtState }
 
 // the runtime and models missing (2 + 3 bytes), the install idle, running or stopped with an error
 const installing = (status: InstallStatus, error: string | null = null) => installState({ needRuntime: true, needModels: true, bytes: 5, runtimeBytes: 2, modelsBytes: 3, status, error });
+// the engine not set up, its first problem being the engine program
+const noEngine = { ok: false, problems: ["Choose the CorridorKey engine program (corridorkey-engine)."] };
 
 describe("TensorRT task", () => {
   // switched on, its libraries and models still to download
@@ -16,15 +18,15 @@ describe("TensorRT task", () => {
     expect(tasksOf(state({ tensorrt: trt({ needLibs: false, needModels: false, ready: true }) }))).toEqual([]);
     expect(tasksOf(state({ tensorrt: trt({ status: "error", error: "no space" }) }))[0]).toMatchObject({ level: "error", text: "The TensorRT download stopped: no space" });
     // the runtime and models come first: their task, not TensorRT's
-    expect(tasksOf(state({ engineKind: null, install: installing("idle"), tensorrt: trt({}) })).map((t) => t.id)).toEqual(["install"]);
+    expect(tasksOf(state({ rustEngine: noEngine, install: installing("idle"), tensorrt: trt({}) })).map((t) => t.id)).toEqual(["install"]);
   });
 });
 
 describe("first-run install and ffmpeg tasks", () => {
   it("asks for the install; while it runs there is no task (not the engine-setup one either)", () => {
-    expect(tasksOf(state({ engineKind: null, install: installing("idle") }))).toEqual([expect.objectContaining({ id: "install", section: "install" })]);
-    expect(tasksOf(state({ engineKind: null, install: installing("running") }))).toEqual([]);
-    expect(tasksOf(state({ engineKind: null, install: installing("error", "no space") }))[0]).toMatchObject({ level: "error", text: "The install stopped: no space" });
+    expect(tasksOf(state({ rustEngine: noEngine, install: installing("idle") }))).toEqual([expect.objectContaining({ id: "install", section: "install" })]);
+    expect(tasksOf(state({ rustEngine: noEngine, install: installing("running") }))).toEqual([]);
+    expect(tasksOf(state({ rustEngine: noEngine, install: installing("error", "no space") }))[0]).toMatchObject({ level: "error", text: "The install stopped: no space" });
   });
   it("says nothing about ffmpeg before the first check has answered", () => {
     expect(tasksOf(state({ ffmpeg: ffmpegState({ checked: false, ok: false }) }))).toEqual([]);
@@ -40,17 +42,16 @@ describe("tasks (the one mechanism)", () => {
     expect(t).toEqual([expect.objectContaining({ page: "queue", section: "hint", jobId: "a" })]);
     expect(dots(t).targets.queue).toBe("hint");
   });
-  it("no engine set up points at Engine → ONNX engine; it clears when either engine is set up", () => {
-    const t = tasksOf(state({ checkout: { ok: false, problems: ["Choose your CorridorKey2.0 folder."] }, engineKind: null }));
+  it("no engine set up points at Engine → ONNX engine; it clears when the engine is set up", () => {
+    const t = tasksOf(state({ rustEngine: noEngine }));
     expect(t[0]).toMatchObject({ page: "engine", section: "onnx", text: "Choose the CorridorKey engine program (corridorkey-engine)." });
     expect(tasksOf(state({}))).toEqual([]);
-    expect(tasksOf(state({ engineKind: "rust", checkout: { ok: false, problems: ["x"] } }))).toEqual([]);
   });
   it("failed clips are one error on the Queue item, every text on its own line", () => {
-    const t = tasksOf(state({ jobs: [job("a", { status: "failed" }), job("b", { status: "failed" })], engine: { status: "failed", pong: null, error: "no python" } }));
+    const t = tasksOf(state({ jobs: [job("a", { status: "failed" }), job("b", { status: "failed" })], engine: { status: "failed", pong: null, error: "no engine" } }));
     const d = dots(t);
     expect(d.pages.queue).toBe("2 clips failed");
-    expect(d.pages.engine).toMatch(/no python/);
+    expect(d.pages.engine).toMatch(/no engine/);
   });
   it("a clip the app can't read is an error on the Queue item that selects that clip", () => {
     const bad = job("b", { clip: clipInfo("b", { probeError: "ffprobe: Invalid data found when processing input" }) });

@@ -1,11 +1,11 @@
-// Settings file (userData/settings.json) and the CorridorKey checkout check.
+// Settings file (userData/settings.json) and the Rust engine's setup check.
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
-import type { CheckoutCheck, EngineKind, Settings } from "../../src/shared/types";
+import type { CheckoutCheck, Settings } from "../../src/shared/types";
 import { sanitizeAppearance, sanitizeOptions, vramLimit } from "./validate";
 import { sanitizeTrtSizes } from "../../src/shared/trt";
 
-export function loadSettings(file: string, env: NodeJS.ProcessEnv): Settings {
+export function loadSettings(file: string): Settings {
   let saved: Partial<Settings> = {};
   try {
     // loop: NOT-WORTH — reads the settings file (a few KB) once at start
@@ -17,7 +17,6 @@ export function loadSettings(file: string, env: NodeJS.ProcessEnv): Settings {
   if (!saved || typeof saved !== "object" || Array.isArray(saved)) saved = {};
   const path = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
   return {
-    corridorKeyRoot: env.CK_PACKAGE_ROOT || path(saved.corridorKeyRoot),
     lastOptions: sanitizeOptions(saved.lastOptions),
     appearance: sanitizeAppearance(saved.appearance),
     outputRoot: path(saved.outputRoot),
@@ -71,13 +70,6 @@ export function checkRustEngine(
   return { ok: problems.length === 0, problems };
 }
 
-/** The engine the queue uses: the Rust engine when it is set up, else the PyTorch one, else none. */
-export function chooseEngine(rust: CheckoutCheck, python: CheckoutCheck): EngineKind | null {
-  if (rust.ok) return "rust";
-  if (python.ok) return "python";
-  return null;
-}
-
 /** Write atomically (temp file + rename) so a crash never leaves half a file. */
 export function saveSettings(file: string, settings: Settings): void {
   // loop: NOT-WORTH — one mkdir per settings save (a user action)
@@ -87,19 +79,4 @@ export function saveSettings(file: string, settings: Settings): void {
   writeFileSync(tmp, JSON.stringify(settings, null, 2));
   // loop: NOT-WORTH — one rename per save (atomic replace)
   renameSync(tmp, file);
-}
-
-/** The PyTorch engine runs from a CorridorKey2.0 checkout: its code, weights, foundation models and venv. */
-export function checkCheckout(root: string | null, exists: (p: string) => boolean = existsSync): CheckoutCheck {
-  if (!root) return { ok: false, problems: ["Choose your CorridorKey2.0 folder."] };
-  const need: [string, string][] = [
-    ["corridorkey/runtime.py", "the CorridorKey code"],
-    ["venv/bin/python", "its Python environment (venv) — see the CorridorKey README, Setup"],
-    ["weights/corridorkey_v2.safetensors", "the model weights — run scripts/download_weights.py"],
-    ["vfms/cradio/C-RADIOv4-SO400M", "the C-RADIO foundation model — run scripts/download_weights.py"],
-    ["vfms/moge/model.pt", "the MoGe foundation model — run scripts/download_weights.py"],
-  ];
-  // loop: NOT-WORTH — a few required paths, once per check
-  const problems = need.filter(([p]) => !exists(join(root, p))).map(([p, what]) => `Missing ${p}: ${what}.`);
-  return { ok: problems.length === 0, problems };
 }

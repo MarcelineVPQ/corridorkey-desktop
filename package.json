@@ -16,11 +16,11 @@
     "dist:mac": "tools/build_engine.sh --mac && electron-vite build && electron-builder --mac dmg --arm64 --publish never",
     "typecheck": "tsc -b",
     "test": "vitest run",
-    "test:engine": "python3 -I -m unittest discover -s engine -p 'test_*.py'",
+    "test:reference": "python3 -I -m unittest discover -s tools/reference -p 'test_*.py'",
     "gates": "./.hooks/check_electron_security.sh && node .hooks/check_theme_colors.mjs && node tools/list_loops.mjs --check && node tools/check_no_folds.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "npm run typecheck && npm run format:check && npm run gates && npm test && npm run test:engine",
+    "check": "npm run typecheck && npm run format:check && npm run gates && npm test && npm run test:reference",
     "check:targets": "tools/check_targets.sh",
     "check:engine": "cd engine-rs && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test"
   },

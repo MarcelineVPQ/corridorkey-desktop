@@ -10,11 +10,12 @@ talk in **JSON lines**, one JSON object per line, UTF-8.
 - **stderr:** logs, tracebacks and library warnings. The app keeps the last
   lines for an error report and never parses them.
 
-Any engine that speaks this protocol works with the app: the Rust engine on
-ONNX Runtime (`engine-rs/`, `corridorkey-engine --models DIR`, docs/ENGINE_RUST.md;
-the default when it is set up) and the PyTorch engine (`engine/ck_engine.py`,
-run with a CorridorKey2.0 checkout's venv and `--package-root`), kept as the Rust engine's
-benchmark reference (Marcy 2026-10-22).
+The app runs one engine: the Rust engine on ONNX Runtime (`engine-rs/`,
+`corridorkey-engine --models DIR`, docs/ENGINE_RUST.md). The original CorridorKey 2.0
+speaks it too, through `tools/reference/ck_engine.py` (the "PyTorch engine" below, run
+with a CorridorKey2.0 checkout's venv and `--package-root`): not part of the app, it is
+the Rust engine's benchmark reference for the comparison tools (`tools/vs_original.sh`,
+`tools/engine_bench.mjs`; Marcy 2026-10-22).
 
 **Versions.** The pong carries `"protocol"`. New fields are additive, and the
 app ignores fields it doesn't know. The app refuses an engine whose protocol it

@@ -722,7 +722,7 @@ The clips are free to download (their owners don't allow re-hosting, so they are
 Run both engines the same way with `tools/engine_bench.mjs` (it writes this table's numbers, `bench.md`):
 
 ```
-node tools/engine_bench.mjs python --python <CorridorKey2.0>/venv/bin/python --script engine/ck_engine.py \
+node tools/engine_bench.mjs python --python <CorridorKey2.0>/venv/bin/python --script tools/reference/ck_engine.py \
   --package-root <CorridorKey2.0> --out out/pytorch --vram-budget 12 CLIP...
 node tools/engine_bench.mjs rust --bin <corridorkey-engine> --models <models>/2.0.0-onnx.4 \
   --ort <runtime>/onnxruntime/capi/libonnxruntime.so.1.31.0 --env LD_LIBRARY_PATH=<runtime's library folders> \
@@ -745,7 +745,7 @@ Every result in this README is reproducible with the tools in this repository. T
 
 | Test | What it checks | Result |
 | --- | --- | --- |
-| `npm run check` | TypeScript types, formatting, the theme gate (colours only from one place), the loop gate (every loop, timer and wait in the app and engine carries a written verdict: 846 rows listed, 768 with a required verdict; plain Rust loops over small collections are exempt), 172 unit tests, the PyTorch engine's own tests | pass |
+| `npm run check` | TypeScript types, formatting, the theme gate (colours only from one place), the loop gate (every loop, timer and wait in the app and engine carries a written verdict: 846 rows listed, 768 with a required verdict; plain Rust loops over small collections are exempt), 172 unit tests, the reference engine's protocol tests (`tools/reference/`) | pass |
 | `npm run check:engine` | Rust formatting, clippy with every warning an error, 132 engine tests | pass |
 | CPU end to end (`e2e_cpu.sh`) | the Rust engine against PyTorch, both fp32: frame folder, H.264 and hint inputs, EXR and video outputs, low-memory mode | pass: alpha MAE 1.7e-7, low-memory mode identical |
 | GPU speed and quality, HD and 4K | `engine_bench.mjs` + `matte_compare.py`, ten clips, both engines | pass (the tables above) |
@@ -837,8 +837,9 @@ The main pieces:
   models are published here under the CorridorKey licence. Every file is checked before it is used.
 - **ffmpeg from the system, not bundled:** every Linux distribution ships it; the app checks it has the encoders it
   needs (libx264 with 10-bit, and DNxHR on Linux and Windows) and offers the install where it can.
-- **The original kept as the reference:** the PyTorch engine stays in the app (Engine page), so every speed and
-  quality claim here can be checked against it on the same machine.
+- **The original kept as the reference, outside the app:** the app runs only the Rust engine; the comparison tools
+  (`tools/vs_original.sh`, `tools/engine_bench.mjs`) run Corridor's original from its own checkout and venv, so every
+  speed and quality claim here can be checked against it on the same machine.
 
 ## Uninstall
 

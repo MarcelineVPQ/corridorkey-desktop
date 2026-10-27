@@ -42,7 +42,6 @@ export const SESSION_VARS = [
   "KDE_SESSION_VERSION",
   "XAUTHORITY",
   "ELECTRON_OZONE_PLATFORM_HINT",
-  "CK_PACKAGE_ROOT",
   "HOME",
   "LANG",
   "PATH",
@@ -50,7 +49,7 @@ export const SESSION_VARS = [
 
 export function relaunchEnv(env: Record<string, string | undefined>): Record<string, string> {
   const out: Record<string, string> = {};
-  // loop: NOT-WORTH — a fixed list of 16 names
+  // loop: NOT-WORTH — a fixed list of 15 names
   for (const v of SESSION_VARS) {
     const value = env[v];
     if (!value) continue;

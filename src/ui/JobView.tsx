@@ -78,7 +78,7 @@ export function JobView({ job, prebuild }: { job: Job; prebuild?: TrtPrebuild })
             <Stat k="Temporal window" v={`${m.hannChunk} / ${m.hannStride}`} />
             <Stat k="Low-memory mode" v={m.lowVram ? "on" : "off"} />
             <Stat k="Chosen" v={m.auto ? "automatically" : "manually"} />
-            {/* the Rust engine says the free memory and the limit apart; the PyTorch engine's budget is the free memory, capped by a limit */}
+            {/* the engine says the free memory and the limit apart; a reply with only its budget (the free memory, capped by a limit) shows that */}
             {m.freeGb !== null ? (
               <Stat k="Free when it started" v={`${m.freeGb.toFixed(1)} GiB`} />
             ) : (

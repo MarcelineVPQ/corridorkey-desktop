@@ -10,7 +10,7 @@ import { Estimator } from "./estimate";
 import { GPU_POLL_MS, otherGpuUsers, readGpu } from "./gpu";
 import { expandPaths, probeClip, still, STILL_WIDTH, VIDEO_EXT, HINT_IMAGE_EXT } from "./media";
 import { clearJobTemps, Queue } from "./queue";
-import { checkCheckout, checkRustEngine, chooseEngine, loadSettings, saveSettings } from "./settings";
+import { checkRustEngine, loadSettings, saveSettings } from "./settings";
 import { effectivePath, findEngineFiles, findTrtBuilder, isInsideApp, modelSetVersion, windowTitle } from "./engineFind";
 import { addToPathList, APP_DIR, appDirs, engineBinName, isMac, isWin, ortLibrary, PLATFORM } from "./platform";
 import { HOMEBREW_DIRS, checkFfmpeg, ffmpegState, installFfmpeg, planFor, readOsRelease, wingetFfmpegDirs } from "./ffmpeg";
@@ -40,7 +40,6 @@ import { holdAppImageMountUntilExit } from "./appImageQuit";
 import {
   LOG_SHOWN,
   type AppState,
-  type EngineKind,
   type FfmpegState,
   type GpuInfo,
   type InstallState,
@@ -88,7 +87,7 @@ const IS_WIN = isWin();
 const IS_MAC = isMac();
 // the data folder (runtime, models) and the cache (thumbnails, stills): platform.ts appDirs
 const appFolders = appDirs(process.env, app.getPath("home"));
-let settings = loadSettings(settingsFile, process.env);
+let settings = loadSettings(settingsFile);
 // the cache folder: the system's, or the app's own folder in the location chosen in App settings, Storage (row 44);
 // a chosen location that isn't there (drive unplugged): the system's folder for now, the setting kept, Storage says so.
 // Checked async once the app is ready (checkCacheDrive; a share that stops answering mustn't hold the start); nothing
@@ -96,7 +95,6 @@ let settings = loadSettings(settingsFile, process.env);
 let cacheMissing: string | null = null;
 let cacheDir = cacheDirFor(settings.cacheRoot, appFolders.cache);
 let mediaDir = join(cacheDir, MEDIA_DIR);
-let checkout = checkCheckout(settings.corridorKeyRoot);
 /** Where the Engine page's lists look (engineFind.ts): the app's own engine, a dev build, the in-app install's folder. */
 function enginePlaces() {
   return {
@@ -183,9 +181,8 @@ async function recheckFfmpeg(): Promise<void> {
   ffmpeg = { ...ffmpegState(await checkFfmpeg(), planFor(PLATFORM, readOsRelease())), installing: ffmpeg.installing, installError: ffmpeg.installError };
   scheduleSend();
 }
-/** Re-check both engines' files (after a setting changed, or before the queue starts). */
+/** Re-check the engine's files (after a setting changed, or before the queue starts). */
 function recheckEngines(): void {
-  checkout = checkCheckout(settings.corridorKeyRoot);
   engineFiles = findEngineFiles(enginePlaces());
   const paths = enginePaths();
   rustEngine = checkRustEngine(paths.binary, paths.models, paths.ort);
@@ -195,7 +192,7 @@ function recheckEngines(): void {
 }
 /** The window title for what is set up now (engineFind.ts windowTitle). */
 function currentTitle(): string {
-  return windowTitle(chooseEngine(rustEngine, checkout), modelSetVersion(enginePaths().models));
+  return windowTitle(modelSetVersion(enginePaths().models));
 }
 let mainWindow: BrowserWindow | null = null;
 recheckEngines();
@@ -220,32 +217,19 @@ function mediaFile(url: string): string | null {
   }
 }
 
-function engineScript(): string {
-  // packaged: engine/ is unpacked next to app.asar (python can't read inside the asar)
-  return app.isPackaged ? join(process.resourcesPath, "app.asar.unpacked", "engine", "ck_engine.py") : resolve(app.getAppPath(), "engine", "ck_engine.py");
-}
-
 /** The Rust engine's process, as the queue and the memory estimate start it. */
 function rustEngineProcess(onReply: (r: EngineReply) => void, onExit: (code: number | null, signal: NodeJS.Signals | null, stderrTail: string[]) => void): EngineProcess {
   const paths = enginePaths();
   const trtBuild = findTrtBuilder(paths.binary, app.isPackaged ? null : resolve(app.getAppPath(), "engine-rs", "target", "dist"));
-  return new EngineProcess({ kind: "rust", binary: paths.binary!, models: paths.models!, ort: paths.ort, env: process.env, trtCache: join(cacheDir, TRT_ENGINES_DIR), trtBuild }, onReply, onExit);
+  return new EngineProcess({ binary: paths.binary!, models: paths.models!, ort: paths.ort, env: process.env, trtCache: join(cacheDir, TRT_ENGINES_DIR), trtBuild }, onReply, onExit);
 }
 
-// which engine the queue started (TensorRT is asked of the Rust engine only)
-let runningKind: EngineKind | null = null;
 const queue = new Queue({
-  makeEngine: (onReply, onExit) => {
-    // the Rust engine when it is set up; the PyTorch engine (CorridorKey checkout) until it replaces it
-    runningKind = chooseEngine(rustEngine, checkout);
-    if (runningKind === "rust") return rustEngineProcess(onReply, onExit);
-    const root = settings.corridorKeyRoot!;
-    return new EngineProcess({ python: join(root, "venv", "bin", "python"), script: engineScript(), packageRoot: root, env: process.env }, onReply, onExit);
-  },
+  makeEngine: rustEngineProcess,
   // job temp files stay on the system's local cache folder whatever the chosen location (Marcy 2026-10-26)
   tempDirFor: (id) => jobTempDir(appFolders.cache, id),
-  tensorrt: () => useTensorrt({ platform: PLATFORM, setting: settings.tensorrt, engine: runningKind, ready: trtReady(enginePaths().ort, enginePaths().models) }),
-  tensorrtWhyNot: () => tensorrtWhyNot({ platform: PLATFORM, setting: settings.tensorrt, engine: runningKind, ready: trtReady(enginePaths().ort, enginePaths().models) }),
+  tensorrt: () => useTensorrt({ platform: PLATFORM, setting: settings.tensorrt, ready: trtReady(enginePaths().ort, enginePaths().models) }),
+  tensorrtWhyNot: () => tensorrtWhyNot({ platform: PLATFORM, setting: settings.tensorrt, ready: trtReady(enginePaths().ort, enginePaths().models) }),
   changed: () => {
     // the queue's end resumes a paused background TensorRT build
     if (!queue.running) prebuild.queueStopped();
@@ -291,7 +275,7 @@ const prebuild: Prebuilder = new Prebuilder({
   recordBuild: (range, seconds) => {
     void recordBuild(join(cacheDir, TRT_ENGINES_DIR), range, seconds).then(readTrtCache).then(scheduleSend);
   },
-  allowed: () => !cacheMoving && useTensorrt({ platform: PLATFORM, setting: settings.tensorrt, engine: chooseEngine(rustEngine, checkout), ready: trtReady(enginePaths().ort, enginePaths().models) }),
+  allowed: () => !cacheMoving && rustEngine.ok && useTensorrt({ platform: PLATFORM, setting: settings.tensorrt, ready: trtReady(enginePaths().ort, enginePaths().models) }),
   // while the queue runs the build waits for it (paused), and goes on once its engine has exited: a build started while
   // the quitting engine still held its model would pick its window from the memory left (bug hunt 2026-10-26 P6)
   queueRunning: () => queue.running || queue.engineEnding,
@@ -319,9 +303,7 @@ function state(): AppState {
     gpu,
     gpuError,
     settings,
-    checkout,
     rustEngine,
-    engineKind: chooseEngine(rustEngine, checkout),
     engineFiles,
     enginePaths: enginePaths(),
     ffmpeg,
@@ -659,14 +641,6 @@ function registerIpc(): void {
     });
     return r.canceled ? null : r.filePaths[0];
   });
-  ipcMain.handle(IPC.pickCheckout, async () => {
-    const r = await dialog.showOpenDialog(mainWindow!, { title: "Your CorridorKey2.0 folder", properties: ["openDirectory"] });
-    if (r.canceled) return;
-    settings = { ...settings, corridorKeyRoot: r.filePaths[0] };
-    recheckEngines();
-    persist();
-    scheduleSend();
-  });
   ipcMain.handle(IPC.pickRustEngine, async (_e, whatArg: unknown) => {
     if (!isRustWhat(whatArg)) return;
     const what = whatArg;
@@ -888,7 +862,7 @@ function registerIpc(): void {
     // loop: NOT-WORTH — the queue's jobs, once per estimate asked
     const job = id ? queue.jobs.find((j) => j.id === id) : undefined;
     if (!job || job.status !== "waiting") return { ok: false, reason: "Only for a clip that hasn't run yet." };
-    if (chooseEngine(rustEngine, checkout) !== "rust") return { ok: false, reason: "The memory estimate comes from the Rust engine (set it up on the Engine page)." };
+    if (!rustEngine.ok) return { ok: false, reason: "The memory estimate comes from the Rust engine (set it up on the Engine page)." };
     const r = await estimator.ask(job.clip.path, queue.running, job.options.vramLimitGb, job.options.modelScale);
     // the card's memory as this reading saw it, for App settings' limit menu
     if (r.ok && !r.stale && (r.estimate.totalBytes !== null || r.estimate.freeBytes !== null)) {
@@ -910,7 +884,7 @@ function registerIpc(): void {
     await recheckFfmpeg();
     await checkCacheDrive();
     // not while the cache folder moves (a job writes its TensorRT engines there; its working files stay in the system's folder)
-    if (!chooseEngine(rustEngine, checkout) || !ffmpeg.ok || cacheMoving) return scheduleSend();
+    if (!rustEngine.ok || !ffmpeg.ok || cacheMoving) return scheduleSend();
     // one engine at a time: an estimate still asking gives way to the queue
     estimator.stop();
     // the queue has the card: the background TensorRT build pauses, and goes on when the queue stops

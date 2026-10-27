@@ -3,7 +3,7 @@
 // files it had started (the staging folder holds nothing else), and results an earlier run left in the output
 // folder survive it untouched: the engines write the same names, which used to overwrite them at once.
 // The app does this, not the engine: a cancel kills the engine's process group, so the engine never gets to clean up,
-// and both engines (Rust, PyTorch) get the same treatment.
+// and the app does it the same way for every job.
 // Every call here is async (fs/promises): output folders are the user's choice and often on a NAS, and a share that
 // stops answering must not freeze the window (loop pass 2026-10-26, finding 2).
 import { access, lstat, mkdir, readdir, readFile, rename, rm, rmdir, writeFile } from "node:fs/promises";

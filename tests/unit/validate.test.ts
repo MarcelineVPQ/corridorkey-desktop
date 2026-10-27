@@ -68,13 +68,13 @@ describe("IPC and settings validation", () => {
     try {
       const file = join(dir, "settings.json");
       writeFileSync(file, JSON.stringify({ lastOptions: { outputs: ["matte"], memory: { auto: false, hannChunk: 24 } }, appearance: { theme: "neon" }, outputRoot: 5 }));
-      const s = loadSettings(file, {});
+      const s = loadSettings(file);
       expect(s.lastOptions.outputs).toEqual(["alpha", "fg"]);
       expect(s.lastOptions.memory).toEqual({ auto: true });
       expect(s.appearance).toEqual(DEFAULT_APPEARANCE);
       expect(s.outputRoot).toBeNull();
       writeFileSync(file, "[1, 2"); // cut short
-      expect(loadSettings(file, {}).lastOptions).toEqual(DEFAULT_OPTIONS);
+      expect(loadSettings(file).lastOptions).toEqual(DEFAULT_OPTIONS);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -89,10 +89,10 @@ describe("IPC and settings validation", () => {
     try {
       const file = join(dir, "settings.json");
       writeFileSync(file, JSON.stringify({ vramLimitGb: 10, cacheRoot: "/media/fast" }));
-      expect(loadSettings(file, {})).toMatchObject({ vramLimitGb: 10, cacheRoot: "/media/fast" });
+      expect(loadSettings(file)).toMatchObject({ vramLimitGb: 10, cacheRoot: "/media/fast" });
       // a relative cache location or a bad limit: the defaults (the system's cache folder, Auto)
       writeFileSync(file, JSON.stringify({ vramLimitGb: "lots", cacheRoot: "fast" }));
-      expect(loadSettings(file, {})).toMatchObject({ vramLimitGb: null, cacheRoot: null });
+      expect(loadSettings(file)).toMatchObject({ vramLimitGb: null, cacheRoot: null });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

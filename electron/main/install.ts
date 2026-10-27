@@ -6,7 +6,6 @@
 // After a Stop or a failure, pressing the button again resumes: finished files are checked offline and kept,
 // a partial one continues where it stopped. A set only appears in the lists once all of it is in place
 // (built in a `.partial-…` folder, then renamed; engineFind skips dot folders).
-import type { EngineKind } from "../../src/shared/types";
 import { gbBytes } from "../../src/shared/units";
 import { lowerFirst, INSTALL_FIRST } from "../../src/shared/texts";
 import { DOWNLOADS_DIR, LIBRARY_FILE, MODELS_DIR, PLATFORM, RUNTIME_DIR } from "./platform";
@@ -521,19 +520,18 @@ export function trtReady(ort: string | null, models: string | null, exists: (p: 
 /** TensorRT in 1.0: Linux (Windows needs its own engine builder, later; macOS has no TensorRT). */
 export const trtSupported = (platform: NodeJS.Platform) => platform === "linux";
 
-/** Whether a job asks the engine for TensorRT: Linux, the setting on, the Rust engine (never PyTorch), its parts installed. */
-export function useTensorrt(s: { platform: NodeJS.Platform; setting: boolean; engine: EngineKind | null; ready: boolean }): boolean {
-  return trtSupported(s.platform) && s.setting && s.engine === "rust" && s.ready;
+/** Whether a job asks the engine for TensorRT: Linux, the setting on, its parts installed. */
+export function useTensorrt(s: { platform: NodeJS.Platform; setting: boolean; ready: boolean }): boolean {
+  return trtSupported(s.platform) && s.setting && s.ready;
 }
 
 /**
  * Why a job doesn't ask for TensorRT, in the words the job page shows (useTensorrt's conditions, in order). Null when
  * it asks, and where TensorRT doesn't exist in this version (Windows, macOS): nothing to decide there.
  */
-export function tensorrtWhyNot(s: { platform: NodeJS.Platform; setting: boolean; engine: EngineKind | null; ready: boolean }): string | null {
+export function tensorrtWhyNot(s: { platform: NodeJS.Platform; setting: boolean; ready: boolean }): string | null {
   if (!trtSupported(s.platform) || useTensorrt(s)) return null;
   if (!s.setting) return "TensorRT is off (Engine settings)";
-  if (s.engine !== "rust") return "TensorRT runs on the ONNX Runtime engine only, not the PyTorch engine";
   return "TensorRT's parts weren't installed when the job started (Engine settings, TensorRT)";
 }
 
