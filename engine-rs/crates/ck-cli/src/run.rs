@@ -141,6 +141,8 @@ struct Target {
     target: PathBuf,
     /// an EXR frame (checked whole), else a video
     exr: bool,
+    /// the shot's frame number of an EXR frame (verify reports the missing ones as ranges)
+    frame: Option<u64>,
 }
 
 /// The job file's run object (`--job`), checked.
@@ -330,7 +332,7 @@ fn render(m: &ArgMatches, verify: bool, sink: &mut CliSink, report: &mut Report)
         let sfx = ck_core::job::suffix(name, job.despill_strength);
         if !job.exr {
             let file = format!("{clip}_{sfx}.{}", job.writer.codec.ext());
-            targets.push(Target { staged: PathBuf::from(&file), target: target_dir.join(&file), exr: false });
+            targets.push(Target { staged: PathBuf::from(&file), target: target_dir.join(&file), exr: false, frame: None });
             continue;
         }
         let folder = format!("{clip}_{sfx}_exr");
@@ -346,7 +348,7 @@ fn render(m: &ArgMatches, verify: bool, sink: &mut CliSink, report: &mut Report)
                 Some(p) => p.path(n),
                 None => target_dir.join(&folder).join(&file),
             };
-            targets.push(Target { staged: Path::new(&folder).join(&file), target, exr: true });
+            targets.push(Target { staged: Path::new(&folder).join(&file), target, exr: true, frame: Some(n) });
         }
     }
     let settings = (
@@ -360,7 +362,9 @@ fn render(m: &ArgMatches, verify: bool, sink: &mut CliSink, report: &mut Report)
     let whole = |t: &Target| if t.exr { ck_core::writers::exr_complete(&t.target) } else { std::fs::metadata(&t.target).is_ok_and(|m| m.len() > 0) };
     if verify {
         // loop: NOT-WORTH — one check per target, once per run (each reads its file)
-        let missing: Vec<String> = targets.iter().filter(|t| !whole(t)).map(|t| t.target.to_string_lossy().into_owned()).collect();
+        let bad: Vec<&Target> = targets.iter().filter(|t| !whole(t)).collect();
+        // loop: NOT-WORTH — the missing files, once per verify
+        let missing: Vec<String> = bad.iter().map(|t| t.target.to_string_lossy().into_owned()).collect();
         report.missing = missing.clone();
         if missing.is_empty() {
             sink.note(&format!("verify: all {} file(s) there and whole", targets.len()));
@@ -370,7 +374,17 @@ fn render(m: &ArgMatches, verify: bool, sink: &mut CliSink, report: &mut Report)
         for f in &missing {
             println!("missing or incomplete: {f}");
         }
-        return Err(fail(exit::INCOMPLETE, format!("{} of {} file(s) missing or incomplete (first: {})", missing.len(), targets.len(), missing[0])));
+        // the frames as ranges, as a requeue takes them (-F 1012-1015,1040); a video output has none
+        // loop: NOT-WORTH — as above
+        let mut nums: Vec<u64> = bad.iter().filter_map(|t| t.frame).collect();
+        nums.sort_unstable();
+        nums.dedup();
+        let ranges = frames::frame_ranges(&nums);
+        if !nums.is_empty() {
+            println!("missing frames: {ranges} (re-render them: -F {})", ranges.replace(' ', ""));
+        }
+        let which = if nums.is_empty() { format!("first: {}", missing[0]) } else { format!("frames {ranges}") };
+        return Err(fail(exit::INCOMPLETE, format!("{} of {} file(s) missing or incomplete ({which})", missing.len(), targets.len())));
     }
     // loop: NOT-WORTH — one existence check per target, once per run
     let existing: Vec<&Target> = targets.iter().filter(|t| t.target.exists()).collect();
@@ -654,7 +668,7 @@ mod tests {
             eprintln!("running as root: a read-only folder doesn't stop a rename; skipped");
             return;
         }
-        let t = |n: &str, dir: &Path| Target { staged: PathBuf::from(n), target: dir.join(n), exr: true };
+        let t = |n: &str, dir: &Path| Target { staged: PathBuf::from(n), target: dir.join(n), exr: true, frame: None };
         let targets = [t("a.exr", &out), t("b.exr", &locked), t("c.exr", &out)];
         let (f, keep) = place(&targets, &staging).unwrap_err();
         assert!(!keep, "the undo worked: nothing to keep");

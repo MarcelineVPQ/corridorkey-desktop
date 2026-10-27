@@ -69,7 +69,9 @@ open, `rm` that the Console never deletes files, `cat` and `echo` that they come
 from the `corridorkey` CLI's own definitions, so the Console and the farm never differ. `help` lists the commands,
 `help render` or `render ?` explains one with examples, `help -k overwrite` (or `apropos overwrite`) searches them. The
 shell reflexes work: `ls -la`, `ls -tr`, `dir /o:-d`, `cd -`; `dir` shows a frame sequence as one row with its range
-and gaps (`dir -f` lists the frames).
+and gaps (`dir -f` lists the frames). A frame pattern is one item everywhere: `dir plates/sh010.####.exr` (or
+`%04d`, `$F4`, `@@@@`) lists that sequence, `open` shows its first frame, `cd` goes to its folder, and `verify` ends
+with the missing frames as ranges you can paste into `-F` (`missing frames: 1012-1015, 1040`).
 
 **Safety.** It is not a system shell: only its own commands, each one parsed and checked (no variables, pipes, globs
 or other programs). It **reads anywhere** you can, and **writes only into the folders you chose**: the results folder
@@ -137,6 +139,7 @@ Examples:
 ```
 cd ~/shots/sh010
 dir plates
+dir plates/sh010.%04d.exr
 allow ~/renders
 render -i plates/sh010.####.exr -o ~/renders/sh010/sh010_key.####.exr -F 1001-1100 --outputs alpha,fg
 sudo render sh010.mov -o ~/renders/sh010/ --overwrite

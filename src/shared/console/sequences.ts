@@ -1,6 +1,7 @@
 // Frame sequences, the way a TD reads a folder (lsseq): numbered files with the same name around the number, the
 // same padding and extension are one sequence, `sh010_plate.####.exr  1001-1100`, its gaps listed. dir groups them
-// and Tab offers one pattern per sequence, in the CLI's own `####` syntax (docs/CLI.md "Inputs"). Pure.
+// and Tab offers one pattern per sequence, in the CLI's own `####` syntax (docs/CLI.md "Inputs"). A typed pattern
+// (`####`, `%04d`, `$F4`, `@@@@`) names one sequence for every built-in that takes a path (sequenceOf). Pure.
 
 export interface Sequence {
   /** the CLI's pattern: sh010_plate.####.exr */
@@ -40,6 +41,72 @@ function runs(frames: readonly number[]): [number, number][] {
   return out;
 }
 
+/**
+ * The frame token in a file name, as ck-cli frames.rs find_token reads it: `####` (one digit per #), `%04d` / `%d`,
+ * Houdini's `$F4` / `$F`, and `@@@@` (one digit per @, RV's and OIIO's). Where it starts, its length, its padding.
+ */
+export function frameToken(name: string): { at: number; len: number; pad: number } | null {
+  // loop: NOT-WORTH — one short file name
+  for (let i = 0; i < name.length; i++) {
+    const c = name[i];
+    if (c === "#" || c === "@") {
+      let n = 1;
+      // loop: NOT-WORTH — the run of # or @
+      while (name[i + n] === c) n++;
+      return { at: i, len: n, pad: n };
+    }
+    if (c === "%") {
+      const m = /^%(\d*)d/.exec(name.slice(i));
+      if (m) return { at: i, len: m[0].length, pad: Math.max(1, Number(m[1] || "1")) };
+    }
+    if (c === "$" && name[i + 1] === "F") return /[1-9]/.test(name[i + 2] ?? "") ? { at: i, len: 3, pad: Number(name[i + 2]) } : { at: i, len: 2, pad: 1 };
+  }
+  return null;
+}
+
+/** One sequence from its frames (sorted by number): range, count, gaps; `pattern` in the CLI's `####` form. */
+function makeSequence(prefix: string, pad: number, ext: string, frames: { n: number; name: string }[]): Sequence {
+  // loop: NOT-WORTH — as below
+  const nums = frames.map((f) => f.n);
+  const r = runs(nums);
+  // loop: NOT-WORTH — the sequence's runs: the gap after each but the last
+  const gaps = r.slice(1).map(([start], i): [number, number] => [r[i][1] + 1, start - 1]);
+  // loop: NOT-WORTH — at most GAPS_SHOWN gaps
+  const shown = gaps.slice(0, GAPS_SHOWN).map(([a, b]) => (a === b ? `${a}` : `${a}-${b}`));
+  const missing = gaps.length ? shown.join(", ") + (gaps.length > GAPS_SHOWN ? ` and ${gaps.length - GAPS_SHOWN} more` : "") : null;
+  return {
+    pattern: `${prefix}${"#".repeat(pad)}${ext}`,
+    range: `${nums[0]}-${nums[nums.length - 1]}`,
+    count: nums.length,
+    missing,
+    // loop: NOT-WORTH — the sequence's names
+    names: frames.map((f) => f.name),
+  };
+}
+
+/**
+ * The sequence a typed pattern names among a folder's file names (`plate.####.exr`, `plate.%04d.exr`,
+ * `plate.$F4.exr`, `plate.@@@@.exr` alike), its frames as the CLI reads them (frames.rs frame_of: the pattern's
+ * padding, or wider for a larger number). Null: `pattern` has no frame token, or no file is one of its frames.
+ */
+export function sequenceOf(pattern: string, names: readonly string[]): Sequence | null {
+  const t = frameToken(pattern);
+  if (!t) return null;
+  const prefix = pattern.slice(0, t.at);
+  const suffix = pattern.slice(t.at + t.len);
+  const frames: { n: number; name: string }[] = [];
+  // loop: NOT-WORTH — one pass over a folder's names, per built-in given a pattern
+  for (const name of names) {
+    if (!name.startsWith(prefix) || !name.endsWith(suffix) || name.length <= prefix.length + suffix.length) continue;
+    const digits = name.slice(prefix.length, name.length - suffix.length);
+    if (/^\d+$/.test(digits) && (digits.length === t.pad || (digits.length > t.pad && !digits.startsWith("0")))) frames.push({ n: Number(digits), name });
+  }
+  if (!frames.length) return null;
+  // loop: NOT-WORTH — sorts one sequence's frames
+  frames.sort((a, b) => a.n - b.n);
+  return makeSequence(prefix, t.pad, suffix, frames);
+}
+
 /** Numbered files grouped into sequences (two or more frames); everything else stays a single file, in order. */
 export function groupSequences(names: readonly string[]): { sequences: Sequence[]; singles: string[] } {
   const groups = new Map<string, { prefix: string; pad: number; ext: string; frames: { n: number; name: string }[] }>();
@@ -60,24 +127,9 @@ export function groupSequences(names: readonly string[]): { sequences: Sequence[
     if (g.frames.length < 2) continue;
     // loop: NOT-WORTH — sorts one sequence's frames
     g.frames.sort((a, b) => a.n - b.n);
-    // loop: NOT-WORTH — as above
-    const nums = g.frames.map((f) => f.n);
-    const r = runs(nums);
-    // loop: NOT-WORTH — the sequence's runs: the gap after each but the last
-    const gaps = r.slice(1).map(([start], i): [number, number] => [r[i][1] + 1, start - 1]);
-    // loop: NOT-WORTH — at most GAPS_SHOWN gaps
-    const shown = gaps.slice(0, GAPS_SHOWN).map(([a, b]) => (a === b ? `${a}` : `${a}-${b}`));
-    const missing = gaps.length ? shown.join(", ") + (gaps.length > GAPS_SHOWN ? ` and ${gaps.length - GAPS_SHOWN} more` : "") : null;
     // loop: NOT-WORTH — the sequence's names
     for (const f of g.frames) grouped.add(f.name);
-    sequences.push({
-      pattern: `${g.prefix}${"#".repeat(g.pad)}${g.ext}`,
-      range: `${nums[0]}-${nums[nums.length - 1]}`,
-      count: nums.length,
-      missing,
-      // loop: NOT-WORTH — as above
-      names: g.frames.map((f) => f.name),
-    });
+    sequences.push(makeSequence(g.prefix, g.pad, g.ext, g.frames));
   }
   // loop: NOT-WORTH — one pass over the names
   return { sequences, singles: names.filter((n) => !grouped.has(n)) };

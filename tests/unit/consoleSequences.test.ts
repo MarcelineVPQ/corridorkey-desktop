@@ -1,6 +1,6 @@
 // Frame sequences as a TD reads a folder (src/shared/console/sequences.ts): lsseq-style grouping for dir and Tab.
 import { describe, expect, it } from "vitest";
-import { frameRanges, groupSequences } from "../../src/shared/console/sequences";
+import { frameRanges, frameToken, groupSequences, sequenceOf } from "../../src/shared/console/sequences";
 
 const frames = (pre: string, from: number, to: number, ext = ".exr", pad = 4) => Array.from({ length: to - from + 1 }, (_, i) => `${pre}${String(from + i).padStart(pad, "0")}${ext}`);
 
@@ -40,5 +40,46 @@ describe("groupSequences (SME review S1, M4)", () => {
   it("lists at most a few gaps, then says how many more", () => {
     const names = Array.from({ length: 40 }, (_, i) => `k.${String(1000 + i * 2).padStart(4, "0")}.exr`);
     expect(groupSequences(names).sequences[0].missing).toBe("1001, 1003, 1005, 1007, 1009, 1011, 1013, 1015 and 31 more");
+  });
+});
+
+describe("a typed pattern names one sequence (Phase 4: sequences everywhere)", () => {
+  const folder = [...frames("plate.", 1001, 1012).filter((n) => !/\.(1005|1006)\./.test(n)), "plate.mov", "plate.01.exr", "other.1001.exr", "plate.12345.exr", "plate.01234.exr"];
+
+  it("reads the CLI's tokens and @ (frames.rs find_token): where, how long, the padding", () => {
+    expect(frameToken("plate.####.exr")).toEqual({ at: 6, len: 4, pad: 4 });
+    expect(frameToken("plate.%04d.exr")).toEqual({ at: 6, len: 4, pad: 4 });
+    expect(frameToken("plate.%d.exr")).toEqual({ at: 6, len: 2, pad: 1 });
+    expect(frameToken("plate.$F4.exr")).toEqual({ at: 6, len: 3, pad: 4 });
+    expect(frameToken("plate.$F.exr")).toEqual({ at: 6, len: 2, pad: 1 });
+    expect(frameToken("plate.@@@@.exr")).toEqual({ at: 6, len: 4, pad: 4 });
+    expect(frameToken("plate.1001.exr")).toBeNull();
+    expect(frameToken("50%.exr")).toBeNull();
+  });
+
+  it("####, %04d, $F4 and @@@@ name the same frames, shown in the CLI's #### form, gaps as ranges", () => {
+    // loop: NOT-WORTH — four spellings
+    for (const p of ["plate.####.exr", "plate.%04d.exr", "plate.$F4.exr", "plate.@@@@.exr"]) {
+      const q = sequenceOf(p, folder)!;
+      expect([q.pattern, q.range, q.count, q.missing], p).toEqual(["plate.####.exr", "1001-12345", 11, "1005-1006, 1013-12344"]);
+      expect(q.names).not.toContain("plate.01.exr");
+      expect(q.names).not.toContain("plate.01234.exr");
+    }
+    expect(sequenceOf("plate.##.exr", folder)!.names).toEqual([
+      "plate.01.exr",
+      "plate.1001.exr",
+      "plate.1002.exr",
+      "plate.1003.exr",
+      "plate.1004.exr",
+      "plate.1007.exr",
+      "plate.1008.exr",
+      "plate.1009.exr",
+      "plate.1010.exr",
+      "plate.1011.exr",
+      "plate.1012.exr",
+      "plate.12345.exr",
+    ]);
+    expect(sequenceOf("nothing.####.exr", folder)).toBeNull();
+    expect(sequenceOf("plate.mov", folder)).toBeNull();
   });
 });

@@ -27,7 +27,14 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   manager shows it, as Show in folder does: `shell.showItemInFolder`, which never opens or runs a file), `dir` / `ls` (`-l -a -t -S -r -1`,
   combined like `-la`, and DOS's `/w /b /a /o:d` on every system; dot files only with `-a`; a frame sequence is one row,
   `sh010_plate.####.exr  1001-1100 · 96 frames · missing 1047`, `-f` lists its frames: `src/shared/console/sequences.ts`,
-  which Tab completion uses too: one candidate per sequence, never one per frame), `cls` / `clear`,
+  which Tab completion uses too: one candidate per sequence, never one per frame), `cls` / `clear`. **Sequences
+  everywhere:** a path whose file name is a frame pattern, `plate.####.exr`, `plate.%04d.exr`, `plate.$F4.exr` or
+  `plate.@@@@.exr` (one digit per `@`; the frames read as ck-cli's `frame_of` reads them), is one item with its frame
+  set to every built-in that takes a path: `dir <pattern>` lists that sequence's row (`-f` its frames), `open
+  <pattern>` shows its first frame, `cd` and `allow` take its folder; a pattern with no frame says so with the `dir`
+  line to type (`sequenceOf` in sequences.ts). `verify`'s missing frames come from the CLI as ranges, ready for a
+  requeue (`missing frames: 1012-1015, 1040 (re-render them: -F 1012-1015,1040)`, docs/CLI.md); the block shows
+  them as its last lines. (`@` is the Console's: corridorkey itself reads `####`, `%04d` and `$F4`.)
   `history [N|term]` (`--audit`: the elevated log), `version` (also `corridorkey --version`, `render --version`: the app's
   version, which its corridorkey shares; answered without running it), `run <file.ckcmd>` (a script of Console lines, one per line, `#` comments;
   each line through the same checks; stops at the first that fails; no script inside a script; its elevation: Security

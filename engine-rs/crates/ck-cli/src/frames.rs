@@ -58,6 +58,21 @@ pub fn parse_frames(spec: &str) -> Result<(Vec<u64>, u64), String> {
     Ok((out, end))
 }
 
+/// Frames as a wrangler pastes them into a requeue: runs as ranges, single frames alone (`1012-1015, 1040`).
+/// `frames` sorted, each once.
+pub fn frame_ranges(frames: &[u64]) -> String {
+    let mut runs: Vec<(u64, u64)> = Vec::new();
+    // loop: NOT-WORTH — one pass over the missing frames, once per verify
+    for &f in frames {
+        match runs.last_mut() {
+            Some(r) if f == r.1 + 1 => r.1 = f,
+            _ => runs.push((f, f)),
+        }
+    }
+    // loop: NOT-WORTH — the runs, once per verify
+    runs.iter().map(|&(a, b)| if a == b { a.to_string() } else { format!("{a}-{b}") }).collect::<Vec<_>>().join(", ")
+}
+
 /// A file pattern with one frame number in its file name: `prefix` + the number zero-padded to `pad` + `suffix`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Pattern {
@@ -224,6 +239,16 @@ pub fn input_folder(p: &Pattern) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frame_ranges_read_as_a_requeue() {
+        assert_eq!(frame_ranges(&[1012, 1013, 1014, 1015, 1040]), "1012-1015, 1040");
+        assert_eq!(frame_ranges(&[7]), "7");
+        assert_eq!(frame_ranges(&[1, 3, 4]), "1, 3-4");
+        assert_eq!(frame_ranges(&[]), "");
+        // what it prints, -F reads back (without the spaces it is one word on a command line)
+        assert_eq!(parse_frames(&frame_ranges(&[1012, 1013, 1040]).replace(' ', "")).unwrap().0, vec![1012, 1013, 1040]);
+    }
 
     #[test]
     fn nuke_style_frame_specs() {

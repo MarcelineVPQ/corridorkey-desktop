@@ -170,6 +170,9 @@ fn verify_finds_missing_and_cut_frames() {
     let o = verify();
     assert_eq!(o.status.code(), Some(9), "{}", text(&o.stderr));
     assert!(text(&o.stdout).contains(&format!("missing or incomplete: {}", s(&d.0.join("key/key.0003.exr")))), "{}", text(&o.stdout));
+    // the frames as ranges, ready for a requeue (SME review N6)
+    assert!(text(&o.stdout).contains("missing frames: 3 (re-render them: -F 3)"), "{}", text(&o.stdout));
+    assert!(text(&o.stderr).contains("1 of 3 file(s) missing or incomplete (frames 3)"), "{}", text(&o.stderr));
     let r: Value = serde_json::from_str(&std::fs::read_to_string(&report).unwrap()).unwrap();
     assert_eq!((r["schema"].as_str(), r["command"].as_str(), r["exit_code"].as_i64()), (Some("corridorkey-report/1"), Some("verify"), Some(9)));
     assert_eq!(r["missing"].as_array().unwrap().len(), 1);

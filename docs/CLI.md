@@ -41,7 +41,9 @@ Options are GNU style: `--frames 1001-1100` or `--frames=1001-1100`, short ones 
 (for a clip whose name starts with `-`). A mistake is exit 2 with what to type instead (`--frame` → "a similar
 argument exists: '--frames'").
 
-`verify` takes `render`'s arguments, so the render line with `verify` in place of `render` checks its own output.
+`verify` takes `render`'s arguments, so the render line with `verify` in place of `render` checks its own output. It prints
+each missing or cut file (`missing or incomplete: <path>`), then the frames as ranges, ready for a requeue:
+`missing frames: 1012-1015, 1040 (re-render them: -F 1012-1015,1040)`; its failure message names them too.
 
 For tools: `corridorkey __spec --json` (hidden from the help) prints the command line itself as JSON: `version`,
 `about`, and `commands` (`name`, `about`, `examples`, `args`: `id`, `long`, `short`, `positional`, `value_name`,

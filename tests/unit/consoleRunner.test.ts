@@ -178,6 +178,27 @@ describe("corridorkey from the Console", () => {
     expect(blocks.get(b.id)!.lines.at(-1)).toEqual({ kind: "err", text: "failed: no memory (out-of-graphics-memory)" });
   });
 
+  it("verify's missing frames end the block as ranges, as the CLI reports them (ready for -F)", async () => {
+    const { c } = make();
+    const b = await c.run("verify -i plate.####.exr -o ../out/key.####.exr");
+    await finish(
+      spawned[0].child,
+      [
+        "missing or incomplete: /out/key.1012.exr",
+        "missing frames: 1012-1015, 1040 (re-render them: -F 1012-1015,1040)",
+        '{"event":"fail","exit_code":9,"reason":"incomplete","message":"5 of 100 file(s) missing or incomplete (frames 1012-1015, 1040)"}',
+      ],
+      9,
+    );
+    expect(blocks.get(b.id)).toMatchObject({ state: "failed", exitCode: 9, exitMeaning: expect.stringMatching(/missing/) });
+    expect(
+      blocks
+        .get(b.id)!
+        .lines.slice(-2)
+        .map((l) => l.text),
+    ).toEqual(["missing frames: 1012-1015, 1040 (re-render them: -F 1012-1015,1040)", "failed: 5 of 100 file(s) missing or incomplete (frames 1012-1015, 1040) (incomplete)"]);
+  });
+
   it("cancels with SIGTERM (a clean stop, 143), and a second cancel kills the process group", async () => {
     const { c } = make();
     const b = await c.run("render shot.mov -o ../out/a");
@@ -951,6 +972,48 @@ describe("SME review 2026-10-26: sequences (M4, S1)", () => {
     const f = await c.run("dir -f");
     expect(f.entries!.filter((e) => e.name.startsWith("sh010_plate.1"))).toHaveLength(11);
     expect((await c.run("ls -1")).lines.map((l) => l.text)).toContain("sh010_plate.####.exr");
+  });
+});
+
+describe("Phase 4: sequences everywhere", () => {
+  /** plates/sh010_plate.1001-1012.exr without 1005-1006, and a single file */
+  function shot() {
+    const d = mkdtempSync(join(root, "seq4-"));
+    mkdirSync(join(d, "plates"));
+    // loop: NOT-WORTH — twelve test frames
+    for (let f = 1001; f <= 1012; f++) if (f !== 1005 && f !== 1006) writeFileSync(join(d, "plates", `sh010_plate.${f}.exr`), "x".repeat(10));
+    writeFileSync(join(d, "plates", "notes.txt"), "x");
+    return d;
+  }
+
+  it("dir <pattern> lists that one sequence (any spelling: ####, %04d, $F4, @@@@); -f its frames; none: said", async () => {
+    const d = shot();
+    const { c } = make({ startDir: d });
+    // loop: NOT-WORTH — four spellings
+    for (const p of ["plates/sh010_plate.####.exr", "plates/sh010_plate.%04d.exr", "plates/sh010_plate.$F4.exr", "plates/sh010_plate.@@@@.exr"]) {
+      const b = await c.run(`dir '${p}'`);
+      expect(
+        b.entries!.map((e) => [e.name, e.bytes, e.sequence]),
+        p,
+      ).toEqual([["sh010_plate.####.exr", 100, { range: "1001-1012", count: 10, missing: "1005-1006" }]]);
+    }
+    const f = await c.run("dir -f plates/sh010_plate.####.exr");
+    expect(f.entries!.map((e) => e.name)).toHaveLength(10);
+    expect(f.entries![0].name).toBe("sh010_plate.1001.exr");
+    const none = await c.run("dir plates/sh020_plate.####.exr");
+    expect([none.state, none.lines[0].text]).toEqual(["failed", `No frame of sh020_plate.####.exr in ${join(d, "plates")}. dir ${join(d, "plates")} lists what is there.`]);
+  });
+
+  it("open <pattern> shows its first frame; cd and allow take a pattern's folder", async () => {
+    const d = shot();
+    const { c } = make({ startDir: d });
+    expect((await c.run("open plates/sh010_plate.%04d.exr")).state).toBe("done");
+    expect(shown).toEqual([join(d, "plates", "sh010_plate.1001.exr")]);
+    const cd = await c.run("cd plates/sh010_plate.####.exr");
+    expect([cd.state, c.session().cwd]).toEqual(["done", join(d, "plates")]);
+    await c.run(`cd ${d}`);
+    const a = await c.run("allow plates/key.####.exr");
+    expect([a.state, allowAsked]).toEqual(["done", [join(d, "plates")]]);
   });
 });
 

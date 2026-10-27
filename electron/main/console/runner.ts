@@ -18,7 +18,7 @@ import type { Elevation } from "./elevation";
 import { commandHelp, findLines, overview } from "./help";
 import type { AuditLog, History } from "./logs";
 import { checkWrite, expandHome, fsErrorText, resolveReal, type PathDeps } from "./paths";
-import { groupSequences } from "../../../src/shared/console/sequences";
+import { frameToken, groupSequences, sequenceOf, type Sequence } from "../../../src/shared/console/sequences";
 import { WRITE_FOLDERS_MAX } from "../settings";
 import { fileSizeText } from "../../../src/shared/units";
 
@@ -309,7 +309,11 @@ export class Console {
         return now(await this.dir(b, pos("folder")[0], p));
       case "open": {
         const a = this.d.paths.platform === "win32" ? win32 : posix;
-        const path = a.resolve(this.cwd, expandHome(pos("path")[0] ?? ".", this.d.paths));
+        let path = a.resolve(this.cwd, expandHome(pos("path")[0] ?? ".", this.d.paths));
+        // a frame pattern: its first frame
+        const pat = await this.patternAt(path);
+        if (pat && !pat.seq) return now(this.finish(b, "failed", noFrames(pat, this.opts)));
+        if (pat?.seq) path = a.join(pat.dir, pat.seq.names[0]);
         // loop: NOT-WORTH — one async stat per open
         const st = await this.d.fs.stat(path).catch((e: unknown) => e as Error);
         if (st instanceof Error) return now(this.finish(b, "failed", `Can't show it: ${fsErrorText(st, path)}. Tab completes a name.`));
@@ -341,7 +345,8 @@ export class Console {
     }
     let dir = "";
     try {
-      dir = await resolveReal(to ?? this.d.paths.home, this.cwd, this.d.paths);
+      // a frame pattern (cd plates/plate.####.exr): its folder
+      dir = await resolveReal((to !== undefined && (await this.patternFolder(to))) || (to ?? this.d.paths.home), this.cwd, this.d.paths);
       // loop: NOT-WORTH — one async stat per cd
       if (!(await this.d.fs.stat(dir)).isDirectory()) return this.finish(b, "failed", `${dir} isn't a folder.`);
     } catch (e) {
@@ -368,7 +373,8 @@ export class Console {
     }
     let dir = "";
     try {
-      dir = await resolveReal(folder, this.cwd, this.d.paths);
+      // a frame pattern (allow key/key.####.exr): its folder
+      dir = await resolveReal((await this.patternFolder(folder)) ?? folder, this.cwd, this.d.paths);
       // loop: NOT-WORTH — one async stat per allow
       if (!(await this.d.fs.stat(dir)).isDirectory()) return this.finish(b, "failed", `${dir} isn't a folder: allow takes a folder (it covers every folder inside it).`);
     } catch (e) {
@@ -408,7 +414,11 @@ export class Console {
       reverse = (by !== "name") !== order.startsWith("-");
     }
     const a = this.d.paths.platform === "win32" ? win32 : posix;
-    const dir = a.resolve(this.cwd, expandHome(folder ?? ".", this.d.paths));
+    let dir = a.resolve(this.cwd, expandHome(folder ?? ".", this.d.paths));
+    // a frame pattern (dir plates/plate.####.exr): that one sequence, in its folder
+    const pat = folder !== undefined ? await this.patternAt(dir) : null;
+    if (pat && !pat.seq) return this.finish(b, "failed", noFrames(pat, this.opts));
+    if (pat) dir = pat.dir;
     let names: Dirent[];
     try {
       // loop: NOT-WORTH — one async readdir per dir / ls
@@ -422,12 +432,18 @@ export class Console {
     const total = names.length;
     // loop: NOT-WORTH — one folder's names, per dir / ls
     names = all ? names : names.filter((n) => !n.name.startsWith("."));
+    const only = pat?.seq ? new Set(pat.seq.names) : null;
+    // loop: NOT-WORTH — as above
+    if (only) names = names.filter((n) => only.has(n.name));
     const hidden = total - names.length;
     // loop: NOT-WORTH — sorts one folder's names, per dir / ls
     names.sort((x, y) => naturalCompare(x.name, y.name));
     // a sequence is one row (lsseq: sh010_plate.####.exr  1001-1100, its gaps), unless -f asks for the frames
     // loop: NOT-WORTH — one folder's names
-    const grouped = has("frames") ? { sequences: [], singles: names.map((n) => n.name) } : groupSequences(names.filter((n) => !n.isDirectory()).map((n) => n.name));
+    const every = names.map((n) => n.name);
+    // loop: NOT-WORTH — as above
+    const fileNames = names.filter((n) => !n.isDirectory()).map((n) => n.name);
+    const grouped = has("frames") ? { sequences: [], singles: every } : pat?.seq ? { sequences: [pat.seq], singles: [] } : groupSequences(fileNames);
     // loop: NOT-WORTH — as above
     const inSequence = new Set(grouped.sequences.flatMap((q) => q.names));
     // loop: NOT-WORTH — one folder's names
@@ -485,6 +501,27 @@ export class Console {
       return this.finish(b, "done", ...entries.map((e) => e.name + (e.folder ? a.sep : "")));
     }
     return this.finish(b, "done", summary);
+  }
+
+  /** A path whose file name is a frame pattern (####, %04d, $F4, @@@@) and that isn't a file or folder itself: its folder. */
+  private async patternFolder(path: string): Promise<string | null> {
+    const a = this.d.paths.platform === "win32" ? win32 : posix;
+    const abs = a.resolve(this.cwd, expandHome(path, this.d.paths));
+    if (!frameToken(a.basename(abs))) return null;
+    // loop: NOT-WORTH — one async stat per path given
+    return (await this.d.fs.stat(abs).catch(() => null)) ? null : a.dirname(abs);
+  }
+
+  /** As patternFolder, with the sequence the pattern names there (null: no frame of it). */
+  private async patternAt(path: string): Promise<{ dir: string; pattern: string; seq: Sequence | null } | null> {
+    const dir = await this.patternFolder(path);
+    if (dir === null) return null;
+    // loop: NOT-WORTH — one async readdir per pattern given
+    const names = await this.d.fs.readdir(dir).catch(() => [] as Dirent[]);
+    const pattern = (this.d.paths.platform === "win32" ? win32 : posix).basename(path);
+    // loop: NOT-WORTH — one folder's names
+    const files = names.filter((n) => !n.isDirectory()).map((n) => n.name);
+    return { dir, pattern, seq: sequenceOf(pattern, files) };
   }
 
   /** history [N|term]: numbered (stable numbers), when, how it ended (✓, ✗ and the exit code), the line, its folder. */
@@ -926,6 +963,9 @@ function localTime(iso: string | null): string {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
+
+/** A pattern with no frame in its folder: said, with what to type. */
+const noFrames = (pat: { dir: string; pattern: string }, opts: ParseOptions) => `No frame of ${pat.pattern} in ${pat.dir}. dir ${quoteArg(pat.dir, opts)} lists what is there.`;
 
 /** Control and bidi characters as \u{…}: a dialog line shows exactly one line, in the order it is stored. */
 // loop: NOT-WORTH — one pass over a dialog string
