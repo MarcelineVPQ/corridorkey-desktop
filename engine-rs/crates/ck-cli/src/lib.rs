@@ -6,6 +6,7 @@ pub mod frames;
 pub mod progress;
 pub mod report;
 pub mod run;
+pub mod rundirs;
 pub mod signals;
 
 /// The command line's version: the app's (package.json, via ck-core), the engine's too: one number for all.

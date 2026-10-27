@@ -131,25 +131,6 @@ fn runtime(cfg: &EngineConfig, report: &mut Report) -> Result<(&'static Runtime,
     Ok((rt, set))
 }
 
-/// The run's own name: two runs of one clip (on one machine, or sharing a folder) never share a file.
-fn run_id() -> String {
-    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
-    format!("{}-{t:x}", std::process::id())
-}
-
-/// The run's folders, removed with everything in them when the run ends, however it ends (a SIGKILL leaves them:
-/// hidden `.corridorkey-<run>` folders, safe to delete).
-struct RunDirs(Vec<PathBuf>);
-
-impl Drop for RunDirs {
-    fn drop(&mut self) {
-        // loop: NOT-WORTH — two folders
-        for d in &self.0 {
-            let _ = std::fs::remove_dir_all(d);
-        }
-    }
-}
-
 /// One result file: where the engine writes it (inside the staging folder), where it goes.
 struct Target {
     staged: PathBuf,
@@ -317,21 +298,19 @@ fn render(m: &ArgMatches, verify: bool, sink: &mut CliSink, report: &mut Report)
     report.requested = requested.clone().unwrap_or_default();
     report.span = span.clone();
 
-    // the job as the engine takes it (the protocol's own checks), with the run's own folders
-    let run = run_id();
+    // the job as the engine takes it (the protocol's own checks); its folders are the run's own, made before it runs
     let target_dir = match &out {
         Output::Folder(d) => d.clone(),
         Output::Pattern(p) => p.dir.clone(),
     };
-    let staging = if target_dir.as_os_str().is_empty() { PathBuf::from(".") } else { target_dir.clone() }.join(format!(".corridorkey-{run}"));
+    let staging_in = if target_dir.as_os_str().is_empty() { PathBuf::from(".") } else { target_dir.clone() };
     let temp_root = opt(m, "temp")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("OPENJD_SESSION_WORKING_DIR").filter(|v| !v.is_empty()).map(PathBuf::from))
         .or_else(|| jstr("temp_dir").map(PathBuf::from))
         .unwrap_or_else(std::env::temp_dir);
-    let temp = temp_root.join(format!("corridorkey-{run}"));
-    let req = json!({"id": "corridorkey", "input": input, "output_dir": staging, "temp_dir": temp, "options": options});
-    let job = ck_core::job::parse(&req).map_err(|e| fail(exit::USAGE, crate::args::in_flag_words(&e.message)))?;
+    let req = json!({"id": "corridorkey", "input": input, "output_dir": staging_in, "temp_dir": temp_root, "options": options});
+    let mut job = ck_core::job::parse(&req).map_err(|e| fail(exit::USAGE, crate::args::in_flag_words(&e.message)))?;
     if !job.exr && matches!(out, Output::Pattern(_)) {
         return Err(fail(exit::USAGE, format!("{output}: a frame pattern is for EXR; video outputs go in a folder (-o out/)")));
     }
@@ -367,7 +346,7 @@ fn render(m: &ArgMatches, verify: bool, sink: &mut CliSink, report: &mut Report)
         }
     }
     let settings = (
-        staging.join(format!("{clip}_settings.txt")),
+        PathBuf::from(format!("{clip}_settings.txt")),
         match &out {
             Output::Pattern(p) => p.settings_path(),
             Output::Folder(_) => target_dir.join(format!("{clip}_settings.txt")),
@@ -416,13 +395,22 @@ fn render(m: &ArgMatches, verify: bool, sink: &mut CliSink, report: &mut Report)
         set.dir.display(),
         set.version.as_deref().map(|v| format!(" ({v})")).unwrap_or_default()
     ));
-    let mut dirs = RunDirs(vec![staging.clone(), temp.clone()]);
     // the output folder holds the staging folder; the results' own folders are made when they arrive
-    let mkdir = |d: &Path| match d.as_os_str().is_empty() {
-        true => Ok(()),
-        false => std::fs::create_dir_all(d).map_err(|e| fail(exit::OUTPUT, format!("can't make the output folder {}: {e}", d.display()))),
-    };
-    mkdir(&target_dir)?;
+    if !target_dir.as_os_str().is_empty() {
+        std::fs::create_dir_all(&target_dir).map_err(|e| fail(exit::OUTPUT, format!("can't make the output folder {}: {e}", target_dir.display())))?;
+    }
+    // the folders of earlier runs that were killed (a SIGKILL never cleans up), never a live run's
+    let me = crate::rundirs::host();
+    // loop: NOT-WORTH — the two places run folders live
+    for (dir, prefix) in [(&staging_in, ".corridorkey-"), (&temp_root, "corridorkey-")] {
+        // loop: NOT-WORTH — the folders removed, once per run
+        for d in crate::rundirs::sweep(dir, prefix, &me, crate::rundirs::pid_alive, std::time::SystemTime::now()) {
+            sink.note(&format!("removed the folder of an earlier run that was killed: {}", d.display()));
+        }
+    }
+    let (mut dirs, staging, temp) = crate::rundirs::RunDirs::create(&staging_in, &temp_root).map_err(|e| fail(exit::OUTPUT, e))?;
+    job.output_dir = staging.clone();
+    job.temp_dir = temp;
     crate::signals::install();
     let mut pipeline = ck_core::pipeline::Pipeline::new(rt, set);
     // a panic in the engine is an engine error with its words, the run's folders still removed
@@ -438,11 +426,11 @@ fn render(m: &ArgMatches, verify: bool, sink: &mut CliSink, report: &mut Report)
     // the job is whole: its frames to their names (renames on one drive)
     if let Err((f, keep)) = place(&targets, &staging) {
         if keep {
-            dirs.0.retain(|d| d != &staging);
+            dirs.dirs.retain(|d| d != &staging);
         }
         return Err(f);
     }
-    let _ = std::fs::rename(&settings.0, &settings.1);
+    let _ = std::fs::rename(staging.join(&settings.0), &settings.1);
     report.kept = kept;
     sink.note(&format!("wrote {} file(s) to {output}", targets.len()));
     Ok(())

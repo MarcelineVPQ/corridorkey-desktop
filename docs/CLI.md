@@ -96,9 +96,11 @@ A name without a frame number (`-o out/key.exr`) is exit 2: give a folder or a p
 
 ### Output safety
 
-- The job writes into a hidden folder of its own beside the output (`.corridorkey-<pid>-<time>`, same drive). Only
-  when the whole job is done are the requested frames renamed to their final names. A failed, stopped or killed run
-  never leaves a frame at a final name, and two runs never share a folder.
+- The job writes into a hidden folder of its own beside the output (`.corridorkey-<host>-<pid>-<random>`, same
+  drive; the machine's name and 64 random bits, so the machines and containers of a farm writing to one share never
+  pick the same name, and the folder is made only if no folder has that name). Only when the whole job is done are
+  the requested frames renamed to their final names. A failed, stopped or killed run never leaves a frame at a final
+  name, and two runs never share a folder.
 - Those renames are all or nothing. Frames already at the names (`--overwrite`) are first moved aside into the
   hidden folder, then the new ones put in place; a rename is tried four times over 0.65 s (a reader holding a frame
   on Windows, a share's hiccup). If one still fails, every rename done is undone (the old frames back at their names,
@@ -111,7 +113,12 @@ A name without a frame number (`-o out/key.exr`) is exit 2: give a folder or a p
 - Temporary files (the RVM features and states, GBs on long shots) go in a folder of the run's own under `--temp DIR`,
   else `OPENJD_SESSION_WORKING_DIR` (OpenJD's session folder), else the job file's `temp_dir`, else `TMPDIR`.
 - Both folders are removed when the run ends, however it ends. A SIGKILL leaves them (hidden `.corridorkey-*` and
-  `corridorkey-*` folders, safe to delete).
+  `corridorkey-*` folders, safe to delete), and the next `render` with the same output folder (or temporary folder)
+  removes them, saying so on stderr, when their run is certainly over. Each run holds a lock on a `.corridorkey.lock`
+  file in both folders while it lives (the system drops it when the process ends, killed or not); a folder whose lock
+  is held is never touched. Otherwise a folder goes when it was made on this machine (by name) by a process that no
+  longer runs, or when nothing in it changed for 7 days (another machine's, or an older version's
+  `.corridorkey-<pid>-<time>`). On a filesystem without file locks the process and age rules alone decide.
 - Frames already at the output's names: the run refuses (exit 4) unless told. `--overwrite` replaces them;
   `--skip-existing` does nothing (exit 0) when **every** requested frame is there and reads as a whole EXR, and keys
   them all again otherwise (a part can't be keyed alone without changing the matte). Reruns give the same result.

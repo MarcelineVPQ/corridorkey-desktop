@@ -223,7 +223,8 @@ shell would). With chunk size 0 the job is one `key` task; otherwise Flamenco's 
 chunk. Each task runs the Worker's `exec` command (`exe` + `args`, Flamenco 3.3 or newer); a `verify` task depends on
 all of them. Tasks have the `misc` type, which every Worker runs by default: use worker tags to keep CorridorKey on
 the GPU machines. Flamenco cancels a task by killing it (Go's `exec.CommandContext`, SIGKILL): no frame reaches a
-final name, but corridorkey's hidden `.corridorkey-*` folders stay behind (docs/CLI.md "Output safety").
+final name, but corridorkey's hidden `.corridorkey-*` folders stay behind until the next task writing to that
+folder removes them (docs/CLI.md "Output safety").
 
 **Tested here**: `node --check`, and `compileJob` run in Node against stand-ins for Flamenco's `author`,
 `frameChunker` (the Manager's algorithm, internal/manager/job_compilers/js_globals.go) and `shellSplit`: the whole
