@@ -538,6 +538,8 @@ fn budget_job(cap: u64, low_vram: bool) -> Vec<(&'static str, u64, BTreeSet<&'st
         std::fs::File::options().write(true).open(h._dir.0.join(format!("models/{p}_fp32.onnx"))).unwrap().set_len(n).unwrap();
     }
     h.pipe.gpu_overhead = Some(354_334_801);
+    // already read: on a PC with NVML the first load would read the test process's own 0 bytes and replace it
+    h.pipe.overhead_read = true;
     let k = ModelKey { vram_cap: Some(cap), ..key(Provider::Cuda) };
     h.keying(&k, None, 1, 1, low_vram).res.unwrap();
     let events = h.loader.events();
