@@ -232,7 +232,7 @@ export function JobSettings({
               <Row label="Frame rate" htmlFor="fps">
                 <input id="fps" type="number" min={1} max={240} step={0.001} value={o.frameDirFps} onChange={(e) => set({ frameDirFps: Number(e.target.value) || 24 })} />
               </Row>
-              <Row label="Color">
+              <Row label="Color" hint={job.clip.exrFrames ? "EXR frames: scene-linear by format" : "PNG/JPEG frames: display-coded by format"}>
                 <label className="checks">
                   <input type="checkbox" checked={o.frameDirLinear} onChange={(e) => set({ frameDirLinear: e.target.checked })} />
                   Frames are scene-linear (linear EXR plates)

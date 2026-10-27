@@ -324,9 +324,6 @@ export interface Settings {
   tensorrt: boolean;
   // the graphics memory limit new clips start with (GiB; null = Auto), backlog row 43
   vramLimitGb: number | null;
-  // "Frames are scene-linear" as the user last set it on a frame folder; null = never set: by the frames' format
-  // (EXR scene-linear, others display-coded; media.ts frameDirLinearFor)
-  frameDirLinear: boolean | null;
   // the sizes TensorRT builds for in the background (Engine settings, TensorRT; backlog row 56), one per range
   trtSizes: TrtSize[];
   // the cache folder's parent chosen in App settings, Storage (the app keeps its own folder inside it); null = the

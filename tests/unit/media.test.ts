@@ -66,16 +66,13 @@ describe("frame order (CorridorKey2.0 PR #4: natural order, any extension case)"
 // Marcy 2026-10-27: an EXR plate folder (scene-linear by convention, e.g. Tears of Steel's F65 plates) started as
 // "display-coded", clipping everything above 1, unless the user noticed the box
 describe("a frame folder's scene-linear default", () => {
-  it("is on for EXR frames and off for the others, unless the user chose", () => {
+  it("is on for EXR frames and off for the others", () => {
     const exr = dir(["f.0002.exr", "f.0001.EXR"]);
     const png = dir(["f.0001.png", "f.0002.png"]);
     const jpg = dir(["f.0001.jpg"]);
-    expect(frameDirLinearFor(exr, null)).toBe(true);
-    expect(frameDirLinearFor(png, null)).toBe(false);
-    expect(frameDirLinearFor(jpg, null)).toBe(false);
-    // the user's own choice wins either way
-    expect(frameDirLinearFor(exr, false)).toBe(false);
-    expect(frameDirLinearFor(png, true)).toBe(true);
+    expect(frameDirLinearFor(exr)).toBe(true);
+    expect(frameDirLinearFor(png)).toBe(false);
+    expect(frameDirLinearFor(jpg)).toBe(false);
   });
 });
 

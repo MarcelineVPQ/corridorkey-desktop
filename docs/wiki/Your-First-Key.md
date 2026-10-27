@@ -62,7 +62,7 @@ from the settings you used last.
 | --- | --- |
 | **Hint** | No hint, a first-frame matte or a hint video, and how far to trust it. See [Hints](Hints). |
 | **Outputs** | Which files (Alpha, Foreground, Checker, Cutout), the format (Video or EXR sequence), the codec, despill. See [Outputs](Outputs). |
-| **Frame folder** | Frame sequences only: the frame rate (24 by default) and whether the frames are scene-linear. A folder of EXR frames starts scene-linear, PNG/JPEG display-coded; once you change it, new frame folders start with your choice. |
+| **Frame folder** | Frame sequences only: the frame rate (24 by default) and whether the frames are scene-linear. A folder of EXR frames starts scene-linear, PNG/JPEG display-coded; a change you make is that folder's alone. |
 | **Internal resolution** | **Full** runs the networks at the clip's own size; **¾**, **½** and **¼** run them smaller (the original's `--model_scale`, the plugin's Internal Resolution): faster and lighter, with less detail in the edges. The result is resized back to the clip's size. |
 | **Input precision** | **Bit depth**, off by default: every input is read exactly as CorridorKey 2.0 reads it, byte for byte. On reads 10/12-bit video and 16-bit PNG at full depth, which differs from CorridorKey 2.0 ([README](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/README.md#deep-input-10--and-12-bit-plates-reach-the-model-in-full-10)). |
 | **Linear exposure** | Video clips only: brightness and contrast (around the **Contrast pivot**, 0.18 = mid grey) on the frames the networks see, for an under- or over-exposed plate. The foreground is turned back by the exact inverse, so the outputs keep the clip's own exposure. |

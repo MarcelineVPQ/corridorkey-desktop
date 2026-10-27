@@ -294,7 +294,6 @@ export const SETTINGS = {
   ortLibrary: { label: "ONNX Runtime library", page: "Troubleshooting" },
   tensorrt: { label: "Use TensorRT", page: "TensorRT" },
   vramLimitGb: { label: "Memory limit", page: "Graphics-Memory-and-the-Window" },
-  frameDirLinear: { label: "Frames are scene-linear", page: "Outputs" },
   trtSizes: { label: "A size of my own", page: "TensorRT" },
   cacheRoot: { label: "Cache folder", page: "Uninstall" },
   consoleWriteFolders: { label: "May write in", page: "Console" },

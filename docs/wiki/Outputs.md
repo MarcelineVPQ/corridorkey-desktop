@@ -38,7 +38,7 @@ and writes a straight cutout); the matte values themselves are the same. The REA
 
 For a frame folder input, the app needs to know whether the frames are scene-linear (**Frame folder → Color → Frames
 are scene-linear**). A folder of EXR frames starts with it on, PNG/JPEG with it off; change it if your frames differ
-(new frame folders then start with your choice). The `corridorkey` command line reads a frame folder the same way:
+(that folder's alone: every new folder starts by its format). The `corridorkey` command line reads a frame folder the same way:
 scene-linear when its first frame is EXR, display-coded otherwise, unless given `--linear` or `--no-linear`. Copy as
 command writes the box for an EXR folder both ways (`--linear` or `--no-linear`), for other frames `--linear` when on.
 

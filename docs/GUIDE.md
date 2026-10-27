@@ -25,7 +25,7 @@ A matte named like the clip (`shot01FrameHint.png`, `shot01_AlphaHint.mp4`) is f
 
 ## Frame folders
 
-A folder of frames has its own **Frame folder** section: the frame rate (24 by default) and **Frames are scene-linear**. A folder of OpenEXR frames starts with it on (EXR plates are scene-linear by convention); PNG and JPEG frames start with it off (display-coded, read as sRGB and clipped to 0-1). Once you change the box yourself, new frame folders start with your choice instead. The `corridorkey` command line reads a frame folder the same way (scene-linear when its first frame is EXR, display-coded otherwise); `--linear` and `--no-linear` choose. The Queue's **Copy as command** and the farm export write the box's choice: for EXR frames `--linear` or `--no-linear`, for other frames `--linear` when it's on.
+A folder of frames has its own **Frame folder** section: the frame rate (24 by default) and **Frames are scene-linear**. A folder of OpenEXR frames starts with it on (EXR plates are scene-linear by convention); PNG and JPEG frames start with it off (display-coded, read as sRGB and clipped to 0-1). The box's hint says what the frames' format gives; a change you make is that folder's alone (every new folder starts by its format). The `corridorkey` command line reads a frame folder the same way (scene-linear when its first frame is EXR, display-coded otherwise); `--linear` and `--no-linear` choose. The Queue's **Copy as command** and the farm export write the box's choice: for EXR frames `--linear` or `--no-linear`, for other frames `--linear` when it's on.
 
 ## Internal resolution
 

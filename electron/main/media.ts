@@ -60,12 +60,11 @@ export function frameFiles(dir: string): string[] {
 }
 
 /**
- * Whether a frame folder's frames are scene-linear: the user's own choice when they made one, else by the frames'
- * format, as the engine reads it (its first frame in natural order): OpenEXR plates are scene-linear by convention,
- * PNG/JPEG display-coded (Marcy 2026-10-27: an EXR folder read as display-coded clipped every value above 1).
+ * Whether a frame folder's frames are scene-linear by their format, as the engine reads it (its first frame in natural
+ * order): OpenEXR plates are scene-linear by convention, PNG/JPEG display-coded (Marcy 2026-10-27: an EXR folder read
+ * as display-coded clipped every value above 1). A folder's box starts here; a change to it is that folder's alone.
  */
-export function frameDirLinearFor(dir: string, chosen: boolean | null): boolean {
-  if (chosen !== null) return chosen;
+export function frameDirLinearFor(dir: string): boolean {
   const first = frameFiles(dir)[0];
   return first !== undefined && extname(first).toLowerCase() === ".exr";
 }

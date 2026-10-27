@@ -118,7 +118,6 @@ export const settings = (over: Partial<Settings> = {}): Settings => ({
   ortLibrary: null,
   tensorrt: false,
   vramLimitGb: null,
-  frameDirLinear: null,
   cacheRoot: null,
   consoleWriteFolders: [],
   consoleBookmarks: {},

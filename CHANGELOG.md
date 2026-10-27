@@ -103,8 +103,8 @@ on its own rail icon. Not a system shell: its own commands only, each parsed and
 - The Engine page's list of programs using the graphics card showed other programs' whole command lines (a
   Chromium-based app's arguments and home-folder paths): it now shows the program's name alone.
 - A folder of EXR frames started as "display-coded", clipping every value above 1 unless the box was noticed: an EXR
-  folder now starts scene-linear (PNG/JPEG frames stay display-coded), and a choice you make on the box is kept for
-  the frame folders you add after it. The `corridorkey` command line now does the same (above).
+  folder now starts scene-linear (PNG/JPEG frames stay display-coded), the box says which its format gives, and a
+  change you make to it is that folder's alone. The `corridorkey` command line now does the same (above).
 - The Results stills showed faint green lines in black areas (the still's conversion from the engine's 10-bit video
   rounded near-black to green; the outputs themselves were clean): stills are now converted to RGB first, black stays
   black.
