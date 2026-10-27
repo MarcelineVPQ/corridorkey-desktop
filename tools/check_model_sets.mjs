@@ -3,7 +3,9 @@
 // pins is on GitHub as it is pinned, with its licence files. Sources of truth: electron/main/install.ts (each
 // `const X_SET`, each `inRelease(SET)` helper and its `(file, size, sha256)` pins), updateFeed.ts's REPO, and the
 // releases `models-<set>` on GitHub. It fails when
-//   (a) a pinned file is missing from its release, or its size or SHA-256 (GitHub's digest) differs from the pin;
+//   (0) a set has no pin this gate can read (a pin it can't read would go unchecked);
+//   (a) a pinned file is missing from its release, or its size or SHA-256 (GitHub's digest) differs from the pin, or
+//       GitHub gives no digest for it (nothing to check the SHA-256 against);
 //   (b) the base set's release (the set the others are named after) lacks LICENSE, NOTICE or ATTRIBUTION.md;
 //   (c) a derived set's release (…-trt, …-coreml) lacks one of the base release's licence files
 //       (LICENSE*, NOTICE, ATTRIBUTION*), or has it at another size.
@@ -33,25 +35,29 @@ export function pinnedSets(installTs) {
   // loop: NOT-WORTH — a few inRelease helpers
   for (const h of installTs.matchAll(/^const (\w+) = inRelease\((\w+)\);/gm)) {
     const set = names[h[2]];
+    // (a call Prettier wrapped over several lines, with a trailing comma, reads the same)
+    const pin = new RegExp(`\\b${h[1]}\\(\\s*"([^"]+)",\\s*(\\d+),\\s*"([0-9a-f]{64})",?\\s*\\)`, "g");
     // loop: NOT-WORTH — one set's dozen pins
-    const files = [...installTs.matchAll(new RegExp(`\\b${h[1]}\\("([^"]+)", (\\d+), "([0-9a-f]{64})"\\)`, "g"))].map((m) => ({ file: m[1], size: Number(m[2]), sha256: m[3] }));
+    const files = [...installTs.matchAll(pin)].map((m) => ({ file: m[1], size: Number(m[2]), sha256: m[3] }));
     sets.push({ set, base: base[set], files });
   }
   return sets;
 }
 
-/** (a)–(c) for one set; `assets` are GitHub's [{ name, size, digest }] for it, `baseAssets` its base set's (or null). */
+/** (0)–(c) for one set; `assets` are GitHub's [{ name, size, digest }] for it, `baseAssets` its base set's (or null). */
 export function checkRelease(s, assets, baseAssets) {
   const out = [];
   const tag = `models-${s.set}`;
   // loop: NOT-WORTH — one release's assets
   const by = new Map(assets.map((a) => [a.name, a]));
+  if (!s.files.length) out.push(`${tag}: install.ts pins no file this gate can read (a pin it can't parse?)`);
   // loop: NOT-WORTH — one set's pins
   for (const p of s.files) {
     const a = by.get(p.file);
     if (!a) out.push(`${tag}: ${p.file} is pinned in install.ts but not in the release`);
     else if (a.size !== p.size) out.push(`${tag}: ${p.file} is ${a.size} bytes, pinned ${p.size}`);
-    else if (a.digest && a.digest !== `sha256:${p.sha256}`) out.push(`${tag}: ${p.file}'s SHA-256 (${a.digest}) isn't the pin's`);
+    else if (!a.digest) out.push(`${tag}: GitHub gives no digest for ${p.file}: its SHA-256 can't be checked`);
+    else if (a.digest !== `sha256:${p.sha256}`) out.push(`${tag}: ${p.file}'s SHA-256 (${a.digest}) isn't the pin's`);
   }
   if (!s.base) {
     // loop: NOT-WORTH — three names

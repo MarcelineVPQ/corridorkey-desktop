@@ -31,12 +31,43 @@ describe("the model-set gate (online at release; these checks are offline)", () 
   });
 
   it("(b) a base release without its licence files fails; (c) the Core ML release as first uploaded (none) fails", () => {
-    const base = { set: "2.0.0-onnx.4", base: null, files: [] };
-    expect(checkRelease(base, [{ name: "LICENSE", size: 1 }], null)).toEqual([expect.stringContaining("no NOTICE"), expect.stringContaining("no ATTRIBUTION.md")]);
+    const base = { set: "2.0.0-onnx.4", base: null, files: [{ file: "m.onnx", size: 1, sha256: H("m") }] };
+    expect(
+      checkRelease(
+        base,
+        [
+          { name: "m.onnx", size: 1, digest: `sha256:${H("m")}` },
+          { name: "LICENSE", size: 1 },
+        ],
+        null,
+      ),
+    ).toEqual([expect.stringContaining("no NOTICE"), expect.stringContaining("no ATTRIBUTION.md")]);
     const coreml = { set: "2.0.0-onnx.4-coreml", base: "2.0.0-onnx.4", files: [{ file: "coreml.json", size: 458, sha256: H("c") }] };
     const json = { name: "coreml.json", size: 458, digest: `sha256:${H("c")}` };
     expect(checkRelease(coreml, [json], LICENCES)).toHaveLength(4);
     expect(checkRelease(coreml, [json, ...LICENCES], LICENCES)).toEqual([]);
     expect(checkRelease(coreml, [json, ...LICENCES.slice(1), { name: "LICENSE", size: 5 }], LICENCES)).toEqual([expect.stringContaining("LICENSE is 5 bytes")]);
+  });
+
+  // review N3: a set whose pins the gate can't read passed as `files: []`; a missing digest skipped the SHA-256 check
+  it("(0) a set with no readable pin fails; (a) a pinned file without GitHub's digest fails", () => {
+    expect(checkRelease({ set: "x", base: null, files: [] }, LICENCES, null)).toEqual([expect.stringContaining("pins no file")]);
+    const s = { set: "x", base: null, files: [{ file: "a.onnx", size: 10, sha256: H("a") }] };
+    expect(checkRelease(s, [{ name: "a.onnx", size: 10 }, ...LICENCES], null)).toEqual([expect.stringContaining("no digest for a.onnx")]);
+    expect(checkRelease(s, [{ name: "a.onnx", size: 10, digest: null }, ...LICENCES], null)).toEqual([expect.stringContaining("no digest for a.onnx")]);
+  });
+
+  it("reads a pin Prettier wrapped over lines", () => {
+    const ts = ['const M_SET = "s1";', "const m = inRelease(M_SET);", `m("one.onnx", 5, "${H("a")}");`, "m(", '  "two.onnx",', "  6,", `  "${H("b")}",`, ");"].join("\n");
+    expect(pinnedSets(ts)).toEqual([
+      {
+        set: "s1",
+        base: null,
+        files: [
+          { file: "one.onnx", size: 5, sha256: H("a") },
+          { file: "two.onnx", size: 6, sha256: H("b") },
+        ],
+      },
+    ]);
   });
 });
