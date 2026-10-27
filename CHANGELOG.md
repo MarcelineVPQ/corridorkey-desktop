@@ -47,8 +47,8 @@ on its own rail icon. Not a system shell: its own commands only, each parsed and
   definitions.
 - Safety: it reads anywhere and writes only into the results and cache folders, the queued clips' folders and folders
   you `allow`; a command that replaces files runs only as `sudo …` after a dialog showing what it replaces, elevated
-  for 5 minutes (each elevated command extends it, never past 15), dropped on a screen lock or sleep (on Linux
-  through systemd-logind); every elevated command is logged before it runs. The renderer's security policy is
+  for 5 minutes (each elevated command extends it, never past 15), dropped on sleep or quit and meant to drop on a
+  screen lock too (on Linux it reads systemd-logind's lock state; not yet tried with a real lock); every elevated command is logged before it runs. The renderer's security policy is
   stricter, and a gate forbids shells and `exec` in the app's code.
 - For the pipeline: frame sequences shown and completed as one item (`sh010.####.exr 1001-1100 · missing 1047`);
   every job the queue starts appears as its exact `corridorkey render …` line, and the Queue's **Copy as command**
