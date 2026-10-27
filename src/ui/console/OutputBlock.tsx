@@ -9,6 +9,7 @@ import { Check, ChevronDown, ChevronRight, Copy, CornerDownLeft, FolderOpen, Shi
 import type { Registry } from "../../shared/console/registry";
 import type { ConsoleBlock } from "../../shared/types";
 import { ProgressBar } from "../ProgressBar";
+import { commandLine } from "../../shared/console/jobCommand";
 import { fileSizeText } from "../../shared/units";
 import {
   blockStatus,
@@ -48,7 +49,7 @@ function CopyButton({ label, text }: { label: string; text: string }) {
   );
 }
 
-type BlockProps = { b: ConsoleBlock; registry: Registry; onReinsert: (line: string) => void };
+type BlockProps = { b: ConsoleBlock; registry: Registry; windows: boolean; onReinsert: (line: string) => void };
 
 export const OutputBlock = memo(function OutputBlock(props: BlockProps) {
   const { b } = props;
@@ -81,8 +82,10 @@ export const OutputBlock = memo(function OutputBlock(props: BlockProps) {
   );
 });
 
-function FullBlock({ b, registry, onReinsert, onCollapse }: BlockProps & { onCollapse: (() => void) | null }) {
+function FullBlock({ b, registry, windows, onReinsert, onCollapse }: BlockProps & { onCollapse: (() => void) | null }) {
   const st = blockStatus(b);
+  // the corridorkey line this block ran, for a terminal or a farm task (the Console's own flags left out)
+  const farm = b.command ? commandLine(b.command, windows) : null;
   const took = duration(b);
   const written = b.state === "done" || b.state === "failed" || b.state === "cancelled" ? writtenPaths(b, registry) : [];
   const out = blockText(b);
@@ -128,6 +131,12 @@ function FullBlock({ b, registry, onReinsert, onCollapse }: BlockProps & { onCol
         {b.echo && <span className="cb-why ok">{b.echo}</span>}
         <span className="cb-actions">
           <CopyButton label="Copy command" text={b.line} />
+          {farm && "line" in farm && <CopyButton label="Copy as farm line" text={farm.line} />}
+          {farm && "error" in farm && (
+            <button type="button" className="copy-btn" disabled title={farm.error}>
+              <Copy size={13} aria-hidden /> Copy as farm line
+            </button>
+          )}
           {out && <CopyButton label="Copy output" text={out} />}
           <button type="button" className="copy-btn" title="Put this line back in the input to edit or run it" onClick={() => onReinsert(b.line)}>
             <CornerDownLeft size={13} aria-hidden /> Re-run

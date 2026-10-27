@@ -98,10 +98,18 @@ export function shellWord(value: string, windows: boolean): { word: string } | {
 
 /** The job as one line a shell and the Console read the same: corridorkey render -i … -o …; or why there is none. */
 export function jobCommand(job: JobLike, tensorrt: boolean, windows: boolean): { line: string } | { error: string } {
+  return commandLine(jobArgs(job, tensorrt), windows);
+}
+
+/**
+ * `corridorkey` and its arguments as one line for a terminal or a farm's task (each word quoted by shellWord; `--`
+ * bare, where it ends the options): Copy as command, and a Console block's Copy as farm line (SME review 2026-10-26 N7).
+ */
+export function commandLine(args: readonly string[], windows: boolean): { line: string } | { error: string } {
   const words = ["corridorkey"];
-  // loop: NOT-WORTH — a job's few words
-  for (const w of jobArgs(job, tensorrt)) {
-    const q = shellWord(w, windows);
+  // loop: NOT-WORTH — a command's few words
+  for (const w of args) {
+    const q = w === "--" ? { word: w } : shellWord(w, windows);
     if ("error" in q) return q;
     words.push(q.word);
   }

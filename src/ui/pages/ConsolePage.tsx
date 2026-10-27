@@ -171,7 +171,7 @@ export function ConsolePage(props: {
         )}
         {/* loop: HOT-PATH-OK — ≤ 200 blocks per render; each is memoised (only a changed block re-renders) */}
         {shown.map((b) => (
-          <OutputBlock key={b.id} b={b} registry={registry} onReinsert={reinsert} />
+          <OutputBlock key={b.id} b={b} registry={registry} windows={windows} onReinsert={reinsert} />
         ))}
       </div>
       {/* the output isn't live (every streamed line and listed row would be read out): this says each command's start and end */}

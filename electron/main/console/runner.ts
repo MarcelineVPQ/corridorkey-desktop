@@ -1941,8 +1941,9 @@ export class Console {
     for (const x of p.positionals) positionals.push(x.arg.kind === "path" ? await pathValue(x.arg, x.value) : x.value);
     // the clip after `--`: a name starting with - is never read as a flag
     if (positionals.length) argv.push("--", ...positionals);
-    // what the user asked for, as the dialog shows it (before the Console's own flags go in)
+    // what the user asked for, as the dialog shows it (before the Console's own flags go in); Copy as farm line too
     const asked = argv.slice(1);
+    b.command = [cmd.name, ...asked];
     // --progress-format json: progress as events (render, verify, prepare); render's temporary files in the app's cache
     // loop: NOT-WORTH — a command's ~50 flags
     if (cmd.args.some((a) => a.id === "progress-format")) argv.splice(1, 0, ...PROGRESS);

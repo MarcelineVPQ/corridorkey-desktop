@@ -4,7 +4,7 @@
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { engineOptions } from "../../electron/main/queue";
-import { CLI_DEFAULTS, jobCommand, type JobLike } from "../../src/shared/console/jobCommand";
+import { CLI_DEFAULTS, commandLine, jobCommand, type JobLike } from "../../src/shared/console/jobCommand";
 import cliSpec from "../../src/shared/console/cliSpec.json";
 import { DEFAULT_OPTIONS, type JobOptions } from "../../src/shared/types";
 import { cliOptions, REPRESENTATIVE, sameOptions } from "./cliOptions";
@@ -129,5 +129,13 @@ describe("the copied line is safe to paste into a shell (review 2026-10-27 M3)",
   it("no line for a control character (a new line would paste as two lines), on every system", () => {
     // loop: NOT-WORTH — two systems
     for (const windows of [false, true]) expect(jobCommand(job({}, "video", "/shots/a\ntouch PWNED"), false, windows)).toEqual({ error: expect.stringMatching(/control character/) });
+  });
+});
+
+describe("SME review 2026-10-26 N7 (row 124): a Console block's Copy as farm line", () => {
+  it("quotes each word for bash or cmd, keeps -- bare, refuses what cmd.exe would read", () => {
+    expect(commandLine(["render", "-o", "/mnt/show/sh 010/key", "--", "it's.mov"], false)).toEqual({ line: "corridorkey render -o '/mnt/show/sh 010/key' -- 'it'\\''s.mov'" });
+    expect(commandLine(["render", "-o", "D:\\sh 010", "--", "a.mov"], true)).toEqual({ line: 'corridorkey render -o "D:\\sh 010" -- a.mov' });
+    expect(commandLine(["render", "--", "100%.mov"], true)).toEqual({ error: expect.stringMatching(/%/) });
   });
 });

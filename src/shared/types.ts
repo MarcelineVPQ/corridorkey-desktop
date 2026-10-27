@@ -600,6 +600,8 @@ export interface ConsoleBlock {
   cwd: string;
   // corridorkey's arguments as run (paths resolved, --progress-format json added), or null for a built-in
   argv: string[] | null;
+  // the same as the user asked for it, without the Console's own --progress-format and --temp (Copy as farm line)
+  command?: string[] | null;
   elevated: boolean;
   state: "running" | "done" | "failed" | "refused" | "cancelled";
   exitCode: number | null;

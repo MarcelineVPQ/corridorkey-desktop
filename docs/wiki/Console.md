@@ -227,7 +227,9 @@ group, a clip left out and why). It never replaces its own job files unless you 
 
 Every job the queue starts appears in the Console as its exact `corridorkey render …` line, marked "from the queue"
 (**Console settings → Show GUI jobs as commands** turns it off). **Copy as command** on a clip in the Queue copies
-the same line, quoted so a terminal runs nothing hidden in a file name. Pasted into a terminal it uses the app's own
+the same line, quoted so a terminal runs nothing hidden in a file name. Any `render`, `verify`, `prepare` or `info`
+block has **Copy as farm line**: the exact `corridorkey …` line the Console ran (paths as it resolved them, relative ones
+from its folder), quoted for this computer's shell, without the Console's own progress and temporary-folder flags. Pasted into a terminal it uses the app's own
 models and ONNX Runtime ([Command line: the runtime](Command-Line#the-runtime)). On Windows a path with `%`, `!`, `$`,
 a backtick or `"` gets no line (cmd.exe and PowerShell would read them inside quotes), and the Queue says so.
 

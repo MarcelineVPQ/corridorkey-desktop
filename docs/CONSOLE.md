@@ -256,7 +256,10 @@ inner loop's words);
   app shows paths, `~` and the
   middle as … (`shortenKnown` in model.ts), whole on hover and in Copy output. The page keeps them quiet: a block's actions show on hover and on
   keyboard focus (`:focus-within`; opacity only, so Tab always reaches them; always shown without hover), a built-in's
-  block is compact, `cd` prints nothing on success (`cd -` prints where it went). Updates are pushed on `ck:console-blocks`, at most 10 a second and only
+  block is compact, `cd` prints nothing on success (`cd -` prints where it went). A corridorkey block keeps
+  `command` (its argv as asked: the dialog's, without `--progress-format` and the Console's `--temp`) and offers
+  **Copy as farm line**, `jobCommand.ts commandLine` (shellWord's quoting for this system's shell: bash, or cmd on
+  Windows, where a word cmd.exe would read is refused and the button says why; SME review 2026-10-26 N7). Updates are pushed on `ck:console-blocks`, at most 10 a second and only
   while the window is shown; the session (folder, elevation's end, the running line) rides in the app state.
 - **History shortcuts** (`src/shared/console/expand.ts`), typed lines only (never a script's, bash's non-interactive
   rule): `!!` the line before, `!N` line N (the stable numbers), `!-N` the Nth before, `!prefix` the newest line

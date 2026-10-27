@@ -2477,3 +2477,13 @@ describe("SME reviews: a measured frame rate", () => {
     await finish(spawned[0].child, [], 0);
   });
 });
+
+describe("SME reviews: Copy as farm line", () => {
+  it("N7 (row 124): a corridorkey block keeps the argv as asked: resolved paths, without the Console's --progress-format and --temp", async () => {
+    const { c } = make();
+    const b = await c.run("render shot.mov -o ../out/farm -F 1001-1010");
+    expect(b.command).toEqual(["render", "--output", join(out, "farm"), "--frames", "1001-1010", "--", "shot.mov"]);
+    expect(spawned[0].args).toContain("--progress-format");
+    await finish(spawned[0].child, [], 0);
+  });
+});
