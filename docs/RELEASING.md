@@ -112,6 +112,10 @@ spent 29 minutes waiting on a package mirror).
 each pinned file there at its size and SHA-256, and the licence files (LICENSE, NOTICE, ATTRIBUTION.md, and the
 base set's LICENSE-* on every derived set).
 
+**On demand:** `.github/workflows/windows.yml` (`gh workflow run windows.yml`) runs the engine's checks (cargo fmt,
+clippy, cargo test) on GitHub's Windows runner, the only place its Windows-only code runs; worth a run before a
+stable release or after a change to that code.
+
 ### macOS (Apple Silicon)
 
 There is no Mac here and no cross-build from Linux without Apple's SDK, so the macOS disk image is built on
