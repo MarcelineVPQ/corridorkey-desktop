@@ -7,7 +7,8 @@ every claim is measured, every change is tested.
 - **Questions, ideas, results:** [Discussions](https://github.com/MarcelineVPQ/corridorkey-desktop/discussions).
 - **Pull requests:** small and focused, one change each. Before opening one:
   - `npm run check` (types, formatting, the theme and loop gates, unit tests) and, for engine changes,
-    `npm run check:engine` and `npm run check:targets` must pass;
+    `npm run check:engine` and `npm run check:targets` must pass (`git config core.hooksPath .hooks` runs every gate
+    before each commit);
   - a fix comes with a test that fails without it;
   - anything that changes speed or mattes comes with numbers (tools/engine_bench.mjs, tools/matte_compare.py), and
     mattes may not change unless that's the point of the change;
