@@ -39,8 +39,8 @@ A standalone farm archive per system is planned with the release packaging; unti
 | `corridorkey help [COMMAND]` | the help; `corridorkey COMMAND -h` too, with examples |
 
 ```sh
-# a plate sequence to a matte sequence, the shot's own frame numbers
-corridorkey render -i plates/sh010.####.exr -o key/sh010_key.####.exr --linear --outputs alpha
+# a plate sequence to a matte sequence, the shot's own frame numbers (EXR plates are read scene-linear)
+corridorkey render -i plates/sh010.####.exr -o key/sh010_key.####.exr --outputs alpha
 
 # afterwards (or on another machine): is every frame there and whole?
 corridorkey verify -i plates/sh010.####.exr -o key/sh010_key.####.exr --outputs alpha
@@ -194,8 +194,10 @@ A first-frame matte belongs to the shot's first frame: not with a chunk that sta
 **The image going in**
 
 ```sh
-# scene-linear EXR plates (else display-coded, clipped to 0-1)
-corridorkey render -i plates/sh010.####.exr -o key/ --linear
+# a frame folder is read as the app starts one: scene-linear when its first frame is EXR, display-coded otherwise
+# (PNG, JPEG). Choose it yourself: --linear reads it scene-linear, --no-linear display-coded (clipped to 0-1)
+corridorkey render -i plates/sh010.####.exr -o key/ --no-linear
+corridorkey render -i pngs/sh010.####.png -o key/ --linear
 
 # keep a 10- or 12-bit source's bits (8 reads it as CorridorKey 2.0 does)
 corridorkey render shot.mov -o out/ --input-bit-depth 16

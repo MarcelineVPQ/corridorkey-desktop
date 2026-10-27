@@ -27,6 +27,10 @@ the app still pins 45.0.0-beta.3. The pin moves before this build is made.
   report of the run, a clean stop on SIGTERM / SIGINT (also on Windows' console close, log-off and shut-down).
 - Without `--models` / `--ort` it uses the app's own installed models and ONNX Runtime, so the Queue's Copy as
   command line runs in a terminal as it is (tested with a fake install; not yet on a graphics card).
+- Frame folders are read as the app starts them: scene-linear when the first frame is EXR, display-coded otherwise;
+  `--linear` / `--no-linear` choose, and the report says which was used and why. Copy as command and farm export
+  write an EXR folder's choice both ways (`--no-linear` when the box is off); the OpenJD templates' scene-linear
+  parameter and the Flamenco job type's setting gain a "by the first frame" default.
 - `corridorkey __spec --json` describes the whole command line for tools; on Windows it never loads a library from
   the current folder.
 - Fixes from the farm review (2026-10-26) before anything shipped: a stepped `-F` keys to the end of its range,
@@ -79,7 +83,7 @@ on its own rail icon. Not a system shell: its own commands only, each parsed and
   Chromium-based app's arguments and home-folder paths): it now shows the program's name alone.
 - A folder of EXR frames started as "display-coded", clipping every value above 1 unless the box was noticed: an EXR
   folder now starts scene-linear (PNG/JPEG frames stay display-coded), and a choice you make on the box is kept for
-  the frame folders you add after it. The `corridorkey` command line is unchanged (`--linear` to read scene-linear).
+  the frame folders you add after it. The `corridorkey` command line now does the same (above).
 - The Results stills showed faint green lines in black areas (the still's conversion from the engine's 10-bit video
   rounded near-black to green; the outputs themselves were clean): stills are now converted to RGB first, black stays
   black.

@@ -360,7 +360,7 @@
         {
           "conflicts_with": [],
           "default": [],
-          "help": "scene-linear EXR plates (else read as display-coded, clipped to 0-1)",
+          "help": "read a frame folder scene-linear [default: when its first frame is EXR]",
           "hidden": false,
           "id": "linear",
           "long": "linear",
@@ -628,6 +628,23 @@
           "value_name": "N"
         },
         {
+          "conflicts_with": [
+            "linear"
+          ],
+          "default": [],
+          "help": "read a frame folder display-coded, clipped to 0-1 [default: when its first frame isn't EXR]",
+          "hidden": false,
+          "id": "no-linear",
+          "long": "no-linear",
+          "multiple": false,
+          "positional": false,
+          "possible_values": [],
+          "required": false,
+          "short": null,
+          "takes_value": false,
+          "value_name": null
+        },
+        {
           "conflicts_with": [],
           "default": [],
           "help": "the engine's every reply on stderr too",
@@ -771,7 +788,8 @@
         }
       ],
       "examples": [
-        "corridorkey render -i plates/sh010.####.exr -o key/sh010_key.####.exr --linear",
+        "corridorkey render -i plates/sh010.####.exr -o key/sh010_key.####.exr",
+        "corridorkey render -i plates/sh010.####.exr -o key/ --no-linear",
         "corridorkey render shot.mov -o out/ -F 1001-1100 --preroll 16 --outputs alpha",
         "corridorkey render -i plates/ -o key.%04d.exr -s 1001 -e 1050 --gpu 1 --progress-format openjd",
         "corridorkey render --job job.json --report sh010.report.json -q"
@@ -1137,7 +1155,7 @@
         {
           "conflicts_with": [],
           "default": [],
-          "help": "scene-linear EXR plates (else read as display-coded, clipped to 0-1)",
+          "help": "read a frame folder scene-linear [default: when its first frame is EXR]",
           "hidden": false,
           "id": "linear",
           "long": "linear",
@@ -1403,6 +1421,23 @@
           "short": null,
           "takes_value": true,
           "value_name": "N"
+        },
+        {
+          "conflicts_with": [
+            "linear"
+          ],
+          "default": [],
+          "help": "read a frame folder display-coded, clipped to 0-1 [default: when its first frame isn't EXR]",
+          "hidden": false,
+          "id": "no-linear",
+          "long": "no-linear",
+          "multiple": false,
+          "positional": false,
+          "possible_values": [],
+          "required": false,
+          "short": null,
+          "takes_value": false,
+          "value_name": null
         },
         {
           "conflicts_with": [],

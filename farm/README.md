@@ -52,8 +52,9 @@ frame at a final name and exits 143. Temporary files go in the session's working
 `OPENJD_SESSION_WORKING_DIR`).
 
 Parameters carry `userInterface` hints for Deadline Cloud's submitter: clip, output folder and file name
-(`key.####.exr`), outputs (`alpha,fg`), scene-linear plates, frames already there, low-memory mode, the command, the
-models folder and the ONNX Runtime library (paths on the workers; no default, since the app's install is per user).
+(`key.####.exr`), outputs (`alpha,fg`), scene-linear plates (`null`: by the first frame, as corridorkey does; `true`;
+`false`), frames already there, low-memory mode, the command, the models folder and the ONNX Runtime library (paths on
+the workers; no default, since the app's install is per user).
 
 Host requirements: Linux or Windows, `amount.worker.gpu` ≥ 1, `amount.worker.gpu.memory` ≥ 8192 MiB. That is the
 README's floor ("8 GB or more"); the engine picks its temporal window from the card's free memory, and the measured
@@ -67,8 +68,9 @@ Two limits of the 2023-09 template language, without a shell (which wouldn't run
   the shot or chunk is keyed again) or `--overwrite`. The command line's own default, refusing (exit 4), isn't
   offered: the template can't leave a flag out. Resubmitting changed settings to the same folder with
   `--skip-existing` keeps the old frames: pick `--overwrite` then.
-- The checkboxes (scene-linear, low-memory) go in through a small `--job` options file the template writes
-  (`{"options": {"frame_dir_linear": …, "low_vram": …}}`, docs/CLI.md `--job`).
+- Scene-linear plates and low-memory mode go in through a small `--job` options file the template writes
+  (`{"options": {"frame_dir_linear": …, "low_vram": …}}`, docs/CLI.md `--job`); scene-linear is `null` by default,
+  which corridorkey reads as not set: an EXR folder scene-linear, other frames display-coded.
 
 ```sh
 openjd check farm/openjd/corridorkey/template.yaml
@@ -245,8 +247,9 @@ service. Run `--help` for the rest.
 `flamenco/corridorkey.js`, a Flamenco 3.x job type. Put it in the `scripts` folder next to the Manager's executable
 and restart the Manager; it appears as "CorridorKey".
 
-Settings: the command, clip, output (a folder or a `key.####.exr` pattern), outputs, scene-linear, frames (empty:
-the whole shot), chunk size (0: one task over the whole range), preroll and tail (chunks only), frames already there
+Settings: the command, clip, output (a folder or a `key.####.exr` pattern), outputs, scene-linear (`auto`: by the
+first frame, as corridorkey does; `scene-linear`: `--linear`; `display-coded`: `--no-linear`), frames (empty: the
+whole shot), chunk size (0: one task over the whole range), preroll and tail (chunks only), frames already there
 (`refuse`, `skip-existing`, `overwrite`), the models folder, the ONNX Runtime library, and extra flags (split as a
 shell would). With chunk size 0 the job is one `key` task; otherwise Flamenco's `frameChunker` makes one task per
 chunk. Each task runs the Worker's `exec` command (`exe` + `args`, Flamenco 3.3 or newer); a `verify` task depends on

@@ -192,6 +192,38 @@ fn verify_finds_missing_and_cut_frames() {
 }
 
 #[test]
+fn exr_plates_are_read_scene_linear_by_default_and_the_report_says_why() {
+    // Marcy 2026-10-27 "make the CLI match the app": an EXR folder starts scene-linear, --no-linear reads it display-coded
+    let d = scratch("linear");
+    let pl = plates(&d.0, &[1, 2]);
+    let (report, out) = (d.0.join("r.json"), d.0.join("out"));
+    let linear = |extra: &[&str]| {
+        let mut a = vec!["verify", "-i", s(&pl), "-o", s(&out), "--report", s(&report)];
+        a.extend(extra);
+        let o = run(&a);
+        assert_eq!(o.status.code(), Some(9), "{extra:?}: {}", text(&o.stderr));
+        let r: Value = serde_json::from_str(&std::fs::read_to_string(&report).unwrap()).unwrap();
+        r["frame_dir_linear"].clone()
+    };
+    assert_eq!(linear(&[]), serde_json::json!({"value": true, "why": "default: EXR plates"}));
+    assert_eq!(linear(&["--no-linear"]), serde_json::json!({"value": false, "why": "--no-linear"}));
+    assert_eq!(linear(&["--linear"]), serde_json::json!({"value": true, "why": "--linear"}));
+    // a pattern is its folder: the same default
+    let pattern = format!("{}/plate.####.exr", s(&pl));
+    let o = run(&["verify", "-i", &pattern, "-o", s(&out), "--report", s(&report)]);
+    assert_eq!(o.status.code(), Some(9), "{}", text(&o.stderr));
+    let r: Value = serde_json::from_str(&std::fs::read_to_string(&report).unwrap()).unwrap();
+    assert_eq!(r["frame_dir_linear"]["why"], "default: EXR plates");
+    // a job file's choice, when no flag is given
+    let job = d.0.join("job.json");
+    std::fs::write(&job, r#"{"options": {"frame_dir_linear": false}}"#).unwrap();
+    assert_eq!(linear(&["--job", s(&job)]), serde_json::json!({"value": false, "why": "--job"}));
+    // the two flags are one or the other
+    let o = run(&["render", "-i", s(&pl), "-o", s(&out), "--linear", "--no-linear"]);
+    assert_eq!(o.status.code(), Some(2), "{}", text(&o.stderr));
+}
+
+#[test]
 fn skip_existing_runs_nothing_only_when_every_frame_is_whole() {
     let d = scratch("skip");
     let pl = plates(&d.0, &[1, 2, 3]);

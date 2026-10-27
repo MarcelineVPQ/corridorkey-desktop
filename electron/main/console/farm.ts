@@ -51,7 +51,13 @@ export interface FarmExport {
 
 /** Flags a farm job carries: the job's, without the video ones (the farm writes EXR) and without --outputs. */
 // loop: NOT-WORTH — a job's few flags
-const farmFlags = (j: FarmJob): Flag[] => jobFlags({ ...j.options, outputFormat: "exr" }, j.clip.kind, false).filter(([n]) => n !== "outputs");
+const farmFlags = (j: FarmJob): Flag[] => jobFlags({ ...j.options, outputFormat: "exr" }, j.clip, false).filter(([n]) => n !== "outputs");
+/** How the clip's frames are read, as its flags say: true (--linear), false (--no-linear), null (the CLI's default). */
+const linearOf = (j: FarmJob): boolean | null => {
+  // loop: NOT-WORTH — a job's few flags
+  const n = farmFlags(j).find(([n]) => n === "linear" || n === "no-linear")?.[0];
+  return n === undefined ? null : n === "linear";
+};
 const outputs = (j: FarmJob) => j.options.outputs.join(",");
 /**
  * Where corridorkey writes each output's frames for `-o <folder>` (ck-cli run.rs: `<clip>_<suffix>_exr/<clip>_<suffix>.<n>.exr`,
@@ -210,7 +216,7 @@ export function farmExport(format: FarmFormat, jobs: readonly FarmJob[], env: Fa
 function openjd(j: FarmJob, env: FarmEnv): FarmExport["files"] {
   // scene-linear and low-memory are the template's own parameters; every other flag goes in the Key step's arguments
   // loop: NOT-WORTH — a job's few flags
-  const extra = flagWords(farmFlags(j).filter(([n]) => n !== "linear" && n !== "low-vram"));
+  const extra = flagWords(farmFlags(j).filter(([n]) => n !== "linear" && n !== "no-linear" && n !== "low-vram"));
   const anchor = '            - "{{Param.Outputs}}"\n';
   const at = openjdTemplate.indexOf(anchor) + anchor.length;
   // loop: NOT-WORTH — a job's few words
@@ -220,7 +226,7 @@ function openjd(j: FarmJob, env: FarmEnv): FarmExport["files"] {
     ["Input", j.clip.path],
     ["OutputDir", j.outputDir],
     ["Outputs", outputs(j)],
-    ["Linear", String(j.clip.kind === "frames" && j.options.frameDirLinear)],
+    ["Linear", String(linearOf(j))],
     ["ExistingFrames", "--overwrite"],
     ["LowVram", String(!j.options.memory.auto && j.options.memory.lowVram)],
     ["Models", env.models],
@@ -349,7 +355,8 @@ function opencue(j: FarmJob, env: FarmEnv): FarmExport["files"][number] {
 /** Flamenco 3.x: the job (POST /api/v3/jobs) for the CorridorKey job type, one task over the whole shot. */
 function flamenco(j: FarmJob, env: FarmEnv): FarmExport["files"][number] {
   // loop: NOT-WORTH — a job's few flags
-  const flags = farmFlags(j).filter(([n]) => n !== "linear");
+  const flags = farmFlags(j).filter(([n]) => n !== "linear" && n !== "no-linear");
+  const linear = linearOf(j);
   const job = {
     name: `${j.name} key`,
     type: "corridorkey",
@@ -360,7 +367,7 @@ function flamenco(j: FarmJob, env: FarmEnv): FarmExport["files"][number] {
       input: j.clip.path,
       output: j.outputDir,
       outputs: outputs(j),
-      linear: j.clip.kind === "frames" && j.options.frameDirLinear,
+      linear: linear === null ? "auto" : linear ? "scene-linear" : "display-coded",
       frames: "",
       chunk_size: 0,
       preroll: 0,

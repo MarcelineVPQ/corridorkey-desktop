@@ -29,6 +29,9 @@ pub struct Report {
     pub kept: Vec<u64>,
     /// `verify`: the files missing or not whole
     pub missing: Vec<String>,
+    /// a frame folder: read scene-linear or not, and why (`--linear`, `--no-linear`, `--job`, or the default by its
+    /// first frame); None for a video
+    pub frame_dir_linear: Option<(bool, &'static str)>,
     /// `--skip-existing` found every frame whole: nothing ran
     pub skipped: bool,
     pub seconds: f64,
@@ -66,6 +69,7 @@ impl Report {
             "message": self.message,
             "input": self.input,
             "output": self.output,
+            "frame_dir_linear": self.frame_dir_linear.map(|(v, why)| json!({"value": v, "why": why})),
             "models": {"dir": self.models_dir, "set": self.model_set},
             "onnxruntime": self.onnxruntime,
             "provider": field(&s.provider, "provider"),
@@ -136,6 +140,7 @@ mod tests {
             span: vec![1003, 1004, 1005],
             kept: vec![1003, 1005],
             seconds: 12.3456,
+            frame_dir_linear: Some((true, "default: EXR plates")),
             seen,
             ..Report::default()
         };
@@ -152,6 +157,7 @@ mod tests {
         assert_eq!((j["seconds"].as_f64(), j["skipped"].as_bool()), (Some(12.346), Some(false)));
         assert_eq!(j["models"], json!({"dir": "/m", "set": "2.0.0-onnx.4"}));
         assert_eq!(j["gpu"]["name"], "NVIDIA GeForce RTX 5080");
+        assert_eq!(j["frame_dir_linear"], json!({"value": true, "why": "default: EXR plates"}));
         // loop: NOT-WORTH — the schema's top-level keys
         for k in ["corridorkey", "command", "input", "output", "onnxruntime", "provider_fallback", "missing"] {
             assert!(j.get(k).is_some(), "{k}");

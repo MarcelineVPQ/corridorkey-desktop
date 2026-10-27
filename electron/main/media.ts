@@ -230,6 +230,7 @@ export async function probeClip(path: string, kind: ClipKind, cacheDir: string, 
     thumb: null,
     companionFirstFrame: kind === "video" ? findFirstFrameHint(path) : null,
     companionHintVideo: findHintVideo(path, kind),
+    exrFrames: false,
     probeError: null,
   };
   try {
@@ -241,6 +242,7 @@ export async function probeClip(path: string, kind: ClipKind, cacheDir: string, 
     } else {
       const files = frameFiles(path);
       if (files.length === 0) throw new Error("no EXR/PNG/JPG frames in this folder");
+      info.exrFrames = extname(files[0]).toLowerCase() === ".exr";
       const mid = files[Math.floor(files.length / 2)];
       Object.assign(info, await probeImage(mid));
       info.frames = files.length;

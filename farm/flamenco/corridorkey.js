@@ -15,7 +15,13 @@ const JOB_TYPE = {
       description: "A folder (the app's layout inside it), or one file per frame: key.####.exr, key.%04d.exr. A report goes beside it",
     },
     { key: "outputs", type: "string", required: true, default: "alpha,fg", description: "What to write, comma-separated: alpha, fg, cutout, checker" },
-    { key: "linear", type: "bool", default: false, description: "Scene-linear EXR plates (else read as display-coded, clipped to 0-1)" },
+    {
+      key: "linear",
+      type: "string",
+      default: "auto",
+      choices: ["auto", "scene-linear", "display-coded"],
+      description: "How a frame folder is read: auto by its first frame (EXR scene-linear, others display-coded), or as chosen",
+    },
     {
       key: "frames",
       type: "string",
@@ -70,7 +76,8 @@ function compileJob(job) {
       args.push("--frames", part);
       if (s.chunk_size > 0) args.push("--preroll", String(s.preroll), "--tail", String(s.tail));
     }
-    if (s.linear) args.push("--linear");
+    if (s.linear === "scene-linear") args.push("--linear");
+    if (s.linear === "display-coded") args.push("--no-linear");
     if (s.existing !== "refuse") args.push(`--${s.existing}`);
     args.push.apply(args, shellSplit(s.extra_args || ""));
 

@@ -26,6 +26,7 @@ export const clipInfo = (id: string, over: Partial<ClipInfo> = {}): ClipInfo => 
   thumb: null,
   companionFirstFrame: null,
   companionHintVideo: null,
+  exrFrames: false,
   probeError: null,
   ...over,
 });

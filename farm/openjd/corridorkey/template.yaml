@@ -46,11 +46,13 @@ parameterDefinitions:
       groupLabel: Shot
   - name: Linear
     type: STRING
-    default: "false"
-    allowedValues: ["true", "false"]
-    description: Scene-linear EXR plates (else read as display-coded, clipped to 0-1).
+    default: "null"
+    allowedValues: ["null", "true", "false"]
+    description: >-
+      How a frame folder is read. null: by its first frame, as corridorkey does by default (EXR scene-linear, other
+      formats display-coded); true: scene-linear; false: display-coded, clipped to 0-1. A movie ignores it.
     userInterface:
-      control: CHECK_BOX
+      control: DROPDOWN_LIST
       label: Scene-linear plates
       groupLabel: Shot
   - name: ExistingFrames

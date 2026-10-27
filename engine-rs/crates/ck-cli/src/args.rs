@@ -19,7 +19,7 @@ pub enum Kind {
 }
 
 /// (flag, run option, kind, value name, help) for every run option a flag maps to one to one.
-pub const RUN_OPTIONS: [(&str, &str, Kind, &str, &str); 29] = [
+pub const RUN_OPTIONS: [(&str, &str, Kind, &str, &str); 30] = [
     ("hint", "hint_first_frame", Kind::Text, "FILE", "first-frame matte (a PNG's alpha, an EXR's A), for the shot's first frame"),
     ("hint-video", "hint_video", Kind::Text, "PATH", "a hint matte for every frame: a video or a frame folder"),
     ("hint-quality", "hint_quality", Kind::Number, "0-1", "trust in the hint [default: 0.95]"),
@@ -31,7 +31,8 @@ pub const RUN_OPTIONS: [(&str, &str, Kind, &str, &str); 29] = [
     ("despill", "despill_strength", Kind::Number, "0-1", "despill strength [default: 0.5]"),
     ("cutout-linear", "cutout_linear", Kind::On, "", "a video cutout in linear light"),
     ("fps", "frame_dir_fps", Kind::Number, "FPS", "a frame folder's rate, for video outputs [default: 24]"),
-    ("linear", "frame_dir_linear", Kind::On, "", "scene-linear EXR plates (else read as display-coded, clipped to 0-1)"),
+    ("linear", "frame_dir_linear", Kind::On, "", "read a frame folder scene-linear [default: when its first frame is EXR]"),
+    ("no-linear", "frame_dir_linear", Kind::Off, "", "read a frame folder display-coded, clipped to 0-1 [default: when its first frame isn't EXR]"),
     ("model-scale", "model_scale", Kind::Number, "S", "run the networks at S times the plate's size, above 0 up to 2 [default: 1]"),
     ("brightness", "linear_brightness", Kind::Number, "G", "linear gain before keying (video inputs) [default: 1]"),
     ("contrast", "linear_contrast", Kind::Number, "C", "linear contrast before keying (video inputs) [default: 1]"),
@@ -167,11 +168,12 @@ fn job_args(c: Command) -> Command {
             Kind::Text | Kind::Number => a.value_name(value),
         });
     }
-    runtime(reporting(c))
+    runtime(reporting(c.mut_arg("no-linear", |a| a.conflicts_with("linear"))))
 }
 
 const RENDER_EXAMPLES: &str = "Examples:
-  corridorkey render -i plates/sh010.####.exr -o key/sh010_key.####.exr --linear
+  corridorkey render -i plates/sh010.####.exr -o key/sh010_key.####.exr
+  corridorkey render -i plates/sh010.####.exr -o key/ --no-linear
   corridorkey render shot.mov -o out/ -F 1001-1100 --preroll 16 --outputs alpha
   corridorkey render -i plates/ -o key.%04d.exr -s 1001 -e 1050 --gpu 1 --progress-format openjd
   corridorkey render --job job.json --report sh010.report.json -q
@@ -261,6 +263,7 @@ mod tests {
         assert!(parse(&["render", "-F", "1-2", "-s", "1"]).is_err(), "-F and -s/-e are one or the other");
         assert!(parse(&["render", "--overwrite", "--skip-existing"]).is_err());
         assert!(parse(&["render", "-q", "-v"]).is_err());
+        assert_eq!(parse(&["render", "--linear", "--no-linear"]).unwrap_err().kind(), clap::error::ErrorKind::ArgumentConflict);
         assert!(parse(&["render", "--progress-format", "nuke"]).unwrap_err().to_string().contains("openjd"));
         assert!(parse(&["render", "-s", "first"]).is_err());
         assert_eq!(parse(&[]).unwrap_err().exit_code(), 2);

@@ -1229,6 +1229,7 @@ describe("Phase 4: farm export", () => {
         thumb: null,
         companionFirstFrame: null,
         companionHintVideo: null,
+        exrFrames: false,
         probeError: null,
       },
       options: { ...DEFAULT_OPTIONS, outputs: ["alpha"] },

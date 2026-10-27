@@ -7,6 +7,7 @@ use crate::exit;
 use crate::frames::{self, Output, Pattern};
 use crate::progress::{CliSink, Format, Verbosity};
 use crate::report::Report;
+use ck_core::clip::Source;
 use ck_core::config::EngineConfig;
 use ck_core::runtime::{ModelSet, Runtime};
 use clap::ArgMatches;
@@ -162,6 +163,22 @@ fn job_file(path: &str) -> Result<Map<String, Value>, Fail> {
     }
 }
 
+/// How a frame folder is read, and why (the report's `frame_dir_linear`): `--linear` / `--no-linear`, else the job
+/// file's `frame_dir_linear` (null: not set), else by its first frame in the engine's order, as the app starts a folder
+/// (media.ts frameDirLinearFor): OpenEXR plates scene-linear by convention, other formats display-coded. None: a video.
+fn frame_dir_linear(source: &Source, linear: bool, no_linear: bool, job: Option<&Value>) -> Result<Option<(bool, &'static str)>, Fail> {
+    let Source::Frames(frames) = source else { return Ok(None) };
+    let exr = frames.first().is_some_and(|f| f.to_string_lossy().to_lowercase().ends_with(".exr"));
+    Ok(Some(match (linear, no_linear, job) {
+        (true, ..) => (true, "--linear"),
+        (_, true, _) => (false, "--no-linear"),
+        (_, _, Some(Value::Bool(b))) => (*b, "--job"),
+        (_, _, Some(v)) if !v.is_null() => return Err(fail(exit::USAGE, format!("--job: frame_dir_linear must be true, false or null, got {v}"))),
+        _ if exr => (true, "default: EXR plates"),
+        _ => (false, "default: not EXR"),
+    }))
+}
+
 /// `render` and `verify`.
 fn render(m: &ArgMatches, verify: bool, sink: &mut CliSink, report: &mut Report) -> Result<(), Fail> {
     let job = match opt(m, "job") {
@@ -242,6 +259,11 @@ fn render(m: &ArgMatches, verify: bool, sink: &mut CliSink, report: &mut Report)
         return Err(fail(exit::INPUT, format!("input not found: {input}")));
     }
     let meta = ck_core::clip::probe_size(Path::new(&input), -1, 1.0)?;
+    // a frame folder (or pattern) is read scene-linear when its first frame is EXR, unless a flag or the job file says
+    report.frame_dir_linear = frame_dir_linear(&meta.source, m.get_flag("linear"), m.get_flag("no-linear"), options.get("frame_dir_linear"))?;
+    if let Some((linear, _)) = report.frame_dir_linear {
+        options.insert("frame_dir_linear".into(), json!(linear));
+    }
     let shot = ck_core::clip::FrameNumbers::for_source(&meta.source, meta.num_frames);
     let (Some(&first), Some(&last)) = (shot.numbers.first(), shot.numbers.last()) else {
         return Err(fail(exit::INPUT, format!("{input}: no frames")));
@@ -410,6 +432,9 @@ fn render(m: &ArgMatches, verify: bool, sink: &mut CliSink, report: &mut Report)
         ));
     }
 
+    if let Some((linear, why)) = report.frame_dir_linear {
+        sink.note(&format!("frames read {} ({why})", if linear { "scene-linear" } else { "display-coded, clipped to 0-1" }));
+    }
     let cfg = engine_config(m)?;
     let (rt, set) = runtime(&cfg, report)?;
     sink.note(&format!(
@@ -692,6 +717,29 @@ mod tests {
         // all placed when nothing is in the way: the old frames replaced
         place(&targets, &staging).unwrap();
         assert_eq!((read(out.join("a.exr")), read(locked.join("b.exr")), read(out.join("c.exr"))), ("new a".into(), "new b".into(), "new c".into()));
+    }
+
+    #[test]
+    fn a_frame_folder_is_read_scene_linear_by_default_when_its_first_frame_is_exr() {
+        // Marcy 2026-10-27 "make the CLI match the app": EXR plates scene-linear, other frames display-coded, a choice wins
+        let frames = |names: &[&str]| Source::Frames(names.iter().map(PathBuf::from).collect());
+        let (exr, png) = (frames(&["/p/a.1001.EXR", "/p/a.1002.png"]), frames(&["/p/a.1001.png", "/p/a.1002.exr"]));
+        let f = |src: &Source, l, n, j: Option<&Value>| frame_dir_linear(src, l, n, j).unwrap();
+        assert_eq!(f(&exr, false, false, None), Some((true, "default: EXR plates")));
+        assert_eq!(f(&png, false, false, None), Some((false, "default: not EXR")));
+        assert_eq!(f(&exr, false, true, None), Some((false, "--no-linear")));
+        assert_eq!(f(&png, true, false, None), Some((true, "--linear")));
+        // a video isn't a frame folder: nothing chosen, whatever the flags
+        assert_eq!(f(&Source::Video("/p/shot.mov".into()), true, false, None), None);
+        assert_eq!(f(&Source::Video("/p/shot.exr.mov".into()), false, false, None), None);
+        // the job file's value when no flag is given (null: not set); the flags win over it
+        assert_eq!(f(&exr, false, false, Some(&json!(false))), Some((false, "--job")));
+        assert_eq!(f(&png, false, false, Some(&json!(true))), Some((true, "--job")));
+        assert_eq!(f(&exr, false, false, Some(&Value::Null)), Some((true, "default: EXR plates")));
+        assert_eq!(f(&png, true, false, Some(&json!(false))), Some((true, "--linear")));
+        assert_eq!(f(&exr, false, true, Some(&json!(true))), Some((false, "--no-linear")));
+        // anything else in the job file is a mistake, said as one (the engine would read the text "false" as true)
+        assert_eq!(frame_dir_linear(&exr, false, false, Some(&json!("false"))).unwrap_err().exit, exit::USAGE);
     }
 
     #[test]

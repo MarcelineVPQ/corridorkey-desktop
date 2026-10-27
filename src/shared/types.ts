@@ -131,6 +131,9 @@ export interface ClipInfo {
   // Companion hints found next to the clip (run_interactive.py's naming).
   companionFirstFrame: string | null;
   companionHintVideo: string | null;
+  // a frame folder whose first frame (in the engine's order) is OpenEXR: the corridorkey CLI reads it scene-linear by
+  // default, so Copy as command and farm export write --linear or --no-linear for it (jobCommand.ts)
+  exrFrames: boolean;
   probeError: string | null;
 }
 

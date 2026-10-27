@@ -19,7 +19,8 @@ const yaml = (await import("js-yaml" as string)) as { load: (s: string) => unkno
 const env = { models: "/opt/ck/models", ort: "/opt/ck/libonnxruntime.so" };
 const fj = (name: string, options: Partial<JobOptions> = {}, kind: "video" | "frames" = "video"): FarmJob => ({
   name,
-  clip: { path: kind === "video" ? `/shots/${name}.mov` : `/shots/${name}/plates`, kind },
+  // a frame folder here is EXR plates
+  clip: { path: kind === "video" ? `/shots/${name}.mov` : `/shots/${name}/plates`, kind, exrFrames: kind === "frames" },
   outputDir: `/renders/${name}`,
   options: { ...DEFAULT_OPTIONS, ...options },
   range: kind === "video" ? [1001, 1024] : [1001, 1100],
@@ -57,7 +58,7 @@ describe("farm export", () => {
       Input: "/shots/sh010.mov",
       OutputDir: "/renders/sh010",
       Outputs: "alpha",
-      Linear: "false",
+      Linear: "null",
       ExistingFrames: "--overwrite",
       LowVram: "true",
       Models: "/opt/ck/models",
@@ -120,7 +121,7 @@ describe("farm export", () => {
     const keys = [...readFileSync(new URL("../../farm/flamenco/corridorkey.js", import.meta.url), "utf8").matchAll(/\{ key: "(\w+)"|key: "(\w+)"/g)].map((m) => m[1] ?? m[2]);
     expect(job.type).toBe("corridorkey");
     expect(Object.keys(job.settings).sort()).toEqual([...new Set(keys)].sort());
-    expect(job.settings).toMatchObject({ input: "/shots/sh020/plates", output: "/renders/sh020", outputs: "alpha,fg", linear: true, frames: "", chunk_size: 0 });
+    expect(job.settings).toMatchObject({ input: "/shots/sh020/plates", output: "/renders/sh020", outputs: "alpha,fg", linear: "scene-linear", frames: "", chunk_size: 0 });
   });
 
   it("shell: shot lists by their flags (tab-separated INPUT OUTPUT) and the lines that run them", () => {
@@ -159,12 +160,82 @@ describe("farm export", () => {
   });
 });
 
+// Marcy 2026-10-27 "make the CLI match the app": the CLI reads an EXR folder scene-linear by default, so every format
+// says an EXR folder's choice both ways (the box off: --no-linear), and a PNG folder's only when it is on
+describe("farm export: how a frame folder is read", () => {
+  const exrOff = fj("sh021", { frameDirLinear: false }, "frames");
+  const pngOff = { ...fj("sh022", { frameDirLinear: false }, "frames"), clip: { path: "/shots/sh022/plates", kind: "frames" as const, exrFrames: false } };
+  const pngOn = { ...pngOff, name: "sh023", options: { ...pngOff.options, frameDirLinear: true } };
+  const all = [sh010, sh020, exrOff, pngOff, pngOn];
+
+  it("openjd: the Linear parameter (null: the CLI's own choice by the first frame)", () => {
+    const e = farmExport("openjd", all, env);
+    // loop: NOT-WORTH — five clips
+    const linear = all.map(
+      (j) => (yaml.load(file(e, `${j.name}/parameter_values.yaml`)) as { parameterValues: { name: string; value: string }[] }).parameterValues.find((p) => p.name === "Linear")!.value,
+    );
+    expect(linear).toEqual(["null", "true", "false", "null", "true"]);
+    // never also a flag in the Key step
+    expect(file(e, "sh021/template.yaml")).not.toMatch(/- "--(no-)?linear"/);
+  });
+
+  it("deadline, opencue, shell: --linear / --no-linear in the flags", () => {
+    const flags = (j: FarmJob) => {
+      // loop: NOT-WORTH — the formats' few lines
+      const d = file(farmExport("deadline", [j], env), `${j.name}_plugin_info.txt`)
+        .split("\n")
+        .find((l) => l.startsWith("ExtraArguments="))!;
+      const o = file(farmExport("opencue", [j], env), `${j.name}_opencue.sh`);
+      const s = file(farmExport("shell", [j], env), "run-shots.sh");
+      // loop: NOT-WORTH — three texts
+      return [d, o, s].map((t) => (t.match(/--(no-)?linear\b/g) ?? []).join(" "));
+    };
+    expect(flags(sh020)).toEqual(["--linear", "--linear", "--linear"]);
+    expect(flags(exrOff)).toEqual(["--no-linear", "--no-linear", "--no-linear"]);
+    expect(flags(pngOff)).toEqual(["", "", ""]);
+    expect(flags(pngOn)).toEqual(["--linear", "--linear", "--linear"]);
+    expect(flags(sh010)).toEqual(["", "", ""]);
+  });
+
+  it("flamenco: the job type's linear setting, and the type writes the flag it names", () => {
+    const e = farmExport("flamenco", all, env);
+    // loop: NOT-WORTH — five clips
+    const linear = all.map((j) => (JSON.parse(file(e, `${j.name}.flamenco.json`)) as { settings: { linear: string; extra_args: string } }).settings);
+    expect(linear.map((s) => s.linear)).toEqual(["auto", "scene-linear", "display-coded", "auto", "scene-linear"]);
+    // loop: NOT-WORTH — as above
+    expect(linear.every((s) => !/--(no-)?linear/.test(s.extra_args))).toBe(true);
+    // the job type compiled as the Manager compiles it (its author API and shellSplit faked): the render task's flag
+    const type = readFileSync(new URL("../../farm/flamenco/corridorkey.js", import.meta.url), "utf8");
+    const compileJob = new Function("author", "shellSplit", `${type}\nreturn compileJob;`)(
+      {
+        Task: () => ({
+          args: [] as string[],
+          addCommand(c: { args: string[] }) {
+            this.args = c.args;
+          },
+          addDependency() {},
+        }),
+        Command: (_: string, c: unknown) => c,
+      },
+      (t: string) => t.split(" ").filter(Boolean),
+    ) as (job: unknown) => void;
+    const render = (settings: unknown) => {
+      const tasks: { args: string[] }[] = [];
+      compileJob({ settings, addTask: (t: { args: string[] }) => tasks.push(t) });
+      // loop: NOT-WORTH — one task's words
+      return tasks[0].args.filter((w) => /^--(no-)?linear$/.test(w));
+    };
+    // loop: NOT-WORTH — five clips
+    expect(linear.map((s) => render(s))).toEqual([[], ["--linear"], ["--no-linear"], [], ["--linear"]]);
+  });
+});
+
 // senior review 2026-10-27 M1 (probe P1): a clip, folder or flag value with a new line put its own lines into the farm
 // files (the OpenCue script ran `touch PWNED`; Deadline's job info gained `Plugin=CommandLine`). Control characters are
 // refused, with the clip and why; other hostile characters reach each farm exactly as they are.
 describe("farm export: hostile names (review 2026-10-27 M1)", () => {
   const FORMATS = ["openjd", "deadline", "opencue", "flamenco", "shell"] as const;
-  const hostile = (name: string): FarmJob => ({ ...fj("x"), name, clip: { path: `/shots/${name}.mov`, kind: "video" } });
+  const hostile = (name: string): FarmJob => ({ ...fj("x"), name, clip: { path: `/shots/${name}.mov`, kind: "video", exrFrames: false } });
 
   it("refuses a control character in a clip's name, path, results folder, flag value or runtime path, in every format", () => {
     const cases: [string, FarmJob, typeof env][] = [
@@ -229,9 +300,9 @@ describe("farm export: hostile names (review 2026-10-27 M1)", () => {
 // senior review 2026-10-27 S3 (probe P2): /a/sh010.mov and /b/sh010.mov wrote "7 files" but the folder held one set
 describe("farm export: two clips with one name (review 2026-10-27 S3)", () => {
   it("refuses them (names compared without case: a farm share may fold it) instead of one overwriting the other", () => {
-    const a = { ...fj("sh010"), clip: { path: "/a/sh010.mov", kind: "video" as const } };
-    const b = { ...fj("sh010"), clip: { path: "/b/sh010.mov", kind: "video" as const } };
-    const B = { ...fj("SH010"), clip: { path: "/b/SH010.mov", kind: "video" as const } };
+    const a = { ...fj("sh010"), clip: { path: "/a/sh010.mov", kind: "video" as const, exrFrames: false } };
+    const b = { ...fj("sh010"), clip: { path: "/b/sh010.mov", kind: "video" as const, exrFrames: false } };
+    const B = { ...fj("SH010"), clip: { path: "/b/SH010.mov", kind: "video" as const, exrFrames: false } };
     // loop: NOT-WORTH — five formats
     for (const f of ["openjd", "deadline", "opencue", "flamenco", "shell"] as const) {
       expect(farmExport(f, [a, b], env).error, f).toBe(`"/a/sh010.mov" and "/b/sh010.mov" are both named sh010: their job files would replace each other; export them into separate folders.`);

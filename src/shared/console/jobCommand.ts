@@ -1,11 +1,12 @@
 // A queue job as its `corridorkey render …` line (Phase 4, teach by echo): the same mapping the queue sends the engine
 // (queue.ts engineOptions), in the CLI's flags (ck-cli args.rs RUN_OPTIONS). A flag is written only where the job's value
 // differs from the CLI's default (its help's "[default: …]"; tests/unit/jobCommand.test.ts checks both against the spec
-// and that the line, parsed by the Console, gives the engine the same options). Pure.
+// and that the line, parsed by the Console, gives the engine the same options), except an EXR frame folder's
+// --linear / --no-linear, written both ways. Pure.
 import type { ClipKind, JobOptions } from "../types";
 
 export interface JobLike {
-  clip: { path: string; kind: ClipKind };
+  clip: { path: string; kind: ClipKind; exrFrames: boolean };
   outputDir: string;
   options: JobOptions;
 }
@@ -29,7 +30,8 @@ export type Flag = [name: string, value: string | null];
  * The job's settings as render flags, in a fixed order, only those that differ from the CLI's defaults. `tensorrt`: the
  * queue asked the engine for TensorRT (a machine's choice, made when the job starts).
  */
-export function jobFlags(o: JobOptions, kind: ClipKind, tensorrt: boolean): Flag[] {
+export function jobFlags(o: JobOptions, clip: Pick<JobLike["clip"], "kind" | "exrFrames">, tensorrt: boolean): Flag[] {
+  const kind = clip.kind;
   const f: Flag[] = [];
   const num = (name: keyof typeof CLI_DEFAULTS, v: number) => v !== CLI_DEFAULTS[name] && f.push([name, String(v)]);
   // loop: NOT-WORTH — ≤ four outputs
@@ -50,7 +52,11 @@ export function jobFlags(o: JobOptions, kind: ClipKind, tensorrt: boolean): Flag
   if (o.vramLimitGb !== null) f.push(["max-vram", String(o.vramLimitGb)]);
   if (kind === "frames") {
     num("fps", o.frameDirFps);
-    if (o.frameDirLinear) f.push(["linear", null]);
+    // the CLI reads an EXR folder scene-linear by default (others display-coded): for EXR the choice is written both
+    // ways, so the line says it on any CLI version (one from before --no-linear refuses it rather than guess; Marcy
+    // 2026-10-27)
+    if (clip.exrFrames) f.push([o.frameDirLinear ? "linear" : "no-linear", null]);
+    else if (o.frameDirLinear) f.push(["linear", null]);
   }
   num("model-scale", o.modelScale);
   if (kind === "video" && (o.linearBrightness !== 1 || o.linearContrast !== 1))
@@ -67,7 +73,7 @@ export const flagWords = (flags: readonly Flag[]): string[] => flags.flatMap(([n
 /** The job's render arguments (after `corridorkey`). */
 export function jobArgs(job: JobLike, tensorrt: boolean): string[] {
   // the folder as it is (no trailing separator: on Windows a quoted "D:\key\" would end its quote for cmd.exe)
-  return ["render", "-i", job.clip.path, "-o", job.outputDir, ...flagWords(jobFlags(job.options, job.clip.kind, tensorrt))];
+  return ["render", "-i", job.clip.path, "-o", job.outputDir, ...flagWords(jobFlags(job.options, job.clip, tensorrt))];
 }
 
 /**

@@ -195,7 +195,9 @@ impl Sink for CliSink<'_> {
     }
 
     fn log(&mut self, text: &str) {
-        self.note(text);
+        // the engine's EXR warning names the original's flag; here it is --linear (it comes only after a choice: the
+        // CLI reads EXR plates scene-linear by default)
+        self.note(&text.replace("pass --frame_dir_linear", "pass --linear"));
     }
 
     fn stop_requested(&mut self) -> bool {
@@ -245,6 +247,9 @@ mod tests {
         s.send(json!({"type": "frames", "done": 1, "total": 4}));
         s.send(json!({"type": "frames", "done": 4, "total": 4}));
         s.log("  probed 4 frames");
+        s.log(
+            "  [WARNING] EXR input frames are being treated as display-coded and clipped to [0, 1]. For scene-linear HDR EXR plates, pass --frame_dir_linear.",
+        );
         let seen = s.seen.clone();
         drop(s);
         let out = String::from_utf8(out).unwrap();
@@ -259,7 +264,10 @@ mod tests {
                 "PROGRESS: 100%"
             ]
         );
-        assert_eq!(String::from_utf8(err).unwrap(), "  probed 4 frames\n");
+        assert_eq!(
+            String::from_utf8(err).unwrap(),
+            "  probed 4 frames\n  [WARNING] EXR input frames are being treated as display-coded and clipped to [0, 1]. For scene-linear HDR EXR plates, pass --linear.\n"
+        );
         assert_eq!(seen.frame_done_s.len(), 4);
         assert_eq!(seen.window.unwrap()["hann_chunk"], 4);
         assert_eq!(seen.provider.unwrap()["provider"], "cpu");

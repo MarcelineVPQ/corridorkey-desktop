@@ -103,7 +103,12 @@ fn a_whole_shot_and_a_stepped_list_match_the_engine_bit_for_bit() {
     let d = scratch("whole");
     let input = shot(&d.0, 6);
     let (eng, out, temp) = (d.0.join("engine"), d.0.join("cli"), d.0.join("temp"));
-    engine(&input, &eng, &d.0.join("etemp"), serde_json::json!({"output_format": "exr", "outputs": ["alpha", "fg"], "hann_chunk": 4, "hann_stride": 2}));
+    engine(
+        &input,
+        &eng,
+        &d.0.join("etemp"),
+        serde_json::json!({"output_format": "exr", "outputs": ["alpha", "fg"], "hann_chunk": 4, "hann_stride": 2, "frame_dir_linear": true}),
+    );
     let o = render().args(["-i", input.to_str().unwrap(), "-o", out.to_str().unwrap(), "--window", "4/2", "--temp", temp.to_str().unwrap()]).output().unwrap();
     assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stderr));
     assert!(String::from_utf8_lossy(&o.stdout).contains("openjd_progress: 100"));
@@ -128,7 +133,7 @@ fn a_whole_shot_and_a_stepped_list_match_the_engine_bit_for_bit() {
         &input,
         &eng2,
         &d.0.join("etemp2"),
-        serde_json::json!({"output_format": "exr", "outputs": ["alpha"], "hann_chunk": 4, "hann_stride": 2, "frame_start": 1002, "frame_end": 1005}),
+        serde_json::json!({"output_format": "exr", "outputs": ["alpha"], "hann_chunk": 4, "hann_stride": 2, "frame_start": 1002, "frame_end": 1005, "frame_dir_linear": true}),
     );
     let pat = d.0.join("key/key.$F4.exr");
     let report = d.0.join("report.json");
@@ -150,6 +155,8 @@ fn a_whole_shot_and_a_stepped_list_match_the_engine_bit_for_bit() {
     assert_eq!(r["frames"]["keyed"], serde_json::json!({"first": 1002, "last": 1005}));
     assert_eq!(r["frames"]["written"], serde_json::json!({"first": 1002, "last": 1004, "count": 2}));
     assert_eq!(r["frame_times"].as_array().unwrap().len(), 4);
+    // EXR plates: scene-linear by default, as the app starts an EXR folder (the engine jobs above say so)
+    assert_eq!(r["frame_dir_linear"], serde_json::json!({"value": true, "why": "default: EXR plates"}));
 }
 
 #[test]

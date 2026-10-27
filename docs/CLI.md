@@ -15,7 +15,8 @@ release packaging.)
 
 ```sh
 # a plate sequence to a matte sequence, the shot's own frame numbers (Nuke: -F, -o)
-corridorkey render -i plates/sh010.####.exr -o key/sh010_key.####.exr --linear --outputs alpha
+# (EXR plates are read scene-linear by default, as the app starts them: --no-linear reads them display-coded)
+corridorkey render -i plates/sh010.####.exr -o key/sh010_key.####.exr --outputs alpha
 
 # a movie, frames 1001-1100 of it (a movie's frames count from 1001), alpha and fg into a folder
 corridorkey render shot.mov -o out/ -F 1001-1100
@@ -159,7 +160,8 @@ A name without a frame number (`-o out/key.exr`) is exit 2: give a folder or a p
 | `--carry-hint-quality Q` | `carry_hint_quality` | 0-1 (0.95) |
 | `--despill S` | `despill_strength` | 0-1 (0.5) |
 | `--cutout-linear` | `cutout_linear` | a video cutout in linear light |
-| `--linear` | `frame_dir_linear` | scene-linear EXR plates (else display-coded, clipped to 0-1) |
+| `--linear` | `frame_dir_linear` | read a frame folder scene-linear |
+| `--no-linear` | `frame_dir_linear: false` | read a frame folder display-coded, clipped to 0-1 (not with `--linear`) |
 | `--fps FPS` | `frame_dir_fps` | a frame folder's rate for video outputs (24) |
 | `--model-scale S` | `model_scale` | the networks at S times the plate's size (above 0, up to 2) |
 | `--brightness G`, `--contrast C`, `--contrast-pivot P` | `linear_brightness`, `linear_contrast`, `linear_contrast_pivot` | linear adjust before keying (video inputs) |
@@ -173,6 +175,12 @@ A name without a frame number (`-o out/key.exr`) is exit 2: give a folder or a p
 | `--report FILE.json` | | the run as JSON (below) |
 | `--progress-format F` | | `openjd`, `deadline`, `plain`, `json` (below) |
 | `-v`, `--verbose`; `-q`, `--quiet` | | stderr: also every engine reply; or failures only |
+
+A frame folder (or pattern) without `--linear` / `--no-linear` is read as the app starts one: scene-linear when its
+first frame (in the engine's order) is OpenEXR, display-coded otherwise (PNG, JPEG). A `--job` file's
+`frame_dir_linear` (`true` / `false`; `null` as absent) is used when neither flag is given. A movie ignores all three.
+The run says which it used and why on stderr and in the report (`frame_dir_linear`); the engine's warning about EXR
+read display-coded comes only after `--no-linear` (or a job file's `false`).
 
 Run options without a flag, and why: `num_frames`, `start_mode`, `seed` pick a preview sample of a movie in the app;
 on the command line `--frames` picks the frames, and a `--job` file that sets them is refused (exit 2, saying so).
@@ -267,6 +275,7 @@ say where it is (`loading the models`, `reading the clip`, `building TensorRT`, 
 | `exit_code`, `exit_reason` | the exit code and its name: `done`, `usage`, `input`, `output`, `no-gpu`, `out-of-graphics-memory`, `assets`, `engine`, `incomplete`, `interrupted`, `terminated` |
 | `message` | why it failed (null when it didn't) |
 | `input`, `output` | as given |
+| `frame_dir_linear` | a frame folder: `{"value", "why"}`, read scene-linear or not and why: `--linear`, `--no-linear`, `--job`, `default: EXR plates` or `default: not EXR`; null for a movie |
 | `models` | `{"dir", "set"}`: the folder and its manifest's version (`2.0.0-onnx.4`) |
 | `onnxruntime` | ONNX Runtime's version |
 | `provider`, `precision`, `provider_fallback` | what ran the job (`cuda`, `tensorrt`, `tensorrt+cuda`, `cpu`, `coreml`; `fp16` / `fp32`) and why TensorRT wasn't used, if asked for |

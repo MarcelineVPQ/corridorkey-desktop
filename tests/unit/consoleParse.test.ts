@@ -291,6 +291,8 @@ describe("SME review 2026-10-26: the CLI's conflicts", () => {
     expect(msg("render a.mov -o out/ -qv")).toEqual(["-v can't be used with -q (one or the other)"]);
     expect(msg("sudo render a.mov -o out/ --overwrite --skip-existing")).toEqual(["--skip-existing can't be used with --overwrite (one or the other)"]);
     expect(msg("render a.mov -i b.mov -o out/")).toEqual(["-i can't be used with INPUT (one or the other)"]);
+    expect(msg("render plates/ -o out/ --linear --no-linear")).toEqual(["--no-linear can't be used with --linear (one or the other)"]);
+    expect(msg("render plates/ -o out/ --no-linear --linear")).toEqual(["--linear can't be used with --no-linear (one or the other)"]);
     // the error sits on the second flag
     const line = "render a.mov -o out/ -F 1001-1100 -s 1001";
     const e = parse(line, reg, posix).errors[0];

@@ -17,8 +17,11 @@ const args = readFileSync(new URL("../../engine-rs/crates/ck-cli/src/args.rs", i
 // loop: NOT-WORTH — the CLI's ~30 run options, once
 const RUN = new Map([...args.matchAll(/\("([a-z-]+)", "([a-z_]+)", Kind::(\w+),/g)].map((m) => [m[1], [m[2], m[3]] as const]));
 
-/** What the CLI hands the engine for a parsed line (run.rs render: RUN_OPTIONS, --outputs, --window, exr by default). */
-function cliOptions(line: string): { input: string; output: string; options: Record<string, unknown> } {
+/**
+ * What the CLI hands the engine for a parsed line (run.rs render: RUN_OPTIONS, --outputs, --window, exr by default; a
+ * frame folder whose first frame is EXR read scene-linear unless --no-linear).
+ */
+function cliOptions(line: string, exrFrames = false): { input: string; output: string; options: Record<string, unknown> } {
   const p = parse(line, reg, { windows: false });
   expect(p.errors, line).toEqual([]);
   const o: Record<string, unknown> = {};
@@ -36,6 +39,7 @@ function cliOptions(line: string): { input: string; output: string; options: Rec
     }
   }
   o.output_format ??= "exr";
+  if (exrFrames) o.frame_dir_linear ??= true;
   return { input, output, options: o };
 }
 
@@ -62,7 +66,7 @@ function lineOf(job: JobLike, trt: boolean, windows = false): string {
 
 function same(job: JobLike, trt: boolean) {
   const line = lineOf(job, trt);
-  const got = cliOptions(line);
+  const got = cliOptions(line, job.clip.kind === "frames" && job.clip.exrFrames);
   expect([got.input, got.output]).toEqual([job.clip.path, job.outputDir]);
   const want = engineOptions(job.options, job.clip.kind, trt);
   // loop: NOT-WORTH — the options of one job
@@ -70,8 +74,8 @@ function same(job: JobLike, trt: boolean) {
   return line;
 }
 
-const job = (options: Partial<JobOptions>, kind: "video" | "frames" = "video", path = "/shots/sh010 plate.mov"): JobLike => ({
-  clip: { path, kind },
+const job = (options: Partial<JobOptions>, kind: "video" | "frames" = "video", path = "/shots/sh010 plate.mov", exrFrames = false): JobLike => ({
+  clip: { path, kind, exrFrames },
   outputDir: "/renders/sh010",
   options: { ...DEFAULT_OPTIONS, ...options },
 });
@@ -107,6 +111,20 @@ describe("a queue job as its corridorkey line (teach by echo)", () => {
     same(job({ frameDirFps: 25, frameDirLinear: true, outputFormat: "exr" }, "frames", "/shots/sh010/plates"), false);
     // the linear adjust is for video clips only (as the queue sends it)
     expect(same(job({ linearBrightness: 2 }, "frames", "/p"), false)).not.toContain("--brightness");
+  });
+
+  it("a frame folder: EXR says --linear or --no-linear (the CLI reads EXR scene-linear by default), others only --linear", () => {
+    // Marcy 2026-10-27: the CLI matches the app; an EXR folder with the box off must say so, or the CLI reads it scene-linear
+    expect(same(job({ frameDirLinear: false }, "frames", "/shots/sh010/plates", true), false)).toBe(
+      "corridorkey render -i /shots/sh010/plates -o /renders/sh010 --format video --codec h264-lossless --no-linear",
+    );
+    expect(same(job({ frameDirLinear: true }, "frames", "/shots/sh010/plates", true), false)).toBe(
+      "corridorkey render -i /shots/sh010/plates -o /renders/sh010 --format video --codec h264-lossless --linear",
+    );
+    expect(same(job({ frameDirLinear: false }, "frames", "/shots/sh010/pngs"), false)).toBe("corridorkey render -i /shots/sh010/pngs -o /renders/sh010 --format video --codec h264-lossless");
+    expect(same(job({ frameDirLinear: true }, "frames", "/shots/sh010/pngs"), false)).toContain(" --linear");
+    // a video clip has no frame folder setting
+    expect(same(job({ frameDirLinear: true }), false)).not.toMatch(/linear/);
   });
 
   it("its defaults are the CLI's own (the help's [default: …])", () => {
