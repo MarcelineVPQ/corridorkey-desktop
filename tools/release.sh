@@ -7,8 +7,8 @@
 #    section for it, its header not saying draft / unreleased; the signing key is there; THIRD_PARTY_NOTICES.md is
 #    current (tools/gen_notices.mjs --check, which needs cargo-about on PATH or CARGO_ABOUT=<path>); the published
 #    wiki is docs/wiki/ (a read-only clone of the wiki repository compared by tools/check_wiki.mjs --published;
-#    tools/publish_wiki.mjs publishes it)
-# 2. npm run check, npm run check:engine and tools/check_targets.sh (the engine's macOS / Windows lint), then
+#    tools/publish_wiki.mjs publishes it); every pinned model set on GitHub as pinned (tools/check_model_sets.mjs)
+# 2. npm run check, npm run check:engine and tools/check_targets.sh (the engine's Linux / Windows / macOS lint), then
 #    npm run dist:linux (the engine for glibc 2.28, then the AppImage) and npm run dist:win (the Windows engine
 #    cross-built here, then the NSIS installer through Wine), memory-capped
 # 3. SHA256SUMS / SHA512SUMS of both files and the notes (the CHANGELOG section)

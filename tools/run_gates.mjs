@@ -13,6 +13,20 @@ const GATES = [
   ["CLI parity", "node", ["tools/check_cli_parity.mjs"]],
   ["IPC sender", "node", ["tools/check_ipc_sender.mjs"]],
   ["notices (downloads)", "node", ["tools/check_notices_downloads.mjs"]],
+  ["providers", "node", ["tools/check_providers.mjs"]],
+  ["protocol doc", "node", ["tools/check_protocol_doc.mjs"]],
+  ["guide", "node", ["tools/check_guide.mjs"]],
+  ["docs touch", "node", ["tools/check_docs_touch.mjs"]],
+  ["per-OS docs", "node", ["tools/check_platform_docs.mjs"]],
+  ["backlog", "node", ["tools/check_backlog.mjs"]],
+  ["engine features", "node", ["tools/check_features.mjs"]],
+  ["farm submitters", "node", ["tools/check_farm_submitters.mjs"]],
+  ["shared texts", "node", ["tools/check_texts.mjs"]],
+  ["README what's coming", "node", ["tools/check_readme_coming.mjs"]],
+  ["engine knobs", "node", ["tools/check_knobs.mjs"]],
+  ["platform tests", "node", ["tools/check_platform_tests.mjs"]],
+  ["test files", "node", ["tools/check_test_files.mjs"]],
+  ["rail tips", "node", ["tools/check_rail_tips.mjs"]],
 ];
 
 const repo = fileURLToPath(new URL("..", import.meta.url));

@@ -29,6 +29,11 @@ Built to **Marcy's 17 basic rules for programming applications** (memory
   systemd-run joins it), and one memory-heavy job at a time (`flock ~/.cache/claude-scratch/heavy.lock`).
 - **Command line keeps up:** every engine job option has a verdict in `docs/cli-parity.json` and reaches the CLI,
   Copy as command and farm export; gate `tools/check_cli_parity.mjs` (docs/CLI.md "Adding an option").
+- **Surface gates (audit 2026-10-27, one per surface, never sharing code or data):** `tools/check_providers`,
+  `check_protocol_doc`, `check_guide`, `check_docs_touch`, `check_platform_docs`, `check_backlog`, `check_features`,
+  `check_farm_submitters`, `check_texts`, `check_readme_coming`, `check_knobs`, `check_platform_tests`,
+  `check_test_files`, `check_rail_tips` (.mjs, in tools/run_gates.mjs), the token check in the theme gate, and at release
+  only `check_model_sets` (online; docs/RELEASING.md). A gate's exception list says why for each entry.
 - **Backlog (rule 8):** `docs/BACKLOG.md`; ideas wait for Marcy's "now".
 - **Licence:** CorridorKey licence (LICENSE, a CC BY-NC-SA 4.0 variant). The app stays free,
   keeps the CorridorKey name, credits Corridor Digital. No paywall, ever.
