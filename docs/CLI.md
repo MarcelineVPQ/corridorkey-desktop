@@ -104,7 +104,9 @@ which must hold only that sequence: the engine keys a whole folder, and says so 
   add the output's name before the number: `key_alpha.1001.exr`, `key_fg.1001.exr`. The settings file goes beside them
   (`key_settings.txt`). Patterns are for EXR; videos go in a folder.
 
-A name without a frame number (`-o out/key.exr`) is exit 2: give a folder or a pattern.
+A name without a frame number (`-o out/key.exr`) is exit 2: give a folder or a pattern. So is a pattern in the
+input folder (`-i plates/ -o plates/key.####.exr`): it would work once, then every later task (a chunk, a retry)
+would find the key frames beside the plates.
 
 ### Output safety
 

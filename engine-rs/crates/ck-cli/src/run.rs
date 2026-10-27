@@ -258,6 +258,14 @@ fn render(m: &ArgMatches, verify: bool, sink: &mut CliSink, report: &mut Report)
     if !Path::new(&input).exists() {
         return Err(fail(exit::INPUT, format!("input not found: {input}")));
     }
+    // frames written into the input folder work once, then every later task (a chunk, a retry) finds the key frames
+    // there beside the plates and is refused (exit 3): refuse it up front (farm senior review 2026-10-26 N10)
+    if let Output::Pattern(p) = &out {
+        let dir = if p.dir.as_os_str().is_empty() { Path::new(".") } else { p.dir.as_path() };
+        if Path::new(&input).is_dir() && dir.canonicalize().ok() == Path::new(&input).canonicalize().ok() {
+            return Err(fail(exit::USAGE, format!("{output}: the frames would land in the input folder {input}; write them to a folder of their own")));
+        }
+    }
     let meta = ck_core::clip::probe_size(Path::new(&input), -1, 1.0)?;
     // a frame folder (or pattern) is read scene-linear when its first frame is EXR, unless a flag or the job file says
     report.frame_dir_linear = frame_dir_linear(&meta.source, m.get_flag("linear"), m.get_flag("no-linear"), options.get("frame_dir_linear"))?;

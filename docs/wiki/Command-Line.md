@@ -125,7 +125,8 @@ folder must hold only that sequence (the engine keys a whole folder, and says so
   with several the output's name goes before the number (`key_alpha.1001.exr`, `key_fg.1001.exr`). The settings file
   goes beside them. Patterns are for EXR; videos go in a folder.
 
-A name without a frame number (`-o out/key.exr`) is exit 2: give a folder or a pattern.
+A name without a frame number (`-o out/key.exr`) is exit 2: give a folder or a pattern. A pattern in the input
+folder (`-i plates/ -o plates/key.####.exr`) is exit 2 too: put the key frames in a folder of their own.
 
 **Your output is safe.** A run writes into a hidden folder of its own beside the output and renames the finished
 frames into place only when the whole job is done, all or nothing. A failed, stopped or killed run never leaves a frame

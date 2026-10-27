@@ -259,6 +259,21 @@ fn skip_existing_runs_nothing_only_when_every_frame_is_whole() {
     assert_eq!((r["exit_code"].as_i64(), r["exit_reason"].as_str()), (Some(7), Some("assets")));
 }
 
+/// `-i plates/ -o plates/key.####.exr` would work once, then every later task finds the key frames beside the plates
+/// (exit 3): it is refused up front, before anything is written (farm senior review 2026-10-26 N10).
+#[test]
+fn an_output_pattern_in_the_input_folder_is_a_usage_error() {
+    let d = scratch("samefolder");
+    let pl = plates(&d.0, &[1, 2]);
+    // loop: NOT-WORTH — the input as a folder and as a pattern
+    for input in [s(&pl).to_string(), s(&pl.join("plate.####.exr")).to_string()] {
+        let o = run(&["render", "-i", &input, "-o", s(&pl.join("key.####.exr"))]);
+        assert_eq!(o.status.code(), Some(2), "{}", text(&o.stderr));
+        assert!(text(&o.stderr).contains("input folder"), "{}", text(&o.stderr));
+    }
+    assert_eq!(std::fs::read_dir(&pl).unwrap().count(), 2, "nothing written beside the plates");
+}
+
 #[test]
 #[cfg(unix)]
 fn a_launcher_that_exits_first_doesnt_end_the_task() {
