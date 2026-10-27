@@ -19,7 +19,7 @@ import { complete } from "./complete";
 import type { Elevation } from "./elevation";
 import { commandHelp, findLines, overview } from "./help";
 import type { AuditLog, History } from "./logs";
-import { checkWrite, expandHome, fsErrorText, resolveReal, type PathDeps } from "./paths";
+import { checkWrite, expandHome, fsErrorText, nextVersion, resolveReal, type PathDeps } from "./paths";
 import { expandHistory, hasExpansion } from "../../../src/shared/console/expand";
 import { folderRange, frameToken, groupSequences, isFrameFile, sequenceOf, type Sequence } from "../../../src/shared/console/sequences";
 import { commands, globRegExp, isCompound, parseProgram, type CmdNode, type List } from "../../../src/shared/console/script";
@@ -1703,9 +1703,25 @@ export class Console {
     const given = new Set(p.options.map((o) => o.arg.id));
     const jobFlags: string[] = [];
     const job: { input: string | null } = { input: null };
+    const versions: string[] = [];
     const pathValue = async (a: ConsoleArg, v: string): Promise<string> => {
       // --ocio's ocio://… names a built-in config, not a file; any other value is a path (C://… is one on Windows)
       if (a.id === "ocio" && !a.writes && v.startsWith("ocio://")) return v;
+      if (a.writes && a.id === "output" && cmd.name === "render") {
+        // -o key/sh010_v###/: the next free version, so the render replaces nothing (S9)
+        const dir = (p: string) => (this.d.paths.platform === "win32" ? win32 : posix).resolve(this.cwd, expandHome(p || ".", this.d.paths));
+        const first = nextVersion(v, [], this.d.paths.platform);
+        // loop: NOT-WORTH — one async readdir per versioned -o
+        const names = first ? await this.d.fs.readdir(dir(first.parent)).catch(() => [] as Dirent[]) : [];
+        // loop: NOT-WORTH — one folder's names
+        const taken = names.map((n) => n.name);
+        const next = first && nextVersion(v, taken, this.d.paths.platform);
+        if (next) {
+          const w = await checkWrite(next.path, this.cwd, this.d.writeRoots(), this.d.paths);
+          if (w.ok) versions.push(w.path);
+          v = next.path;
+        }
+      }
       if (a.writes) {
         const w = await checkWrite(v, this.cwd, this.d.writeRoots(), this.d.paths);
         if (!w.ok) refusals.push(`${a.long ? `--${a.long}` : a.id}: ${w.reason}`);
@@ -1748,6 +1764,11 @@ export class Console {
     if (temp) argv.splice(1, 0, "--temp", temp);
     b.argv = argv;
     if (refusals.length) return now(this.finish(b, "refused", ...refusals));
+    // the version picked, said and audited (what was written where is findable later: history --audit)
+    // loop: NOT-WORTH — at most one versioned -o
+    for (const v of versions) this.note(b, "info", `-o: the next free version is ${v}`);
+    // loop: NOT-WORTH — one async append per versioned render [bounded: a local file write]
+    if (versions.length && !(await this.d.audit.append({ event: "version", argv: [b.line], targets: versions }))) return now(this.finish(b, "refused", AUDIT_FAILED));
 
     // destructive: only as sudo, and confirmed (or already elevated)
     // the clip's name (render's own naming: docs/CLI.md "Outputs"): the files the run writes start with it

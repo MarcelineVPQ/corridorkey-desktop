@@ -156,3 +156,23 @@ export async function replaceFile(p: string, text: string): Promise<void> {
     throw e;
   }
 }
+
+/**
+ * The next free version (SME review 2026-10-27 S9): a folder in a written path named with `v` and `#`s, `key/sh010_v###/`
+ * (a folder: a separator follows it, so it is never a frame pattern's file name), is that folder with the next number
+ * not there yet in its parent (`names`): v004 when v001-v003 are, v001 when none is; padded to the #s. Null: no such
+ * folder in `path`. Pure.
+ */
+export function nextVersion(path: string, names: readonly string[], platform: NodeJS.Platform): { parent: string; path: string } | null {
+  const sep = platform === "win32" ? "[\\\\/]" : "/";
+  const m = new RegExp(`(^|${sep})([^\\\\/#]*?[vV])(#+)([^\\\\/#]*)(?=${sep})`).exec(path);
+  if (!m) return null;
+  const at = m.index + m[1].length;
+  const [head, pad, tail] = [m[2], m[3].length, m[4]];
+  const esc = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`^${esc(head)}(\\d+)${esc(tail)}$`, platform === "win32" || platform === "darwin" ? "i" : "");
+  let top = 0;
+  // loop: NOT-WORTH — one folder's names, once per versioned -o
+  for (const n of names) top = Math.max(top, Number(re.exec(n)?.[1] ?? 0));
+  return { parent: path.slice(0, at), path: path.slice(0, at) + head + String(top + 1).padStart(pad, "0") + tail + path.slice(at + m[0].length - m[1].length) };
+}

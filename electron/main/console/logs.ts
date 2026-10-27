@@ -16,8 +16,9 @@ const AUDIT_TAIL_BYTES = 256 * 1024;
 
 export interface AuditEntry {
   time: string;
-  /** allowed / removed: a folder added to (after its confirmation) or taken from the Console's write folders */
-  event: "granted" | "refused" | "dropped" | "run" | "exit" | "allowed" | "removed";
+  /** allowed / removed: a folder added to (after its confirmation) or taken from the Console's write folders; version:
+   * the next free version a render's -o was given (targets: the path it resolved to) */
+  event: "granted" | "refused" | "dropped" | "run" | "exit" | "allowed" | "removed" | "version";
   argv?: string[];
   targets?: string[];
   exit?: number | null;

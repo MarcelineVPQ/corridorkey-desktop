@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { replaceFile } from "../../electron/main/console/paths";
+import { nextVersion, replaceFile } from "../../electron/main/console/paths";
 import { clipName, Console, type ConsoleDeps, type ElevationRequest, type ScriptElevationRequest } from "../../electron/main/console/runner";
 import { dropOnLockAndSleep, Elevation, LinuxLockWatch, LOCK_POLL_MS, parseLockedHint } from "../../electron/main/console/elevation";
 import { AuditLog, History } from "../../electron/main/console/logs";
@@ -2079,5 +2079,40 @@ describe("review 2026-10-27 S1: the elevation drops on a Linux screen lock", () 
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// SME review 2026-10-27 S9: look-dev renders over the last try twenty times a day, a sudo dialog each time; studios
+// version instead. -o key/sh010_v###/ is the next version not there yet: it replaces nothing, so no sudo
+describe("review 2026-10-27 S9: the next free version", () => {
+  it("nextVersion: v and #s in a folder (a separator follows) is the next number its parent hasn't got, padded", () => {
+    expect(nextVersion("key/sh010_v###/", ["sh010_v001", "sh010_v003", "sh010_v002.txt", "other_v009"], "linux")).toEqual({ parent: "key/", path: "key/sh010_v004/" });
+    expect(nextVersion("/k/sh010_v##/sh010.####.exr", [], "linux")).toEqual({ parent: "/k/", path: "/k/sh010_v01/sh010.####.exr" });
+    expect(nextVersion("v###/", ["v099"], "linux")).toEqual({ parent: "", path: "v100/" });
+    expect(nextVersion("D:\\key\\SH010_V###\\", ["sh010_v002"], "win32")).toEqual({ parent: "D:\\key\\", path: "D:\\key\\SH010_V003\\" });
+    // a frame pattern's file name (no separator after it) and a folder without a v are left alone
+    expect(nextVersion("key/sh010_v###.exr", [], "linux")).toBeNull();
+    expect(nextVersion("key/sh010_###/", [], "linux")).toBeNull();
+  });
+
+  it("render -o …_v###/ renders into the next version: no sudo, the path said and audited", async () => {
+    const { c, files } = make();
+    mkdirSync(join(out, "look", "sh010_v001"), { recursive: true });
+    mkdirSync(join(out, "look", "sh010_v002"), { recursive: true });
+    const b = await c.run("render shot.mov -o ../out/look/sh010_v###/");
+    expect(b.state, b.lines.map((l) => l.text).join("\n")).toBe("running");
+    const s = spawned[0];
+    expect(s.args[s.args.indexOf("--output") + 1]).toBe(join(out, "look", "sh010_v003"));
+    expect(confirms).toEqual([]);
+    expect(b.lines.map((l) => l.text)).toContain(`-o: the next free version is ${join(out, "look", "sh010_v003")}`);
+    const audit = readFileSync(join(files, "console-audit.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l) as { event: string; targets: string[]; argv: string[] });
+    expect(audit.at(-1)).toMatchObject({ event: "version", argv: ["render shot.mov -o ../out/look/sh010_v###/"], targets: [join(out, "look", "sh010_v003")] });
+    await finish(s.child, [], 0);
+    // outside the write scope: refused as any -o is
+    const no = await c.run(`render shot.mov -o ${elsewhere}/v###/`);
+    expect([no.state, no.lines.at(-1)!.text]).toEqual(["refused", expect.stringMatching(/outside the folders the Console may write to/)]);
   });
 });
