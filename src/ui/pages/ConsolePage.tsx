@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { History, Keyboard, SlidersHorizontal, SquareTerminal, Square, ShieldAlert, Check, X } from "lucide-react";
 import type { AppState, ConsoleHistoryEntry } from "../../shared/types";
 import { makeRegistry } from "../../shared/console/registry";
+import type { HistoryLine } from "../../shared/console/expand";
 import { Accordion, Row, Section, Segmented } from "../panel/Section";
 import { SplitView } from "../panel/SplitView";
 import { PathText } from "../PathText";
@@ -30,6 +31,7 @@ export const KEYS: [string, string][] = [
   ["↑ ↓, Ctrl+P Ctrl+N", "Earlier lines that start with what you typed"],
   ["Ctrl+R", "Search the history; again for older; Enter runs; Esc or Ctrl+G cancels"],
   ["Alt+.", "Insert the last word of the line before (the path you just used)"],
+  ["!! !N !-N !abc !$ ^a^b", "History shortcuts: the line before, line N, N back, the last starting abc, its last word, it with a → b"],
   ["Ctrl+A, Ctrl+E", "Start, end of the line"],
   ["Alt+B, Alt+←", "A word back (Option on a Mac)"],
   ["Ctrl+U, Ctrl+K", "Cut to the start, to the end"],
@@ -64,13 +66,23 @@ export function ConsolePage(props: {
   const [autosuggest, setAutosuggest] = usePref<boolean>("ck.console.autosuggest", true);
   const [echoes, setEchoes] = usePref<boolean>("ck.console.echo", true);
   const [history, setHistory] = useState<string[]>([]);
+  const [past, setPast] = useState<HistoryLine[]>([]);
   const [now, setNow] = useState(Date.now());
   const editor = useRef<LineEditorHandle>(null);
   const out = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
 
   // loop: NOT-WORTH — ≤ 200 entries, per history fetch
-  const loadHistory = useCallback(() => void window.ck.consoleHistory("").then((h) => setHistory(uniqueHistory(h.map((e) => e.line)))), []);
+  const loadHistory = useCallback(
+    () =>
+      void window.ck.consoleHistory("").then((h) => {
+        // loop: NOT-WORTH — as above
+        setHistory(uniqueHistory(h.map((e) => e.line)));
+        // loop: NOT-WORTH — as above (newest last, for !!, !N, !$)
+        setPast(h.map((e) => ({ n: e.n, line: e.line })).reverse());
+      }),
+    [],
+  );
   useEffect(() => {
     loadHistory();
     editor.current?.focus();
@@ -163,6 +175,7 @@ export function ConsolePage(props: {
         registry={registry}
         windows={windows}
         history={history}
+        past={past}
         running={session.running !== null}
         elevated={elevated}
         folder={folder}
@@ -235,7 +248,7 @@ export function ConsolePage(props: {
         {() => (
           <table className="console-keys">
             <tbody>
-              {/* loop: NOT-WORTH — eighteen rows */}
+              {/* loop: NOT-WORTH — nineteen rows */}
               {KEYS.map(([k, what]) => (
                 <tr key={k}>
                   <th scope="row">

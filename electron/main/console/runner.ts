@@ -19,6 +19,7 @@ import type { Elevation } from "./elevation";
 import { commandHelp, findLines, overview } from "./help";
 import type { AuditLog, History } from "./logs";
 import { checkWrite, expandHome, fsErrorText, resolveReal, type PathDeps } from "./paths";
+import { expandHistory, hasExpansion } from "../../../src/shared/console/expand";
 import { frameToken, groupSequences, sequenceOf, type Sequence } from "../../../src/shared/console/sequences";
 import { WRITE_FOLDERS_MAX } from "../settings";
 import { fileSizeText } from "../../../src/shared/units";
@@ -149,11 +150,25 @@ export class Console {
     return { cwd: this.cwd, elevatedUntil: this.d.elevation.expiresAt, running: this.job?.block.line ?? null, cliFound: this.d.cli() !== null };
   }
 
-  /** Run a typed line. Resolves with its block once it is done, or (corridorkey, run) once it has started. */
+  /**
+   * Run a typed line. Resolves with its block once it is done, or (corridorkey, run) once it has started. History
+   * expansion (`!!`, `!N`, `!-N`, `!prefix`, `!$`, `^old^new`: expand.ts) first, typed lines only: the expanded line is
+   * what runs, what its block shows (with what was typed) and what the history keeps, as in bash.
+   */
   async run(line: string): Promise<ConsoleBlock> {
+    let typed: string | null = null;
+    if (hasExpansion(line, this.opts)) {
+      await this.d.history.loaded;
+      // loop: NOT-WORTH — the history's lines (≤ its cap), once per line with a ! or ^ to expand
+      const past = this.d.history.entries("", Number.MAX_SAFE_INTEGER).reverse();
+      const x = expandHistory(line, past, this.opts);
+      if ("error" in x) return this.finish(this.block(line, null), "refused", x.error);
+      typed = line;
+      line = x.line;
+    }
     // kept with its folder (a leading space: not kept), and how it ended once it has
     const n = this.d.history.add(line, this.cwd);
-    const r = await this.runLine(line, null);
+    const r = await this.runLine(line, null, typed);
     // loop: NOT-WORTH — one async history append per line's end [bounded: a local file write]
     void r.done.then(async (b) => {
       const k = await n;
@@ -280,8 +295,10 @@ export class Console {
   }
 
   /** One line: parsed, checked, run. `done` settles when it has finished (a script waits on it). */
-  private async runLine(line: string, parent: number | null): Promise<{ block: ConsoleBlock; done: Promise<ConsoleBlock> }> {
+  private async runLine(line: string, parent: number | null, typed: string | null = null): Promise<{ block: ConsoleBlock; done: Promise<ConsoleBlock> }> {
     const b = this.block(line, parent);
+    // a history expansion: the block shows the line that runs, and what was typed
+    if (typed !== null) this.note(b, "info", `from ${typed}`);
     const now = (x: ConsoleBlock) => ({ block: x, done: Promise.resolve(x) });
     const p = parse(line, this.d.registry, this.opts);
     if (p.errors.length) {
@@ -854,8 +871,9 @@ export class Console {
     // loop: NOT-WORTH — the line's options
     const destructive = p.options.filter((o) => o.arg.destructive);
     if (!destructive.length) return null;
-    // loop: NOT-WORTH — one or two flags
-    if (!p.sudo) return this.finish(b, "refused", `${destructive.map((o) => o.name).join(", ")} replaces files that are already there: run it as sudo ${b.line.trim()}`);
+    if (!p.sudo)
+      // loop: NOT-WORTH — one or two flags
+      return this.finish(b, "refused", `${destructive.map((o) => o.name).join(", ")} replaces files that are already there: run it as sudo ${b.line.trim()}${inScript ? "" : " (or type sudo !!)"}`);
     if (inScript) {
       // a script's line: covered only by its own confirmation up front, never by (or extending) the session's elevation
       if (!this.job?.scriptGrant) return this.finish(b, "refused", "Not run: a script's line that replaces files runs only after the script's own confirmation.");

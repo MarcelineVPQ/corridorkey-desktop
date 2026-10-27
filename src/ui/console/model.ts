@@ -2,6 +2,7 @@
 // parser's tokens, and the output blocks as the page shows them (merged by id, cleared by cls or Ctrl+L, their status
 // words, the paths a command wrote, the text Copy output puts on the clipboard).
 import type { Parsed, Token } from "../../shared/console/parse";
+import { expandHistory, hasExpansion, type HistoryLine } from "../../shared/console/expand";
 import { fullName, type Registry } from "../../shared/console/registry";
 import type { ConsoleBlock, ConsoleEntry } from "../../shared/types";
 import { fileSizeText } from "../../shared/units";
@@ -185,6 +186,16 @@ export function errorSpans(line: string, errors: readonly { start: number; end: 
   }
   if (pos < line.length) out.push({ text: line.slice(pos), kind: "plain" });
   return out;
+}
+
+/**
+ * A line with a history shortcut (!!, !N, !$, ^old^new…): what Enter will run, from the history the page has (the main
+ * process expands it again from the whole history), or why it can't. Null: nothing to expand.
+ */
+export function expansionHint(line: string, past: readonly HistoryLine[], windows: boolean): { text: string; error: boolean; line: string | null } | null {
+  if (!hasExpansion(line, { windows })) return null;
+  const x = expandHistory(line, past, { windows });
+  return "error" in x ? { text: x.error, error: true, line: null } : { text: `Enter runs: ${x.line}`, error: false, line: x.line };
 }
 
 /** What the line says about itself: a mistake (with did-you-mean), else the help of the argument at the cursor. */

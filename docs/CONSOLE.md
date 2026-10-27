@@ -89,6 +89,16 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   keyboard focus (`:focus-within`; opacity only, so Tab always reaches them; always shown without hover), a built-in's
   block is compact, `cd` prints nothing on success (`cd -` prints where it went). Updates are pushed on `ck:console-blocks`, at most 10 a second and only
   while the window is shown; the session (folder, elevation's end, the running line) rides in the app state.
+- **History shortcuts** (`src/shared/console/expand.ts`), typed lines only (never a script's, bash's non-interactive
+  rule): `!!` the line before, `!N` line N (the stable numbers), `!-N` the Nth before, `!prefix` the newest line
+  starting so, `!$` the line before's last word (as typed, quotes kept), `^old^new` the line before with its first
+  `old` replaced; `sudo !!` is `sudo` and the line before, and the "replaces files" refusal says to type it. The main
+  process expands from the whole history (an event not found is refused, not kept); the expanded line is what runs,
+  what the block shows (its first line `from <what was typed>`) and what the history keeps, as in bash. Frame tokens
+  and file names stay literal (SME review): a `!` expands only at a word's start, outside quotes, not escaped (`\!`),
+  and only before `!`, a digit, `-` and a digit, `$` (not `$F`) or a letter; so `sh010!.mov`, `'take!!'`, `!####`,
+  `!%04d`, `!@@@@`, `!$F4` and `!=` are as typed, and `^` counts only at the line's start. The page previews it from
+  its history (the hint says "Enter runs: …", the line reads plain). Alt+. inserts the line before's last word.
 - **History** (`userData/console-history.jsonl`): the lines typed, across restarts, the newest 5000, consecutive
   duplicates once, a line typed with a leading space not at all (bash's ignorespace). Each line has a stable number
   (it never changes, also across compaction; for `!N` later), its folder and time (`{n, time, line, cwd}`), and its end

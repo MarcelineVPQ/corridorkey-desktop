@@ -23,7 +23,8 @@ import {
   type Key,
   type SuggestMode,
 } from "./editor";
-import { highlight, lineHint } from "./model";
+import { expansionHint, highlight, lineHint } from "./model";
+import type { HistoryLine } from "../../shared/console/expand";
 
 export interface LineEditorHandle {
   /** put a line in (History, Re-run): ready to edit, never run; several lines (a pasted script's Re-run) are offered again */
@@ -36,6 +37,8 @@ interface Props {
   windows: boolean;
   /** lines typed before, newest first, no repeats */
   history: readonly string[];
+  /** the same lines with their numbers, newest last (history shortcuts: !!, !N, !$, ^old^new) */
+  past: readonly HistoryLine[];
   running: boolean;
   elevated: boolean;
   /** the current folder's last part, for the prompt */
@@ -162,10 +165,12 @@ export const LineEditor = forwardRef<LineEditorHandle, Props>(function LineEdito
   };
 
   const parsed = useMemo(() => parse(s.line, registry, { windows }), [s.line, registry, windows]);
-  const spans = useMemo(() => highlight(s.line, parsed), [s.line, parsed]);
+  const expansion = useMemo(() => expansionHint(s.line, props.past, windows), [s.line, props.past, windows]);
+  // a history shortcut isn't a command: the line reads plain, the hint says what Enter runs
+  const spans = useMemo(() => (expansion ? [{ text: s.line, kind: "plain" as const }] : highlight(s.line, parsed)), [s.line, parsed, expansion]);
   const sug = suggestion(s, runnable);
   const shown = shownItems(s);
-  const hint = s.search ? null : lineHint(parsed, s.line, s.cursor, registry, Boolean(sug));
+  const hint = s.search ? null : (expansion ?? lineHint(parsed, s.line, s.cursor, registry, Boolean(sug)));
   // the list's names in one column, as wide as the longest (capped)
   // loop: HOT-PATH-OK — ≤ 200 completions, per render while the list is open
   const nameWidth = shown ? Math.min(34, Math.max(8, ...shown.items.map((it) => it.label.length))) : 0;

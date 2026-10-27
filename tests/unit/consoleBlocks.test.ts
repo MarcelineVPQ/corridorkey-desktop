@@ -11,6 +11,7 @@ import {
   compactBlock,
   duration,
   errorSpans,
+  expansionHint,
   highlight,
   mergeBlocks,
   isoTime,
@@ -255,5 +256,17 @@ describe("teach by echo: a queue job's line", () => {
     const list = mergeBlocks({ blocks: [], clearedTo: 0 }, [block(4), echo]);
     expect(visibleBlocks(list).map((b) => b.id)).toEqual([4, 5]);
     expect(visibleBlocks(list, false).map((b) => b.id)).toEqual([4]);
+  });
+});
+
+describe("history shortcuts in the hint", () => {
+  const past = [
+    { n: 7, line: "render a.mov -o out/ --overwrite" },
+    { n: 8, line: "dir out" },
+  ];
+  it("says what Enter will run, or why it can't; a line without a shortcut has no such hint", () => {
+    expect(expansionHint("sudo !-2", past, false)).toEqual({ text: "Enter runs: sudo render a.mov -o out/ --overwrite", error: false, line: "sudo render a.mov -o out/ --overwrite" });
+    expect(expansionHint("!9", past, false)).toEqual({ text: "!9: no line 9 in the history (history lists the numbers)", error: true, line: null });
+    expect(expansionHint("render sh010!.mov", past, false)).toBeNull();
   });
 });

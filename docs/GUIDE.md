@@ -123,6 +123,7 @@ instead (**F2** switches).
 | ↑ ↓, Ctrl+P Ctrl+N | Earlier lines that start with what you typed |
 | Ctrl+R | Search the history as you type; again for older; Enter runs; Esc or Ctrl+G cancels |
 | Alt+. | Insert the last word of the line before (the output path you just used) |
+| `!!` `!N` `!-N` `!abc` `!$` `^a^b` | History shortcuts, as in bash: the line before (`sudo !!`), line N of `history`, N lines back, the last line starting with abc, the last word of the line before, the line before with a changed to b; the hint shows what Enter runs. A `!` inside a name (`sh010!.mov`), in quotes or before a frame token (`!$F4`) stays as typed |
 | Ctrl+A, Ctrl+E | Start, end of the line |
 | Alt+B, Alt+← | A word back (Option on a Mac, Option+F a word forward) |
 | Ctrl+U, Ctrl+K, Ctrl+W, Alt+D | Cut to the start, to the end, the word before, the word after |

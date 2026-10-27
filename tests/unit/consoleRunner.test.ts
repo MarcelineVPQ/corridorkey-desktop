@@ -339,7 +339,7 @@ describe("sudo", () => {
   it("refuses a destructive flag without sudo", async () => {
     const { c } = make();
     const b = await c.run("render shot.mov -o ../out/sh010 --overwrite");
-    expect([b.state, b.lines[0].text]).toEqual(["refused", "--overwrite replaces files that are already there: run it as sudo render shot.mov -o ../out/sh010 --overwrite"]);
+    expect([b.state, b.lines[0].text]).toEqual(["refused", "--overwrite replaces files that are already there: run it as sudo render shot.mov -o ../out/sh010 --overwrite (or type sudo !!)"]);
     expect(confirms).toEqual([]);
   });
 
@@ -978,6 +978,48 @@ describe("SME review 2026-10-26: sequences (M4, S1)", () => {
     const f = await c.run("dir -f");
     expect(f.entries!.filter((e) => e.name.startsWith("sh010_plate.1"))).toHaveLength(11);
     expect((await c.run("ls -1")).lines.map((l) => l.text)).toContain("sh010_plate.####.exr");
+  });
+});
+
+describe("Phase 4: history shortcuts", () => {
+  it("sudo !! after a refusal runs the line before as sudo; the block shows the expanded line and what was typed", async () => {
+    const { c } = make();
+    const refused = await c.run("render shot.mov -o ../out/sh010 --overwrite");
+    expect(refused.lines[0].text).toMatch(/run it as sudo .* \(or type sudo !!\)$/);
+    const b = await c.run("sudo !!");
+    expect(b.line).toBe("sudo render shot.mov -o ../out/sh010 --overwrite");
+    expect(b.lines[0]).toEqual({ kind: "info", text: "from sudo !!" });
+    expect(confirms).toHaveLength(1);
+    expect(spawned).toHaveLength(1);
+    // the history keeps what ran (bash's rule), never "sudo !!"
+    expect(c.history("").map((e) => e.line)).toEqual(["sudo render shot.mov -o ../out/sh010 --overwrite", "render shot.mov -o ../out/sh010 --overwrite"]);
+  });
+
+  it("!N, !-N, !prefix, !$ and ^old^new from the stable numbers; a missing one is refused and not kept", async () => {
+    const { c } = make();
+    await c.run("cd ..");
+    await c.run("pwd");
+    const n = c.history("")[1].n;
+    expect((await c.run(`!${n}`)).line).toBe("cd ..");
+    expect((await c.run("!-2")).line).toBe("pwd");
+    expect((await c.run("!pw")).line).toBe("pwd");
+    expect((await c.run("dir !$")).line).toBe("dir pwd");
+    expect((await c.run("^dir pwd^dir")).line).toBe("dir");
+    const bad = await c.run("!nothing");
+    expect([bad.state, bad.lines[0].text]).toEqual(["refused", "!nothing: no line in the history starts with nothing"]);
+    expect(c.history("nothing")).toEqual([]);
+    // a file name with ! or a frame token is never expanded
+    expect((await c.run("dir sh010!")).line).toBe("dir sh010!");
+    expect((await c.run("dir !$F4.exr")).line).toBe("dir !$F4.exr");
+  });
+
+  it("a script's lines are never expanded (bash's non-interactive rule)", async () => {
+    const { c } = make();
+    await c.run("pwd");
+    const b = await c.runLines(["!!", "pwd"]);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(blocks.get(b.id)!.state).toBe("failed");
+    expect([...blocks.values()].find((x) => x.parent === b.id)!.lines[0].text).toMatch(/unknown command '!!'/);
   });
 });
 
