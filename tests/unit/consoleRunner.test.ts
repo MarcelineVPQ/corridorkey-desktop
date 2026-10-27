@@ -525,3 +525,36 @@ describe("block pushes and IPC checks", () => {
     expect([cursorArg(3, "pwd"), cursorArg(4, "pwd"), cursorArg(-1, "pwd"), cursorArg(1.5, "pwd")]).toEqual([3, null, null, null]);
   });
 });
+
+// The senior review of 2026-10-26 (docs/REVIEW_CONSOLE_2026-10-26.md): each probe, inverted, as a regression test.
+describe("review 2026-10-26 probes", () => {
+  const win = (over: Partial<ConsoleDeps> = {}) =>
+    make({ paths: { realpath: async (p) => p, platform: "win32", home: "C:\\Users\\M" }, startDir: "D:\\shots", writeRoots: () => ["D:\\results"], ...over });
+
+  it("P1 (M1): a URL-looking written path is checked like any other (Linux)", async () => {
+    const { c } = make();
+    const b = await c.run("render shot.mov -o x://y/");
+    expect(b.state).toBe("refused");
+    expect(b.lines[0].text).toMatch(/^--output: .*outside the folders/);
+    expect(spawned).toEqual([]);
+  });
+
+  it("P1 (M1): C://… is a path on Windows, checked for every written flag", async () => {
+    const { c } = win();
+    const b = await c.run("render shot.mov -o C://Users/Public/anywhere/ --report C://Windows/Temp/r.json");
+    expect(b.state).toBe("refused");
+    expect(b.lines.map((l) => l.text)).toEqual([expect.stringMatching(/^--output: C:\\Users\\Public\\anywhere.* outside/), expect.stringMatching(/^--report: C:\\Windows\\Temp\\r\.json.* outside/)]);
+    expect(spawned).toEqual([]);
+  });
+
+  it("P1 (M1): sudo with a URL-looking output is refused before any dialog; only --ocio's ocio:// names pass as names", async () => {
+    const { c } = make();
+    expect((await c.run("sudo render shot.mov -o x://y/ --overwrite")).state).toBe("refused");
+    expect((await c.run("render shot.mov -o ocio://studio/")).state).toBe("refused");
+    expect(confirms).toEqual([]);
+    expect(spawned).toEqual([]);
+    await c.run("render shot.mov -o ../out/a --ocio ocio://studio-config-latest");
+    expect(spawned[0].args).toContain("ocio://studio-config-latest");
+    await finish(spawned[0].child, [], 0);
+  });
+});

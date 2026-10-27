@@ -389,7 +389,8 @@ export class Console {
     // loop: NOT-WORTH — the line's few options
     const given = new Set(p.options.map((o) => o.arg.id));
     const pathValue = async (a: ConsoleArg, v: string): Promise<string> => {
-      if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) return v; // ocio://… names a built-in config, not a file
+      // --ocio's ocio://… names a built-in config, not a file; any other value is a path (C://… is one on Windows)
+      if (a.id === "ocio" && !a.writes && v.startsWith("ocio://")) return v;
       if (a.writes) {
         const w = await checkWrite(v, this.cwd, this.d.writeRoots(), this.d.paths);
         if (!w.ok) refusals.push(`${a.long ? `--${a.long}` : a.id}: ${w.reason}`);
