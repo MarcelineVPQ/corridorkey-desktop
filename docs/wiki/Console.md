@@ -94,7 +94,7 @@ files must say `sudo`, and one dialog lists them all, with their `${…}` filled
 | `du [folder…]` | how much each folder takes on disk |
 | `tree [folder] [-L N] [-a]` | the folders as a tree, a frame sequence as one row |
 | `time <command>` | run a command and say how long it took (a render's frames per second too) |
-| `run [--keep-going] <file.ckcmd>` | run a script ([below](#scripting)) |
+| `run [--keep-going] <file.ckcmd>` | run a script ([below](#scripting)); `source` is the same command |
 | `history [N or term]` | the lines typed before, numbered, with when and how each ended; `history --audit` the elevation log |
 | `allow [folder]` | let the Console write in a folder ([above](#safety)) |
 | `allow-server [server]` | Windows: let the Console open a network server's paths until the app quits ([above](#safety)) |
@@ -104,7 +104,10 @@ files must say `sudo`, and one dialog lists them all, with their `${…}` filled
 | `cls` / `clear` | clear the screen (Ctrl+L too) |
 
 Other shells' words get a straight answer instead of "unknown command": `exit` says the Console stays open, `rm` that
-it never deletes files, `cp` / `mv` that `render -o` writes where you say, `less` that `cat` and `tail` show a file.
+it never deletes files, `cp` / `mv` that `render -o` writes where you say, `less` that `cat` and `tail` show a file,
+`export X=1` (or `X=1`, `setenv`, `$env:X=`) that the Console's variables are `set X=1` and `${X}`, `lsseq` that `dir`
+shows sequences. `echo $HOME` prints `$HOME` and says that only `${name}` expands. An unquoted `?` anywhere on a line
+asks for help, so a file named `?` goes in quotes (the help says so when it sees other arguments).
 
 ## Frame sequences
 

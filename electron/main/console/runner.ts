@@ -477,7 +477,8 @@ export class Console {
       }
       const value = a.slice(eq + 1);
       if (value.length > VALUE_MAX || value.includes("\0")) return this.finish(b, "refused", `${name}: a value is at most ${VALUE_MAX} characters, without NUL.`);
-      if (!this.vars.has(name) && !sets.has(name) && this.vars.size + sets.size >= VARIABLES_SESSION_MAX) return this.finish(b, "refused", `${VARIABLES_SESSION_MAX} variables already: unset some first.`);
+      if (!this.vars.has(name) && !sets.has(name) && this.vars.size + sets.size >= VARIABLES_SESSION_MAX)
+        return this.finish(b, "refused", `${VARIABLES_SESSION_MAX} variables already: unset some first.`);
       // a kept variable stays kept (set changes it everywhere); -p keeps a new one
       if (keep || Object.hasOwn(kept, name)) {
         if (!Object.hasOwn(next, name) && Object.keys(next).length >= VARIABLES_MAX) return this.finish(b, "refused", `${VARIABLES_MAX} kept variables already: unset some first.`);
@@ -588,7 +589,13 @@ export class Console {
     if (p.sudo && !p.options.some((o) => o.arg.destructive)) this.note(b, "info", "sudo isn't needed for this (it replaces no files): ran it as it is.");
     // as the CLI prints it (clap: "corridorkey 1.0.0", "corridorkey-render 1.0.0"), without running it
     if (p.version) return now(this.finish(b, "done", `${cmd === this.d.registry.cli ? "corridorkey" : `corridorkey-${cmd.name}`} ${this.d.version}`));
-    if (p.help) return now(this.finish(b, "done", ...(cmd.name === "help" && cmd.kind === "builtin" ? overview(this.d.registry) : commandHelp(this.d.registry, cmd))));
+    if (p.help) {
+      // a ? among other arguments was most likely a file's name: say how to write one (SME review 2026-10-26 N5)
+      // loop: NOT-WORTH — the line's few words
+      const qmark = p.words.some((w) => !w.quoted && w.value === "?") && p.positionals.length + p.options.length > 0;
+      if (qmark) this.note(b, "info", "An unquoted ? anywhere on a line asks for help, so this is the help; a file or value named ? goes in quotes: '?'.");
+      return now(this.finish(b, "done", ...(cmd.name === "help" && cmd.kind === "builtin" ? overview(this.d.registry) : commandHelp(this.d.registry, cmd))));
+    }
     if (cmd.kind === "cli") return this.cli(b, p, parent !== null);
     // loop: NOT-WORTH — the line's few options
     const has = (id: string) => p.options.some((o) => o.arg.id === id);
@@ -635,8 +642,14 @@ export class Console {
         return now(this.set(b, pos("assign"), has("persist")));
       case "unset":
         return now(this.unset(b, pos("names")));
-      case "echo":
+      case "echo": {
+        // $HOME, $SHOT: printed as typed (only ${name} expands, so $F4 and $HIP stay file names); said once (SME review
+        // 2026-10-27 N1). A value filled in is quoted, so only what was typed counts.
+        // loop: NOT-WORTH — the line's few words
+        const shellVar = p.positionals.find((x) => !p.words[x.word].quoted && /\$(?!F\d?\b)[A-Za-z_]\w*/.test(x.value));
+        if (shellVar) this.note(b, "info", `Only \${name} expands here (\${home} is your home folder); ${shellVar.value} is printed as typed.`);
         return now(this.finish(b, "done", pos("words").join(" ")));
+      }
       case "dir":
         return now(await this.dir(b, pos("folder")[0], p));
       case "open": {

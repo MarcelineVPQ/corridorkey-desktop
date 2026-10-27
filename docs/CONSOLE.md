@@ -53,7 +53,11 @@ missing there).
   `sudo -k`, `farm export` (below), and `corridorkey render | verify | prepare | info` (also bare `render` …). Other command lines' names get
   an answer instead of "unknown command" (`ANSWERS` in registry.ts): `exit` / `quit` (the Console stays open), `rm` /
   `del` / `rmdir` (the Console never deletes files), `cp` / `mv`, `more` / `less` (`cat`, `head`, `tail`),
-  `which`. Built-ins say a file system error in words with what to type (`fsErrorText` in paths.ts), never Node's
+  `which`, `export` / `setenv` / `setx` and a line starting `X=1` or `$env:X=` (the variables are `set X=1`, `${X}`:
+  `assignmentAnswer`), `lsseq` (`dir`), `grep` (`history <term>`, `help -k`); `echo $HOME` prints it and says only
+  `${name}` expands (not for `$F` / `$F4`, Houdini's frame, nor a quoted word: SME review 2026-10-27 N1). A `?` among
+  other arguments shows the help with a note that a name with `?` goes in quotes (SME review 2026-10-26 N5); `source`
+  is `run`'s alias (N4). Built-ins say a file system error in words with what to type (`fsErrorText` in paths.ts), never Node's
   `ENOENT: …, stat '…'`; one they didn't expect (a file whose stat works but whose open doesn't) ends the block failed
   in the same words (`cat: you have no permission to open …`), never a call with no block. Every readdir, stat, lstat
   and realpath answers within 3 s (`answerWithin`, `FS_ANSWER_MS`): on a hung network share `dir`, `cd` and the write

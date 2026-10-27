@@ -2376,3 +2376,45 @@ describe("SME reviews: set all or nothing", () => {
     expect([ok.state, ok.lines.map((l) => l.text)]).toEqual(["done", ["a=2"]]);
   });
 });
+
+describe("SME reviews: shell reflexes, source, ? in a name", () => {
+  it("P4 N1 (row 140): export / setenv / X=1 / $env:X= say how the Console's variables work; lsseq and grep say what to type", async () => {
+    const { c } = make();
+    // loop: NOT-WORTH — a few test lines
+    for (const l of ["export X=1", "setenv X 1", "X=1", "$env:X=1", "setx X 1"]) {
+      const b = await c.run(l);
+      expect([b.state, b.lines[0].text], l).toEqual(["refused", expect.stringMatching(/the Console's variables are set X=1 .*\$\{X\}/)]);
+    }
+    expect((await c.run("lsseq")).lines[0].text).toMatch(/^dir lists a sequence as one row/);
+    expect((await c.run("grep sh010")).lines[0].text).toMatch(/history <term>.*help -k <term>/);
+  });
+
+  it("P4 N1 (row 140): echo $HOME prints it as typed and says only ${name} expands; $F4 (Houdini's frame) and a quoted one say nothing", async () => {
+    const { c } = make();
+    const b = await c.run("echo $HOME");
+    expect(b.lines.map((l) => [l.kind, l.text])).toEqual([
+      ["info", "Only ${name} expands here (${home} is your home folder); $HOME is printed as typed."],
+      ["out", "$HOME"],
+    ]);
+    expect((await c.run("echo plate.$F4.exr")).lines.map((l) => l.kind)).toEqual(["out"]);
+    expect((await c.run("echo '$HOME'")).lines.map((l) => l.kind)).toEqual(["out"]);
+  });
+
+  it("SME N4 (row 121): source is run (bash, Maya and hscript's word)", async () => {
+    const { c } = make();
+    const f = join(mkdtempSync(join(root, "src-")), "a.ckcmd");
+    writeFileSync(f, "echo one\n");
+    const b = await c.run(`source ${f}`);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(blocks.get(b.id)!.state).toBe("done");
+    expect([...blocks.values()].some((x) => x.parent === b.id && x.lines[0]?.text === "one")).toBe(true);
+  });
+
+  it("SME N5 (row 122): a ? among other arguments shows the help and says a name with ? goes in quotes; render ? alone doesn't", async () => {
+    const { c } = make();
+    const b = await c.run("cat ? notes.txt");
+    expect(b.lines[0]).toEqual({ kind: "info", text: "An unquoted ? anywhere on a line asks for help, so this is the help; a file or value named ? goes in quotes: '?'." });
+    expect(b.lines[1].text).toMatch(/^usage: cat/);
+    expect((await c.run("render ?")).lines[0].text).toMatch(/^usage: corridorkey render/);
+  });
+});

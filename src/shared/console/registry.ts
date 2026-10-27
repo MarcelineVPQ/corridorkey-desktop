@@ -299,7 +299,8 @@ const BUILTINS: ConsoleCommand[] = [
       arg({ id: "file", kind: "path", positional: true, required: true, valueName: "FILE.ckcmd", help: "the script" }),
       arg({ id: "keep-going", long: "keep-going", kind: "switch", help: "go on after a command fails (the script still ends failed)" }),
     ],
-    ["run nightly.ckcmd", "run --keep-going nightly.ckcmd"],
+    ["run nightly.ckcmd", "run --keep-going nightly.ckcmd", "source nightly.ckcmd"],
+    ["source"],
   ),
   builtin(
     "time",
@@ -429,6 +430,7 @@ export function makeRegistry(spec: CliSpec = cliSpec as CliSpec): Registry {
 const NEVER_DELETES = "the Console never deletes files (render's --overwrite replaces only its own outputs, as sudo); delete them in your file manager (open . shows this folder there)";
 const NO_COPY = "the Console doesn't copy or move files; render -o writes its outputs where you say";
 const SHOW_FILE = "cat <file> (or type) prints a text file, head and tail its start or end; the output block scrolls";
+const VARIABLES = "the Console's variables are set X=1 (set -p X=1 keeps it), used as ${X}; they never reach the system's environment";
 const STAYS_OPEN = "the Console stays open (it is a tab: the rail leaves it); cls or Ctrl+L clears the screen";
 export const ANSWERS: Readonly<Record<string, string>> = {
   find: "find (a file search) comes in a later version; to search the commands and their options: help -k <term> (or apropos <term>)",
@@ -449,6 +451,11 @@ export const ANSWERS: Readonly<Record<string, string>> = {
   rename: NO_COPY,
   more: SHOW_FILE,
   less: SHOW_FILE,
+  export: VARIABLES,
+  setenv: VARIABLES,
+  setx: VARIABLES,
+  lsseq: "dir lists a sequence as one row (lsseq's view: name.####.exr, its range and gaps); dir -f lists its frames",
+  grep: "history <term> finds the lines typed before, help -k <term> the commands and their options",
   which: "corridorkey is the app's own: version prints its version, corridorkey info checks its engine",
   where: "corridorkey is the app's own: version prints its version, corridorkey info checks its engine",
 };
@@ -463,6 +470,11 @@ export const MEANINGS: Readonly<Record<string, Readonly<Record<string, string>>>
   format: { mov: "video", mp4: "video", movie: "video", sequence: "exr", frames: "exr", openexr: "exr" },
   datatype: { "16": "half", "32": "float", fp16: "half", fp32: "float", f16: "half", f32: "float" },
 };
+
+/** What a line starting with a shell's assignment (`X=1`, PowerShell's `$env:X=1`) gets instead of "unknown command". */
+export function assignmentAnswer(word: string): string | null {
+  return /^[A-Za-z_][A-Za-z0-9_]*=/.test(word) || /^\$env:/i.test(word) ? VARIABLES : null;
+}
 
 /** A command by name or alias; bare `render` / `verify` / `prepare` / `info` are corridorkey's. */
 export function findCommand(reg: Registry, word: string): ConsoleCommand | null {
