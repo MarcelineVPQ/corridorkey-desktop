@@ -273,7 +273,10 @@ inner loop's words);
   (they name a built-in config); any other value is a path (`C://…` is one on Windows). A `--job` file is read and
   parsed by the app (at most 1 MiB, a regular file) or refused; its checked `output_dir` and `temp_dir` go to
   corridorkey as resolved `--output` / `--temp`, which win over the file, so a file changed after the check changes
-  nothing.
+  nothing. The limit (senior review 2026-10-26 N4): only the path given is resolved. The names corridorkey makes
+  inside it (`<clip>_alpha_exr/`, `<clip>_settings.txt`) are not checked: a symlink already there is followed out of
+  the folder, and a name missing at the check could be a link by the time corridorkey writes. Both need a link put in a
+  folder the user chose, so the scope holds for the user's own folders, not against someone who can write into them.
 - **The runtime is the Engine page's.** `--models` and `--ort` take only what the Engine page lists or uses (ONNX
   Runtime is a library: loading one runs its code).
 - **Elevation (`sudo`).** A destructive command (`render --overwrite`, `render --skip-existing`) runs only as
