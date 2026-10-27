@@ -100,6 +100,13 @@ it happens again, please open an issue with the log.
 **Cause:** the engine found no NVIDIA card it can use with CUDA. **Fix:** see
 [No NVIDIA graphics driver is loaded](#no-nvidia-graphics-driver-is-loaded). Nothing runs on the processor instead.
 
+On a Mac the message is:
+
+> On a Mac, CorridorKey runs on Apple's Core ML: start the engine with --device coreml (CK_ENGINE_DEVICE=coreml; the app does this).
+
+**Cause:** the engine was started without `--device coreml` (the app always passes it; this comes from the command
+line). **Fix:** pass `--device coreml`, or set `CK_ENGINE_DEVICE=coreml`.
+
 ### The graphics card ran out of memory
 
 > The graphics card ran out of memory (`<what it was doing>`): `<details>`

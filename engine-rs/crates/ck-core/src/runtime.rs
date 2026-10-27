@@ -120,7 +120,7 @@ impl ModelSet {
     /// coreml.json, no file for that size, the batches it has for that size, or the file is missing).
     pub(crate) fn coreml_file(&self, piece: &str, (sh, sw): (usize, usize), t: usize) -> Result<PathBuf, String> {
         let Some(cm) = &self.coreml else {
-            return Err(format!("{} has no Core ML model set (coreml.json)", self.dir.display()));
+            return Err(format!("{} has no Core ML model set (coreml.json): on a Mac the app's setup downloads it", self.dir.display()));
         };
         if let (Some(from), Some(v)) = (&cm.source_set, &self.version) {
             if from != v {
@@ -324,13 +324,7 @@ impl Runtime {
 
     /// Why `provider()` is None, in words for the job's error.
     pub fn unavailable_reason(&self) -> String {
-        match self.cfg.device {
-            Device::CoreMl => format!(
-                "--device coreml: this ONNX Runtime ({}) has no Core ML execution provider (the macOS onnxruntime build has it); nothing runs on the CPU instead",
-                self.ort_version
-            ),
-            _ => "CorridorKey needs an NVIDIA graphics card with CUDA.".into(),
-        }
+        no_provider_reason(self.cfg.device, std::env::consts::OS, &self.ort_version)
     }
 
     fn builder(&self) -> Result<ort::session::builder::SessionBuilder, String> {
@@ -438,6 +432,18 @@ fn cuda_ep(cfg: &EngineConfig, vram_cap: Option<u64>) -> ort::ep::CUDA {
         .with_arena_extend_strategy(ort::ep::ArenaExtendStrategy::SameAsRequested)
         // TF32 off: an fp32 model on CUDA computes in fp32
         .with_tf32(false)
+}
+
+/// Why no provider runs `device` on system `os` (std::env::consts::OS): a Mac has no NVIDIA card, so its reason
+/// names Core ML (BACKLOG row 58).
+fn no_provider_reason(device: Device, os: &str, ort_version: &str) -> String {
+    match device {
+        Device::CoreMl => format!(
+            "--device coreml: this ONNX Runtime ({ort_version}) has no Core ML execution provider (the macOS onnxruntime build has it); nothing runs on the CPU instead"
+        ),
+        _ if os == "macos" => "On a Mac, CorridorKey runs on Apple's Core ML: start the engine with --device coreml (CK_ENGINE_DEVICE=coreml; the app does this).".into(),
+        _ => "CorridorKey needs an NVIDIA graphics card with CUDA.".into(),
+    }
 }
 
 /// The compiled-model cache folder of one Core ML set file: `<root>/<ORT version>/<units>/<file stem>-<bytes>-<mtime>`.
@@ -712,11 +718,23 @@ mod tests {
     }
 
     #[test]
+    fn no_provider_reason_names_the_systems_real_need() {
+        // a Mac has no NVIDIA card: the reason names Core ML, never NVIDIA (BACKLOG row 58)
+        let mac = no_provider_reason(Device::Auto, "macos", "1.31.0");
+        assert!(mac.contains("Core ML") && !mac.contains("NVIDIA"), "{mac}");
+        assert!(no_provider_reason(Device::Cuda, "macos", "1.31.0").contains("Core ML"));
+        assert!(no_provider_reason(Device::CoreMl, "macos", "1.31.0").contains("no Core ML execution provider"));
+        assert_eq!(no_provider_reason(Device::Auto, "linux", "1.31.0"), "CorridorKey needs an NVIDIA graphics card with CUDA.");
+        assert_eq!(no_provider_reason(Device::Auto, "windows", "1.31.0"), "CorridorKey needs an NVIDIA graphics card with CUDA.");
+    }
+
+    #[test]
     fn coreml_set_files_by_size_and_batch() {
         let dir = std::env::temp_dir().join(format!("ck-coreml-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let m = ModelSet::open(&dir).unwrap();
-        assert!(m.coreml_file("stage1", (1152, 1280), 4).unwrap_err().contains("no Core ML model set"));
+        let e = m.coreml_file("stage1", (1152, 1280), 4).unwrap_err();
+        assert!(e.contains("no Core ML model set") && e.contains("setup"), "{e}");
         std::fs::write(dir.join("s1-t4.onnx"), b"").unwrap();
         std::fs::write(
             dir.join("coreml.json"),

@@ -103,7 +103,7 @@ const literals = (s) =>
 /**
  * The engine's messages written for people: from each ck-core error a user can act on (`Error::input(…)`, `Error::new(…)`,
  * …; not `Error::engine`, a bug the message names) its
- * first string literal, and every literal of `fn unavailable_reason` (no usable card); each up to its first `{`
+ * first string literal, and every literal of `fn unavailable_reason` / `fn no_provider_reason` (no usable card); each up to its first `{`
  * placeholder, kept when it starts with a capital letter (a sentence; the lower-case ones are protocol and internal
  * details, such as "id missing"). `files`: [{path, text}] of ck-core's sources.
  */
@@ -119,8 +119,8 @@ export function engineMessages(files) {
       const first = literals(span(src, m.index + m[0].length - 1))[0];
       if (first !== undefined) found.push(first);
     }
-    // loop: NOT-WORTH — at most one such function per file
-    for (const m of src.matchAll(/fn unavailable_reason\([^)]*\)[^{]*\{/g)) found.push(...literals(span(src, m.index + m[0].length - 1)));
+    // loop: NOT-WORTH — at most two such functions per file
+    for (const m of src.matchAll(/fn (?:unavailable_reason|no_provider_reason)\([^)]*\)[^{]*\{/g)) found.push(...literals(span(src, m.index + m[0].length - 1)));
     // loop: NOT-WORTH — one file's messages
     for (const lit of found) {
       const head = lit.split("{")[0].trim();
