@@ -917,6 +917,11 @@ select {
 .cb-dir td:nth-child(3) {
   color: var(--text-3);
 }
+/* a sequence row's range, frame count and gaps after its pattern */
+.cb-seq {
+  margin-left: 2ch;
+  color: var(--text-3);
+}
 .cb-dir tr.folder td:first-child {
   color: var(--status-info);
 }

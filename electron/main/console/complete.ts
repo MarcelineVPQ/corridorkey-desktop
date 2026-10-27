@@ -6,6 +6,7 @@ import { posix, win32 } from "node:path";
 import { naturalCompare } from "../media";
 import { parse, quoteArg, tokenize, type ParseOptions } from "../../../src/shared/console/parse";
 import { commandNames, findCommand, type ConsoleArg, type ConsoleCommand, type Registry } from "../../../src/shared/console/registry";
+import { groupSequences } from "../../../src/shared/console/sequences";
 import type { ConsoleCompletion, ConsoleCompletionItem } from "../../../src/shared/types";
 import { expandHome } from "./paths";
 
@@ -123,13 +124,28 @@ async function paths(prefix: string, cwd: string, d: CompleteDeps, opts: ParseOp
     return [];
   }
   const sep = opts.windows ? "\\" : "/";
-  const items: ConsoleCompletionItem[] = [];
-  // loop: NOT-WORTH — sorts one folder's names, once per Tab
-  const matching = entries.filter((e) => fold(e.name).startsWith(fold(namePart)) && (namePart.startsWith(".") || !e.name.startsWith("."))).sort((x, y) => naturalCompare(x.name, y.name));
-  // loop: NOT-WORTH — at most COMPLETIONS_MAX entries, an async stat only for a link
-  for (const e of matching.slice(0, COMPLETIONS_MAX)) {
-    const folder = e.isDirectory() || (e.isSymbolicLink() && (await d.isDir(a.join(dir, e.name))));
-    items.push({ insert: quoteArg(dirPart + e.name + (folder ? sep : ""), opts), label: e.name + (folder ? sep : ""), kind: folder ? "folder" : "file", help: "" });
-  }
-  return items;
+  // loop: NOT-WORTH — one folder's names, once per Tab
+  const matching = entries.filter((e) => fold(e.name).startsWith(fold(namePart)) && (namePart.startsWith(".") || !e.name.startsWith(".")));
+  const folders = new Set<string>();
+  let links = 0;
+  // loop: NOT-WORTH — the matching names; an async stat only for a link, at most COMPLETIONS_MAX of them
+  for (const e of matching) if (e.isDirectory() || (e.isSymbolicLink() && links++ < COMPLETIONS_MAX && (await d.isDir(a.join(dir, e.name))))) folders.add(e.name);
+  // a plate folder's frames are one pattern per sequence (sh010_plate.####.exr, as the CLI reads it), not a name per frame
+  // loop: NOT-WORTH — the matching names, once per Tab
+  const { sequences, singles } = groupSequences(matching.filter((e) => !folders.has(e.name)).map((e) => e.name));
+  const item = (name: string, kind: "file" | "folder", help: string): ConsoleCompletionItem => ({
+    insert: quoteArg(dirPart + name + (kind === "folder" ? sep : ""), opts),
+    label: name + (kind === "folder" ? sep : ""),
+    kind,
+    help,
+  });
+  const items = [
+    // loop: NOT-WORTH — the sequences found
+    ...sequences.map((q) => item(q.pattern, "file", `frames ${q.range} (${q.count})${q.missing ? `, missing ${q.missing}` : ""}`)),
+    // loop: NOT-WORTH — the single files
+    ...singles.map((n) => item(n, "file", "")),
+    ...[...folders].map((n) => item(n, "folder", "")),
+  ];
+  // loop: NOT-WORTH — sorts ≤ one folder's items, once per Tab
+  return items.sort((x, y) => naturalCompare(x.label, y.label)).slice(0, COMPLETIONS_MAX);
 }

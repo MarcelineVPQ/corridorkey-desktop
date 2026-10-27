@@ -198,6 +198,7 @@ const BUILTINS: ConsoleCommand[] = [
       arg({ id: "time", short: "t", kind: "switch", help: "newest first" }),
       arg({ id: "size", short: "S", kind: "switch", help: "largest first" }),
       arg({ id: "reverse", short: "r", kind: "switch", help: "the other way round" }),
+      arg({ id: "frames", short: "f", kind: "switch", help: "each frame of a sequence on its own row (sequences are one row: name.####.exr 1001-1100)" }),
       arg({ id: "names", short: "1", dos: ["/w", "/b"], kind: "switch", help: "names only" }),
       arg({
         id: "order",

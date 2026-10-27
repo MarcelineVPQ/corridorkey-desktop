@@ -20,7 +20,9 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   `-s`/`-e`, `-q` with `-v`, `--overwrite` with `--skip-existing`, `-i` with INPUT before Enter), `render`'s `-o`, `--report`, `--temp` (and `verify`'s and `prepare`'s `--report`) as written paths.
 - **Commands.** `help [command]` (also `command ?`), `help -k <term>` / `apropos <term>` (search the help; `find` is
   kept free for a file search and says so), `cd` (`cd -`: the folder before), `pwd`, `dir` / `ls` (`-l -a -t -S -r -1`,
-  combined like `-la`, and DOS's `/w /b /a /o:d` on every system; dot files only with `-a`), `cls` / `clear`,
+  combined like `-la`, and DOS's `/w /b /a /o:d` on every system; dot files only with `-a`; a frame sequence is one row,
+  `sh010_plate.####.exr  1001-1100 · 96 frames · missing 1047`, `-f` lists its frames: `src/shared/console/sequences.ts`,
+  which Tab completion uses too: one candidate per sequence, never one per frame), `cls` / `clear`,
   `history` (`--audit`: the elevated log), `version` (also `corridorkey --version`, `render --version`: the app's
   version, which its corridorkey shares; answered without running it), `run <file.ckcmd>` (a script of Console lines, one per line, `#` comments;
   each line through the same checks; stops at the first that fails; no script inside a script), `sudo <command>`,

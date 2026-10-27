@@ -3,7 +3,21 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parse } from "../../src/shared/console/parse";
 import { makeRegistry } from "../../src/shared/console/registry";
-import { announcement, blockStatus, blockText, clearScreen, duration, errorSpans, highlight, mergeBlocks, sizeText, visibleBlocks, writtenPaths, BLOCKS_KEPT } from "../../src/ui/console/model";
+import {
+  announcement,
+  blockStatus,
+  blockText,
+  clearScreen,
+  duration,
+  errorSpans,
+  highlight,
+  mergeBlocks,
+  sequenceText,
+  sizeText,
+  visibleBlocks,
+  writtenPaths,
+  BLOCKS_KEPT,
+} from "../../src/ui/console/model";
 import type { ConsoleBlock } from "../../src/shared/types";
 
 const reg = makeRegistry();
@@ -129,8 +143,8 @@ describe("the blocks", () => {
         { kind: "err", text: "b" },
       ],
       entries: [
-        { name: "plates", folder: true, bytes: null, modified: null },
-        { name: "a.mov", folder: false, bytes: 2048, modified: null },
+        { name: "plates", folder: true, bytes: null, modified: null, sequence: null },
+        { name: "a.mov", folder: false, bytes: 2048, modified: null, sequence: null },
       ],
     });
     expect(blockText(b).split("\n")).toEqual(["a", "b", "         <DIR>  plates/", "          2048  a.mov"]);
@@ -159,12 +173,19 @@ describe("screen readers (review 2026-10-26 S8)", () => {
     expect(announcement([block(3, { line: "render a.mov --overwrite", state: "refused", exitCode: null, lines: [{ kind: "err", text: "--overwrite replaces files" }] })])).toBe(
       "render a.mov --overwrite: refused: --overwrite replaces files",
     );
-    expect(announcement([block(4, { line: "ls", entries: [{ name: "a", folder: false, bytes: 1, modified: 1 }] })])).toBe("ls: done, exit 0");
+    expect(announcement([block(4, { line: "ls", entries: [{ name: "a", folder: false, bytes: 1, modified: 1, sequence: null }] })])).toBe("ls: done, exit 0");
   });
 
   it("the output isn't a live region; one polite status region carries the announcements", () => {
     const page = readFileSync(new URL("../../src/ui/pages/ConsolePage.tsx", import.meta.url), "utf8");
     expect(page).not.toMatch(/role="log"|aria-live="(polite|assertive)"[^>]*console-out/);
     expect(page).toMatch(/role="status"[^>]*>\s*\{announcement\(/);
+  });
+});
+
+describe("SME review 2026-10-26: sequences in a listing (S1)", () => {
+  it("a sequence row says its range, frame count and gaps", () => {
+    expect(sequenceText({ range: "1001-1100", count: 96, missing: "1047, 1050-1052" })).toBe("1001-1100 · 96 frames · missing 1047, 1050-1052");
+    expect(sequenceText({ range: "1-2", count: 2, missing: null })).toBe("1-2 · 2 frames");
   });
 });

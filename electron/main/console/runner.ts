@@ -18,12 +18,15 @@ import type { Elevation } from "./elevation";
 import { commandHelp, findLines, overview } from "./help";
 import type { AuditLog, History } from "./logs";
 import { checkWrite, expandHome, resolveReal, type PathDeps } from "./paths";
+import { groupSequences } from "../../../src/shared/console/sequences";
 
 /** Lines a block keeps (the newest); a long render's log can't grow the page or the pushes without bound. */
 export const CONSOLE_LINES_KEPT = 2000;
 const LINE_CHARS = 4000;
 /** dir / ls rows (a plate folder can hold 100 000 frames). */
 export const LIST_MAX = 5000;
+/** dir's stats in all (a sequence's size is its frames'): past these, a size says "?" */
+const DIR_STATS = 20_000;
 /** A script (run) or job file read: at most this many bytes. */
 const FILE_MAX = 1024 * 1024;
 /** The quit's grace for a running corridorkey: it stops cleanly within it, else it is killed. */
@@ -341,11 +344,36 @@ export class Console {
     const hidden = total - names.length;
     // loop: NOT-WORTH — sorts one folder's names, per dir / ls
     names.sort((x, y) => naturalCompare(x.name, y.name));
+    // a sequence is one row (lsseq: sh010_plate.####.exr  1001-1100, its gaps), unless -f asks for the frames
+    // loop: NOT-WORTH — one folder's names
+    const grouped = has("frames") ? { sequences: [], singles: names.map((n) => n.name) } : groupSequences(names.filter((n) => !n.isDirectory()).map((n) => n.name));
+    const inSequence = new Set(grouped.sequences.flatMap((q) => q.names));
+    // loop: NOT-WORTH — one folder's names
+    const rows = [...grouped.sequences.map((q) => ({ name: q.pattern, seq: q })), ...names.filter((n) => !inSequence.has(n.name)).map((n) => ({ name: n.name, seq: null, dirent: n }))];
+    // loop: NOT-WORTH — sorts the rows, per dir / ls
+    rows.sort((x, y) => naturalCompare(x.name, y.name));
     let entries: ConsoleEntry[] = [];
-    // loop: NOT-WORTH — one async stat per listed entry, at most LIST_MAX, per dir / ls
-    for (const n of names.slice(0, LIST_MAX)) {
-      const s = await this.d.fs.stat(a.join(dir, n.name)).catch(() => null);
-      entries.push({ name: n.name, folder: s?.isDirectory() ?? n.isDirectory(), bytes: s && !s.isDirectory() ? s.size : null, modified: s?.mtimeMs ?? null });
+    // a sequence's size is its frames' (each one stat'ed, at most DIR_STATS in all): over that, it says "?"
+    let stats = DIR_STATS;
+    let unread = 0;
+    // loop: NOT-WORTH — one async stat per listed entry (and per frame, at most DIR_STATS), at most LIST_MAX rows, per dir / ls
+    for (const r of rows.slice(0, LIST_MAX)) {
+      if (r.seq) {
+        let bytes: number | null = 0;
+        let modified = 0;
+        // loop: NOT-WORTH — as above
+        for (const n of r.seq.names) {
+          const st = stats-- > 0 ? await this.d.fs.stat(a.join(dir, n)).catch(() => null) : null;
+          if (!st) bytes = null;
+          else if (bytes !== null) bytes += st.size;
+          modified = Math.max(modified, st?.mtimeMs ?? 0);
+        }
+        if (bytes === null) unread += r.seq.count;
+        entries.push({ name: r.name, folder: false, bytes, modified: modified || null, sequence: { range: r.seq.range, count: r.seq.count, missing: r.seq.missing } });
+        continue;
+      }
+      const st = await this.d.fs.stat(a.join(dir, r.name)).catch(() => null);
+      entries.push({ name: r.name, folder: st?.isDirectory() ?? r.dirent!.isDirectory(), bytes: st && !st.isDirectory() ? st.size : null, modified: st?.mtimeMs ?? null, sequence: null });
     }
     // newest / largest first (a folder counts as size 0), ties by name; -r reverses
     const key = (e: ConsoleEntry) => (by === "time" ? (e.modified ?? 0) : (e.bytes ?? 0));
@@ -356,9 +384,18 @@ export class Console {
     // loop: NOT-WORTH — the listed entries
     const files = entries.filter((e) => !e.folder);
     // loop: NOT-WORTH — as above
+    const fileCount = files.reduce((n, e) => n + (e.sequence?.count ?? 1), 0);
+    // loop: NOT-WORTH — as above
     const bytes = files.reduce((n, e) => n + (e.bytes ?? 0), 0);
-    const more = names.length - entries.length;
-    const summary = `${dir}: ${files.length} files (${bytes} bytes), ${entries.length - files.length} folders${more > 0 ? `; ${more} more not listed` : ""}${hidden > 0 ? `; ${hidden} hidden (dir -a shows them)` : ""}`;
+    // loop: NOT-WORTH — the listed files
+    const seqs = files.filter((e) => e.sequence);
+    // loop: NOT-WORTH — the sequences listed
+    const framed = seqs.reduce((n, e) => n + e.sequence!.count, 0);
+    const more = rows.length - entries.length;
+    const summary =
+      `${dir}: ${fileCount} files (${bytes} bytes${unread ? `; the sizes of ${unread} frames not read` : ""})` +
+      `${seqs.length ? `, ${framed} of them in ${seqs.length} sequence${seqs.length === 1 ? "" : "s"} (dir -f lists the frames)` : ""}` +
+      `, ${entries.length - files.length} folders${more > 0 ? `; ${more} more not listed` : ""}${hidden > 0 ? `; ${hidden} hidden (dir -a shows them)` : ""}`;
     if (has("names")) {
       // names only (ls -1, dir /w /b): one per line, folders with a separator
       b.entries = null;

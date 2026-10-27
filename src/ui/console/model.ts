@@ -3,7 +3,7 @@
 // words, the paths a command wrote, the text Copy output puts on the clipboard).
 import type { Parsed, Token } from "../../shared/console/parse";
 import type { Registry } from "../../shared/console/registry";
-import type { ConsoleBlock } from "../../shared/types";
+import type { ConsoleBlock, ConsoleEntry } from "../../shared/types";
 
 export type SpanKind = "plain" | "command" | "flag" | "value" | "path" | "string" | "error" | "danger";
 
@@ -136,6 +136,11 @@ export function blockText(b: ConsoleBlock): string {
     // loop: NOT-WORTH — ≤ 5000 rows, per Copy press
     for (const e of b.entries) lines.push(`${e.folder ? "<DIR>".padStart(14) : (e.bytes === null ? "?" : String(e.bytes)).padStart(14)}  ${e.name}${e.folder ? "/" : ""}`);
   return lines.join("\n");
+}
+
+/** A sequence row's frames, lsseq-style: "1001-1100 · 96 frames · missing 1047, 1050-1052". */
+export function sequenceText(q: NonNullable<ConsoleEntry["sequence"]>): string {
+  return `${q.range} · ${q.count} frames${q.missing ? ` · missing ${q.missing}` : ""}`;
 }
 
 /** A file's size in a listing (1 KiB = 1024 bytes, as the file managers show it). */

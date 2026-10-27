@@ -805,3 +805,44 @@ describe("SME review 2026-10-26: shell reflexes (M3)", () => {
     expect(c.session().cwd).toBe(root);
   });
 });
+
+describe("SME review 2026-10-26: sequences (M4, S1)", () => {
+  /** sh010_plate.1001-1012.exr without 1005, sh010_plate.mov, notes.txt, sh010_plates/ */
+  function plates() {
+    const d = mkdtempSync(join(root, "seq-"));
+    // loop: NOT-WORTH — twelve test frames
+    for (let f = 1001; f <= 1012; f++) if (f !== 1005) writeFileSync(join(d, `sh010_plate.${f}.exr`), "x".repeat(100));
+    writeFileSync(join(d, "sh010_plate.mov"), "x");
+    writeFileSync(join(d, "notes.txt"), "x");
+    mkdirSync(join(d, "sh010_plates"));
+    return d;
+  }
+
+  it("M4: Tab offers one pattern per sequence (its frame range in the description), not one item per frame; single files still complete", async () => {
+    const { c } = make({ startDir: plates() });
+    const r = await c.complete("render sh010_pl", 15);
+    expect(r.items.map((i) => [i.insert, i.help])).toEqual([
+      ["sh010_plate.####.exr", "frames 1001-1012 (11), missing 1005"],
+      ["sh010_plate.mov", ""],
+      ["sh010_plates/", ""],
+    ]);
+    expect((await c.complete("render no", 9)).items.map((i) => i.insert)).toEqual(["notes.txt"]);
+    // -o offers the same pattern style
+    expect((await c.complete("render x.mov -o sh010_plate.", 28)).items.map((i) => i.insert)).toEqual(["sh010_plate.####.exr", "sh010_plate.mov"]);
+  });
+
+  it("S1: dir groups a sequence into one row (range, count, gaps, total size); dir -f lists the frames", async () => {
+    const { c } = make({ startDir: plates() });
+    const b = await c.run("dir");
+    expect(b.entries!.map((e) => [e.name, e.bytes, e.sequence])).toEqual([
+      ["notes.txt", 1, null],
+      ["sh010_plate.####.exr", 1100, { range: "1001-1012", count: 11, missing: "1005" }],
+      ["sh010_plate.mov", 1, null],
+      ["sh010_plates", null, null],
+    ]);
+    expect(b.lines[0].text).toMatch(/13 files .*in 1 sequence/);
+    const f = await c.run("dir -f");
+    expect(f.entries!.filter((e) => e.name.startsWith("sh010_plate.1"))).toHaveLength(11);
+    expect((await c.run("ls -1")).lines.map((l) => l.text)).toContain("sh010_plate.####.exr");
+  });
+});

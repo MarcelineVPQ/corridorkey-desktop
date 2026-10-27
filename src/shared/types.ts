@@ -555,6 +555,8 @@ export interface ConsoleEntry {
   // null: unreadable (a dangling link)
   bytes: number | null;
   modified: number | null;
+  // a frame sequence's row (name is its pattern, sh010_plate.####.exr; bytes its frames'; modified the newest), else null
+  sequence: { range: string; count: number; missing: string | null } | null;
 }
 
 // one command and everything it printed (Warp-style output block)

@@ -7,7 +7,7 @@ import { Check, Copy, CornerDownLeft, FolderOpen, ShieldAlert } from "lucide-rea
 import type { Registry } from "../../shared/console/registry";
 import type { ConsoleBlock } from "../../shared/types";
 import { ProgressBar } from "../ProgressBar";
-import { blockStatus, blockText, duration, errorSpans, sizeText, writtenPaths } from "./model";
+import { blockStatus, blockText, duration, errorSpans, sequenceText, sizeText, writtenPaths } from "./model";
 
 const COPIED_MS = 1500;
 
@@ -101,7 +101,10 @@ export const OutputBlock = memo(function OutputBlock({ b, registry, onReinsert }
             {/* loop: HOT-PATH-OK — ≤ 5000 rows, once per listing (memo) */}
             {b.entries.map((e) => (
               <tr key={e.name} className={e.folder ? "folder" : ""}>
-                <td>{e.folder ? `${e.name}/` : e.name}</td>
+                <td>
+                  {e.folder ? `${e.name}/` : e.name}
+                  {e.sequence && <span className="cb-seq">{sequenceText(e.sequence)}</span>}
+                </td>
                 <td>{e.folder ? "folder" : sizeText(e.bytes)}</td>
                 <td>{when(e.modified)}</td>
               </tr>

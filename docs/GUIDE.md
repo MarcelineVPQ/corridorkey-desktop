@@ -65,7 +65,8 @@ The **Console** (its own icon on the rail) is a command line inside the app for 
 `render`, `verify`, `prepare` and `info` with the same flags, output and exit codes, plus `help`, `apropos`, `cd`, `pwd`,
 `dir` / `ls`, `cls`, `history`, `version`, `run` (a `.ckcmd` script of Console lines) and `sudo`. Every command and flag comes
 from the `corridorkey` CLI's own definitions, so the Console and the farm never differ. `help` lists the commands,
-The shell reflexes work: `ls -la`, `ls -tr`, `dir /o:-d`, `cd -`. `help render` or `render ?` explains one with examples, `help -k overwrite` (or `apropos overwrite`) searches them.
+The shell reflexes work: `ls -la`, `ls -tr`, `dir /o:-d`, `cd -`; `dir` shows a frame sequence as one row with its range
+and gaps (`dir -f` lists the frames). `help render` or `render ?` explains one with examples, `help -k overwrite` (or `apropos overwrite`) searches them.
 
 **Safety.** It is not a system shell: only its own commands, each one parsed and checked (no variables, pipes, globs
 or other programs). It **reads anywhere** you can, and **writes only into the folders you chose**: the results folder
@@ -85,7 +86,8 @@ every line it prints.
 Enter (an unknown command or flag with its "did you mean", a value out of range), a flag that replaces files in
 amber. The line under the input explains the mistake, or the flag the cursor is on. A grey suggestion follows the
 cursor: your history first (only lines that would run), then the commands; **→** takes it, **Alt+→** one word of it;
-it never runs by itself. **Tab** completes commands, flags, values and paths; when several fit it adds what they
+it never runs by itself. **Tab** completes commands, flags, values and paths (a frame sequence as one pattern, `sh010_plate.####.exr`, with its
+frame range beside it); when several fit it adds what they
 share, and a second Tab opens the list. **Console settings → Completions → List** shows the list as you type
 instead (**F2** switches).
 
