@@ -1,0 +1,1 @@
+[CorridorKey Desktop on GitHub](https://github.com/MarcelineVPQ/corridorkey-desktop) · [Releases](https://github.com/MarcelineVPQ/corridorkey-desktop/releases) (newest first; Development builds are marked Pre-release) · A community project, not made or endorsed by Corridor Digital. CorridorKey © Corridor Digital.
