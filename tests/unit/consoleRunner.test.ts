@@ -1,13 +1,14 @@
 // The Console's runner with a fake spawn (as engine.test.ts): the exact argv, never a shell, cancel semantics, the CLI's
 // JSON events into blocks, the file scope and the sudo flow end to end. Real files only in a temp folder of its own.
 import { EventEmitter } from "node:events";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
-import { mkdir, open, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { lstat, mkdir, open, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { replaceFile } from "../../electron/main/console/paths";
 import { clipName, Console, type ConsoleDeps, type ElevationRequest, type ScriptElevationRequest } from "../../electron/main/console/runner";
 import { dropOnLockAndSleep, Elevation } from "../../electron/main/console/elevation";
 import { AuditLog, History } from "../../electron/main/console/logs";
@@ -99,10 +100,11 @@ function make(over: Partial<ConsoleDeps> = {}, files = mkdtempSync(join(root, "u
     fs: {
       readdir: (p) => readdir(p, { withFileTypes: true }),
       stat: (p) => stat(p),
+      lstat: (p) => lstat(p),
       readRange,
       readFile: (p) => readFile(p, "utf8"),
       mkdir: async (p) => void (await mkdir(p, { recursive: true })),
-      writeFile: (p, text) => writeFile(p, text),
+      writeFile: replaceFile,
       writable: async () => true,
       freeBytes: async () => 2 ** 40,
     },
@@ -709,6 +711,7 @@ describe("review 2026-10-26 probes", () => {
       fs: {
         readdir: (p) => readdir(p, { withFileTypes: true }),
         stat: (p) => stat(p),
+        lstat: (p) => lstat(p),
         readRange,
         readFile: async (p, max) => {
           if ((await stat(p)).size > max) throw new Error(`larger than ${max} bytes`);
@@ -776,6 +779,7 @@ describe("review 2026-10-26 probes", () => {
       fs: {
         readdir: (p) => readdir(p, { withFileTypes: true }),
         stat: (p) => stat(p),
+        lstat: (p) => lstat(p),
         readRange,
         // a slow disk: the script's file arrives after the render has been typed
         readFile: async (p) => (await slow, readFile(p, "utf8")),
@@ -1039,6 +1043,7 @@ describe("Phase 4: doctor", () => {
   const fs4 = (free: number, writable = true) => ({
     readdir: (p: string) => readdir(p, { withFileTypes: true }),
     stat: (p: string) => stat(p),
+    lstat: (p: string) => lstat(p),
     readRange,
     readFile: (p: string) => readFile(p, "utf8"),
     mkdir: async (p: string) => void (await mkdir(p, { recursive: true })),
@@ -1246,6 +1251,57 @@ describe("Phase 4: farm export", () => {
     expect(confirms.at(-1)!.targets.map((t) => t.files)).toEqual([1, 1]);
     const audit = readFileSync(join(files, "console-audit.jsonl"), "utf8");
     expect(audit).toMatch(/"event":"run","argv":\["farm","export","openjd"/);
+  });
+
+  // senior review 2026-10-27 M2 (probe P9): links planted in the export folder were followed out of the write scope
+  it("never writes through a link in the export folder: a dangling file link, a linked folder, an existing target with sudo", async () => {
+    queued = [qjob("sh010")];
+    const { c } = make();
+    const outside = mkdtempSync(join(elsewhere, "p9-"));
+    // a dangling link at a file it writes ("not there", so no sudo was needed)
+    const d1 = join(out, "farm-p9a");
+    mkdirSync(d1);
+    symlinkSync(join(outside, "planted.txt"), join(d1, "sh010_job_info.txt"));
+    const a = await c.run(`farm export deadline --queue -o ${d1}`);
+    expect([a.state, a.lines[0].text]).toEqual(["refused", expect.stringMatching(/sh010_job_info.txt is a link: farm export never writes through one/)]);
+    // a linked folder (CorridorKey/ → outside)
+    const d2 = join(out, "farm-p9b");
+    mkdirSync(d2);
+    symlinkSync(outside, join(d2, "CorridorKey"));
+    const b = await c.run(`farm export deadline --queue -o ${d2}`);
+    expect([b.state, b.lines[0].text]).toEqual(["refused", expect.stringMatching(/CorridorKey.py.*outside the folders the Console may write to/)]);
+    // a link to an existing file outside: refused with sudo … --overwrite too (never replaced through the link)
+    const d3 = join(out, "farm-p9c");
+    mkdirSync(d3);
+    writeFileSync(join(outside, "bashrc"), "mine");
+    symlinkSync(join(outside, "bashrc"), join(d3, "sh010_plugin_info.txt"));
+    const s = await c.run(`sudo farm export deadline --queue -o ${d3} --overwrite`);
+    expect(s.state).toBe("refused");
+    expect(confirms).toEqual([]);
+    expect(readFileSync(join(outside, "bashrc"), "utf8")).toBe("mine");
+    // nothing landed outside
+    expect((await readdir(outside)).sort()).toEqual(["bashrc"]);
+  });
+
+  it("replaces a file it wrote without following a link raced in after the check (a new file renamed over the name)", async () => {
+    const dir = mkdtempSync(join(out, "rf-"));
+    const outside = mkdtempSync(join(elsewhere, "rf-"));
+    writeFileSync(join(outside, "target"), "mine");
+    symlinkSync(join(outside, "target"), join(dir, "job.txt"));
+    await replaceFile(join(dir, "job.txt"), "farm");
+    expect(readFileSync(join(outside, "target"), "utf8")).toBe("mine");
+    expect(readFileSync(join(dir, "job.txt"), "utf8")).toBe("farm");
+    expect(lstatSync(join(dir, "job.txt")).isSymbolicLink()).toBe(false);
+    expect(await readdir(dir)).toEqual(["job.txt"]);
+  });
+
+  it("refuses a queued clip whose name has a new line (M1), writing nothing", async () => {
+    queued = [qjob("x\ntouch PWNED\nx")];
+    const { c } = make();
+    const dir = join(out, "farm-m1");
+    const r = await c.run(`farm export opencue --queue -o ${dir}`);
+    expect([r.state, r.lines[0].text]).toEqual(["refused", expect.stringMatching(/control character/)]);
+    expect(await readdir(dir).catch(() => "none")).toBe("none");
   });
 });
 

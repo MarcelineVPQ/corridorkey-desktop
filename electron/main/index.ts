@@ -3,7 +3,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, net, power
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
-import { access, constants as fsConstants, mkdir, open, readdir, readFile, stat, statfs, writeFile } from "node:fs/promises";
+import { access, constants as fsConstants, lstat, mkdir, open, readdir, readFile, stat, statfs } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { EngineProcess, rustEngineEnv, type EngineReply } from "./engine";
@@ -62,7 +62,7 @@ import { Console, LINE_MAX, type ElevationRequest, type ScriptElevationRequest }
 import { dropOnLockAndSleep, Elevation, ELEVATION_CAP_MS, ELEVATION_TTL_MS } from "./console/elevation";
 import { AuditLog, History } from "./console/logs";
 import { BlockPusher } from "./console/push";
-import { realPathDeps } from "./console/paths";
+import { realPathDeps, replaceFile } from "./console/paths";
 import { makeRegistry } from "../../src/shared/console/registry";
 import { cacheDirFor, cacheInfo, cacheUnavailable, CACHE_MARKER, clearOldCache, exists, JOBS_DIR, jobTempDir, MEDIA_DIR, moveCache, prepareTarget, remapMedia, targetProblem } from "./cacheFolder";
 import { gbBytes, mbOrGbBytes } from "../../src/shared/units";
@@ -366,6 +366,8 @@ const appConsole = new Console({
     readdir: (p) => readdir(p, { withFileTypes: true }),
     // loop: NOT-WORTH — one async stat per listed entry
     stat: (p) => stat(p),
+    // loop: NOT-WORTH — one async lstat per farm export file
+    lstat: (p) => lstat(p),
     readFile: async (p, max) => {
       // loop: NOT-WORTH — one async stat per script or job file read
       const s = await stat(p);
@@ -389,8 +391,7 @@ const appConsole = new Console({
       // loop: NOT-WORTH — one async mkdir per render
       await mkdir(p, { recursive: true });
     },
-    // loop: NOT-WORTH — one async write per farm export file
-    writeFile: (p, text) => writeFile(p, text, "utf8"),
+    writeFile: replaceFile,
     // loop: NOT-WORTH — one async access check per doctor folder
     writable: (p) =>
       access(p, fsConstants.W_OK).then(

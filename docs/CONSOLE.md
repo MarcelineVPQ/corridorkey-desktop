@@ -77,9 +77,13 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   per set of flags) with `run-shots.sh`. One task per shot (the app's matte); the farm writes EXR frames
   (`<results folder>/<clip>.####.exr`; a clip set to video says so); the models and ONNX Runtime are this computer's
   (the block says to change them for the workers); Deadline and OpenCue need the shot's frame range (a video from
-  1001, a frame folder by its files): a clip without one is left out, and said. The folder goes through the write scope
-  (`-o` is a written path); files already there are refused unless `sudo farm export … --overwrite` (the same
-  elevation, dialog and audit as render's). Tests: `tests/unit/farmExport.test.ts` (each format parsed as its farm
+  1001, a frame folder by its files): a clip without one is left out, and said. A clip whose name, path, results
+  folder, a flag's value or the runtime's paths has a control character (a new line, a tab) is refused, with which and
+  why: it would add lines to the farm's files (senior review 2026-10-27 M1). The folder goes through the write scope
+  (`-o` is a written path), and so does each file it writes, resolved (a linked folder inside that leads out is
+  refused); a file name that is a link is refused, dangling or not, with sudo too, and each file is written as a new one
+  renamed over the name, so a link raced in after the checks is replaced, never written through (M2). Files already
+  there are refused unless `sudo farm export … --overwrite` (the same elevation, dialog and audit as render's). Tests: `tests/unit/farmExport.test.ts` (each format parsed as its farm
   reads it: YAML, key=value, JSON, shell words), the runner's scope and sudo. `openjd check` and `openjd summary`
   passed on a generated bundle (openjd-cli in a scratch venv, 2026-10-27; it isn't installed for the tests, which
   check the bundle structurally).

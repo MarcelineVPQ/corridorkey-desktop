@@ -48,10 +48,13 @@ export type SpawnFn = (cmd: string, args: string[], opts: SpawnOptions) => Child
 export interface ConsoleFs {
   readdir: (p: string) => Promise<Dirent[]>;
   stat: (p: string) => Promise<Stats>;
+  /** the name itself, a link not followed (farm export never writes through one) */
+  lstat: (p: string) => Promise<Stats>;
   readFile: (p: string, maxBytes: number) => Promise<string>;
   /** up to `length` bytes of a regular file from `start` (cat, head, tail, wc) */
   readRange: (p: string, start: number, length: number) => Promise<Buffer>;
   mkdir: (p: string) => Promise<void>;
+  /** replaces the file at `p`, never writing through a link there (paths.ts replaceFile) */
   writeFile: (p: string, text: string) => Promise<void>;
   /** may this process write in the folder (doctor) */
   writable: (p: string) => Promise<boolean>;
@@ -984,8 +987,16 @@ export class Console {
     // loop: NOT-WORTH — the files to write
     const paths = exp.files.map((f) => a.join(w.path, ...f.path.split("/")));
     const there: string[] = [];
-    // loop: NOT-WORTH — one async stat per file to write
-    for (const f of paths) if (await this.d.fs.stat(f).catch(() => null)) there.push(f);
+    // each file it writes: inside the write scope once resolved (a linked folder leads out), and never a link itself (a
+    // dangling one reads as "not there"): senior review 2026-10-27 M2
+    // loop: NOT-WORTH — the export's few files, one async realpath and lstat each
+    for (const f of paths) {
+      const c = await checkWrite(f, this.cwd, this.d.writeRoots(), this.d.paths);
+      if (!c.ok) return this.finish(b, "refused", `${f}: ${c.reason}`);
+      const l = await this.d.fs.lstat(f).catch(() => null);
+      if (l?.isSymbolicLink()) return this.finish(b, "refused", `${f} is a link: farm export never writes through one (remove the link, or export into another folder).`);
+      if (l) there.push(f);
+    }
     // loop: NOT-WORTH — the line's options
     const overwrite = p.options.some((o) => o.arg.destructive);
     if (there.length && !overwrite)

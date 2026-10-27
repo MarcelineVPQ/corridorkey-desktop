@@ -4,7 +4,8 @@
 // realpath before any check (symlinks and `..` resolved; a path that doesn't exist yet resolves through its nearest
 // existing parent), and the resolved path is what the command is then given, so what was checked is what is used.
 // The platform is a parameter so Windows' rules (case-insensitive, backslashes, drive letters) are tested on Linux.
-import { realpath as fsRealpath } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { realpath as fsRealpath, rename, rm, writeFile } from "node:fs/promises";
 import { posix, win32 } from "node:path";
 import { PLATFORM } from "../platform";
 
@@ -135,4 +136,23 @@ async function folderFor(typed: string, path: string, d: PathDeps): Promise<stri
 /** The exact line that allows `folder` (always quoted: it is copied as is). */
 export function allowLine(folder: string, platform: NodeJS.Platform): string {
   return `allow ${platform === "win32" ? `"${folder}"` : `"${folder.replace(/[\\"]/g, "\\$&")}"`}`;
+}
+
+/**
+ * Writes `text` at `p` without following a link there (senior review 2026-10-27 M2): into a new file beside it (created
+ * exclusively, so never through a link), then renamed over the name, which replaces a link raced in after the checks
+ * instead of writing where it points.
+ */
+export async function replaceFile(p: string, text: string): Promise<void> {
+  const tmp = `${p}.${randomBytes(6).toString("hex")}.tmp`;
+  // loop: NOT-WORTH — one async write per farm export file
+  await writeFile(tmp, text, { encoding: "utf8", flag: "wx" });
+  try {
+    // loop: NOT-WORTH — one async rename per farm export file
+    await rename(tmp, p);
+  } catch (e) {
+    // error: SHOWN — rethrown for the block; the new file goes
+    await rm(tmp, { force: true });
+    throw e;
+  }
 }
