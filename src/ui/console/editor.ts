@@ -67,7 +67,14 @@ export interface KeyContext {
   suggestFrom?: readonly string[];
 }
 
-export type Effect = { kind: "run"; line: string } | { kind: "script"; lines: string[] } | { kind: "cancel" } | { kind: "clear" } | { kind: "mode"; mode: SuggestMode };
+export type Effect =
+  | { kind: "run"; line: string }
+  | { kind: "script"; lines: string[] }
+  | { kind: "cancel" }
+  | { kind: "clear" }
+  | { kind: "mode"; mode: SuggestMode }
+  /** Ctrl+↑ / Ctrl+↓: to the block before or after (Warp's; SME review 2026-10-26 N8) */
+  | { kind: "jump"; by: -1 | 1 };
 
 export interface KeyResult {
   state: EditorState;
@@ -404,6 +411,9 @@ export function keyDown(s0: EditorState, k: Key, ctx: KeyContext): KeyResult {
     const line = s.line + firstWord(sug);
     return ok({ ...at(s, line, line.length), lastTab: null });
   }
+
+  // --- the blocks: Ctrl+↑ / Ctrl+↓ (the line stays as it is) ---
+  if (ctrl && (k.key === "ArrowUp" || k.key === "ArrowDown")) return ok(s, { kind: "jump", by: k.key === "ArrowUp" ? -1 : 1 });
 
   // --- history ---
   if (plain && k.key === "ArrowUp") return ok(historyStep(s, history, 1));

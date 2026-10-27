@@ -238,7 +238,10 @@ finished `render` adds **Copy as Nuke Read**, a Read node per EXR sequence it wr
 `pwd`, `help`…) are compact, and `cd` prints nothing when it worked (the bar and the prompt show the folder); a render's output folder and report open with **Show in folder**. A listing's sizes are human (KiB, MiB, GiB, in its summary too) and its dates
 ISO-style local time (`2026-10-26 22:58`); a long name ends in … (point at it for all of it), long folders show as
 `~/…/sh010/plates`, and **Copy output** copies the same columns with everything whole. `doctor` is a table with each
-problem's fix under it. Elevated blocks are marked amber.
+problem's fix under it. Elevated blocks are marked amber. The arrow at a block's start folds it to its line (and back);
+**Session → Show → Failed only** shows only the commands that failed or were refused (and any still running), with a
+line above the log saying so and **Show all**; Ctrl+↑ and Ctrl+↓ jump from block to block (outlined; Ctrl+↓ past the
+newest is back at the input).
 **History** in the panel searches every line you typed (and the folder you typed it in), with its number and ✓ or ✗;
 a click puts one back. `history 20` prints the last 20, `history sh010` the lines about sh010, each with when it ran
 and its exit code. Start a line with a space to keep it out of the history.

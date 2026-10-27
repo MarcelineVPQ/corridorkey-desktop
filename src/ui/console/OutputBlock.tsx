@@ -50,14 +50,16 @@ function CopyButton({ label, text }: { label: string; text: string }) {
   );
 }
 
-type BlockProps = { b: ConsoleBlock; registry: Registry; windows: boolean; onReinsert: (line: string) => void };
+type BlockProps = { b: ConsoleBlock; registry: Registry; windows: boolean; selected: boolean; onReinsert: (line: string) => void };
 
 export const OutputBlock = memo(function OutputBlock(props: BlockProps) {
   const { b } = props;
   // a program's command: null follows childOpens (running, failed, refused), else what the user chose
   const [open, setOpen] = useState<boolean | null>(null);
+  // a command's block folded to its line (SME review 2026-10-26 N8)
+  const [folded, setFolded] = useState(false);
   const home = useContext(HomeContext);
-  if (b.parent === null) return <FullBlock {...props} onCollapse={null} />;
+  if (b.parent === null) return <FullBlock {...props} onCollapse={null} fold={{ folded, toggle: () => setFolded(!folded) }} />;
   if (open ?? childOpens(b)) return <FullBlock {...props} onCollapse={() => setOpen(false)} />;
   const st = blockStatus(b);
   const row = childRow(b, home);
@@ -83,7 +85,8 @@ export const OutputBlock = memo(function OutputBlock(props: BlockProps) {
   );
 });
 
-function FullBlock({ b, registry, windows, onReinsert, onCollapse }: BlockProps & { onCollapse: (() => void) | null }) {
+function FullBlock({ b, registry, windows, selected, onReinsert, onCollapse, fold = null }: BlockProps & { onCollapse: (() => void) | null; fold?: { folded: boolean; toggle: () => void } | null }) {
+  const folded = fold?.folded ?? false;
   const st = blockStatus(b);
   // the corridorkey line this block ran, for a terminal or a farm task (the Console's own flags left out)
   const farm = b.command ? commandLine(b.command, windows) : null;
@@ -93,8 +96,18 @@ function FullBlock({ b, registry, windows, onReinsert, onCollapse }: BlockProps 
   const home = useContext(HomeContext);
   return (
     // the line is the user's own input: it labels the block, the live log announces only what the command printed
-    <article className={`cblock tone-${st.tone} ${b.elevated ? "elevated" : ""} ${b.parent !== null ? "child" : ""} ${compactBlock(b) ? "compact" : ""}`} aria-label={b.line}>
+    <article
+      id={`cblock-${b.id}`}
+      className={`cblock tone-${st.tone} ${b.elevated ? "elevated" : ""} ${b.parent !== null ? "child" : ""} ${compactBlock(b) ? "compact" : ""} ${selected ? "selected" : ""}`}
+      aria-label={b.line}
+    >
       <header className="cb-head">
+        {fold && (
+          <button type="button" className="cb-collapse" aria-expanded={!folded} title={folded ? "Show this command's output" : "Fold this command to its line"} onClick={fold.toggle}>
+            {folded ? <ChevronRight size={13} aria-hidden /> : <ChevronDown size={13} aria-hidden />}
+            <span className="sr-only">{folded ? "Unfold" : "Fold"}</span>
+          </button>
+        )}
         {onCollapse && (
           <button type="button" className="cb-collapse" aria-expanded={true} title="Fold this command into one row" onClick={onCollapse}>
             <ChevronDown size={13} aria-hidden />
@@ -150,7 +163,7 @@ function FullBlock({ b, registry, windows, onReinsert, onCollapse }: BlockProps 
           )}
         </span>
       </header>
-      {(b.progress || (b.state === "running" && b.status)) && (
+      {!folded && (b.progress || (b.state === "running" && b.status)) && (
         <div className="cb-progress">
           {b.progress && <ProgressBar value={b.progress.done} max={b.progress.total} />}
           <span className="cb-phase">
@@ -161,7 +174,7 @@ function FullBlock({ b, registry, windows, onReinsert, onCollapse }: BlockProps 
           </span>
         </div>
       )}
-      {(b.lines.length > 0 || b.linesDropped > 0) && (
+      {!folded && (b.lines.length > 0 || b.linesDropped > 0) && (
         <pre className={`cb-out ${b.nowrap ? "nowrap" : ""}`}>
           {b.linesDropped > 0 && <span className="l-info">{`… ${b.linesDropped} earlier lines not kept\n`}</span>}
           {/* loop: HOT-PATH-OK — ≤ 2000 lines, per render of a changed block (memo: others don't re-render) */}
@@ -177,7 +190,7 @@ function FullBlock({ b, registry, windows, onReinsert, onCollapse }: BlockProps 
           })}
         </pre>
       )}
-      {b.entries && b.entries.length > 0 && (
+      {!folded && b.entries && b.entries.length > 0 && (
         <table className="cb-dir">
           <thead>
             <tr>
@@ -202,7 +215,7 @@ function FullBlock({ b, registry, windows, onReinsert, onCollapse }: BlockProps 
           </tbody>
         </table>
       )}
-      {b.doctor && b.doctor.length > 0 && (
+      {!folded && b.doctor && b.doctor.length > 0 && (
         <table className="cb-doctor">
           <tbody>
             {/* loop: NOT-WORTH — doctor's dozen rows */}
@@ -224,7 +237,7 @@ function FullBlock({ b, registry, windows, onReinsert, onCollapse }: BlockProps 
           </tbody>
         </table>
       )}
-      {written.length > 0 && (
+      {!folded && written.length > 0 && (
         <div className="cb-paths">
           {/* loop: NOT-WORTH — one to three written paths */}
           {written.map((w) => (

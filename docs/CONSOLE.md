@@ -258,7 +258,11 @@ inner loop's words);
   app shows paths, `~` and the
   middle as … (`shortenKnown` in model.ts), whole on hover and in Copy output. The page keeps them quiet: a block's actions show on hover and on
   keyboard focus (`:focus-within`; opacity only, so Tab always reaches them; always shown without hover), a built-in's
-  block is compact, `cd` prints nothing on success (`cd -` prints where it went). A corridorkey block keeps
+  block is compact, `cd` prints nothing on success (`cd -` prints where it went). Each top-level block folds to its
+  line (its own state, the arrow at its start); Session → Show → Failed only (`filterBlocks`: failed, refused and
+  running blocks; the page's view for this session) is said above the log with the count hidden and Show all; Ctrl+↑ /
+  Ctrl+↓ (`nextBlock`, the editor's `jump` effect) outline the block before or after and scroll to it, the line kept
+  (SME review 2026-10-26 N8). A corridorkey block keeps
   `command` (its argv as asked: the dialog's, without `--progress-format` and the Console's `--temp`) and offers
   **Copy as farm line**, `jobCommand.ts commandLine` (shellWord's quoting for this system's shell: bash, or cmd on
   Windows, where a word cmd.exe would read is refused and the button says why; SME review 2026-10-26 N7). A render

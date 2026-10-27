@@ -401,3 +401,12 @@ describe("SME reviews: the expert suggestions", () => {
     expect(press(initialEditor(), "Escape").handled).toBe(false);
   });
 });
+
+describe("SME review 2026-10-26 N8 (row 125): Ctrl+↑ / Ctrl+↓ jump between blocks", () => {
+  it("is a jump, the line kept; plain ↑ is still the history", () => {
+    const s = typed("dir");
+    expect(press(s, "ArrowUp", { ctrl: true })).toMatchObject({ handled: true, effect: { kind: "jump", by: -1 }, state: { line: "dir" } });
+    expect(press(s, "ArrowDown", { ctrl: true }).effect).toEqual({ kind: "jump", by: 1 });
+    expect(press(s, "ArrowUp", {}, ctx(["dir -la"])).state.line).toBe("dir -la");
+  });
+});

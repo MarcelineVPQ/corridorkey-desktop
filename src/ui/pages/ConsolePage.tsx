@@ -16,7 +16,7 @@ import { usePref } from "../prefs";
 import { LineEditor, type LineEditorHandle } from "../console/LineEditor";
 import { OutputBlock } from "../console/OutputBlock";
 import { uniqueHistory, type SuggestMode } from "../console/editor";
-import { announcement, clearScreen, inputTakesFocus, mergeBlocks, visibleBlocks, type BlockList } from "../console/model";
+import { announcement, clearScreen, filterBlocks, inputTakesFocus, mergeBlocks, nextBlock, visibleBlocks, type BlockList } from "../console/model";
 
 const registry = makeRegistry();
 
@@ -41,6 +41,7 @@ export const KEYS: [string, string][] = [
   ["Ctrl+C", "Copy the selection; else stop the command; else clear the line"],
   ["Esc", "Clear the line (Ctrl+Y brings it back)"],
   ["Ctrl+L, Cmd+K", "Clear the screen (cls also does)"],
+  ["Ctrl+↑ Ctrl+↓", "Jump to the block before or after (the log scrolls to it)"],
   ["F2", "Completions inline or as a list"],
 ];
 
@@ -66,6 +67,10 @@ export function ConsolePage(props: {
   const [mode, setMode] = usePref<SuggestMode>("ck.console.mode", "inline");
   const [autosuggest, setAutosuggest] = usePref<boolean>("ck.console.autosuggest", true);
   const [echoes, setEchoes] = usePref<boolean>("ck.console.echo", true);
+  // Failed only (SME review 2026-10-26 N8): this session's view, said above the log while on
+  const [failedOnly, setFailedOnly] = useState(false);
+  // the block Ctrl+↑ / Ctrl+↓ reached (null: none, the input)
+  const [selected, setSelected] = useState<number | null>(null);
   const [history, setHistory] = useState<string[]>([]);
   const [past, setPast] = useState<HistoryLine[]>([]);
   const [now, setNow] = useState(Date.now());
@@ -108,7 +113,27 @@ export function ConsolePage(props: {
   }, [session.elevatedUntil]);
   const elevated = session.elevatedUntil !== null && elevatedFor > 0;
 
-  const shown = useMemo(() => visibleBlocks(blocks, echoes), [blocks, echoes]);
+  const visible = useMemo(() => visibleBlocks(blocks, echoes), [blocks, echoes]);
+  const { blocks: shown, hidden } = useMemo(() => filterBlocks(visible, failedOnly), [visible, failedOnly]);
+  const jump = useCallback(
+    (by: -1 | 1) => {
+      // loop: NOT-WORTH — ≤ 200 blocks, per Ctrl+↑ / Ctrl+↓
+      const id = nextBlock(
+        shown.filter((b) => b.parent === null).map((b) => b.id),
+        selected,
+        by,
+      );
+      setSelected(id);
+      if (id === null) {
+        stick.current = true;
+        if (out.current) out.current.scrollTop = out.current.scrollHeight;
+      } else {
+        stick.current = false;
+        document.getElementById(`cblock-${id}`)?.scrollIntoView({ block: "nearest" });
+      }
+    },
+    [shown, selected],
+  );
   // the log follows new output while you are at its end; scrolled up, it stays where you are
   useEffect(() => {
     const el = out.current;
@@ -118,6 +143,7 @@ export function ConsolePage(props: {
   const run = useCallback(
     async (line: string) => {
       stick.current = true;
+      setSelected(null);
       const b = await window.ck.consoleRun(line);
       if (b) setBlocks((old) => mergeBlocks(old, [b]));
       loadHistory();
@@ -163,7 +189,15 @@ export function ConsolePage(props: {
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
         }}
       >
-        {shown.length === 0 && (
+        {failedOnly && (
+          <div className="console-filter" role="status">
+            <span>Showing failed and refused commands only{hidden ? ` (${hidden} other${hidden === 1 ? "" : "s"} hidden)` : ""}.</span>
+            <button type="button" className="btn small" onClick={() => setFailedOnly(false)}>
+              Show all
+            </button>
+          </div>
+        )}
+        {shown.length === 0 && !failedOnly && (
           <p className="console-intro">
             CorridorKey Console. <code>help</code> lists the commands, <code>render ?</code> explains one. It reads files anywhere and writes only into the folders you chose; a command that replaces
             files runs as <code>sudo …</code>, after you confirm it.
@@ -171,7 +205,7 @@ export function ConsolePage(props: {
         )}
         {/* loop: HOT-PATH-OK — ≤ 200 blocks per render; each is memoised (only a changed block re-renders) */}
         {shown.map((b) => (
-          <OutputBlock key={b.id} b={b} registry={registry} windows={windows} onReinsert={reinsert} />
+          <OutputBlock key={b.id} b={b} registry={registry} windows={windows} selected={b.id === selected} onReinsert={reinsert} />
         ))}
       </div>
       {/* the output isn't live (every streamed line and listed row would be read out): this says each command's start and end */}
@@ -194,6 +228,7 @@ export function ConsolePage(props: {
         onRunLines={(lines) => void runLines(lines)}
         onCancel={() => void window.ck.consoleCancel()}
         onClear={() => setBlocks(clearScreen)}
+        onJump={jump}
       />
     </div>
   );
@@ -237,6 +272,17 @@ export function ConsolePage(props: {
                 <span className="hint-text">{session.servers.length ? session.servers.join(", ") : "None allowed this session."}</span>
               </Row>
             )}
+            <Row label="Show" hint="Failed only: the commands that failed or were refused (and any still running); the log says so">
+              <Segmented
+                label="Show"
+                value={failedOnly ? "failed" : "all"}
+                options={[
+                  ["all", "All"],
+                  ["failed", "Failed only"],
+                ]}
+                onChange={(v) => setFailedOnly(v === "failed")}
+              />
+            </Row>
             <Row label="corridorkey">
               {session.cliFound ? (
                 <div className="check-line ok">
@@ -268,7 +314,7 @@ export function ConsolePage(props: {
         {() => (
           <table className="console-keys">
             <tbody>
-              {/* loop: NOT-WORTH — twenty rows */}
+              {/* loop: NOT-WORTH — twenty-one rows */}
               {KEYS.map(([k, what]) => (
                 <tr key={k}>
                   <th scope="row">

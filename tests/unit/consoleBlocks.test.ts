@@ -21,7 +21,9 @@ import {
   mergeBlocks,
   isoTime,
   lineHint,
+  filterBlocks,
   lineWords,
+  nextBlock,
   nukeRead,
   rateText,
   sequenceCell,
@@ -490,5 +492,28 @@ describe("SME review 2026-10-27 N8 (row 147): Copy as Nuke Read", () => {
     expect(two).toContain(' file "/k/\\{x\\}/fg.%04d.exr"');
     expect(two).toContain(" first -10");
     expect(two.match(/^Read \{$/gm)).toHaveLength(2);
+  });
+});
+
+describe("SME review 2026-10-26 N8 (row 125): fold, filter and jump between blocks", () => {
+  it("Failed only keeps the failed, refused and running blocks and counts the others", () => {
+    const bs = [block(1, { state: "done" }), block(2, { state: "failed" }), block(3, { state: "refused" }), block(4, { state: "running" }), block(5, { state: "cancelled" })];
+    expect(filterBlocks(bs, false)).toEqual({ blocks: bs, hidden: 0 });
+    const f = filterBlocks(bs, true);
+    // loop: NOT-WORTH — a few test blocks
+    expect([f.blocks.map((b) => b.id), f.hidden]).toEqual([[2, 3, 4], 2]);
+  });
+
+  it("Ctrl+↑ from the input is the newest block, then older ones (stopping at the oldest); Ctrl+↓ past the newest is the input", () => {
+    const ids = [3, 5, 9];
+    expect(nextBlock(ids, null, -1)).toBe(9);
+    expect(nextBlock(ids, 9, -1)).toBe(5);
+    expect(nextBlock(ids, 3, -1)).toBe(3);
+    expect(nextBlock(ids, 5, 1)).toBe(9);
+    expect(nextBlock(ids, 9, 1)).toBeNull();
+    expect(nextBlock(ids, null, 1)).toBeNull();
+    expect(nextBlock([], null, -1)).toBeNull();
+    // a block no longer shown (cleared, filtered): from the newest
+    expect(nextBlock(ids, 4, -1)).toBe(9);
   });
 });

@@ -108,6 +108,29 @@ export function visibleBlocks(list: BlockList, echoes = true): ConsoleBlock[] {
   return list.blocks.filter((b) => !b.clear && (echoes || !b.echo) && (b.id > list.clearedTo || b.state === "running"));
 }
 
+/**
+ * The blocks shown with "Failed only" (SME review 2026-10-26 N8, Warp's filter): those that failed or were refused, and
+ * any still running (it may yet fail); with the count left out, which the page says.
+ */
+export function filterBlocks(blocks: readonly ConsoleBlock[], failedOnly: boolean): { blocks: readonly ConsoleBlock[]; hidden: number } {
+  if (!failedOnly) return { blocks, hidden: 0 };
+  // loop: HOT-PATH-OK — ≤ BLOCKS_KEPT blocks, per render with the filter on
+  const kept = blocks.filter((b) => b.state === "failed" || b.state === "refused" || b.state === "running");
+  return { blocks: kept, hidden: blocks.length - kept.length };
+}
+
+/**
+ * Ctrl+↑ / Ctrl+↓ among the blocks shown (top-level ones: a program's commands go with it): the one before or after
+ * `current`; from the input (null) ↑ is the newest; past the newest is null (back at the input).
+ */
+export function nextBlock(ids: readonly number[], current: number | null, by: -1 | 1): number | null {
+  if (!ids.length) return null;
+  const i = current === null ? ids.length : ids.indexOf(current);
+  const j = (i < 0 ? ids.length : i) + by;
+  if (j >= ids.length) return null;
+  return ids[Math.max(0, j)];
+}
+
 export type Tone = "running" | "ok" | "error" | "stopped";
 
 /** The block's status: a word, its tone, the exit code, and what a non-zero code means (docs/CLI.md). */

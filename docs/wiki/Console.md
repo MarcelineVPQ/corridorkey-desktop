@@ -13,7 +13,8 @@ no subshells, no other programs, nothing passed to the system's shell.
 **Contents:** [Getting started](#getting-started) · [Safety](#safety) · [Commands](#commands) ·
 [Frame sequences](#frame-sequences) · [Getting around](#getting-around) · [Variables](#variables) ·
 [Scripting](#scripting) · [doctor](#doctor) · [Farm export](#farm-export) ·
-[From the queue to the command line](#from-the-queue-to-the-command-line) · [Typing and keys](#typing-and-keys) ·
+[From the queue to the command line](#from-the-queue-to-the-command-line) · [The blocks](#the-blocks) ·
+[Typing and keys](#typing-and-keys) ·
 [Examples](#examples)
 
 ## Getting started
@@ -238,6 +239,12 @@ frame there), ready to paste into Nuke's node graph. Pasted into a terminal it u
 models and ONNX Runtime ([Command line: the runtime](Command-Line#the-runtime)). On Windows a path with `%`, `!`, `$`,
 a backtick or `"` gets no line (cmd.exe and PowerShell would read them inside quotes), and the Queue says so.
 
+## The blocks
+
+Each command is a block: its line, how it ended (with the exit code and what it means) and what it printed. The arrow
+at its start folds it to its line, and back. **Session → Show → Failed only** shows only the commands that failed or
+were refused (and any still running); a line above the log says so, with **Show all**.
+
 ## Typing and keys
 
 As you type, the line is coloured: commands, flags, paths, and mistakes underlined before you press Enter (an unknown
@@ -257,6 +264,7 @@ first, then the commands); it never runs by itself.
 | `!!` `!N` `!-N` `!abc` `!$` `^a^b` | History shortcuts, as in bash (`sudo !!` too); the hint shows what Enter runs. A `!` inside a name (`sh010!.mov`) or before a frame token (`!$F4`) stays as typed |
 | Ctrl+C | Copy the selection; else stop the running command (again: at once); else clear the line |
 | Esc | Clear the line (Ctrl+Y brings it back) |
+| Ctrl+↑, Ctrl+↓ | Jump to the block before or after (outlined; past the newest: back to the input) |
 | Ctrl+L, Cmd+K | Clear the screen (`cls` too) |
 | F2 | Switch completions between Tab and a list as you type (**Console settings → Completions**) |
 

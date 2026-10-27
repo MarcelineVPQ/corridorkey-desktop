@@ -51,6 +51,8 @@ interface Props {
   onRunLines: (lines: string[]) => void;
   onCancel: () => void;
   onClear: () => void;
+  /** Ctrl+↑ / Ctrl+↓: the block before or after */
+  onJump: (by: -1 | 1) => void;
 }
 
 // the line being typed outlives the page (a switch to the Queue and back keeps it)
@@ -162,6 +164,7 @@ export const LineEditor = forwardRef<LineEditorHandle, Props>(function LineEdito
     else if (fx?.kind === "cancel") props.onCancel();
     else if (fx?.kind === "clear") props.onClear();
     else if (fx?.kind === "mode") props.onMode(fx.mode);
+    else if (fx?.kind === "jump") props.onJump(fx.by);
   };
 
   const parsed = useMemo(() => parseLine(s.line, registry, { windows }), [s.line, registry, windows]);

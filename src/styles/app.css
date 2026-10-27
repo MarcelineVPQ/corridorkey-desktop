@@ -779,6 +779,21 @@ select {
 .cblock.child {
   margin-left: 18px;
 }
+/* Ctrl+↑ / Ctrl+↓ reached this block */
+.cblock.selected {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+/* "Failed only" is on: said above the log, with the way back */
+.console-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
 /* a program's command folded into one row (a button: click or Enter shows the whole block) */
 .cblock.child.row {
   margin-bottom: 2px;
