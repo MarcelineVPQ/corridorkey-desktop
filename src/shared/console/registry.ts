@@ -338,6 +338,12 @@ const BUILTINS: ConsoleCommand[] = [
     ["tail render.log", "tail -n 100 render.log"],
   ),
   builtin(
+    "exrheader",
+    "an EXR file's header: resolution, data window, channels (alpha or not), pixel type, compression; a sequence's first frame",
+    [arg({ id: "file", kind: "path", positional: true, required: true, valueName: "FILE", help: "the EXR file, or a frame pattern (plate.####.exr)" })],
+    ["exrheader plate.1001.exr", "exrheader plates/sh010.####.exr"],
+  ),
+  builtin(
     "wc",
     "count a text file's lines, words and bytes",
     [arg({ id: "files", kind: "path", positional: true, multiple: true, required: true, valueName: "FILE", help: "the file" })],

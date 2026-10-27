@@ -92,6 +92,7 @@ files must say `sudo`, and one dialog lists them all, with their `${…}` filled
 | `pushd`, `popd`, `dirs` | go somewhere and come back |
 | `set`, `unset`, `echo` | variables ([below](#variables)) |
 | `cat` / `type`, `head`, `tail` | print a text file, its start or its end (`-n N`); a binary file isn't printed |
+| `exrheader <file or pattern>` | an EXR's header: resolution, data window, channels (alpha or not), pixel type, compression; a sequence's first frame |
 | `wc` | count a text file's lines, words and bytes |
 | `du [folder…]` | how much each folder takes on disk |
 | `tree [folder] [-L N] [-a]` | the folders as a tree, a frame sequence as one row |
@@ -129,6 +130,10 @@ with the missing frames as ranges you can paste into `-F` (`missing frames: 1012
 **Re-render missing**: it puts `render` with the same flags and `-F 1012-1015,1040` in the input for you to check and
 run (`sudo … --overwrite` when a listed frame is there but not whole: only those frames are replaced). It never runs
 by itself.
+
+`exrheader plates/sh010.####.exr` answers the first question about a plate, is it the 4K one and does it have alpha,
+from its first frame's header (resolution, data window, channels and their pixel type, compression, line order;
+each part of a multi-part file), without leaving for OpenEXR's `exrheader`.
 
 The listing flags you know work: `ls -la`, `ls -lh`, `ls -tr`, `ls -S`, `ls -1`, `ls *.exr`, `dir /o:-d`, `dir /b`.
 

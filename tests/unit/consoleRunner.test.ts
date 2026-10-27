@@ -30,6 +30,8 @@ import { consoleLineArg, consoleLinesArg, cursorArg, fromAppPage } from "../../e
 import { makeRegistry } from "../../src/shared/console/registry";
 import { leavesQuoteOpen } from "../../src/shared/console/script";
 import { blockText, mergeBlocks } from "../../src/ui/console/model";
+import { blockText } from "../../src/ui/console/model";
+import { exrFile } from "./exrBytes";
 import { DEFAULT_OPTIONS, type ConsoleBlock, type DoctorRow, type Job } from "../../src/shared/types";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "ck-console-run-")));
@@ -2526,5 +2528,23 @@ describe("SME reviews: Copy as Nuke Read", () => {
     const f = await c.run("render shot.mov -o ../out/nuke2");
     await finish(spawned[1].child, [], 8);
     expect(blocks.get(f.id)!.reads ?? null).toBeNull();
+  });
+});
+
+describe("SME reviews: exrheader", () => {
+  it("P4 N6 (row 145): exrheader <pattern> reads the sequence's first frame's header and says which frame; not an EXR is said", async () => {
+    const { c } = make();
+    const d = mkdtempSync(join(root, "exr-"));
+    const head = exrFile(0, [Buffer.concat([Buffer.from("compression\0compression\0"), Buffer.from(new Int32Array([1]).buffer), Buffer.from([3])])]);
+    writeFileSync(join(d, "pl.1001.exr"), head);
+    writeFileSync(join(d, "pl.1002.exr"), "not one");
+    writeFileSync(join(d, "notes.txt"), "x");
+    await c.run(`cd ${d}`);
+    const b = await c.run("exrheader pl.####.exr");
+    expect(b.state).toBe("done");
+    expect(b.lines[0].text).toBe(`${join(d, "pl.1001.exr")} (the first of pl.####.exr 1001-1002, 2 frames)`);
+    expect(b.lines.map((l) => l.text)).toContain("  compression  ZIP");
+    const no = await c.run("exrheader notes.txt");
+    expect([no.state, no.lines[0].text]).toEqual(["failed", "notes.txt isn't an OpenEXR file (its first bytes aren't the EXR magic number)."]);
   });
 });

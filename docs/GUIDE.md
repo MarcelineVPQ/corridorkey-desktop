@@ -104,7 +104,7 @@ Runtime library the app uses, each with the copies it found, and lets you pick a
 
 The **Console** (its own icon on the rail) is a command line inside the app for people who live in one: the farm CLI's
 `render`, `verify`, `prepare` and `info` with the same flags, output and exit codes, plus `help`, `apropos`, `doctor`, `farm export`, `cd`, `pwd`,
-`dir` / `ls`, `bookmark`, `j`, `pushd` / `popd` / `dirs`, `set` / `unset` / `echo`, `cat` / `type`, `head`, `tail`,
+`dir` / `ls`, `bookmark`, `j`, `pushd` / `popd` / `dirs`, `set` / `unset` / `echo`, `cat` / `type`, `head`, `tail`, `exrheader` (an EXR's resolution, channels, alpha, compression),
 `wc`, `du`, `tree`, `time`, `allow`, `open` (shows a folder in the file manager), `cls`, `history`, `version`, `run` (a
 `.ckcmd` script of Console lines; `source` too) and `sudo`. Other shells' words get a straight answer: `man` is `help`, `exit` says the Console stays
 open, `rm` that the Console never deletes files, `less` that `cat` and `tail` show a file, `export X=1` that the

@@ -15,6 +15,7 @@ import { isBinary, LINES_MAX, readLength, TEXT_MAX, TextCount, textLines, treeLi
 import { EXIT_MEANINGS, fullName, type ConsoleArg, type Registry } from "../../../src/shared/console/registry";
 import type { ConsoleBlock, ConsoleEntry, ConsoleHistoryEntry, ConsoleSession, DoctorRow, Job as QueueJob } from "../../../src/shared/types";
 import { farmExport, fileList, type FarmFormat, type FarmJob } from "./farm";
+import { EXR_HEADER_MAX, exrLines, parseExrHeader } from "./exr";
 import { complete } from "./complete";
 import type { Elevation } from "./elevation";
 import { commandHelp, findLines, overview } from "./help";
@@ -691,6 +692,8 @@ export class Console {
       case "tail":
         // loop: NOT-WORTH — the line's few options
         return now(await this.headTail(b, pos("file")[0], cmd.name === "tail", num(Number(p.options.find((o) => o.arg.id === "lines")?.value ?? 10))));
+      case "exrheader":
+        return now(await this.exrHeader(b, pos("file")[0]));
       case "wc":
         return now(await this.slotted(b, parent !== null, (stop) => this.wc(b, pos("files"), stop)));
       case "du":
@@ -1388,6 +1391,25 @@ export class Console {
     if (isBinary(tail ? buf.subarray(-8192) : buf)) return this.finish(b, "failed", `${f} isn't text (${tail ? "tail" : "head"} shows text files only).`);
     const lines = textLines(buf, from > 0, (!tail && t.size > TEXT_MAX) || (t.size === 0 && buf.length === TEXT_MAX));
     return this.finish(b, "done", ...(tail ? lines.slice(-n) : lines.slice(0, n)));
+  }
+
+  /** exrheader FILE|PATTERN: the EXR header's facts (exr.ts); a frame pattern: its first frame, said. */
+  private async exrHeader(b: ConsoleBlock, given: string): Promise<ConsoleBlock> {
+    const a = this.d.paths.platform === "win32" ? win32 : posix;
+    let path = this.file(given);
+    if (path === null) return this.finish(b, "failed", noBookmark(given));
+    const pat = await this.patternAt(path);
+    if (pat && !pat.seq) return this.finish(b, "failed", noFrames(pat, this.opts));
+    if (pat?.seq) path = a.join(pat.dir, pat.seq.names[0]);
+    // loop: NOT-WORTH — one async stat per exrheader
+    const st = await this.d.fs.stat(path).catch((e: unknown) => e as Error);
+    if (st instanceof Error) return this.finish(b, "failed", `Can't read ${given}: ${fsErrorText(st, path)}. dir lists the files here; Tab completes a name.`);
+    if (!st.isFile()) return this.finish(b, "failed", `${given} isn't a file${st.isDirectory() ? " (it is a folder: dir lists it)" : ""}.`);
+    const h = parseExrHeader(await this.d.fs.readRange(path, 0, Math.min(st.size, EXR_HEADER_MAX)));
+    if ("error" in h) return this.finish(b, "failed", `${a.basename(path)} ${h.error}.`);
+    b.paths = [path];
+    const what = pat?.seq ? `${path} (the first of ${pat.seq.pattern} ${pat.seq.range}, ${pat.seq.count} frames)` : path;
+    return this.finish(b, "done", what, ...exrLines(h));
   }
 
   /** wc FILE…: lines, words and bytes (each file read in TEXT_MAX chunks, at most WC_MAX); several: a total. */

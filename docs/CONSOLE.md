@@ -52,6 +52,11 @@ missing there).
   them as its last lines and offers **Re-render missing** (`rerender`: its `command` with `render` for `verify`, its
   `--frames` / `--start` / `--end` replaced by those ranges; `sudo … --overwrite` when a `missing or incomplete:` file
   is there, at most 1000 stat'ed; the page puts the line in the input, never runs it: SME reviews N6, P4 N7). (`@` is the Console's: corridorkey itself reads `####`, `%04d` and `$F4`.)
+  `exrheader FILE|PATTERN` (electron/main/console/exr.ts: the file's first 256 KiB read as the OpenEXR layout lays
+  out a header, magic, version flags, then each part's `name\0 type\0 size value` attributes; resolution from the
+  display window, the data window when it differs, channels with their pixel types and sampling, alpha (`A` or
+  `*.A`), compression, line order, tiles or scan lines, each part of a multi-part file, other attributes by name; a
+  frame pattern reads its first frame and says so: SME review 2026-10-27 N6),
   `history [N|term]` (`--audit`: the elevated log), `version` (also `corridorkey --version`, `render --version`: the app's
   version, which its corridorkey shares; answered without running it), `run [--keep-going] <file.ckcmd>` (a script: Scripting, below; no script
   inside a script; its elevation: Security rules below). Several lines pasted at once are never joined: the page offers them as a script (Enter runs them in
