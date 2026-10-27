@@ -33,6 +33,10 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 exr = "1.73"
 ocio-rs.workspace = true
 
+# build.rs reads the app's version from package.json
+[build-dependencies]
+serde_json.workspace = true
+
 # the Core ML execution provider's API (--device coreml; macOS only: the macOS ONNX Runtime build has the provider)
 [target.'cfg(target_os = "macos")'.dependencies]
 ort = { workspace = true, features = ["coreml"] }

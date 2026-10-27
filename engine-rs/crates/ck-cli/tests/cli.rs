@@ -98,7 +98,9 @@ fn usage_mistakes_exit_2_and_say_what_to_type() {
 fn help_and_version_exit_0() {
     let o = run(&["--version"]);
     assert_eq!(o.status.code(), Some(0));
-    assert_eq!(text(&o.stdout).trim(), format!("corridorkey {}", env!("CARGO_PKG_VERSION")));
+    // the app's version (package.json), not the Rust workspace's: farm logs and reports name the release
+    let pkg: Value = serde_json::from_str(&std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../package.json")).unwrap()).unwrap();
+    assert_eq!(text(&o.stdout).trim(), format!("corridorkey {}", pkg["version"].as_str().unwrap()));
     let o = run(&["render", "--help"]);
     assert_eq!(o.status.code(), Some(0));
     assert!(text(&o.stdout).contains("Examples:"), "{}", text(&o.stdout));

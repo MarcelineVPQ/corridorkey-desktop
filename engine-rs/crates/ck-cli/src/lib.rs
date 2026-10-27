@@ -8,8 +8,8 @@ pub mod report;
 pub mod run;
 pub mod signals;
 
-/// The command line's version: the engine's (engine-rs/Cargo.toml), one number for both.
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The command line's version: the app's (package.json, via ck-core), the engine's too: one number for all.
+pub const VERSION: &str = ck_core::APP_VERSION;
 
 /// The CUDA_VISIBLE_DEVICES to set before the runtime starts, or None to leave it: `--gpu` (an index in CUDA's order
 /// or a GPU-/MIG- UUID, as Nuke's `--gpu` names a card) wins; without it, a CUDA_VISIBLE_DEVICES already set is the

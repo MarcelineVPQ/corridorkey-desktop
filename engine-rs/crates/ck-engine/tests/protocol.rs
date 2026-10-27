@@ -335,3 +335,10 @@ fn quit_ends_the_loop() {
     assert!(r.is_empty());
     assert!(fake.ran.is_empty());
 }
+
+#[test]
+fn the_version_is_the_apps() {
+    // the pong's `version` and `--version`: the app release (package.json), not the Rust workspace's (backlog row 94)
+    let pkg: Value = serde_json::from_str(&std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../package.json")).unwrap()).unwrap();
+    assert_eq!(ck_engine::ENGINE_VERSION, pkg["version"].as_str().unwrap());
+}

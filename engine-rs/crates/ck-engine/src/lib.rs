@@ -8,8 +8,8 @@ use std::collections::HashSet;
 use std::io::{BufRead, Write};
 use std::time::Instant;
 
-/// The engine's version: the workspace's (engine-rs/Cargo.toml), so a release bump changes it in one place.
-pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The engine's version: the app's (package.json, via ck-core), so a release bump changes it in one place.
+pub const ENGINE_VERSION: &str = ck_core::APP_VERSION;
 pub const PROTOCOL: i64 = 1;
 
 /// What runs the jobs: the ONNX Runtime pipeline, or a fake in the protocol tests.

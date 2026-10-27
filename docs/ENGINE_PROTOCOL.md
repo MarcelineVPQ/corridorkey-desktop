@@ -136,7 +136,7 @@ The `corridorkey` command line ([CLI.md](CLI.md)) runs the same jobs without thi
 ← {"type":"pong","version":"0.1.0","protocol":1,"engine":"pytorch","device":"cuda",
    "gpu":"NVIDIA GeForce RTX 5080","vram_total_mb":16303,"python":"3.12.13","torch":"2.9.1+cu128",
    "assets":{"weights":true,"foundation_stats":true,"rvm":true,"moge":true,"cradio":true}}
-← {"type":"pong","version":"0.2.0","protocol":1,"engine":"onnxruntime","device":"cuda","gpu":"NVIDIA GeForce RTX 5080",
+← {"type":"pong","version":"1.0.0-dev.1","protocol":1,"engine":"onnxruntime","device":"cuda","gpu":"NVIDIA GeForce RTX 5080",
    "vram_total_mb":16303,"provider":"cuda","precision":"fp16","ort":"1.31.0","tensorrt_available":true,
    "models_dir":"/models","assets":{"cradio":true,"moge":true,"rvm":true,"stage1":true,"stage2":true},"python":null,"torch":null,
    "config":{"device":"auto","precision":null,"graph_opt":"all","arena_shrink":"auto","trt_cache":"...",...},
@@ -214,6 +214,8 @@ The `corridorkey` command line ([CLI.md](CLI.md)) runs the same jobs without thi
   the one OpenCV uses, or the image crate's, which differs by a few levels) and the ffmpeg and
   ffprobe versions. A job writes the same three at the end of its `_settings.txt`
   (`JPEG Decoder:`, `FFmpeg:`, `FFprobe:`) and in a `log` line.
+- `version` (Rust engine pong): the app release it ships in (package.json's version, read when the engine is
+  built), the same number `corridorkey --version` prints. Before 2026-10-26 it was the Rust workspace's own 0.2.0.
 - `ocio` (Rust engine pong, additive): the version of the OpenColorIO library linked into the engine ("2.5.2"). An
   engine built without it (a stub) refuses to start.
 - Colour management (Rust engine, backlog row 29; docs/ENGINE_RUST.md "Colour"): with `input_colorspace` the clip's

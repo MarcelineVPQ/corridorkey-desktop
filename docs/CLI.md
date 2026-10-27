@@ -35,7 +35,7 @@ corridorkey verify -i plates/sh010.####.exr -o key/sh010_key.####.exr --outputs 
 | `corridorkey verify` | check that every requested frame is there and reads as a whole EXR (exit 0, or 9) |
 | `corridorkey prepare` | check the models, ONNX Runtime, the card, its free memory and ffmpeg before a farm's tasks start; `--tensorrt-size WxH` builds TensorRT's engines for that size (a one-time build of minutes, so no task waits on it) |
 | `corridorkey info` | version, model set, ONNX Runtime, provider, card, OpenColorIO, decoders (`--json`) |
-| `corridorkey help [COMMAND]` | the help; `corridorkey COMMAND -h` too, with examples. `corridorkey --version` |
+| `corridorkey help [COMMAND]` | the help; `corridorkey COMMAND -h` too, with examples. `corridorkey --version`: the app release it ships in (package.json's version, e.g. `1.0.0-dev.1`; the engine's pong says the same) |
 
 Options are GNU style: `--frames 1001-1100` or `--frames=1001-1100`, short ones `-F 1001-1100`; `--` ends the options
 (for a clip whose name starts with `-`). A mistake is exit 2 with what to type instead (`--frame` → "a similar
@@ -216,7 +216,7 @@ say where it is (`loading the models`, `reading the clip`, `building TensorRT`, 
 | key | value |
 |---|---|
 | `schema` | `"corridorkey-report/1"` |
-| `corridorkey` | the version |
+| `corridorkey` | the version: the app release (`1.0.0-dev.1`), as `--version` prints it |
 | `command` | `render`, `verify` or `prepare` |
 | `exit_code`, `exit_reason` | the exit code and its name: `done`, `usage`, `input`, `output`, `no-gpu`, `out-of-graphics-memory`, `assets`, `engine`, `incomplete`, `interrupted`, `terminated` |
 | `message` | why it failed (null when it didn't) |

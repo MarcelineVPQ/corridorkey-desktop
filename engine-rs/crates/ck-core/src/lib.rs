@@ -1,6 +1,8 @@
 //! CorridorKey's inference pipeline on ONNX Runtime (docs/ENGINE_RUST.md): a port of the upstream runtime's
 //! host side (corridorkey/runtime.py, video_io.py, color_utils.py) around the five exported networks
 //! (C-RADIO, MoGe, RVM single step, stage 1, stage 2).
+/// The app's version (package.json, read by build.rs): the engine's and the command line's, one number for both.
+pub const APP_VERSION: &str = env!("CK_APP_VERSION");
 pub(crate) mod ahead;
 pub mod clip;
 pub mod color;
