@@ -122,7 +122,8 @@ The engine runs `ffmpeg` / `ffprobe` from the system: they are not bundled.
   `CK_ENGINE_THREADS`; TensorRT: `CK_ENGINE_TRT_CACHE` (engine folder; the app passes its cache folder + `tensorrt`, else the system cache folder: `~/.cache`, `%LOCALAPPDATA%\corridorkey-desktop\cache`, `~/Library/Caches`), `CK_ENGINE_TRT_BUILD` (ck-trt-build,
   else next to the engine binary), `CK_ENGINE_TRT_BUILD_TIMEOUT_S` (one engine build's deadline, default 1800 s).
   Also `CK_ENGINE_DEVICE` (auto | cuda | cpu | coreml, = `--device`), `CK_ENGINE_PRECISION` (fp16 | fp32), `CK_ENGINE_MODELS`,
-  `CK_ENGINE_ORT` / `ORT_DYLIB_PATH`. All are read once at startup (`ck-core/src/config.rs`, `EngineConfig`; flags win
+  `CK_ENGINE_ORT` / `ORT_DYLIB_PATH`, and `CK_ENGINE_PARENT_PID` (the app passes its pid; the engine ends with that
+  process, ck-core `proc.rs`). All are read once at startup (`ck-core/src/config.rs`, `EngineConfig`; flags win
   over the environment, an empty value is unset); an unknown value stops the engine with an error naming the
   variable (it used to fall back to the default silently). The settings go to stderr at startup and into the pong
   (`config`). `ORT_ENABLE_CUDNN_FLASH_ATTENTION` stays an environment variable set first thing in `main`, before
@@ -137,7 +138,8 @@ The engine runs `ffmpeg` / `ffprobe` from the system: they are not bundled.
 The engine ships inside the AppImage (`resources/engine/`); its GPU runtime and models are downloaded on first start
 into `~/.local/share/corridorkey-desktop` (`electron/main/install.ts`, Engine page, Runtime and models). The Engine
 page lists every copy it finds (`electron/main/engineFind.ts`; Automatic = the newest, Browse… for anything else);
-`CK_ENGINE_BIN` / `CK_ENGINE_MODELS` / `CK_ENGINE_ORT` override the lists. The queue runs when the engine's program
+`CK_ENGINE_BIN` / `CK_ENGINE_MODELS` / `CK_ENGINE_ORT` override the lists, and `CK_ENGINE_LD_LIBRARY_PATH` (folders,
+`:`-separated, `;` on Windows) adds library folders after the runtime's own (`electron/main/engine.ts`). The queue runs when the engine's program
 and models are there (`electron/main/settings.ts` `checkRustEngine`); the Engine page says whether it is set up.
 
 ## Graphics memory
