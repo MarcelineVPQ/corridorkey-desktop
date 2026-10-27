@@ -256,6 +256,26 @@ export function sequenceCell(q: NonNullable<ConsoleEntry["sequence"]>): { text: 
   return { text: `${q.range} · ${frames}${belowZeroText(q)}`, title: gaps ? `missing ${gaps}` : null };
 }
 
+/**
+ * A block's line as words for the page (SME review 2026-10-27 N4: the echoed queue line broke inside `--codec`): each
+ * run of spaces as text, each word as its spans (a mistake's mark kept), drawn as one unit that wraps only at the spaces
+ * (a word longer than the line still wraps inside itself).
+ */
+export function lineWords(spans: readonly Span[]): (string | Span[])[] {
+  const out: (string | Span[])[] = [];
+  // loop: NOT-WORTH — a line's few spans, per block render
+  for (const sp of spans)
+    // loop: NOT-WORTH — the span's words and spaces
+    for (const part of sp.text.split(/(\s+)/)) {
+      if (!part) continue;
+      const last = out[out.length - 1];
+      if (/^\s+$/.test(part)) out.push(typeof last === "string" ? (out.pop() as string) + part : part);
+      else if (Array.isArray(last)) last.push({ ...sp, text: part });
+      else out.push([{ ...sp, text: part }]);
+    }
+  return out;
+}
+
 /** A refused line cut at its mistakes (the block's command shows where each one is). */
 export function errorSpans(line: string, errors: readonly { start: number; end: number; message: string }[]): Span[] {
   // loop: NOT-WORTH — a line's few mistakes, per refused block render

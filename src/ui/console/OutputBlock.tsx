@@ -10,7 +10,7 @@ import type { Registry } from "../../shared/console/registry";
 import type { ConsoleBlock } from "../../shared/types";
 import { ProgressBar } from "../ProgressBar";
 import { fileSizeText } from "../../shared/units";
-import { blockStatus, blockText, childOpens, childRow, compactBlock, DOCTOR_MARK, duration, entryTitle, errorSpans, isoTime, sequenceCell, shortenKnown, writtenPaths } from "./model";
+import { blockStatus, blockText, childOpens, childRow, compactBlock, DOCTOR_MARK, duration, entryTitle, errorSpans, isoTime, lineWords, sequenceCell, shortenKnown, writtenPaths } from "./model";
 import { HomeContext } from "../PathText";
 
 const COPIED_MS = 1500;
@@ -87,12 +87,21 @@ function FullBlock({ b, registry, onReinsert, onCollapse }: BlockProps & { onCol
               <ShieldAlert size={13} aria-hidden /> sudo
             </span>
           )}
-          {/* loop: NOT-WORTH — a line's few spans, per block render */}
-          {errorSpans(b.line, b.errors).map((sp, i) => (
-            <span key={i} className={`t-${sp.kind}`} title={sp.title}>
-              {sp.text}
-            </span>
-          ))}
+          {/* loop: NOT-WORTH — a line's few words, per block render; it wraps only between them */}
+          {lineWords(errorSpans(b.line, b.errors)).map((w, i) =>
+            typeof w === "string" ? (
+              w
+            ) : (
+              <span key={i} className="cb-word">
+                {/* loop: NOT-WORTH — one word's one or two spans */}
+                {w.map((sp, j) => (
+                  <span key={j} className={`t-${sp.kind}`} title={sp.title}>
+                    {sp.text}
+                  </span>
+                ))}
+              </span>
+            ),
+          )}
         </code>
         <span className="cb-meta">
           <span className={`cb-status ${st.tone}`}>{st.word}</span>

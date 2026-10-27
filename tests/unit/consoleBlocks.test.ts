@@ -21,6 +21,7 @@ import {
   mergeBlocks,
   isoTime,
   lineHint,
+  lineWords,
   sequenceCell,
   sequenceText,
   visibleBlocks,
@@ -440,5 +441,18 @@ describe("SME review 2026-10-27: the expert suggestions", () => {
     expect(sequenceCell({ range: "1-2", count: 2, missing: null, span: 2 })).toEqual({ text: "1-2 · 2 frames", title: null });
     expect(sequenceText(q)).toBe("1001-1048 · 43 frames · missing 1012-1015, 1040");
     expect(sequenceCell({ range: "-10-20", count: 31, missing: null, span: 31, belowZero: 10 }).text).toBe("-10-20 · 31 frames · 10 below 0 (corridorkey's patterns and -F start at 0)");
+  });
+});
+
+describe("SME review 2026-10-27 N4 (row 143): a block's line wraps only between words", () => {
+  it("cuts the line into words and spaces, keeping each word whole with its marks (--codec is one word)", () => {
+    const w = lineWords([
+      { text: "render --codec ", kind: "plain" },
+      { text: "h2", kind: "error", title: "bad" },
+      { text: "64 -- a-b.mov", kind: "plain" },
+    ]);
+    // loop: NOT-WORTH — a few test words
+    expect(w.map((x) => (typeof x === "string" ? x : x.map((s) => s.text).join("|")))).toEqual(["render", " ", "--codec", " ", "h2|64", " ", "--", " ", "a-b.mov"]);
+    expect((w[4] as { kind: string }[]).map((s) => s.kind)).toEqual(["error", "plain"]);
   });
 });

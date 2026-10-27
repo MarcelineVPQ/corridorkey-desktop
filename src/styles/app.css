@@ -878,6 +878,12 @@ select {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* a word of the line is one unit: the line wraps between words, never at a word's - (--codec); a word longer than the
+   line still wraps inside itself */
+.cb-word {
+  display: inline-block;
+  max-width: 100%;
+}
 .cb-sudo,
 .cline-sudo {
   display: inline-flex;
