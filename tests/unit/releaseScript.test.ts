@@ -42,6 +42,23 @@ describe("release script", () => {
     expect(ok.stdout).toContain("passed");
   });
 
+  it("refuses a CHANGELOG whose top section is another version (N13)", () => {
+    const refuse = lines.find((l) => l.includes("top section isn't"));
+    expect(refuse).toBeDefined();
+    const run = (changelog: string) => {
+      writeFileSync(join(scratch, "CHANGELOG.md"), `# Changelog\n\n${changelog}`);
+      // loop: NOT-WORTH — one line of the script, 10 s deadline
+      return spawnSync("bash", ["-c", `set -euo pipefail; v=1.0.0-dev.2; ${refuse}; echo passed`], { cwd: scratch, encoding: "utf8", timeout: 10_000 });
+    };
+    // the bump forgotten: package.json still dev.1 under a dev.2 section, or dev.2 listed below a newer one
+    expect(run("## 1.0.0-dev.3\n\nNew.\n\n## 1.0.0-dev.2 (2026-10-27)\n\nOld.\n").status).toBe(1);
+    expect(run("## 1.0.0-dev.1 (2026-10-26)\n\nOld.\n").status).toBe(1);
+    expect(run("## 1.0.0-dev.20 (2026-10-27)\n").status).toBe(1);
+    const ok = run("## 1.0.0-dev.2 (2026-10-27)\n\nNew.\n\n## 1.0.0-dev.1 (2026-10-26)\n");
+    expect(ok.status).toBe(0);
+    expect(ok.stdout).toContain("passed");
+  });
+
   it("refuses a version already released unless --feeds, and --feeds unless published (N13)", () => {
     const refuse = lines.filter((l) => /^\[ "\$state" (=|!=) (false|none) \]/.test(l));
     expect(refuse).toHaveLength(3);

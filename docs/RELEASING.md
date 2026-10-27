@@ -88,7 +88,7 @@ spent 29 minutes waiting on a package mirror).
    published wiki that differs.
 2. `tools/release.sh`. It checks the version shape (`X.Y.Z` = Stable, `X.Y.Z-dev.N` = Development), that it isn't
    released yet (no tag, no published release: run before step 1 it refuses), the lock, a
-   clean `main` in step with GitHub, the CHANGELOG section (its header must not say draft or unreleased) and the
+   clean `main` in step with GitHub, the CHANGELOG section (the top one; its header must not say draft or unreleased) and the
    signing key; runs the docs-touch gate over the commits since the last `v*` tag, `npm run check`, `npm run check:engine` and `tools/check_targets.sh` (the engine's macOS and
    Windows lint), then `npm run dist:linux` (memory-capped; the engine is linked for glibc 2.28 with cargo-zigbuild, Zig in
    `~/.local/share/corridorkey-release/zig/venv`; then `tools/build_trt_builder.sh` builds TensorRT's engine builder

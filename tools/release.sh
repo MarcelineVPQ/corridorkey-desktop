@@ -6,7 +6,7 @@
 #
 # 1. checks: on main, clean, in step with origin; the version not released yet (no tag, no published release; --feeds:
 #    published); package.json and the lock carry the version; a CHANGELOG
-#    section for it, its header not saying draft / unreleased; the signing key is there; THIRD_PARTY_NOTICES.md is
+#    section for it, the top one, its header not saying draft / unreleased; the signing key is there; THIRD_PARTY_NOTICES.md is
 #    current (tools/gen_notices.mjs --check, which needs cargo-about on PATH or CARGO_ABOUT=<path>); the published
 #    wiki is docs/wiki/ (a read-only clone of the wiki repository compared by tools/check_wiki.mjs --published;
 #    tools/publish_wiki.mjs publishes it); every pinned model set on GitHub as pinned (tools/check_model_sets.mjs)
@@ -47,6 +47,8 @@ state="$(gh release view "v$v" --json isDraft -q .isDraft 2>/dev/null || echo no
 [ "$state" != false ] && [ "${1:-}" = --feeds ] && { echo "release: --feeds: v$v isn't published" >&2; exit 1; }
 [ "$state" = none ] && git rev-parse -q --verify "refs/tags/v$v" >/dev/null && { echo "release: tag v$v exists without a release: bump the version first" >&2; exit 1; }
 grep -q "^## $v\( \|$\)" CHANGELOG.md || { echo "release: CHANGELOG.md has no '## $v' section" >&2; exit 1; }
+# the top section is this version's (a forgotten bump: the newest notes are another version's; review N13)
+[ "$(grep -m1 '^## ' CHANGELOG.md | cut -d' ' -f2)" = "$v" ] || { echo "release: CHANGELOG.md's top section isn't $v: bump the version to the newest section's, or add its section on top" >&2; exit 1; }
 grep "^## $v\( \|$\)" CHANGELOG.md | grep -qiE 'draft|unreleased' && { echo "release: CHANGELOG.md's '## $v' header still says draft / unreleased" >&2; exit 1; }
 # the published wiki must be docs/wiki/ (docs/RELEASING.md "The wiki"): a read-only shallow clone, compared page by page
 wiki="$(mktemp -d)"; trap 'rm -rf "$wiki"' EXIT
