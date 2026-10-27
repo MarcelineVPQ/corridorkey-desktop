@@ -2,5 +2,6 @@
 # Every gate before every commit (git config core.hooksPath .hooks). Skip once with `git commit --no-verify`.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
-[ -d node_modules ] || { echo "pre-commit: no node_modules here, gates skipped (npm run check runs them)"; exit 0; }
+# no node_modules: fail, never pass silently (senior review 2026-10-27 S7: agents' worktrees skipped every gate)
+[ -d node_modules ] || { echo "pre-commit: no node_modules here, so the gates can't run: run npm ci first (or commit with --no-verify on purpose)" >&2; exit 1; }
 NODE_OPTIONS=--max-old-space-size=1024 npm run -s gates
