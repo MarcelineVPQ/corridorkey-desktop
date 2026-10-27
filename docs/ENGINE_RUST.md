@@ -223,6 +223,56 @@ GiB. `vram.rs` now holds the onnx.4 table, built by the same rules (its header s
 low-VRAM windows onnx.4 didn't measure are filled); `measured_peaks_are_bounded` holds the onnx.4 points: the estimate is
 at least 0.12 GiB over every one, 6-7 % over at 48 of 69, within 15 % at 54, up to 57 % over at small windows.
 
+**Where memory is tight: the 8 GB card (2026-10-27).** An RTX 2070 SUPER 8 GB (onnx.4, engines 1e7cf76 and
+fc927ec, `tools/engine_bench.mjs` as above with a 7.0 or 7.4 GiB `vram_budget_gb`; 68 runs, 23 points that ran, 3 out
+of memory) ran the windows the table fits in up to 2.7 GiB less than the table (1920×1080 8/4 normal 4.92 GiB
+against 6.17; 1280×1080 24/12 low-VRAM 5.34 against 8.04, and under its own 16/8, 5.65, which is 0.14 GiB over the
+table, inside the +6 %). The table holds nothing twice (it is measured peaks, not a sum of weights, context and
+working memory); the 16 GB card, measured with a 14 GiB budget, simply peaked higher. Why (cuDNN's workspace, the
+arenas, the architecture) isn't measured.
+Every point estimated within the budget ran and every out-of-memory point was estimated above it: safe, but 8 GB
+cards got 8/4 at HD. `vram.rs` now has a second table, TIGHT, the 8 GB card's highest peak per point (rounded up,
+monotone; 960×720, 1280×1080 and 1920×1080; the 16 GB table's value wherever it didn't measure, and for 1920×1080
+16/8 low-VRAM, which ran but took 394 s for 32 frames, 8× its 8/4's time per frame). One formula for both:
+
+- a window fits a budget when its TIGHT peak (+6 %) does, by the same rule as before (× 1.1 + 0.3 GiB): a window needs
+  at least its highest measured peak + 16.6 % + 0.3 GiB (HD 24/12 low: measured 5.34, its 16/8's 5.65 carried up,
+  needs 6.89 GiB);
+- the estimate shown is the 16 GB table's peak (+6 %), no more than the budget lets a window peak once it fits
+  (7.4 GiB: 6.45), else the TIGHT peak.
+
+It rests on an assumption the runs don't show: a job that ran within 7.0-7.4 GiB runs within a larger budget and
+within a smaller one its TIGHT peak plus the margin fits. Not measured: the app's Auto (no limit, the card's whole
+free memory), budgets under 7.0 GiB, and a 16 GB card held to 7.4 GiB (if its peaks don't come down, the automatic
+window's out-of-memory retry halves the window). Tests: `the_8_gb_cards_peaks_are_bounded_at_any_budget`,
+`an_8_gb_card_gets_the_window_it_ran`, `larger_cards_keep_their_windows`.
+
+| Card (budget GiB) | 1280×1080 before → after | 1920×1080 before → after | 4096×2160 |
+|---|---|---|---|
+| 6 GB (5.5) | 8/4 low → 8/4 normal | 2/1 low → 8/4 low | 1/1 low (same) |
+| 8 GB (7.0) | 8/4 normal → 24/12 low | 8/4 low → 8/4 normal | 2/1 low (same) |
+| 8 GB (7.4, measured) | 8/4 normal → 24/12 low | 8/4 low → 8/4 normal | 2/1 low (same) |
+| 10 GB (9.3) | 8/4 normal → 24/12 low | 8/4 normal (same) | 2/1 low (same) |
+| 12 GB (11.2) | 48/24 low (same) | 8/4 normal (same) | 4/2 low (same) |
+| 16 GB (14.5) | 48/24 normal (same) | 24/12 normal (same) | 8/4 normal (same) |
+
+The budgets are free memory as the engine reads it; only 7.0 / 7.4 (8 GB) and 14 (16 GB) were measured. 960×720 at
+7.0 GiB goes from 8/4 to 24/12 normal (measured 5.39 GiB there).
+
+| 8 GB card point | Mode | Window | Measured peak (highest) | TIGHT | 16 GB table |
+|---|---|---|---|---|---|
+| 960×720 | low | 1/1, 4/2 | 1.39, 1.77 | 1.39, 1.78 | 1.92, 2.61 |
+| 960×720 | normal | 4/2, 8/4, 16/8, 24/12 | 3.25, 3.54, 4.38, 5.39 | 3.54, 4.38, 5.39 | 4.54, 5.09, 6.06 |
+| 960×720 | normal | 48/24 | out of memory | 8.12 | 8.12 |
+| 1280×1080 | low | 1/1, 2/1, 4/2, 8/4 | 1.50, 1.74, 2.26, 3.18 | 1.51, 1.75, 2.27, 3.18 | 1.92, 3.37, 3.57, 3.95 |
+| 1280×1080 | low | 16/8, 24/12 | 5.65, 5.34 | 5.66, 5.66 | 5.51, 8.04 |
+| 1280×1080 | normal | 1/1, 4/2, 8/4, 16/8 | 3.15, 3.51, 4.02, 5.30 | 4.03, 5.31 | 5.33, 6.29 |
+| 1280×1080 | normal | 24/12 | out of memory | 8.05 | 8.05 |
+| 1920×1080 | low | 1/1, 2/1, 4/2, 8/4 | 1.58, 2.07, 2.90, 4.43 | 1.59, 2.08, 2.91, 4.44 | 1.93, 4.29, 4.48, 5.15 |
+| 1920×1080 | low | 16/8 | 5.45, 394 s (starved) | 7.81 | 7.81 |
+| 1920×1080 | normal | 8/4 | 4.92 | 4.93 | 6.17 |
+| 1920×1080 | normal | 16/8 | out of memory | 7.57 | 7.57 |
+
 The peak estimate (`vram.rs`, one function for the automatic window, the `memory` reply and the `estimate` command)
 is this engine's own measurement: peak graphics memory of the engine's process tree (nvidia-smi every 250 ms,
 `tools/engine_bench.mjs`), RTX 5080 16 GB, ONNX Runtime 1.31 CUDA, a 14 GiB budget, the engine built from main that

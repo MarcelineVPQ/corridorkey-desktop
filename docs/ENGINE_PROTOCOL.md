@@ -82,7 +82,7 @@ and `vram_budget_gb` (as the run option; absent = the engine's `CK_ENGINE_VRAM_B
 for its size and frame count only (ffprobe, or a frame folder's first header: nothing decoded, no model loaded, no
 CUDA context) and answers at once between jobs. Each window's `peak_bytes` is the estimate the automatic window and
 the `memory` reply use (this engine's measured ONNX Runtime CUDA peaks over the padded size, an upper bound at every
-measured point, measured on model set 2.0.0-onnx.4 (2026-10-26), docs/BACKLOG.md row 41; the window capped at the clip's frames: `estimate_peak_vram_gb`, no second
+measured point, measured on model set 2.0.0-onnx.4 (2026-10-26), docs/BACKLOG.md row 41, and on an 8 GB card where memory is tight (2026-10-27), weighed against `budget_bytes`: docs/ENGINE_RUST.md; the window capped at the clip's frames: `estimate_peak_vram_gb`, no second
 formula); `needs_bytes` is what the automatic window requires of the
 budget for it (the estimate × `margin_scale` + `margin_gb`), and `fits` is that check against `budget_bytes` (free
 memory plus what the engine holds, capped by `vram_budget_gb`; NVML on a card, the host's available memory on the
@@ -210,7 +210,7 @@ The `corridorkey` command line ([CLI.md](CLI.md)) runs the same jobs without thi
   job's `vram_budget_gb`), `budget_source` (`gpu`, or `host` on the CPU
   provider) and `estimate_basis` (`onnxruntime-cuda-measured` since 2026-10-24: the
   estimate is this engine's measured peaks on ONNX Runtime CUDA plus 6 %, an upper bound at every measured point,
-  re-measured on model set 2.0.0-onnx.4 on 2026-10-26, docs/BACKLOG.md row 41; before, `pytorch-bf16-table`, the upstream runtime's PyTorch table).
+  re-measured on model set 2.0.0-onnx.4 on 2026-10-26, docs/BACKLOG.md row 41; since 2026-10-27 also the 8 GB card's peaks where memory is tight, docs/ENGINE_RUST.md; before, `pytorch-bf16-table`, the upstream runtime's PyTorch table).
 - `decoders` (Rust engine pong, additive): the JPEG decoder frame folders get (libjpeg-turbo,
   the one OpenCV uses, or the image crate's, which differs by a few levels) and the ffmpeg and
   ffprobe versions. A job writes the same three at the end of its `_settings.txt`

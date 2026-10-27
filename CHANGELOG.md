@@ -74,6 +74,11 @@ on its own rail icon. Not a system shell: its own commands only, each parsed and
   internal resolution and input precision). A settings file that still names the folder loads as before; the key is
   dropped. Comparisons with Corridor's original stay in the repository's tools (`tools/vs_original.sh`,
   `tools/engine_bench.mjs`), which run it from its own checkout and venv.
+- The automatic window on 8 GB cards: the memory estimate now also holds the peaks measured on an RTX 2070 SUPER 8 GB,
+  which ran the same windows in up to 2.7 GiB less than the 16 GB card's table. With ~7.4 GiB free, 1280×1080 clips get
+  24/12 (was 8/4) and 1920×1080 8/4 in the normal mode (was low-VRAM); 6 GB cards get 8/4 at 1920×1080 (was 2/1);
+  12 and 16 GB cards keep their windows. Not yet measured on a card's whole free memory without a limit
+  (docs/ENGINE_RUST.md).
 
 **Fixed**
 

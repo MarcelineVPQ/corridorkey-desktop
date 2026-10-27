@@ -568,7 +568,7 @@ fn low_vram_arenas_leave_room_only_for_the_networks_sharing_the_card() {
     let weight = |p: &str| WEIGHTS.iter().find(|(q, _)| *q == p).unwrap().1;
     let (reserve, ctx) = (512u64 << 20, 354_334_801u64);
     // the HD window this job is: its estimate fits the budget
-    let est = crate::vram::estimate_peak_vram_gb(1280.0 * 1152.0 / 1e6, 1, true);
+    let est = crate::vram::estimate_peak_vram_gb(1280.0 * 1152.0 / 1e6, 1, true, None);
     assert!(est * crate::vram::MARGIN_SCALE + crate::vram::MARGIN_GB <= 4.0, "estimate {est} GiB");
     // low-VRAM at 4 GiB; normal mode (unchanged) at 12 GiB, where the reserve was measured
     for (cap, low_vram) in [(4u64 << 30, true), (12 << 30, false)] {
