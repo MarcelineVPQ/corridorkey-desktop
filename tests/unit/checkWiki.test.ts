@@ -9,10 +9,18 @@ import {
   checkCommandLine,
   checkConsole,
   checkLinks,
+  checkRail,
+  checkRunOptions,
+  checkSettings,
   checkTroubleshooting,
   diffPublished,
   engineMessages,
   exitCodes,
+  interfaceKeys,
+  optionFlags,
+  railLabels,
+  runOptions,
+  screenLabels,
   slug,
   type CliSpecIn,
 } from "../../tools/check_wiki.mjs";
@@ -125,6 +133,58 @@ describe("the wiki gate", () => {
       `Hints.md: link (${R}/blob/main/README.md#slow) has no heading #slow in README.md`,
       `Hints.md: link (${R}/blob/main/docs/GONE.md) names docs/GONE.md, which isn't in the repository`,
       `Hints.md: link (${R}/wiki/Gone) names the wiki page Gone, which docs/wiki/ doesn't have`,
+    ]);
+  });
+
+  it("(g) a run option's flag missing from Command-Line.md, one without a flag nowhere (and not excepted), or a clip setting's label on no page fails", () => {
+    const jobRs = 'hint_quality: unit(o, "hint_quality", 0.95)?, seed: whole(o, "seed")?, x: o.get("outputs"), y: num(o, "frame_dir_fps")\n#[cfg(test)]\nunit(o, "test_only", 1.0)';
+    expect(runOptions(jobRs)).toEqual(["hint_quality", "seed", "outputs", "frame_dir_fps"]);
+    const argsRs =
+      '("hint-quality", "hint_quality", Kind::Number, "0-1", "trust"),\n("fps", "frame_dir_fps", Kind::Number, "FPS", "rate"),\npub const OTHER_OPTIONS: [(&str, &str); 1] = [("outputs", "--outputs")];';
+    const flags = optionFlags(argsRs);
+    expect([...flags]).toEqual([
+      ["hint_quality", ["--hint-quality"]],
+      ["frame_dir_fps", ["--fps"]],
+      ["outputs", ["--outputs"]],
+    ]);
+    const tsx = '<Section id="hint" icon={Wand2} title="Hint" status={s}>\n<Row label="Hint trust" hint="x" htmlFor="hq">\n<Row label="">\n<Segmented label="Not a row" />\n<Row label={dynamic}>';
+    expect(screenLabels(tsx)).toEqual(["Hint", "Hint trust"]);
+    const pages = { "Command-Line": "`--hint-quality`, `--outputs`, `--fps`", Hints: "## Hint trust\nThe **hint**." };
+    const opts = runOptions(jobRs);
+    expect(checkRunOptions(pages, opts, flags, ["Hint", "Hint trust"], { seed: "a sample" })).toEqual([]);
+    expect(checkRunOptions({ ...pages, "Command-Line": "`--hint-quality`, `--outputs`" }, opts, flags, [], { seed: "a sample" })).toEqual([
+      "Command-Line.md: the run option `frame_dir_fps` (--fps) is missing",
+    ]);
+    expect(checkRunOptions(pages, opts, flags, [], {})).toEqual([expect.stringMatching(/^the run option `seed` \(ck-core job.rs\) has no flag and no wiki page names it/)]);
+    // named on a page: fine without an exception; an exception for an option the engine dropped is stale
+    expect(checkRunOptions({ ...pages, X: "`seed`" }, opts, flags, [], { gone: "x" })).toEqual(["WIKI_EXCEPTIONS (tools/check_wiki.mjs): `gone` isn't a run option any more: remove it"]);
+    expect(checkRunOptions(pages, opts, flags, ["Despill"], { seed: "a sample" })).toEqual([expect.stringMatching(/^the clip setting "Despill" \(src\/ui\/JobSettings.tsx\) is on no wiki page/)]);
+  });
+
+  it("(h) an app setting without a row, with a label gone from the screen, or missing from its page fails", () => {
+    const ts = "export interface Settings {\n  // where results go\n  outputRoot: string | null;\n  lastOptions: JobOptions;\n  cacheRoot?: string;\n}\nexport interface Other {\n  no: 1;\n}";
+    expect(interfaceKeys(ts, "Settings")).toEqual(["outputRoot", "lastOptions", "cacheRoot"]);
+    const table = { outputRoot: { label: "Where results go", page: "Home" }, lastOptions: { internal: "the last clip's settings" } };
+    const pages = { Home: "Use **App settings → Results → Where results go**." };
+    const ui = '<Row label="Where results go">';
+    expect(checkSettings(pages, ["outputRoot", "lastOptions"], ui, table)).toEqual([]);
+    expect(checkSettings(pages, ["outputRoot", "lastOptions", "cacheRoot"], ui, table)).toEqual([expect.stringMatching(/^the app setting `cacheRoot` has no row in SETTINGS/)]);
+    expect(checkSettings({ Home: "nothing" }, ["outputRoot", "lastOptions"], ui, table)).toEqual(['Home.md: the app setting "Where results go" (`outputRoot`) is missing']);
+    expect(checkSettings(pages, ["outputRoot", "lastOptions"], '<Row label="Results folder">', table)).toEqual([expect.stringMatching(/"Where results go" \(`outputRoot`\) isn't on screen any more/)]);
+    expect(checkSettings(pages, ["outputRoot"], ui, table)).toEqual(["SETTINGS (tools/check_wiki.mjs): `lastOptions` isn't an app setting any more: remove it"]);
+    expect(checkSettings(pages, ["outputRoot", "lastOptions"], ui, { ...table, outputRoot: { label: "Where results go", page: "Gone" } })).toEqual([
+      "SETTINGS (tools/check_wiki.mjs): `outputRoot` names the wiki page Gone, which docs/wiki/ doesn't have",
+    ]);
+  });
+
+  it("(i) a rail page without a wiki page or section fails", () => {
+    const rail =
+      'export const ITEMS: RailItem[] = [\n  { id: "queue", label: "Queue", tip: "x" },\n  { id: "settings", label: "App settings", tip: "y" },\n];\nconst other = { label: "Not an item" };';
+    expect(railLabels(rail)).toEqual(["Queue", "App settings"]);
+    expect(checkRail({ Home: "# Queue\n### **App Settings**" }, railLabels(rail))).toEqual([]);
+    // a heading in a code fence or a mention in prose isn't a section
+    expect(checkRail({ Home: "# Queue\n```\n# App settings\n```\nOpen App settings." }, railLabels(rail))).toEqual([
+      'the rail page "App settings" (src/ui/rail/railModel.ts) has no wiki page or section (a heading "App settings")',
     ]);
   });
 

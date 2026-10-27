@@ -14,8 +14,8 @@ Set per clip, in the **Hint** section:
 | **First-frame matte** | one image: a matte of the first frame | Usually the best practical choice. |
 | **Hint video** | a matte for every frame: a video or a frame folder | When you already have a roto pass, a garbage matte or an automatic mask for the whole shot. |
 
-A matte is **white for the subject, black for the background**. A first-frame matte can be a PNG, JPEG or EXR; a
-PNG with an alpha channel is read by its alpha. A hint video must have at least as many frames as the clip.
+A matte is **white for the subject, black for the background**. A first-frame matte (**Matte image**) can be a PNG,
+JPEG or EXR; a PNG with an alpha channel is read by its alpha. A hint video must have at least as many frames as the clip.
 
 ## Hint trust
 

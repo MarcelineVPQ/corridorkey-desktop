@@ -108,7 +108,11 @@ on its own rail icon. Not a system shell: its own commands only, each parsed and
 - The wiki's pages live in the repository (`docs/wiki/`) and a gate keeps them current: every command, flag, exit code
   and progress format of the command line, every Console command and the engine's messages must be there, and every
   link must resolve; a release is refused while the published wiki differs. New pages: Command line, Render farm,
-  Console.
+  Console. The wiki gate also wants every engine option, every clip setting's on-screen name, every app setting
+  and every rail page on the wiki (the App settings, Appearance and the other pages now have sections).
+- A command-line gate of its own: every engine job option has a flag or a stated reason, and every option the app
+  sends reaches the CLI, Copy as command and farm export, tested by reading the copied lines back (docs/CLI.md
+  "Adding an option").
 
 **Already in 1.0.0-dev.1, missing from its notes:** the automatic window's graphics-memory table was re-measured on
 the model set it ships (onnx.4) before dev.1; on a 16 GB card the old table picked a 1080p window that runs out of

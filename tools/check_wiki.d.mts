@@ -20,3 +20,14 @@ export function checkTroubleshooting(page: string | undefined, messages: string[
 export function checkLinks(pages: Record<string, string>, repoFile: (path: string) => string | null): string[];
 export function checkAll(app?: string): string[];
 export function diffPublished(src: string, published: string): string[];
+export const WIKI_EXCEPTIONS: Record<string, string>;
+export type SettingRow = { label: string; page: string; internal?: undefined } | { internal: string; label?: undefined; page?: undefined };
+export const SETTINGS: Record<string, SettingRow>;
+export function runOptions(jobRs: string): string[];
+export function optionFlags(argsRs: string): Map<string, string[]>;
+export function screenLabels(tsx: string): string[];
+export function interfaceKeys(ts: string, name: string): string[];
+export function railLabels(railTs: string): string[];
+export function checkRunOptions(pages: Record<string, string>, options: string[], flags: Map<string, string[]>, labels: string[], exceptions?: Record<string, string>): string[];
+export function checkSettings(pages: Record<string, string>, keys: string[], ui: string, table?: Record<string, SettingRow>): string[];
+export function checkRail(pages: Record<string, string>, labels: string[]): string[];

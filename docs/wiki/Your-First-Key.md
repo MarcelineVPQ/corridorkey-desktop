@@ -5,9 +5,37 @@ This page walks through one job, from adding a clip to finding the results. It a
 
 ## Finding your way around
 
-The **rail** on the right takes you to the pages: **Queue**, **Engine**, **App settings** and **About** (which has
-the in-app guide). Hover it for names, or press **Ctrl+B** to keep it open. A yellow dot on an icon means something
-is waiting there; pressing it takes you to it. Pressing the page you're on shows or hides its settings panel.
+The **rail** on the right takes you to the pages: **Queue**, **Engine**, **Console**, **App settings** and **About**
+(which has the in-app guide). Hover it for names, or press **Ctrl+B** to keep it open. A yellow dot on an icon means
+something is waiting there; pressing it takes you to it. Pressing the page you're on shows or hides its settings panel.
+
+### Queue
+
+Your clips, their settings and their results: the rest of this page.
+
+### Engine
+
+The CorridorKey engine, its files and the graphics card: the **Engine program**, the **Models folder** and the
+**ONNX Runtime library** in use (each **Automatic**, the newest found, or one you choose), ffmpeg, and on Linux
+[TensorRT](TensorRT). [Troubleshooting](Troubleshooting#the-engine) explains its messages.
+
+### Console
+
+A command line inside the app, for power users: see [Console](Console).
+
+### App settings
+
+- **Appearance:** **Theme** (System, Light, Dark, or Desktop: your desktop's own colours), **Accent color**
+  (CorridorKey green or your desktop's accent) and **Glass** (Liquid Glass on the rail and panels).
+- **Results:** where results go (step 4 below).
+- **Console:** the folders the Console may write in besides the results and cache folders ([Console](Console)).
+- **Graphics memory:** the memory limit new clips start with ([Graphics memory](Graphics-Memory-and-the-Window)).
+- **Updates:** the channel and automatic checks ([Updates and channels](Updates-and-Channels)).
+- **Storage:** what the app keeps on this PC, and the cache folder ([Uninstall](Uninstall)).
+
+### About
+
+The in-app guide, the changes, the credits and licence, and the third-party notices.
 
 ## 1. Add clips
 
@@ -36,8 +64,8 @@ from the settings you used last.
 | **Outputs** | Which files (Alpha, Foreground, Checker, Cutout), the format (Video or EXR sequence), the codec, despill. See [Outputs](Outputs). |
 | **Frame folder** | Frame sequences only: the frame rate (24 by default) and whether the frames are scene-linear. A folder of EXR frames starts scene-linear, PNG/JPEG display-coded; once you change it, new frame folders start with your choice. |
 | **Internal resolution** | **Full** runs the networks at the clip's own size; **¾**, **½** and **¼** run them smaller (the original's `--model_scale`, the plugin's Internal Resolution): faster and lighter, with less detail in the edges. The result is resized back to the clip's size. |
-| **Input precision** | Off by default: every input is read exactly as CorridorKey 2.0 reads it, byte for byte. On reads 10/12-bit video and 16-bit PNG at full depth, which differs from CorridorKey 2.0 ([README](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/README.md#deep-input-10--and-12-bit-plates-reach-the-model-in-full-10)). |
-| **Linear exposure** | Video clips only: brightness and contrast (around a pivot, 0.18 = mid grey) on the frames the networks see, for an under- or over-exposed plate. The foreground is turned back by the exact inverse, so the outputs keep the clip's own exposure. |
+| **Input precision** | **Bit depth**, off by default: every input is read exactly as CorridorKey 2.0 reads it, byte for byte. On reads 10/12-bit video and 16-bit PNG at full depth, which differs from CorridorKey 2.0 ([README](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/README.md#deep-input-10--and-12-bit-plates-reach-the-model-in-full-10)). |
+| **Linear exposure** | Video clips only: brightness and contrast (around the **Contrast pivot**, 0.18 = mid grey) on the frames the networks see, for an under- or over-exposed plate. The foreground is turned back by the exact inverse, so the outputs keep the clip's own exposure. |
 | **Graphics memory** | The temporal window and the memory limit. Automatic is right for most clips. See [Graphics memory and the window](Graphics-Memory-and-the-Window). |
 | **TensorRT** | Linux only: whether this clip will run on TensorRT, and why not. See [TensorRT](TensorRT). |
 

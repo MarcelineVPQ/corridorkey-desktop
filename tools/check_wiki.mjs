@@ -11,7 +11,15 @@
 //   (e) an engine message written for people (ck-core's errors that start with a capital letter, and the no-GPU
 //       reason) is missing from Troubleshooting.md;
 //   (f) a relative wiki link (`Page`, `Page#anchor`, `#anchor`) or a link into this repository on GitHub
-//       (`…/corridorkey-desktop/blob/main/<file>#anchor`) doesn't resolve.
+//       (`…/corridorkey-desktop/blob/main/<file>#anchor`) doesn't resolve;
+//   (g) an engine run option (ck-core job.rs) is missing: its flag (ck-cli args.rs) from Command-Line.md, or, without
+//       a flag, its name from every page (unless WIKI_EXCEPTIONS says why); or a clip setting's on-screen label
+//       (src/ui/JobSettings.tsx: a Section's title, a Row's label) is on no page;
+//   (h) an app setting (src/shared/types.ts Settings and Appearance, electron/main/updatePrefs.ts UpdatePrefs) has no
+//       row in SETTINGS below, or its label isn't on screen any more, or isn't on the wiki page the row names;
+//   (i) a rail page (src/ui/rail/railModel.ts ITEMS) has no wiki page or section (a heading with its name).
+// Its own sources only: it never reads the command line's parity manifest (tools/check_cli_parity.mjs, a gate of
+// its own; Marcy 2026-10-27).
 //
 //   node tools/check_wiki.mjs                    the gate (npm run gates)
 //   node tools/check_wiki.mjs --published DIR    exit 1 when the wiki clone in DIR differs from docs/wiki/ (release.sh)
@@ -263,6 +271,135 @@ export function checkLinks(pages, repoFile) {
   return problems;
 }
 
+/** (g) run options the wiki needn't name, and why (each must still be one the engine reads). */
+export const WIKI_EXCEPTIONS = {
+  num_frames: "the original's movie sample (docs/ENGINE_PROTOCOL.md): neither the app nor the command line sets it",
+  start_mode: "the original's movie sample (docs/ENGINE_PROTOCOL.md): neither the app nor the command line sets it",
+  seed: "the original's movie sample (docs/ENGINE_PROTOCOL.md): neither the app nor the command line sets it",
+};
+
+/**
+ * (h) Every app setting: its label on screen (src/ui, the Console's registry) and the wiki page that explains it, or
+ * `internal` and why it needs no page.
+ */
+export const SETTINGS = {
+  lastOptions: { internal: "a new clip's settings, the last ones used (Your-First-Key says so); each is a clip setting, rule (g)" },
+  appearance: { internal: "the group of theme, accent and glass below" },
+  theme: { label: "Theme", page: "Your-First-Key" },
+  accent: { label: "Accent color", page: "Your-First-Key" },
+  glass: { label: "Glass", page: "Your-First-Key" },
+  outputRoot: { label: "Where results go", page: "Your-First-Key" },
+  engineBinary: { label: "Engine program", page: "Troubleshooting" },
+  modelsDir: { label: "Models folder", page: "Troubleshooting" },
+  ortLibrary: { label: "ONNX Runtime library", page: "Troubleshooting" },
+  tensorrt: { label: "Use TensorRT", page: "TensorRT" },
+  vramLimitGb: { label: "Memory limit", page: "Graphics-Memory-and-the-Window" },
+  frameDirLinear: { label: "Frames are scene-linear", page: "Outputs" },
+  trtSizes: { label: "A size of my own", page: "TensorRT" },
+  cacheRoot: { label: "Cache folder", page: "Uninstall" },
+  consoleWriteFolders: { label: "May write in", page: "Console" },
+  consoleBookmarks: { label: "bookmark", page: "Console" },
+  consoleVariables: { label: "set -p", page: "Console" },
+  channel: { label: "Channel", page: "Updates-and-Channels" },
+  automatic: { label: "Check automatically", page: "Updates-and-Channels" },
+};
+
+/** The engine's run options: `(o, "key"` and `o.get("key")` / `o.contains_key("key")` in ck-core job.rs, tests left out. */
+export function runOptions(jobRs) {
+  // loop: NOT-WORTH — the run request's ~40 options, once per gate run
+  return [...new Set([...jobRs.split("#[cfg(test)]")[0].matchAll(/\bo,\s*"(\w+)"|\bo\.(?:get|contains_key)\("(\w+)"\)/g)].map((m) => m[1] ?? m[2]))];
+}
+
+/** Each run option's flags (ck-cli args.rs: RUN_OPTIONS ("flag", "option", …), OTHER_OPTIONS ("option", "--flag")). */
+export function optionFlags(argsRs) {
+  const out = new Map();
+  const add = (o, f) => out.set(o, [...(out.get(o) ?? []), f]);
+  // loop: NOT-WORTH — ~30 tuples
+  for (const m of argsRs.matchAll(/\("([a-z-]+)", "([a-z_]+)", Kind::/g)) add(m[2], `--${m[1]}`);
+  // loop: NOT-WORTH — five tuples
+  for (const m of argsRs.matchAll(/\("([a-z_]+)", "(--[a-z-]+)"\)/g)) add(m[1], m[2]);
+  return out;
+}
+
+/** A panel's on-screen labels: each `<Section … title="X"` and `<Row … label="X"` (non-empty literals). */
+export function screenLabels(tsx) {
+  // loop: NOT-WORTH — a panel's few dozen rows
+  return [...new Set([...tsx.matchAll(/<(?:Section|Row)\b[^>]*?\b(?:title|label)="([^"]+)"/g)].map((m) => m[1]))];
+}
+
+/** The keys of `interface <name> { … }` (one per line, two-space indent). */
+export function interfaceKeys(ts, name) {
+  const at = ts.indexOf(`interface ${name} {`);
+  if (at < 0) return [];
+  // loop: NOT-WORTH — one interface's keys
+  return [...ts.slice(at, ts.indexOf("\n}", at)).matchAll(/^ {2}(\w+)\??:/gm)].map((m) => m[1]);
+}
+
+/** The rail's page names (railModel.ts ITEMS' labels). */
+export function railLabels(railTs) {
+  const at = railTs.indexOf("export const ITEMS");
+  // loop: NOT-WORTH — five items
+  return [...railTs.slice(at, railTs.indexOf("];", at)).matchAll(/label: "([^"]+)"/g)].map((m) => m[1]);
+}
+
+const has = (text, words) => text.toLowerCase().includes(words.toLowerCase());
+
+/** (g): the run options and the clip settings' labels. `flags`: optionFlags; `exceptions`: WIKI_EXCEPTIONS. */
+export function checkRunOptions(pages, options, flags, labels, exceptions = WIKI_EXCEPTIONS) {
+  const problems = [];
+  const cli = pages["Command-Line"] ?? "";
+  // loop: NOT-WORTH — the wiki's pages, once
+  const all = Object.values(pages).join("\n");
+  // loop: NOT-WORTH — ~40 options
+  for (const o of options) {
+    const fl = flags.get(o) ?? [];
+    if (fl.length) {
+      // loop: NOT-WORTH — one or two flags
+      if (!fl.some((f) => flagRe(f).test(cli))) problems.push(`Command-Line.md: the run option \`${o}\` (${fl.join(" / ")}) is missing`);
+    } else if (!exceptions[o] && !all.includes(`\`${o}\``))
+      problems.push(`the run option \`${o}\` (ck-core job.rs) has no flag and no wiki page names it: document it, or add it to WIKI_EXCEPTIONS in tools/check_wiki.mjs with why`);
+  }
+  // loop: NOT-WORTH — three exceptions
+  for (const o of Object.keys(exceptions)) if (!options.includes(o)) problems.push(`WIKI_EXCEPTIONS (tools/check_wiki.mjs): \`${o}\` isn't a run option any more: remove it`);
+  // loop: NOT-WORTH — a panel's few dozen labels
+  for (const l of labels) if (!has(all, l)) problems.push(`the clip setting "${l}" (src/ui/JobSettings.tsx) is on no wiki page: say what it does (Your-First-Key.md or its own page)`);
+  return problems;
+}
+
+/** (h): every app setting has a row in `table`; a label still on screen (`ui`: the UI's source) and on its page. */
+export function checkSettings(pages, keys, ui, table = SETTINGS) {
+  const problems = [];
+  // loop: NOT-WORTH — ~20 settings
+  for (const k of keys) {
+    const row = table[k];
+    if (!row) {
+      problems.push(`the app setting \`${k}\` has no row in SETTINGS (tools/check_wiki.mjs): its on-screen label and wiki page, or internal: why`);
+      continue;
+    }
+    if (row.internal) continue;
+    if (!ui.includes(row.label)) problems.push(`SETTINGS (tools/check_wiki.mjs): "${row.label}" (\`${k}\`) isn't on screen any more (src/ui): fix the label`);
+    if (pages[row.page] === undefined) problems.push(`SETTINGS (tools/check_wiki.mjs): \`${k}\` names the wiki page ${row.page}, which docs/wiki/ doesn't have`);
+    else if (!has(pages[row.page], row.label)) problems.push(`${row.page}.md: the app setting "${row.label}" (\`${k}\`) is missing`);
+  }
+  // loop: NOT-WORTH — ~20 rows
+  for (const k of Object.keys(table)) if (!keys.includes(k)) problems.push(`SETTINGS (tools/check_wiki.mjs): \`${k}\` isn't an app setting any more: remove it`);
+  return problems;
+}
+
+/** (i): every rail page has a wiki page or section: a heading with its name (any case). */
+export function checkRail(pages, labels) {
+  const headings = [];
+  // loop: NOT-WORTH — the wiki's pages
+  for (const t of Object.values(pages))
+    // loop: NOT-WORTH — one page's lines
+    for (const line of splitFences(t).prose.split("\n")) {
+      const m = /^#{1,6}\s+(.*?)\s*#*\s*$/.exec(line);
+      if (m) headings.push(m[1].replace(/\*\*/g, "").toLowerCase());
+    }
+  // loop: NOT-WORTH — five rail pages
+  return labels.filter((l) => !headings.includes(l.toLowerCase())).map((l) => `the rail page "${l}" (src/ui/rail/railModel.ts) has no wiki page or section (a heading "${l}")`);
+}
+
 /** Everything, on this repository. */
 export function checkAll(app = APP) {
   const pages = readPages(join(app, "docs", "wiki"));
@@ -270,6 +407,7 @@ export function checkAll(app = APP) {
   const exits = exitCodes(readFileSync(join(app, "engine-rs", "crates", "ck-cli", "src", "exit.rs"), "utf8"));
   const builtins = builtinNames(readFileSync(join(app, "src", "shared", "console", "registry.ts"), "utf8"));
   const messages = engineMessages(rustFiles(join(app, "engine-rs", "crates", "ck-core", "src")));
+  const read = (...p) => readFileSync(join(app, ...p), "utf8");
   const repoFile = (p) => {
     const f = join(app, p);
     return existsSync(f) && statSync(f).isFile() ? readFileSync(f, "utf8") : existsSync(f) ? "" : null;
@@ -279,7 +417,37 @@ export function checkAll(app = APP) {
     ...checkConsole(pages["Console"], builtins),
     ...checkTroubleshooting(pages["Troubleshooting"], messages),
     ...checkLinks(pages, repoFile),
+    ...checkRunOptions(
+      pages,
+      runOptions(read("engine-rs", "crates", "ck-core", "src", "job.rs")),
+      optionFlags(read("engine-rs", "crates", "ck-cli", "src", "args.rs")),
+      screenLabels(read("src", "ui", "JobSettings.tsx")),
+    ),
+    ...checkSettings(pages, settingKeys(app), uiText(app)),
+    ...checkRail(pages, railLabels(read("src", "ui", "rail", "railModel.ts"))),
   ];
+}
+
+/** The app's settings (Settings, Appearance, UpdatePrefs). */
+function settingKeys(app) {
+  const types = readFileSync(join(app, "src", "shared", "types.ts"), "utf8");
+  const prefs = readFileSync(join(app, "electron", "main", "updatePrefs.ts"), "utf8");
+  return [...interfaceKeys(types, "Settings"), ...interfaceKeys(types, "Appearance"), ...interfaceKeys(prefs, "UpdatePrefs")];
+}
+
+/** The text on screen, as source: src/ui's .tsx files and the Console's registry (its commands are its controls). */
+function uiText(app) {
+  const out = [readFileSync(join(app, "src", "shared", "console", "registry.ts"), "utf8")];
+  const walk = (d) => {
+    // loop: NOT-WORTH — src/ui's few dozen files, once per gate run
+    for (const n of readdirSync(d)) {
+      const p = join(d, n);
+      if (statSync(p).isDirectory()) walk(p);
+      else if (p.endsWith(".tsx")) out.push(readFileSync(p, "utf8"));
+    }
+  };
+  walk(join(app, "src", "ui"));
+  return out.join("\n");
 }
 
 /** The pages that differ between docs/wiki/ and a wiki clone (added, removed or changed; line ends don't count). */
