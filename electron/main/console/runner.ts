@@ -572,13 +572,19 @@ export class Console {
     // loop: NOT-WORTH — the few rows
     const failed = rows.some((r) => r.status === "fail");
     b.exitCode = failed ? 1 : 0;
-    if (json) return this.finish(b, failed ? "failed" : "done", ...JSON.stringify(rows, null, 2).split("\n"));
+    // the rows are output (a ✓ row is never shown as an error), whatever the end
+    const print = (lines: string[]) => {
+      // loop: NOT-WORTH — the few rows' lines
+      for (const l of lines) this.note(b, "out", l);
+      return this.finish(b, failed ? "failed" : "done");
+    };
+    if (json) return print(JSON.stringify(rows, null, 2).split("\n"));
     // loop: NOT-WORTH — the few rows
     const w = Math.max(...rows.map((r) => r.check.length));
     const sym = { ok: "✓", warn: "⚠", fail: "✗" } as const;
     // loop: NOT-WORTH — as above
     const lines = rows.flatMap((r) => [`${sym[r.status]} ${r.check.padEnd(w)}  ${r.detail}`, ...(r.fix && r.status !== "ok" ? [`  ${" ".repeat(w)}  fix: ${r.fix}`] : [])]);
-    return this.finish(b, failed ? "failed" : "done", ...lines);
+    return print(lines);
   }
 
   /** `corridorkey info --json`: its JSON, or what went wrong (its error line, without the exit code it prints). */
@@ -1185,21 +1191,29 @@ const DISK_FULL = 2 * 2 ** 30;
 const DISK_LOW = 20 * 2 ** 30;
 
 const RUNTIME_FIX = "App: Engine page → Runtime and models (download the GPU runtime, or choose one it lists)";
+const MODELS_FIX = "App: Engine page → Runtime and models (download the models)";
 
 /** doctor's rows from `corridorkey info --json` (ck-cli run.rs info): the card, ONNX Runtime, the models. */
 function infoRows(r: { info: Record<string, unknown> } | { error: string }): DoctorRow[] {
+  // info stops at the first of the two it can't open: the runtime ("ONNX Runtime didn't load …"), else the model set
   if ("error" in r)
-    return [
-      { check: "ONNX Runtime", status: "fail", detail: r.error, fix: RUNTIME_FIX },
-      { check: "Graphics card", status: "warn", detail: "not checked: ONNX Runtime first", fix: RUNTIME_FIX },
-    ];
+    return /ONNX Runtime|couldn't start|no JSON|ended with/.test(r.error)
+      ? [
+          { check: "ONNX Runtime", status: "fail", detail: r.error, fix: RUNTIME_FIX },
+          { check: "Graphics card", status: "warn", detail: "not checked: ONNX Runtime first", fix: RUNTIME_FIX },
+        ]
+      : [
+          { check: "Models", status: "fail", detail: r.error, fix: MODELS_FIX },
+          { check: "Graphics card", status: "warn", detail: "not checked: the models first", fix: MODELS_FIX },
+        ];
   const i = r.info as {
     onnxruntime?: string;
     provider?: string | null;
     precision?: string | null;
     unavailable?: string | null;
     gpu?: { name: string; driver: string; vram_total_mb: number } | null;
-    models?: { dir: string; set: string | null; assets: [string, boolean][] | null } | null;
+    // assets: each network's name and whether its file is there (ck-core runtime.rs ModelSet::assets)
+    models?: { dir: string; set: string | null; assets: Record<string, boolean> | null } | null;
   };
   const rows: DoctorRow[] = [];
   if (i.gpu && i.provider && i.provider !== "cpu")
@@ -1224,14 +1238,16 @@ function infoRows(r: { info: Record<string, unknown> } | { error: string }): Doc
       fix: `${RUNTIME_FIX}; an NVIDIA card also needs its driver (nvidia-smi shows it)`,
     });
   rows.push({ check: "ONNX Runtime", status: "ok", detail: i.onnxruntime ?? "?", fix: null });
-  const MODELS_FIX = "App: Engine page → Runtime and models (download the models)";
   if (!i.models) rows.push({ check: "Models", status: "fail", detail: "no model set", fix: MODELS_FIX });
   else {
     // loop: NOT-WORTH — five networks
-    const missing = (i.models.assets ?? []).filter(([, have]) => !have).map(([p]) => p);
+    const missing = Object.entries(i.models.assets ?? {})
+      // loop: NOT-WORTH — as above
+      .filter(([, have]) => !have)
+      .map(([name]) => name);
     rows.push(
       missing.length
-        ? { check: "Models", status: "fail", detail: `missing: ${missing.join(", ")}`, fix: MODELS_FIX }
+        ? { check: "Models", status: "fail", detail: `${i.models.dir} has no ${missing.join(", ")} network${missing.length > 1 ? "s" : ""}`, fix: MODELS_FIX }
         : { check: "Models", status: "ok", detail: `${i.models.set ?? "no manifest"} in ${i.models.dir}`, fix: null },
     );
   }

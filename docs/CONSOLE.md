@@ -92,7 +92,9 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   and ffmpeg (the app's check: ffmpeg, ffprobe and the encoders the outputs need) from `ConsoleDeps.doctor`, and each
   folder the Console writes to (the results folder, the cache folder, the allowed ones): there, writable, its disk's
   free space (✗ under 2 GiB, ⚠ under 20 GiB). It ends failed (exit 1) when a row is ✗, so a script can stop on it.
-  Tests inject the checks and a fake `info`.
+  Tests inject the checks and a fake `info` whose JSON is the real CLI's (`models.assets` is a map of the five
+  networks; a model set info can't open is the Models row, a runtime that doesn't load the ONNX Runtime row); an
+  isolated copy ran it against the real `corridorkey info` (CPU device).
 - **Output** goes to the page as blocks (`ConsoleBlock` in `src/shared/types.ts`): the line, its state and exit code,
   progress, the last 2000 lines, `dir`'s rows. The page keeps them quiet: a block's actions show on hover and on
   keyboard focus (`:focus-within`; opacity only, so Tab always reaches them; always shown without hover), a built-in's

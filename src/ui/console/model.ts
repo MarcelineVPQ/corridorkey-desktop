@@ -113,7 +113,8 @@ export const compactBlock = (b: ConsoleBlock): boolean => b.argv === null && b.p
 
 /** How long it took ("0.4 s", "2 min 05 s"); null while it runs. */
 export function duration(b: ConsoleBlock): string | null {
-  if (b.finishedAt === null) return null;
+  // a queue job's echoed line ran nothing here: no time to show
+  if (b.finishedAt === null || b.echo) return null;
   const s = Math.max(0, (b.finishedAt - b.startedAt) / 1000);
   if (s < 60) return `${s < 10 ? s.toFixed(1) : Math.round(s)} s`;
   const m = Math.floor(s / 60);

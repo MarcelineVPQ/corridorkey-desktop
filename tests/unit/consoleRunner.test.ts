@@ -997,7 +997,8 @@ describe("Phase 4: doctor", () => {
     unavailable: null,
     gpu: { name: "NVIDIA GeForce RTX 5080", driver: "590.44", vram_total_mb: 16303 },
     tensorrt_available: true,
-    models: { dir: "/m/2.0.0-onnx.4", set: "2.0.0-onnx.4", assets: [["/m/2.0.0-onnx.4/a.onnx", true]] },
+    // as ck-cli prints it (a real run: ModelSet::assets is a map of the five networks)
+    models: { dir: "/m/2.0.0-onnx.4", set: "2.0.0-onnx.4", assets: { cradio: true, moge: true, rvm: true, stage1: true, stage2: true } },
     decoders: { ffmpeg: "7.1" },
   };
   const app = (over: Partial<DoctorRow>[] = []) => ({
@@ -1045,13 +1046,19 @@ describe("Phase 4: doctor", () => {
       fs: fs4(1 * 2 ** 30),
     });
     const p = c.run("doctor");
-    await answer({ ...INFO_OK, provider: null, gpu: null, unavailable: "no NVIDIA driver found", models: { dir: "/m", set: null, assets: [["/m/x.onnx", false]] } });
+    await answer({
+      ...INFO_OK,
+      provider: null,
+      gpu: null,
+      unavailable: "no NVIDIA driver found",
+      models: { dir: "/m", set: null, assets: { cradio: true, moge: true, rvm: false, stage1: true, stage2: false } },
+    });
     const b = await p;
     const text = b.lines.map((l) => l.text);
     const at = (s: string) => text.findIndex((l) => l.includes(s));
     expect(text[at("Graphics card")]).toMatch(/^✗ Graphics card +no NVIDIA driver found$/);
     expect(text[at("Graphics card") + 1]).toMatch(/^ +fix: /);
-    expect(text[at("Models")]).toMatch(/^✗ Models +missing: \/m\/x.onnx$/);
+    expect(text[at("Models")]).toMatch(/^✗ Models +\/m has no rvm, stage2 networks$/);
     expect(text[at("Models") + 1]).toMatch(/fix: App: Engine page → Runtime and models \(download the models\)/);
     expect(text[at("TensorRT") + 1]).toMatch(/fix: App: Engine page → TensorRT → Download/);
     expect(text[at("Results folder")]).toMatch(/^✗ Results folder .*1.0 GiB free/);
@@ -1071,6 +1078,13 @@ describe("Phase 4: doctor", () => {
     await answer(null, 7, ["ERROR: ONNX Runtime didn't load: libonnxruntime.so: not found (--ort LIB, or CK_ENGINE_ORT) (exit 7, assets)"]);
     const f = await p;
     expect(f.lines.map((l) => l.text).find((l) => l.includes("ONNX Runtime"))).toMatch(/^✗ ONNX Runtime +ONNX Runtime didn't load: libonnxruntime.so: not found/);
+    // every row is output, a ✓ one too, though the block failed
+    expect(f.lines.every((l) => l.kind === "out")).toBe(true);
+    // a model set info can't open is the Models row
+    const p2 = c.run("doctor");
+    await new Promise((r) => setTimeout(r, 5));
+    await finish(spawned[1].child, [], 7, ["ERROR: /m/models.json: not a model set manifest (exit 7, assets)"]);
+    expect((await p2).lines.map((l) => l.text).find((l) => l.includes("Models"))).toMatch(/^✗ Models +\/m\/models.json: not a model set manifest$/);
   });
 });
 

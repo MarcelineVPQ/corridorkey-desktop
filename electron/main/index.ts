@@ -240,7 +240,7 @@ const queue = new Queue({
   tempDirFor: (id) => jobTempDir(appFolders.cache, id),
   // teach by echo: the job's corridorkey line in the Console (its page shows it unless Console settings turn it off)
   started: (job) => {
-    if (job.command) appConsole.echo(job.command, `The queue started ${job.clip.name}; as a command line:`);
+    if (job.command) appConsole.echo(job.command, `The queue started ${job.clip.name}: this line keys it the same way`);
   },
   tensorrt: () => useTensorrt({ platform: PLATFORM, setting: settings.tensorrt, ready: trtReady(enginePaths().ort, enginePaths().models) }),
   tensorrtWhyNot: () => tensorrtWhyNot({ platform: PLATFORM, setting: settings.tensorrt, ready: trtReady(enginePaths().ort, enginePaths().models) }),

@@ -250,6 +250,8 @@ describe("teach by echo: a queue job's line", () => {
   it("reads as where it came from, with no exit code", () => {
     expect(blockStatus(echo)).toEqual({ word: "from the queue", tone: "ok", exit: null, meaning: null });
     expect(announcement([echo])).toBe("corridorkey render -i a.mov -o /out/a: from the queue");
+    // it ran nothing here: no duration
+    expect(duration(echo)).toBeNull();
   });
 
   it("is shown unless Console settings turn GUI jobs as commands off", () => {
