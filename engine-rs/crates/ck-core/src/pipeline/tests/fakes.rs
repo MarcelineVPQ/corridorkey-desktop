@@ -62,6 +62,8 @@ impl Run {
 
 #[derive(Clone, Debug)]
 pub(crate) enum Event {
+    /// a load starts, logged on the job's thread (Loader::starting), also for a load ahead
+    Start(&'static str),
     Load(&'static str, Provider),
     Drop(&'static str),
     Run(Run),
@@ -137,6 +139,9 @@ impl Loader for FakeLoader {
         self.caps.lock().unwrap().push((piece, vram_cap));
         self.log.lock().unwrap().push(Event::Load(piece, provider));
         Ok(FakeNet { piece, provider, cfg: self.cfg.clone(), log: self.log.clone(), counters: NetCounters::default(), calls: 0, shrink: false })
+    }
+    fn starting(&self, piece: &'static str) {
+        self.log.lock().unwrap().push(Event::Start(piece));
     }
 }
 

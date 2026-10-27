@@ -56,6 +56,7 @@ fn loaded_at_each_run(events: &[Event]) -> Vec<(&'static str, BTreeSet<&'static 
                 loaded.remove(p);
             }
             Event::Run(r) => out.push((r.piece, loaded.clone())),
+            Event::Start(_) => {}
         }
     }
     out
@@ -525,10 +526,11 @@ fn bad_frame_ranges_are_refused() {
 const WEIGHTS: [(&str, u64); 5] = [("cradio", 1_725_204_048), ("moge", 178_173_376), ("rvm", 67_485_130), ("stage1", 926_574_332), ("stage2", 405_244_331)];
 
 /// A job at a budget of `cap` bytes on CUDA with the onnx.4 sizes (the CUDA context measured at 0.33 GiB): each
-/// network's arena limit and the networks its budget leaves room for (`sharing`), after checking that every network
-/// the fake loader saw loaded while its arena held working memory (its first run to its drop) is one of them. The
-/// seen set can come out smaller than the real one, never larger: a load ahead logs from its own thread, after the
-/// drop it overlapped at times (3 in 40 full-suite runs), so the arithmetic uses the engine's set.
+/// network's arena limit and the networks its budget leaves room for (`sharing`), after checking that they are exactly
+/// the networks loaded (from the start of their load) while its arena held working memory (its first run to its
+/// drop). A load counts from `Event::Start`, which the job's own thread logs, also for a load ahead before its thread
+/// is spawned: the fake's `Event::Load` comes from the load-ahead thread and landed after the drop it overlapped at
+/// times (3 in 40 full-suite runs, review N7).
 fn budget_job(cap: u64, low_vram: bool) -> Vec<(&'static str, u64, BTreeSet<&'static str>)> {
     let mut h = Harness::new(FakeCfg::new(SHAPE), 9, options(json!({})));
     // loop: NOT-WORTH — five files
@@ -550,7 +552,7 @@ fn budget_job(cap: u64, low_vram: bool) -> Vec<(&'static str, u64, BTreeSet<&'st
                 .iter()
                 .enumerate()
                 .filter_map(|(i, e)| match e {
-                    Event::Load(q, _) if *q != p && i < dropped => {
+                    Event::Start(q) if *q != p && i < dropped => {
                         let gone = events[i..].iter().position(|e| matches!(e, Event::Drop(d) if d == q)).map(|j| i + j).unwrap_or(events.len());
                         (gone > first_run).then_some(*q)
                     }
@@ -558,7 +560,7 @@ fn budget_job(cap: u64, low_vram: bool) -> Vec<(&'static str, u64, BTreeSet<&'st
                 })
                 .collect();
             let shared: BTreeSet<&'static str> = sharing(p, low_vram).iter().copied().filter(|q| *q != p).collect();
-            assert!(seen.is_subset(&shared), "{p} (low_vram {low_vram}): loaded beside it {seen:?}, budgeted for {shared:?}");
+            assert_eq!(seen, shared, "{p} (low_vram {low_vram}): loaded beside it {seen:?}, budgeted for {shared:?}");
             (p, cap.unwrap(), shared)
         })
         .collect()

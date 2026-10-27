@@ -41,6 +41,10 @@ pub trait Network: Send + 'static {
 pub trait Loader: Clone + Send + 'static {
     type Net: Network;
     fn load(&self, piece: &'static str, provider: Provider, file: &Path, vram_cap: Option<u64>) -> Result<Self::Net, Error>;
+    /// Called on the job's own thread as a load of `piece` starts (also one ahead, before its thread is spawned).
+    /// The engine's loader does nothing; the tests' fake logs it, so which networks share the card is seen in the
+    /// job thread's own order, whatever the load-ahead thread's timing.
+    fn starting(&self, _piece: &'static str) {}
 }
 
 /// The engine's loader: ONNX Runtime sessions in the process's runtime.

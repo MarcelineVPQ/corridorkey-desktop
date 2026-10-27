@@ -355,6 +355,7 @@ impl<L: Loader> Pipeline<L> {
                     .file(piece, key.precision)
                     .ok_or_else(|| Error::assets(format!("missing ONNX model {piece} ({}) in {}", key.precision.name(), self.models.dir.display())))?,
             };
+            self.loader.starting(piece);
             let t = Instant::now();
             let settings = trt.map(|f| f(piece));
             let cap = self.arena_limit(key, piece, low_vram);
@@ -499,6 +500,7 @@ impl<L: Loader> Pipeline<L> {
             }
             let Some(file) = self.models.file(piece, key.precision) else { continue };
             let cap = self.arena_limit(key, piece, true);
+            self.loader.starting(piece);
             let (loader, prov, prec) = (self.loader.clone(), key.provider, key.precision);
             // loop: PARALLELIZE — the next low-VRAM phase's network loads while this phase runs (measured: 1.3-1.5 s less per job)
             let started = crate::ahead::spawn_named(&format!("load-{piece}"), move || {
