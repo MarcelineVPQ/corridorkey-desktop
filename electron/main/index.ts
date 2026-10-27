@@ -57,7 +57,7 @@ import {
 import { NOT_WHILE_BUSY } from "../../src/shared/texts";
 import type { DesktopPalette } from "../../src/ui/theme/palette";
 import { IPC } from "./ipc";
-import { consoleLineArg, consoleLinesArg, cursorArg, fromAppPage, idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir, vramLimit } from "./validate";
+import { consoleLineArg, consoleLinesArg, cursorArg, fromAppPageOnly, idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir, vramLimit } from "./validate";
 import { Console, LINE_MAX, type ElevationRequest, type ScriptElevationRequest } from "./console/runner";
 import { dropOnLockAndSleep, Elevation, ELEVATION_CAP_MS, ELEVATION_TTL_MS, LinuxLockWatch, parseLockedHint } from "./console/elevation";
 import { AuditLog, History } from "./console/logs";
@@ -852,12 +852,17 @@ function persist(): void {
 }
 
 function registerIpc(): void {
-  ipcMain.handle(IPC.getState, () => state());
+  // Every channel answers only the app's own page (its window's top frame): fromAppPageOnly (validate.ts), on top of the
+  // sandbox; gate tools/check_ipc_sender.mjs
+  const appPage = () => mainWindow?.webContents;
+  const handle = (channel: string, fn: (e: Electron.IpcMainInvokeEvent, ...args: unknown[]) => unknown) => ipcMain.handle(channel, fromAppPageOnly(appPage, fn));
+  const listen = (channel: string, fn: (e: Electron.IpcMainEvent, ...args: unknown[]) => void) => ipcMain.on(channel, fromAppPageOnly(appPage, fn));
+  handle(IPC.getState, () => state());
   // Every handler checks its arguments (validate.ts): the page is sandboxed, but what it sends is still input.
-  ipcMain.handle(IPC.addPaths, (_e, paths: unknown) => addPaths(pathsArg(paths)));
+  handle(IPC.addPaths, (_e, paths: unknown) => addPaths(pathsArg(paths)));
   // Two dialogs: on Windows and Linux one dialog can't pick both files and folders (it falls back to a folder
   // picker, so video files couldn't be chosen at all: found in the Windows VM 2026-10-24; Electron's own note).
-  ipcMain.handle(IPC.pickClips, async (_e, kindIn: unknown) => {
+  handle(IPC.pickClips, async (_e, kindIn: unknown) => {
     const folder = kindIn === "folder";
     const r = await dialog.showOpenDialog(
       mainWindow!,
@@ -872,7 +877,7 @@ function registerIpc(): void {
     );
     if (!r.canceled) await addPaths(r.filePaths);
   });
-  ipcMain.handle(IPC.pickFile, async (_e, kindArg: unknown) => {
+  handle(IPC.pickFile, async (_e, kindArg: unknown) => {
     const kind = kindArg === "hint-video" ? "hint-video" : "hint-image";
     const r = await dialog.showOpenDialog(mainWindow!, {
       title: kind === "hint-image" ? "First-frame hint (matte image)" : "Hint video or frame folder",
@@ -882,7 +887,7 @@ function registerIpc(): void {
     });
     return r.canceled ? null : r.filePaths[0];
   });
-  ipcMain.handle(IPC.pickRustEngine, async (_e, whatArg: unknown) => {
+  handle(IPC.pickRustEngine, async (_e, whatArg: unknown) => {
     if (!isRustWhat(whatArg)) return;
     const what = whatArg;
     const opts = {
@@ -897,7 +902,7 @@ function registerIpc(): void {
     persist();
     scheduleSend();
   });
-  ipcMain.handle(IPC.setRustEngine, (_e, whatArg: unknown, pathArgIn: unknown) => {
+  handle(IPC.setRustEngine, (_e, whatArg: unknown, pathArgIn: unknown) => {
     if (!isRustWhat(whatArg)) return;
     const key = RUST_KEYS[whatArg];
     // null = Automatic; otherwise only a path the list offers, or the one already chosen with Browse…
@@ -910,7 +915,7 @@ function registerIpc(): void {
     persist();
     scheduleSend();
   });
-  ipcMain.handle(IPC.startInstall, async (_e, partIn: unknown) => {
+  handle(IPC.startInstall, async (_e, partIn: unknown) => {
     const isTrt = partIn === "tensorrt";
     if (installAbort || !install.gpuOk) return;
     // TensorRT goes on top of the runtime and models (its switch shows the box only then), on Linux
@@ -952,7 +957,7 @@ function registerIpc(): void {
     if (isTrt && !error) void prebuild.start(false);
     scheduleSend();
   });
-  ipcMain.handle(IPC.setTensorrt, (_e, on: unknown) => {
+  handle(IPC.setTensorrt, (_e, on: unknown) => {
     if (!trtSupported(PLATFORM)) return;
     settings = { ...settings, tensorrt: on === true };
     trt = { ...trt, ...trtParts() };
@@ -962,12 +967,12 @@ function registerIpc(): void {
     else prebuild.stop();
     scheduleSend();
   });
-  ipcMain.handle(IPC.trtPrebuild, (_e, action: unknown) => {
+  handle(IPC.trtPrebuild, (_e, action: unknown) => {
     if (action === "start") void prebuild.start(true);
     else if (action === "stop") prebuild.stop();
   });
   // the sizes TensorRT builds for (Engine settings, TensorRT; a waiting clip's "Build for this clip's size"; row 56)
-  ipcMain.handle(IPC.trtSize, async (_e, actionIn: unknown, sizeIn: unknown) => {
+  handle(IPC.trtSize, async (_e, actionIn: unknown, sizeIn: unknown) => {
     const size = sanitizeTrtSize(sizeIn);
     const key = size && trtSizeKey(size.width, size.height);
     if (!trtSupported(PLATFORM) || !size || !key) return;
@@ -1014,12 +1019,12 @@ function registerIpc(): void {
     resume();
     scheduleSend();
   });
-  ipcMain.handle(IPC.stopInstall, () => installAbort?.abort());
-  ipcMain.handle(IPC.measureStorage, async () => {
+  handle(IPC.stopInstall, () => installAbort?.abort());
+  handle(IPC.measureStorage, async () => {
     await measureStorage();
     scheduleSend();
   });
-  ipcMain.handle(IPC.openStorageFolder, async (_e, idIn: unknown) => {
+  handle(IPC.openStorageFolder, async (_e, idIn: unknown) => {
     // only the app's own folders: the cache folder, or one Storage lists
     const items = idIn === "cache-root" ? [] : await storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort);
     // loop: NOT-WORTH — four items, once per click
@@ -1032,13 +1037,13 @@ function registerIpc(): void {
     // error: SHOWN — the file manager couldn't be started: a message box says why
     if (err && mainWindow) await dialog.showMessageBox(mainWindow, { type: "info", message: "The folder couldn't be opened", detail: `${p}: ${err}` });
   });
-  ipcMain.handle(IPC.pickCacheFolder, async (_e, toIn: unknown) => pickCacheFolder(toIn === "default"));
-  ipcMain.handle(IPC.setVramLimitDefault, (_e, gbIn: unknown) => {
+  handle(IPC.pickCacheFolder, async (_e, toIn: unknown) => pickCacheFolder(toIn === "default"));
+  handle(IPC.setVramLimitDefault, (_e, gbIn: unknown) => {
     settings = { ...settings, vramLimitGb: vramLimit(gbIn) };
     persist();
     scheduleSend();
   });
-  ipcMain.handle(IPC.removeStorage, async (_e, idIn: unknown) => {
+  handle(IPC.removeStorage, async (_e, idIn: unknown) => {
     // loop: NOT-WORTH — three items, once per click
     const item = (await storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort)).find((i) => i.id === idIn);
     if (!item || !mainWindow || cacheMoving) return;
@@ -1076,7 +1081,7 @@ function registerIpc(): void {
     resumeBuild();
     scheduleSend();
   });
-  ipcMain.handle(IPC.installFfmpeg, async () => {
+  handle(IPC.installFfmpeg, async () => {
     if (ffmpeg.ok || ffmpeg.installing) return;
     ffmpeg = { ...ffmpeg, installing: true, installError: null };
     scheduleSend();
@@ -1091,7 +1096,7 @@ function registerIpc(): void {
     // found after all (e.g. winget: "already installed"): no error to show
     if (ffmpeg.ok) ffmpeg = { ...ffmpeg, installError: null };
   });
-  ipcMain.handle(IPC.setJobOptions, (_e, idIn: unknown, optionsIn: unknown) => {
+  handle(IPC.setJobOptions, (_e, idIn: unknown, optionsIn: unknown) => {
     const id = idArg(idIn);
     if (!id) return;
     const options: JobOptions = sanitizeOptions(optionsIn);
@@ -1103,7 +1108,7 @@ function registerIpc(): void {
     settings = { ...settings, frameDirLinear, lastOptions: { ...options, hintFirstFrame: null, hintVideo: null, hintMode: "none" } };
     persist();
   });
-  ipcMain.handle(IPC.estimateMemory, async (_e, idIn: unknown): Promise<MemoryEstimateResult> => {
+  handle(IPC.estimateMemory, async (_e, idIn: unknown): Promise<MemoryEstimateResult> => {
     const id = idArg(idIn);
     // loop: NOT-WORTH — the queue's jobs, once per estimate asked
     const job = id ? queue.jobs.find((j) => j.id === id) : undefined;
@@ -1117,15 +1122,15 @@ function registerIpc(): void {
     }
     return r;
   });
-  ipcMain.handle(IPC.removeJob, (_e, id: unknown) => {
+  handle(IPC.removeJob, (_e, id: unknown) => {
     const v = idArg(id);
     if (v) queue.remove(v);
   });
-  ipcMain.handle(IPC.retryJob, (_e, id: unknown) => {
+  handle(IPC.retryJob, (_e, id: unknown) => {
     const v = idArg(id);
     if (v) queue.retry(v);
   });
-  ipcMain.handle(IPC.startQueue, async () => {
+  handle(IPC.startQueue, async () => {
     recheckEngines();
     await recheckFfmpeg();
     await checkCacheDrive();
@@ -1147,20 +1152,20 @@ function registerIpc(): void {
     prebuild.pause();
     return queue.start();
   });
-  ipcMain.handle(IPC.stopQueue, () => queue.stop());
-  ipcMain.handle(IPC.showInFolder, (_e, pathIn: unknown) => {
+  handle(IPC.stopQueue, () => queue.stop());
+  handle(IPC.showInFolder, (_e, pathIn: unknown) => {
     const p = pathArg(pathIn);
     if (p) shell.showItemInFolder(p);
   });
   // a path's Copy button (src/ui/PathText.tsx) and the Console's Copy output (≤ 2000 lines of ≤ 4000 characters):
   // plain text only, bounded
-  ipcMain.handle(IPC.copyText, (_e, textIn: unknown) => {
+  handle(IPC.copyText, (_e, textIn: unknown) => {
     if (typeof textIn !== "string" || textIn.length === 0 || textIn.length > 8_500_000) return false;
     clipboard.writeText(textIn);
     return true;
   });
   // Copy log (the job page): the whole log as its <clip>_log.txt has it, built from the job the main process keeps
-  ipcMain.handle(IPC.copyJobLog, (_e, idIn: unknown) => {
+  handle(IPC.copyJobLog, (_e, idIn: unknown) => {
     const id = idArg(idIn);
     // loop: NOT-WORTH — the queue's jobs, once per click
     const job = id ? queue.jobs.find((j) => j.id === id) : undefined;
@@ -1168,7 +1173,7 @@ function registerIpc(): void {
     clipboard.writeText(jobLogText(job, app.getVersion()));
     return true;
   });
-  ipcMain.handle(IPC.setAppearance, (_e, aIn: unknown) => {
+  handle(IPC.setAppearance, (_e, aIn: unknown) => {
     const a = sanitizeAppearance(aIn);
     settings = { ...settings, appearance: a };
     nativeTheme.themeSource = a.theme === "light" ? "light" : a.theme === "dark" ? "dark" : "system";
@@ -1176,59 +1181,55 @@ function registerIpc(): void {
     updatePaletteWatch();
     scheduleSend();
   });
-  ipcMain.handle(IPC.pickOutputRoot, async () => {
+  handle(IPC.pickOutputRoot, async () => {
     const r = await dialog.showOpenDialog(mainWindow!, { title: "Folder for results", properties: ["openDirectory", "createDirectory"] });
     if (r.canceled) return;
     settings = { ...settings, outputRoot: r.filePaths[0] };
     persist();
     scheduleSend();
   });
-  ipcMain.handle(IPC.clearOutputRoot, () => {
+  handle(IPC.clearOutputRoot, () => {
     settings = { ...settings, outputRoot: null };
     persist();
     scheduleSend();
   });
-  ipcMain.handle(IPC.checkForUpdates, () => updater.check(true));
-  ipcMain.handle(IPC.setUpdateChannel, (_e, c: unknown) => updater.setChannel(c === "dev" ? "dev" : "stable"));
-  ipcMain.handle(IPC.setAutoUpdate, (_e, on: unknown) => updater.setAutomatic(on === true));
-  ipcMain.handle(IPC.installUpdate, () => updater.download());
+  handle(IPC.checkForUpdates, () => updater.check(true));
+  handle(IPC.setUpdateChannel, (_e, c: unknown) => updater.setChannel(c === "dev" ? "dev" : "stable"));
+  handle(IPC.setAutoUpdate, (_e, on: unknown) => updater.setAutomatic(on === true));
+  handle(IPC.installUpdate, () => updater.download());
   // Never restart into an update while the queue runs (it would kill a job).
-  ipcMain.handle(IPC.restartToUpdate, () => {
+  handle(IPC.restartToUpdate, () => {
     if (!queue.running) updater.restart();
   });
-  ipcMain.handle(IPC.backToStable, () => updater.backToStable());
-  ipcMain.on(IPC.setVisible, (_e, visible: unknown) => setShown(visible === true));
-  // The Console: only the app's own page (its window's top frame), every argument checked; the line is parsed and
-  // checked again in the runner whatever the page showed
-  const page = (e: Electron.IpcMainInvokeEvent) => fromAppPage(e, mainWindow?.webContents);
-  ipcMain.handle(IPC.consoleRun, (e, lineIn: unknown) => {
+  handle(IPC.backToStable, () => updater.backToStable());
+  listen(IPC.setVisible, (_e, visible: unknown) => setShown(visible === true));
+  // The Console: every argument checked; the line is parsed and checked again in the runner whatever the page showed
+  handle(IPC.consoleRun, (_e, lineIn: unknown) => {
     const line = consoleLineArg(lineIn, LINE_MAX);
-    return page(e) && line !== null ? appConsole.run(line) : null;
+    return line !== null ? appConsole.run(line) : null;
   });
   // lines pasted into the input, run as a script once the page's offer was taken (each line checked as a typed one)
-  ipcMain.handle(IPC.consoleRunLines, (e, linesIn: unknown) => {
+  handle(IPC.consoleRunLines, (_e, linesIn: unknown) => {
     const lines = consoleLinesArg(linesIn, LINE_MAX);
-    return page(e) && lines !== null ? appConsole.runLines(lines) : null;
+    return lines !== null ? appConsole.runLines(lines) : null;
   });
-  ipcMain.handle(IPC.consoleCancel, (e) => {
-    if (page(e)) appConsole.cancel();
-  });
-  ipcMain.handle(IPC.consoleComplete, (e, lineIn: unknown, cursorIn: unknown) => {
+  handle(IPC.consoleCancel, () => appConsole.cancel());
+  handle(IPC.consoleComplete, (_e, lineIn: unknown, cursorIn: unknown) => {
     const line = consoleLineArg(lineIn, LINE_MAX);
     const cursor = line === null ? null : cursorArg(cursorIn, line);
-    return page(e) && line !== null && cursor !== null ? appConsole.complete(line, cursor) : { start: 0, end: 0, items: [] };
+    return line !== null && cursor !== null ? appConsole.complete(line, cursor) : { start: 0, end: 0, items: [] };
   });
-  ipcMain.handle(IPC.consoleHistory, (e, queryIn: unknown) => {
+  handle(IPC.consoleHistory, (_e, queryIn: unknown) => {
     const q = consoleLineArg(queryIn, 200);
-    return page(e) && q !== null ? appConsole.history(q) : [];
+    return q !== null ? appConsole.history(q) : [];
   });
-  ipcMain.handle(IPC.consoleElevationDrop, (e) => {
-    if (page(e)) appConsole.dropElevation("dropped from the Console's panel");
+  handle(IPC.consoleElevationDrop, () => {
+    appConsole.dropElevation("dropped from the Console's panel");
   });
   // App settings → Console's Remove: only a folder in the list (it narrows the scope: no confirmation)
-  ipcMain.handle(IPC.consoleDisallow, (e, folderIn: unknown) => {
+  handle(IPC.consoleDisallow, (_e, folderIn: unknown) => {
     const folder = pathArg(folderIn);
-    return page(e) && folder !== null ? appConsole.disallow(folder) : false;
+    return folder !== null ? appConsole.disallow(folder) : false;
   });
 }
 
@@ -1266,6 +1267,10 @@ function createWindow(): void {
     mainWindow = null;
     setShown(false);
   });
+  // The page asks for no permission (Electron grants every one by default): Copy goes through the main process's
+  // clipboard (copyText / copyJobLog), files through its dialogs; no camera, microphone, notifications, fullscreen.
+  mainWindow.webContents.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+  mainWindow.webContents.session.setPermissionCheckHandler(() => false);
   // No navigation away from the app, no new windows.
   mainWindow.webContents.on("will-navigate", (e) => e.preventDefault());
   // Links (About's credits) open in the default browser; https only, never in-app.

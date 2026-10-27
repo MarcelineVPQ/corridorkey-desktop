@@ -11,6 +11,7 @@ const GATES = [
   ["no folds", "node", ["tools/check_no_folds.mjs"]],
   ["wiki", "node", ["tools/check_wiki.mjs"]],
   ["CLI parity", "node", ["tools/check_cli_parity.mjs"]],
+  ["IPC sender", "node", ["tools/check_ipc_sender.mjs"]],
 ];
 
 const repo = fileURLToPath(new URL("..", import.meta.url));

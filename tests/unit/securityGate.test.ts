@@ -1,5 +1,6 @@
 // The Electron security gate (.hooks/check_electron_security.sh) on fixture trees: each forbidden pattern fails it,
-// a missing or loosened Content-Security-Policy fails it, and the real tree passes.
+// a missing or loosened Content-Security-Policy fails it, so does a missing permission or navigation handler, and the
+// real tree passes.
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,13 +14,25 @@ const config = readFileSync(join(repo, "electron.vite.config.ts"), "utf8");
 const scratch = mkdtempSync(join(tmpdir(), "ck-security-gate-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
+/** The window's permission and navigation handlers the gate requires (as electron/main/index.ts has them). */
+const WINDOW = [
+  "win.webContents.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));",
+  "win.webContents.session.setPermissionCheckHandler(() => false);",
+  'win.webContents.on("will-navigate", (e) => e.preventDefault());',
+  'win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));',
+].join("\n");
+
 let n = 0;
-/** A fixture tree: the real electron.vite.config.ts (or `viteConfig`), plus `files`; the gate's exit code and output. */
+/**
+ * A fixture tree: the real electron.vite.config.ts (or `viteConfig`), electron/main/window.ts = WINDOW, plus `files`
+ * (which can replace window.ts); the gate's exit code and output.
+ */
 function runGate(files: Record<string, string>, viteConfig = config): { code: number | null; out: string } {
   const root = join(scratch, String(n++));
-  mkdirSync(join(root, "electron"), { recursive: true });
+  mkdirSync(join(root, "electron/main"), { recursive: true });
   mkdirSync(join(root, "src"), { recursive: true });
   writeFileSync(join(root, "electron.vite.config.ts"), viteConfig);
+  writeFileSync(join(root, "electron/main/window.ts"), WINDOW);
   // loop: NOT-WORTH — one or two fixture files
   for (const [p, text] of Object.entries(files)) {
     mkdirSync(dirname(join(root, p)), { recursive: true });
@@ -111,5 +124,18 @@ describe("Electron security gate", () => {
       const r = runGate({}, c);
       expect(r.code, r.out).toBe(1);
     }
+  });
+
+  it("fails without the permission handlers, the will-navigate block or the window-open handler, or allowing a window", () => {
+    const lines = WINDOW.split("\n");
+    // loop: NOT-WORTH — four fixtures, one handler left out each
+    for (const left of lines) {
+      const r = runGate({ "electron/main/window.ts": lines.filter((l) => l !== left).join("\n") });
+      expect(r.code, left).toBe(1);
+      expect(r.out).toContain("permissions / navigation");
+    }
+    const loose = [WINDOW.replace("(e) => e.preventDefault()", "() => {}"), WINDOW.replace('action: "deny"', 'action: "allow"')];
+    // loop: NOT-WORTH — two fixtures
+    for (const w of loose) expect(runGate({ "electron/main/window.ts": w }).code, w).toBe(1);
   });
 });

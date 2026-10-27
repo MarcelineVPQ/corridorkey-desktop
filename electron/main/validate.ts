@@ -52,6 +52,17 @@ export function fromAppPage(e: { sender: unknown; senderFrame?: unknown }, appCo
   return !!appContents && e.sender === appContents && !!e.senderFrame && e.senderFrame === appContents.mainFrame;
 }
 
+/**
+ * An IPC handler that runs only for the app's own page (fromAppPage); a message from anywhere else gets undefined.
+ * Every ipcMain handler is registered through this (tools/check_ipc_sender.mjs).
+ */
+export function fromAppPageOnly<E extends { sender: unknown; senderFrame?: unknown }, A extends unknown[], R>(
+  appContents: () => { mainFrame: unknown } | null | undefined,
+  fn: (e: E, ...args: A) => R,
+): (e: E, ...args: A) => R | undefined {
+  return (e, ...args) => (fromAppPage(e, appContents()) ? fn(e, ...args) : undefined);
+}
+
 /** Dropped paths: the strings of an array (anything else: none). */
 // loop: NOT-WORTH — the dropped paths, once per drop
 export const pathsArg = (v: unknown): string[] => (Array.isArray(v) ? v.filter((p): p is string => typeof p === "string" && p.length > 0) : []);

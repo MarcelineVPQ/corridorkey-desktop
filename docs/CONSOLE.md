@@ -250,8 +250,9 @@ inner loop's words);
   child_process imported whole or by `import()`, and, unless the line or the one above says `gate: shell-ok — why`, a
   `shell:` option other than `false`, spawning a shell by name (sh, bash, cmd.exe, powershell, pwsh…), a shell's
   command-string argument (`"-c"`, `"/c"`, `"-Command"`) and `shell.openPath`.
-- **IPC.** The Console's channels (`consoleRun`, `consoleCancel`, `consoleComplete`, `consoleHistory`,
-  `consoleElevationDrop`) answer only the app's own page (its window's top frame), and check every argument (a line:
+- **IPC.** Every channel, the Console's (`consoleRun`, `consoleCancel`, `consoleComplete`, `consoleHistory`,
+  `consoleElevationDrop`) among them, answers only the app's own page (its window's top frame: `fromAppPageOnly`,
+  gate `tools/check_ipc_sender.mjs`); the Console's check every argument (a line:
   a string of at most 8192 characters without NUL; the cursor within it). The preload exposes named functions only.
 - **File scope: read anywhere, write only into chosen folders.** Reading (inputs, hints, `dir`, `cd`, Tab completion,
   scripts) goes wherever the user can read. A path a command writes to (`-o`, `--report`, `--temp`, a `--job` file's

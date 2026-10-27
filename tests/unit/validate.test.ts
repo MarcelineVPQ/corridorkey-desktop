@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { loadSettings } from "../../electron/main/settings";
-import { idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir, vramLimit } from "../../electron/main/validate";
+import { fromAppPageOnly, idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir, vramLimit } from "../../electron/main/validate";
 import { DEFAULT_APPEARANCE, DEFAULT_OPTIONS, scaledSize, vramLimitChoices } from "../../src/shared/types";
 
 describe("IPC and settings validation", () => {
@@ -120,5 +120,20 @@ describe("IPC and settings validation", () => {
     expect(uniqueOutputDir("/c/out_shot", "/c/shot.mp4", jobs)).toBe("/c/out_shot"); // the same clip again
     const more = [...jobs, { outputDir: "/c/out_shot-2", clip: { path: "/d/shot.mp4" } }] as typeof jobs;
     expect(uniqueOutputDir("/c/out_shot", "/e/shot.mp4", more)).toBe("/c/out_shot-3");
+  });
+
+  it("runs an IPC handler only for the app page's top frame (fromAppPageOnly)", () => {
+    const mainFrame = {};
+    const wc = { mainFrame };
+    let contents: typeof wc | null = wc;
+    const fn = vi.fn((_e: unknown, a: unknown, b: unknown) => [a, b]);
+    const h = fromAppPageOnly(() => contents, fn);
+    expect(h({ sender: wc, senderFrame: mainFrame }, 1, 2)).toEqual([1, 2]);
+    expect(h({ sender: wc, senderFrame: {} }, 1, 2)).toBeUndefined(); // an embedded frame
+    expect(h({ sender: {}, senderFrame: mainFrame }, 1, 2)).toBeUndefined(); // another window
+    expect(h({ sender: wc, senderFrame: null }, 1, 2)).toBeUndefined();
+    contents = null; // the window is gone
+    expect(h({ sender: wc, senderFrame: mainFrame }, 1, 2)).toBeUndefined();
+    expect(fn).toHaveBeenCalledTimes(1);
   });
 });

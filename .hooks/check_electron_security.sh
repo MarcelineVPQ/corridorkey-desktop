@@ -23,6 +23,9 @@
 # Requires the renderer's Content-Security-Policy (electron.vite.config.ts, injected into index.html at build):
 #   default-src 'self', script-src 'self' (never 'unsafe-inline' or 'unsafe-eval'), object-src 'none',
 #   base-uri 'none', and the csp() plugin on the renderer.
+# Requires, in electron/: a permission request handler and a permission check handler (Electron grants every permission
+# by default), a will-navigate handler that calls preventDefault on its line, and a window-open handler; never
+# `action: "allow"` for a new window.
 #
 # From the DS5 app (same baseline). Optional argument: the tree to check (tests use fixtures); default the repo.
 set -uo pipefail
@@ -70,6 +73,20 @@ for d in "\"default-src 'self'\"" "\"script-src 'self'\"" "\"object-src 'none'\"
 done
 if [ -n "$missing" ] || grep -qE "unsafe-eval|script-src[^\"]*unsafe-inline" "$cfg" 2>/dev/null; then
   echo "Electron security gate: the renderer's Content-Security-Policy ($cfg) is missing or loosened:${missing:- unsafe-eval / unsafe-inline scripts}"
+  exit 1
+fi
+
+# permissions and navigation
+missing=""
+src() { grep -rnE "$1" electron --include='*.ts' --include='*.tsx' --include='*.js' 2>/dev/null; }
+src 'setPermissionRequestHandler\(' >/dev/null || missing="$missing setPermissionRequestHandler"
+src 'setPermissionCheckHandler\(' >/dev/null || missing="$missing setPermissionCheckHandler"
+src "[\"']will-navigate[\"'].*preventDefault\(\)" >/dev/null || missing="$missing will-navigate(preventDefault)"
+src 'setWindowOpenHandler\(' >/dev/null || missing="$missing setWindowOpenHandler"
+allow=$(src "action[[:space:]]*:[[:space:]]*[\"'\`]allow")
+if [ -n "$missing" ] || [ -n "$allow" ]; then
+  echo "Electron security gate: permissions / navigation:${missing:+ missing$missing}${allow:+ a new window allowed:
+$allow}"
   exit 1
 fi
 exit 0
