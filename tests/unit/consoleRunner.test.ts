@@ -897,13 +897,12 @@ describe("review 2026-10-26 probes", () => {
     expect(clipName("D:\\plates\\sh010\\input", "win32")).toBe("sh010");
   });
 
-  // P7 and P8 pin today's behaviour of two open NICE items: flip each when its backlog row is built
-  it("P7 (N1, BACKLOG row 106, open): a value starting with - goes to the CLI as two words (clap then refuses it, exit 2)", async () => {
+  it("P7 (N1, BACKLOG row 106): a value starting with - goes to the CLI joined to its flag, so clap reads it as the value", async () => {
     const { c } = make();
     await c.run("render shot.mov -o ../out/c/ --codec=-x");
-    expect(spawned[0].args).toEqual(expect.arrayContaining(["--codec", "-x"]));
-    expect(spawned[0].args).not.toContain("--codec=-x");
-    await finish(spawned[0].child, [], 2);
+    expect(spawned[0].args).toContain("--codec=-x");
+    expect(spawned[0].args).not.toContain("-x");
+    await finish(spawned[0].child, [], 0);
   });
 
   it("P8 (N2, BACKLOG row 107, built by SME S11): sudo on a command that replaces nothing runs it normally, and says so", async () => {

@@ -59,7 +59,8 @@ missing there).
   process group, the engine's environment (`rustEngineEnv`, the app's models, runtime and TensorRT cache), in the
   Console's folder (on Windows corridorkey takes the current folder out of its DLL search first, `SetDllDirectoryW("")`
   in ck-cli's main, so a folder `cd` visited never supplies a DLL). The Console adds `--progress-format json` (the flag itself is refused: the Console shows progress)
-  and, for `render` without `--temp`, a temporary folder in the app's cache. The CLI's JSON events become the block's
+  and, for `render` without `--temp`, a temporary folder in the app's cache. A value starting with `-` goes joined to
+  its flag (`--codec=-x`), so the CLI reads it as the value, as typed. The CLI's JSON events become the block's
   progress (frames handed to the writers, never an estimate), phase and failure; its exit code is shown with its
   meaning (docs/CLI.md). Ctrl+C sends SIGTERM (the CLI stops cleanly after the frame it is on, 143); a second one kills
   the process group. On Windows (no SIGTERM for a console program, no process groups) the first one ends the tree with
@@ -319,7 +320,7 @@ append-only; the history cap), `consoleRunner.test.ts` (a fake spawn: the exact 
 cancel then kill, the JSON events, one job at a time, the queue's card, refusals, the sudo flow and its audit, the
 built-ins, scripts, quit, completion, the throttled push, the IPC checks), `cliSpec.test.ts` (the drift check). The senior review of 2026-10-26 (docs/REVIEW_CONSOLE_2026-10-26.md) left 14
 probes; each is a regression test (`consoleRunner.test.ts` "review 2026-10-26 probes", P9 in `consoleSafety.test.ts`,
-P10 in `consoleParse.test.ts`, the gate fixtures in `securityGate.test.ts`); P7-P9 pin open backlog rows 106-108. The
+P10 in `consoleParse.test.ts`, the gate fixtures in `securityGate.test.ts`); P7 checks backlog row 106 (built), P8-P9 pin rows 107-108. The
 Phase 4 senior review (docs/REVIEW_CONSOLE_P4_2026-10-27.md) proved its findings with probes; each is a test: hostile
 names per farm format and Deadline's argument split (`farmExport.test.ts`), the shell-safe copied line read back by
 `/bin/sh` (`jobCommand.test.ts`), the 30 000-line program (`consoleScript.test.ts`), and in `consoleRunner.test.ts`

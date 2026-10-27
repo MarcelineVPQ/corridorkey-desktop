@@ -1747,7 +1747,9 @@ export class Console {
         if (!this.d.runtimeAllowed(o.arg.id, v))
           refusals.push(`${flag}: the Console runs only the ${o.arg.id === "ort" ? "ONNX Runtime" : "model sets"} the Engine page lists (${v} isn't one; add it there first)`);
       }
-      argv.push(flag, v);
+      // a value starting with - joined to its flag, or clap reads it as a flag of its own (senior review 2026-10-26 N1)
+      if (v.startsWith("-")) argv.push(`${flag}=${v}`);
+      else argv.push(flag, v);
       if (o.arg.id === "job") jobFlags.push(...(await this.jobFileFlags(v, cmd.args, given, targets, refusals, job)));
     }
     // the job file's folders, checked and resolved, as flags (flags win over the file): the CLI uses what was checked
