@@ -245,3 +245,30 @@ code before it.
 | S11 scripts and elevation | d73d8bf (also backlog 107, 110) |
 | S12 values by meaning | 5620c7c (suggested by meaning, never taken in place: the Console accepts what the CLI accepts) |
 | N1-N9 | BACKLOG rows 118-126 |
+
+## Status: the NICE items and the later list (2026-10-27, branch `expert-suggestions`)
+
+Marcy 2026-10-27: "build the expert suggestions too". Every NICE item and the "later / maybe never" list (pipes,
+`watch`, `jobs`, man pages) is built, each with tests written to fail on the code before it (not run yet: they run
+with the branch's test list, on Marcy's OK).
+
+| Finding | Done | Where |
+| --- | --- | --- |
+| N1 `cd` completes folders only | Tab after `cd`, `pushd`, `allow`, `du`, `tree`, `bookmark`'s folder offers folders; `cd <pattern>` already goes to a sequence's folder | db748c9 (row 118) |
+| N2 a measured rate | "3.1 frames/s over the last 20 frames" from the CLI's own progress events, while it runs; no ETA | 4301b9a (row 119) |
+| N3 Esc clears the line | Esc on the line clears it, Ctrl+Y brings it back | 7e738b1 (row 120) |
+| N4 `source` | an alias of `run` | 1da3d3e (row 121) |
+| N5 `?` in a name | a `?` among other arguments shows the help and says a name with `?` goes in quotes | 1da3d3e (row 122) |
+| N6 verify's ranges, "Re-run these frames" | the ranges came from the CLI already; **Re-render missing** puts `render … --frames <ranges>` in the input (sudo … --overwrite when a listed frame is there but cut) | d6dffac (row 123) |
+| N7 Copy as farm line | on every corridorkey block, quoted for bash or cmd, without the Console's own flags | d745cd6 (row 124) |
+| N8 fold and filter, Ctrl+↑/↓ | a block folds to its line; Session → Show → Failed only, said above the log; Ctrl+↑ / Ctrl+↓ outline the block before or after | 2c0e90f (row 125) |
+| N9 a shot-aware prompt | `@sh010/key` inside a bookmark, else the last two folders | 29e88b8 (row 126) |
+| Later: structured pipes | from the Console's read-only built-ins into its own `grep`, `head`, `tail`, `count`; a listing stays a listing; never a program | 1f99b56 (row 127) |
+| Later: `watch` | `watch [-n 2-3600] <command that reads>` in one block until Ctrl+C, at most 12 hours | 0779920 (row 128) |
+| Later: `jobs` | `jobs`, `wait`, `kill [-9]` for the Console's one job (%1); never a pid | 715f690 (row 129) |
+| Later: man pages | `man <command>`: the long page generated from the registry and the CLI's spec | fa3fb3a (row 130) |
+
+For Marcy to confirm (the simplest choice taken where the review left one open): Failed only lives in the panel's
+Session section and isn't kept after a restart; the prompt's "shot" is the bookmark you are in (no guessing from
+folder names); Copy as farm line quotes for this computer's shell (bash, or cmd on Windows) and keeps a relative
+path relative; `man` became its own command (`help` stays the short form).

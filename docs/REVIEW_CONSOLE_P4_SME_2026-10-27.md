@@ -244,3 +244,30 @@ Not done or not verified here: the Deadline, OpenCue and Flamenco files are chec
 (the review's next step: a Deadline 10 repository in a VM); a DIRECTORY input on Deadline Cloud is unverified (no
 account); S2's restart with the CUDA folders was tested with a fake runtime (no GPU run); S8's rows were checked as
 rendered markup, not yet in an isolated copy of the app.
+
+## Status: the NICE items (2026-10-27, branch `expert-suggestions`)
+
+Marcy 2026-10-27: "build the expert suggestions too". All twelve are built, each with tests written to fail on the
+code before it (not run yet: they run with the branch's test list, on Marcy's OK).
+
+| Finding | Done | Where |
+|---|---|---|
+| N1 more shell reflexes | `export`, `setenv`, `setx`, `X=1`, `$env:X=` answer with `set X=1` / `${X}`; `lsseq` → `dir`; bare `grep` says it filters after a pipe (and names `history <term>`, `help -k`); `echo $HOME` says only `${name}` expands | 1da3d3e (row 140) |
+| N2 `set a=1 b` | all or nothing | e26d680 (row 141) |
+| N3 "1 files" | "1 file", "1 folder" | 838cf1b (row 142) |
+| N4 the echoed line breaks inside a flag | a block's line wraps only between words | 7fc9150 (row 143) |
+| N5 `dir`'s gaps cut off | `43/48 frames` on the row, the gaps (up to 200) on hover | 2d8775e (row 144) |
+| N6 an EXR header look | `exrheader <file or pattern>`: resolution, data window, channels, alpha, pixel type, compression, line order, parts | 4d0ec12 (row 145) |
+| N7 Re-render missing | on a failed verify, `render … --frames <ranges>` put in the input, never run | d6dffac (row 146) |
+| N8 Copy as Nuke Read | a `Read` node per EXR sequence a finished render wrote | b848ed1 (row 147) |
+| N9 negative frame numbers | `sim.-010.exr` is frame -10 of `sim.####.exr`; the row says how many are below 0; farm export refuses a folder with a pre-roll | 2d8775e (row 148) |
+| N10 `j` scores | ranks | 01674dd (row 149) |
+| N11 farm export's submit lines | each clip's line by full path, quoted for this computer's shell | e14b191 (row 150) |
+| N12 `.ckcmd` headless | `corridorkey run [--keep-going] FILE.ckcmd`: the app's own Console runner, started as Node by the CLI; sudo lines and `allow` refused (no one to confirm); exit 7 without the app | 8d6844f (row 151) |
+
+For Marcy to confirm: the EXR header is a command of its own, `exrheader` (OpenEXR's own tool's name, the reflex the
+review names), not a `dir -l` column; `corridorkey run` needs the app installed next to the CLI (it runs the app's
+code, so a bare `corridorkey` on a worker says exit 7), reads the app's settings and writes the same audit log, keeps
+its own history, and doesn't know whether the app's queue is keying (it takes the card as `corridorkey render` does).
+Not verified here: `corridorkey run` end to end (an AppImage's `ELECTRON_RUN_AS_NODE` with `app.asar`, Windows,
+macOS's hardened runtime), Copy as Nuke Read pasted into Nuke, the wrap of a long echoed line on screen.
