@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { initialView, isOpen, railKey, railLayout, railPress, RAIL, toggleFlags, viewReduce } from "../../src/ui/rail/railModel";
+import { initialView, isOpen, ITEMS, railKey, railLayout, railPress, RAIL, toggleFlags, viewReduce } from "../../src/ui/rail/railModel";
 
 describe("rail model (the house rail)", () => {
+  // review N11: the Engine tip named the runtime twice ("the engine's runtime and models … its ONNX Runtime files")
+  it("the Engine tip names the runtime once", () => {
+    const tip = ITEMS.find((i) => i.id === "engine")!.tip;
+    expect(tip.match(/runtime/gi)).toHaveLength(1);
+  });
   it("pinned takes its width only with room for the page", () => {
     expect(railLayout(1600, false)).toEqual({ mode: "collapsed", room: RAIL.collapsed });
     expect(railLayout(1600, true)).toEqual({ mode: "pinned", room: RAIL.expanded });
