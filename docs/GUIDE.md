@@ -25,11 +25,17 @@ A matte named like the clip (`shot01FrameHint.png`, `shot01_AlphaHint.mp4`) is f
 
 ## Frame folders
 
-A folder of frames has its own **Frame folder** section: the frame rate (24 by default) and **Frames are scene-linear**. A folder of OpenEXR frames starts with it on (EXR plates are scene-linear by convention); PNG and JPEG frames start with it off (display-coded, read as sRGB and clipped to 0-1). Once you change the box yourself, new frame folders start with your choice instead. The Queue's **Copy as command** and the farm export say `--linear` exactly when the box is on; the `corridorkey` command line itself reads frames as display-coded unless it's given `--linear`.
+A folder of frames has its own **Frame folder** section: the frame rate (24 by default) and **Frames are scene-linear**. A folder of OpenEXR frames starts with it on (EXR plates are scene-linear by convention); PNG and JPEG frames start with it off (display-coded, read as sRGB and clipped to 0-1). Once you change the box yourself, new frame folders start with your choice instead. The `corridorkey` command line reads a frame folder the same way (scene-linear when its first frame is EXR, display-coded otherwise); `--linear` and `--no-linear` choose. The Queue's **Copy as command** and the farm export write the box's choice: for EXR frames `--linear` or `--no-linear`, for other frames `--linear` when it's on.
 
 ## Internal resolution
 
 **Full** runs the networks at the clip's own size. **¾**, **½** and **¼** run them smaller (the original CorridorKey's `--model_scale`, the plugin's Internal Resolution): faster and lighter on graphics memory, and the result is resized back to the clip's size with the same Lanczos filter the original uses, so the edges carry less detail. The section shows the size the networks run at, and the Manual memory estimate follows it. What each step costs in detail and gains in speed is measured in docs/BACKLOG.md row 42.
+
+## Input precision
+
+**Read 10/12-bit plates at 16 bits** (off by default): off, every clip is read at 8 bits exactly as CorridorKey 2.0
+reads it, byte for byte. On, 10/12-bit video and 16-bit PNG frames reach the model in full, which differs from
+CorridorKey 2.0. 8-bit clips and EXR frames are the same either way.
 
 ## Linear exposure (video clips)
 
@@ -43,6 +49,14 @@ A folder of frames has its own **Frame folder** section: the frame rate (24 by d
 
 **Memory limit** (Auto, or 2 GiB up to your card's size) caps the graphics memory a clip's job may plan for. **Auto** sends no limit: the engine's budget is the memory free on the card when the job starts (plus what the engine already holds), and Automatic picks the largest window whose estimate × 1.1 + 0.3 GiB fits it. With a limit, Automatic picks within the smaller of the free memory and the limit, and the engine's CUDA memory is capped at it, so the rest of the card stays for other programs. A Manual window is never resized, so a window past the limit can run out of memory. The row shows the card's size and free memory from the same engine reading as the estimate, and the Manual estimates are weighed against the limit. Not used on the CPU, and not shown on a Mac (Core ML takes its window from the model set). App settings → Graphics memory sets the limit new clips start with.
 
+## TensorRT
+
+On Linux with an NVIDIA card, a clip's **TensorRT** section says what it will run on before it starts: TensorRT once its
+size's range is built, CUDA until then. **Build for this clip's size** builds that range once, in the background (it
+waits while the queue runs); jobs never build one themselves. The choice to use TensorRT is in Engine settings (see
+Engine below); what really ran shows on the clip's page once it starts. On Windows and macOS there is no TensorRT in
+this version: jobs run on CUDA, and on a Mac on Core ML.
+
 ## Outputs
 
 **Video** writes display-referred (sRGB / Rec.709) 10-bit 4:4:4 files in the codec you pick under **Codec**:
@@ -55,13 +69,36 @@ on. For an RGBA cutout in one file, choose EXR. **EXR sequence** is the exact de
 (`shot_alpha.1001.exr`; a numbered frame folder keeps its own frame numbers), with the matte in the alpha channel
 and the cutout premultiplied, as Nuke expects. Despill applies to the checker and cutout.
 
+## Where results go
+
+App settings → **Results**: by default each clip's results go into a folder next to it, `out_<clip>`; **One folder…**
+puts them into `out_<clip>` folders inside a folder you pick instead, and **Next to each clip** goes back. It applies
+to clips added from then on. Each job writes its outputs there, with `<clip>_settings.txt` (the settings it ran with)
+and `<clip>_log.txt` (its log, for failed and cancelled jobs too).
+
 ## Appearance
 
 App settings → Appearance: **System**, **Light**, **Dark** or **Desktop** (your desktop's own colors, followed live), the accent color, and **Glass**.
 
+## Updates
+
+App settings → **Updates** (the Linux AppImage; other copies say why they can't update themselves): the **Channel**,
+**Stable** or **Development** (new features first; may have rough edges), **Check automatically** (at start and every
+few hours), **Check now**, then **Download** the new version and **Restart now** (not while the queue runs). On the
+Stable channel a development build offers **Back to stable**, which installs the newest stable release over it.
+
 ## Storage
 
 App settings → Storage lists what the app keeps on this PC, each with its size, **Open** (shows the folder in your file manager) and **Remove…**. The **cache folder** holds clip thumbnails, result stills and the TensorRT engines built for your card; each job's working files, which a low-memory job reads every frame, stay in the system's cache folder on this PC wherever the cache folder is. Under it, the sizes per clip in the queue (with its job's working files while it runs), the stills of clips no longer in the queue (pruned at start: older than 30 days or past 500 MB), and the TensorRT engines per resolution range. **Change…** picks another location: the app makes its own `corridorkey-desktop` folder there (never writing into the folder you picked itself) and asks whether to **move the files** (each file is copied, checked against the original by size and SHA-256, and only then removed from the old folder; on any error nothing is removed and the cache stays where it was) or **start fresh** (the old cache files are deleted; thumbnails and stills are made again, TensorRT engines are built again on the next TensorRT job). **Default** goes back to the system's cache folder the same way. Not while the queue or a download runs.
+
+## Engine
+
+Engine settings: **Runtime and models** downloads the GPU runtime (ONNX Runtime) and the CorridorKey models, or
+says they are installed. **TensorRT** (Linux, NVIDIA): **Use TensorRT (NVIDIA)** downloads what it needs (NVIDIA's
+TensorRT libraries, ONNX Runtime's TensorRT part and the TensorRT models); until they are installed, jobs run on CUDA.
+Each resolution range is built once, in the background, and listed there. **ffmpeg** says whether ffmpeg is
+installed and offers to install it. **ONNX Runtime engine** shows the engine program, the models folder and the ONNX
+Runtime library the app uses, each with the copies it found, and lets you pick another.
 
 ## Console
 
