@@ -467,8 +467,9 @@ replaces three things at export time, on top of v2; Corridor's code and weights 
   form isn't possible there. Stage 1 keeps v2's exact regions (full windows, halves, quarters), but takes them
   straight from the token grid with **one Gather per q / k / v** (the index includes the window partition and the
   region split), with **one zero region appended to every group**, so no tensor is ever empty at any size, runs four
-  plain attentions and puts the result back with **one Gather**. The indices are built from broadcast ranges and
-  compares (no division), once per block shape and shift (four ScatterElements in the whole network).
+  plain attentions and puts the result back with **one Gather**. Inside a region the tokens are frame-major
+  (t, y, x), v2's order, so attention sums in onnx.4's order (the first build gathered (y, x, t); see the floor
+  below). The indices are built from broadcast ranges and compares (no division), once per block shape and shift (four ScatterElements in the whole network).
 - **RMSNorm in plain ops.** torch's own `rms_norm` composite (fp32 inside, back to the input type, times the weight)
   written as Pow / ReduceMean / Add / Sqrt / Div / Cast / Mul, the pattern ONNX Runtime fuses back into one
   SimplifiedLayerNormalization at load; `LayerNorm2d` reduces over the channel axis in place (no permute pair).
@@ -495,8 +496,8 @@ Tile, Squeeze, Unsqueeze, Gather, Split, Flatten, DepthToSpace):
 
 | file | nodes | layout ops | Reshape | Transpose | Slice | Concat | attention | RMSNormalization |
 |---|---|---|---|---|---|---|---|---|
-| stage 1 fp16 | 4322 → 4550 | 2911 → **2243** | 925 → 753 | 608 → 328 | 541 → 361 | 403 → 252 | 48 → 48 | 111 → 0 |
-| stage 1 fp32 | 4100 → 4182 | 2772 → **2117** | 912 → 753 | 482 → 202 | 541 → 361 | 403 → 252 | 48 → 48 | 111 → 0 |
+| stage 1 fp16 | 4322 → 4505 | 2911 → **2197** | 925 → 727 | 608 → 310 | 541 → 361 | 403 → 247 | 48 → 48 | 111 → 0 |
+| stage 1 fp32 | 4100 → 4137 | 2772 → **2071** | 912 → 727 | 482 → 184 | 541 → 361 | 403 → 247 | 48 → 48 | 111 → 0 |
 | stage 2 fp16 | 2377 → 2039 | 1686 → **1024** | 531 → 247 | 366 → 202 | 341 → 205 | 226 → 121 | 30 → 12 | 50 → 0 |
 | stage 2 fp32 | 2268 → 1862 | 1655 → **963** | 530 → 247 | 305 → 141 | 341 → 205 | 257 → 121 | 30 → 12 | 50 → 0 |
 
@@ -522,7 +523,10 @@ ML set's numbers, only old against new on equal terms). Core ML partitions / nod
 | stage 2 TensorRT form | 91 / 576 | 39 / 100 |
 | C-RADIO fp16 | 29 / 138 | 29 / 138 |
 
-**Measured 2026-10-27** (`onnx5_parity.sh`, Marcy's OK; RTX 5080, ORT 1.31, the engine at main c3864a1):
+**Measured 2026-10-27, first build** (`onnx5_parity.sh`, Marcy's OK; RTX 5080, ORT 1.31, the engine at main c3864a1).
+These runs used the first build, whose stage-1 regions were (y, x, t) inside; the set was rebuilt the same day with
+v2's frame-major order (static checks repeated: region maps, MIGraphX, Core ML partitions 113 / 93 unchanged) and
+awaits the same runs:
 
 - `torch` (PyTorch fp32, CPU, onnx5_patches against Corridor's unpatched code; 256×384, 384×640, 512×896 T=2,
   768×1280 T=4): stage 1 baton max 1.7e-6 to 2.1e-6 (values up to 3.6), aux ≤ 8.3e-7; stage 2 ≤ 1.0e-6. v2's level.

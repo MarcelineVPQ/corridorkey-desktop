@@ -16,7 +16,8 @@ Stage 1 (3D, 256*T tokens per window, T up to 80 in the engine): a mask would be
 40 x 20480^2 values at 1920x1152 and T=80, so stage 1 stays mask-free. Its regions (full windows, halves,
 quarters; onnx_patches v2's analysis) are taken straight from the token grid by ONE Gather per q / k / v, with one
 zero region appended to every group (so no group is ever empty, at any size), run as four plain attentions, and
-put back by ONE Gather. The gather indices depend only on the shape and the block's shift: the window
+put back by ONE Gather. Tokens inside a region keep v2's frame-major order (t, y, x), so the attention sums in
+onnx.4's order (the first build gathered (y, x, t): up to 4/255 on a few hair-edge pixels against onnx.4). The gather indices depend only on the shape and the block's shift: the window
 partition, the region split and the reverse are all in them (no per-group Slice / Reshape / Transpose chains).
 Attention sets are upstream's for every real query; padding queries are cropped afterwards, as before.
 
@@ -140,14 +141,16 @@ def _axis(n, j, w):
     return s, q, i - q * (w // 2), w - s * (w // 2), j + s * (n - 2 * j), r - s * j
 
 
-def region_maps(Bn, Hp, Wp, H, W, w, sh, sw):
-    """Gather indices for the region decomposition of a padded, rolled (Bn, Hp, Wp) token grid.
+def region_maps(Bn, T, Hp, Wp, H, W, w, sh, sw):
+    """Gather indices for the region decomposition of a padded, rolled (Bn, T, Hp, Wp) token grid.
 
     Four groups (joined / split rows x joined / split columns); group g holds R_g regions of region_tokens[g]
-    spatial tokens plus one zero region, so none is ever empty. Returns (fwd, back, sizes, region_tokens):
-      back  (Bn*Hp*Wp,) the slot of each grid row in the concatenated groups
-      fwd   (sum(sizes),) the grid row of each slot (its inverse); the zero regions' slots point at row
-            Bn*Hp*Wp, the zero row the caller appends
+    tokens (its spatial extent x T frames) plus one zero region, so none is ever empty. Inside a region the tokens
+    are frame-major (t, y, x), the order of onnx_patches v2's regions (and of upstream's windows), so attention
+    sums in the same order as set 2.0.0-onnx.4. Returns (fwd, back, sizes, region_tokens):
+      back  (Bn*T*Hp*Wp,) the slot of each grid token in the concatenated groups
+      fwd   (sum(sizes),) the grid token of each slot (its inverse); the zero regions' slots point at row
+            Bn*T*Hp*Wp, the zero row the caller appends
     Built from broadcast ranges and compares only (no division), so every block shape exports as a few nodes.
     """
     nH, nW = Hp // w, Wp // w
@@ -159,30 +162,31 @@ def region_maps(Bn, Hp, Wp, H, W, w, sh, sw):
         # loop: NOT-WORTH — joined / split columns
         for cs in (0, 1):
             rows, cols = (nH - jh) if rs else jh, (nW - jw) if cs else jw
-            tok = (w // (1 + rs)) * (w // (1 + cs))
+            tok = (w // (1 + rs)) * (w // (1 + cs)) * T
             sizes.append((Bn * rows * cols * (1 + rs) * (1 + cs) + 1) * tok)
             toks.append(tok)
     # loop: NOT-WORTH — six small index tables, once per block shape
-    sH, qa, y, hh, rows, r = (t[None, :, :, None, None] for t in _axis(nH, jh, w))   # (1, nH, w, 1, 1)
+    sH, qa, y, hh, rows, r = (t[None, None, :, :, None, None] for t in _axis(nH, jh, w))   # (1, 1, nH, w, 1, 1)
     # loop: NOT-WORTH — six small index tables, once per block shape
-    sW, qb, x, ww, cols, c = (t[None, None, None, :, :] for t in _axis(nW, jw, w))   # (1, 1, 1, nW, w)
-    bb = torch.arange(Bn)[:, None, None, None, None]
+    sW, qb, x, ww, cols, c = (t[None, None, None, None, :, :] for t in _axis(nW, jw, w))   # (1, 1, 1, 1, nW, w)
+    bb = torch.arange(Bn)[:, None, None, None, None, None]
+    tt = torch.arange(T)[None, :, None, None, None, None]
     rho = (((bb * rows + r) * cols + c) * (1 + sH) + qa) * (1 + sW) + qb
     off = sH * (sizes[0] + sizes[1]) + sW * sizes[0] + sH * sW * (sizes[2] - sizes[0])
-    back = (off + rho * (hh * ww) + y * ww + x).reshape(-1)          # (Bn, nH, w, nW, w) = grid row order
-    n = Bn * Hp * Wp
+    back = (off + rho * (hh * ww * T) + (tt * hh + y) * ww + x).reshape(-1)   # (Bn, T, nH, w, nW, w): grid order
+    n = Bn * T * Hp * Wp
     fwd = torch.full((sizes[0] + sizes[1] + sizes[2] + sizes[3],), n, dtype=torch.long).scatter(
         0, back, torch.arange(n))
     return fwd, back, sizes, toks
 
 
 def _grid_rope(rope, T, w, Hp, Wp, t_stride, device):
-    """RoPE tables per grid position (rolled order): (Hp*Wp, T, 1, d/2); position = place inside its window."""
+    """RoPE tables per grid position (rolled order): (T, Hp*Wp, 1, d/2); position = place inside its window."""
     cos, sin = rope.get_cos_sin(T, w, w, device=device, t_stride=t_stride)
     place = torch.arange(w * w).reshape(1, w, 1, w).expand(Hp // w, w, Wp // w, w).reshape(-1)
 
     def grid(t):
-        return t.reshape(T, w * w, -1).index_select(1, place).transpose(0, 1).unsqueeze(2)
+        return t.reshape(T, w * w, -1).index_select(1, place).unsqueeze(2)
     return grid(cos), grid(sin)
 
 
@@ -196,9 +200,7 @@ def swin_attn3d_forward(self, x, t_stride=1.0, real_hw=None, shift=(0, 0)):
     heads, d = self.num_heads, self.head_dim
     xp = F.pad(x, pad)
     qkv = F.pad(self.qkv_dw(self.qkv.qkv(x)), pad) if self.qkv_dw is not None else self.qkv.qkv(xp)
-    # token rows: one per grid position, T frames each
-    qkv = qkv.permute(0, 2, 3, 1, 4).reshape(Bn, Hp * Wp, T, 3, heads, d)
-    q, k, v = qkv.unbind(3)
+    q, k, v = qkv.reshape(Bn, T, Hp * Wp, 3, heads, d).unbind(3)     # each (Bn, T, Hp*Wp, heads, d)
     if self.qk_norm:
         q = self.q_norm(q)
         k = self.k_norm(k)
@@ -207,21 +209,19 @@ def swin_attn3d_forward(self, x, t_stride=1.0, real_hw=None, shift=(0, 0)):
     q = B.apply_rotary(q, cos, sin)
     k = B.apply_rotary(k, cos, sin)
     Hr, Wr = real_hw if real_hw is not None else (H, W)
-    fwd, back, sizes, toks = _cached(("regions3d", Bn, Hp, Wp, Hr, Wr, w, shift),
-                                     lambda: region_maps(Bn, Hp, Wp, Hr, Wr, w, shift[0], shift[1]))
+    fwd, back, sizes, toks = _cached(("regions3d", Bn, T, Hp, Wp, Hr, Wr, w, shift),
+                                     lambda: region_maps(Bn, T, Hp, Wp, Hr, Wr, w, shift[0], shift[1]))
     # loop: NOT-WORTH — q, k, v: three gathers, unrolled at export
-    parts = [torch.cat([t.reshape(Bn * Hp * Wp, T * C), t.new_zeros(1, T * C)]).index_select(0, fwd).split(sizes)
-             for t in (q, k, v)]
+    parts = [torch.cat([t.reshape(-1, C), t.new_zeros(1, C)]).index_select(0, fwd).split(sizes) for t in (q, k, v)]
     outs = []
     # loop: NOT-WORTH — four region groups, unrolled at export
-    for g, s in enumerate(toks):
+    for g, L in enumerate(toks):
         # loop: NOT-WORTH — q, k, v of one group
-        qg, kg, vg = (p[g].reshape(-1, s * T, heads, d).transpose(1, 2) for p in parts)
+        qg, kg, vg = (p[g].reshape(-1, L, heads, d).transpose(1, 2) for p in parts)
         o = F.scaled_dot_product_attention(qg, kg, vg, dropout_p=0.0)
-        outs.append(o.transpose(1, 2).reshape(-1, T * C))
-    attn = torch.cat(outs).index_select(0, back)                     # (Bn*Hp*Wp, T*C), grid order
-    attn = attn.reshape(Bn, Hp, Wp, T, C).permute(0, 3, 1, 2, 4)      # (Bn, T, Hp, Wp, C)
-    attn = (attn.reshape(Bn, T, Hp, Wp, heads, d) * self.attn_gate.grid(xp, attn.dtype)).reshape(Bn, T, Hp, Wp, C)
+        outs.append(o.transpose(1, 2).reshape(-1, C))
+    attn = torch.cat(outs).index_select(0, back).reshape(Bn, T, Hp, Wp, heads, d)   # grid order
+    attn = (attn * self.attn_gate.grid(xp, attn.dtype)).reshape(Bn, T, Hp, Wp, C)
     return self.proj(attn)[:, :, :H, :W, :]
 
 
