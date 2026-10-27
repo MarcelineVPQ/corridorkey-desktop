@@ -142,7 +142,8 @@ missing there).
   this session only); each prints the list, as bash does. On Windows a network path (`\\host\share`, `//host/…`,
   `\\?\UNC\host\…`; a mapped drive too if Windows' realpath names its server: not yet tried) is opened only for a server allowed this
   session: any other command that would read or write there (`cd`, `dir`, `open`, `j`, `cat`, Tab, a path given to
-  corridorkey, a `--job` file's input, corridorkey started in such a folder) is refused before anything opens it,
+  corridorkey, a `--job` file's input, corridorkey started in such a folder; `doctor`'s `corridorkey info` when its
+  program, its folder or a path the app gives it, the `CK_` variables, is on such a server: a ⚠ row, not run) is refused before anything opens it,
   with the line to type, `allow-server <host>`. Windows sends the user's NTLM sign-in to every server it opens, so a
   bookmark or a history line's folder edited to name another host gets a refusal, not a sign-in (P4 senior review
   2026-10-27 N9; backlog row 139, Marcy 2026-10-27). `allow-server <host>` (case-insensitive; `allow-server` alone
@@ -285,10 +286,12 @@ inner loop's words);
   inside it; confirmed, it is audited (`allowed`) and saved in settings (`consoleWriteFolders`: absolute paths only,
   each once, at most 100, checked on load), and App settings → Console lists each with **Remove** (no confirmation and
   no sudo: removing only narrows the scope; audited as `removed`). `allow` alone lists them. A folder the Console may
-  already write to needs no dialog; nothing in the app adds one without it. The settings file itself is trusted as
-  the user's own: an allowed folder loaded from it is checked for shape on load (absolute, no NUL, at most 100), not
-  resolved or confirmed, so whoever can edit the user's settings file can widen the scope (P4 senior review
-  2026-10-27 N6). `allow` refuses a root (`/`, a drive's root, a share's root), the system's folders and every folder inside them,
+  already write to needs no dialog; nothing in the app adds one without it. An allowed folder loaded from the settings file is
+  checked for shape on load (absolute, no NUL, at most 100) and, before the Console's first write (or when the
+  Session panel first asks), by realpath with `allow`'s own refusal below: a root or a system folder is dropped from
+  the settings, audited as `removed` and named in the Session panel ("Allowed folders dropped"), never trusted. Any
+  other folder there is not confirmed again, so whoever can edit the user's settings file can still widen the scope
+  to their own folders (P4 senior review 2026-10-27 N6). `allow` refuses a root (`/`, a drive's root, a share's root), the system's folders and every folder inside them,
   after realpath (a link to `/` is refused too): on Linux /bin /boot /dev /etc /lib /lib32 /lib64 /libx32 /proc /root
   /run /sbin /sys /usr /var (except /run/media, where removable drives are mounted), on macOS /System /Library /usr
   /bin /sbin /dev /etc /var /private/etc /private/var, on Windows %SystemRoot%, %ProgramFiles%,

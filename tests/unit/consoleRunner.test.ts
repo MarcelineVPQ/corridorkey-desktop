@@ -399,6 +399,24 @@ describe("corridorkey from the Console", () => {
     expect(make().c.session().servers).toEqual([]);
   });
 
+  it("row 136: an allowed folder from the settings file that allow refuses is dropped, audited and shown, never trusted", async () => {
+    const show = join(elsewhere, "show136s");
+    mkdirSync(show, { recursive: true });
+    allowedFolders = ["/etc", show];
+    const { c, files } = make();
+    // the first write waits for the check: /etc is no longer a folder the Console may write to
+    const b = await c.run("render shot.mov -o /etc/ck-136/k.####.exr");
+    expect(b.state).toBe("refused");
+    expect(spawned).toEqual([]);
+    expect(allowedFolders).toEqual([show]);
+    expect(c.session().droppedFolders).toEqual(["/etc"]);
+    expect(readFileSync(join(files, "console-audit.jsonl"), "utf8")).toMatch(/"event":"removed","targets":\["\/etc"\]/);
+    // the one allow keeps works as before
+    await c.run(`render shot.mov -o ${show}/k.####.exr`);
+    expect(spawned).toHaveLength(1);
+    await finish(spawned[0].child, [], 0);
+  });
+
   it("row 139: allow-server is Windows' alone", async () => {
     const { c } = make();
     expect((await c.run("allow-server nas")).state).toBe("refused");
@@ -1258,6 +1276,27 @@ describe("Phase 4: doctor", () => {
     expect(text[at("TensorRT") + 1]).toMatch(/fix: App: Engine page → TensorRT → Download/);
     expect(text[at("Results folder")]).toMatch(/^✗ Results folder .*1.0 GiB free/);
     expect([b.state, b.exitCode]).toEqual(["failed", 1]);
+  });
+
+  it("row 139: on Windows info isn't run for a server not allowed this session (its folder, the app's paths it is given)", async () => {
+    const win = { realpath: async (p: string) => p, platform: "win32" as const, home: "C:\\Users\\M" };
+    const { c } = make({ paths: win, startDir: "C:\\shots", writeRoots: () => ["C:\\out"], cliEnv: () => ({ CK_ENGINE_MODELS: "\\\\nas\\models", PATH: "C:\\x" }) });
+    const b = await c.run("doctor");
+    expect(spawned).toEqual([]);
+    const text = blockText(b).split("\n");
+    const at = text.findIndex((l) => l.includes("corridorkey info"));
+    expect(text[at]).toMatch(/^⚠ corridorkey info +not run: \\\\nas\\models is on the network server nas/);
+    expect(text[at + 1]).toMatch(/fix: allow-server nas/);
+    await c.run("allow-server nas");
+    const p = c.run("doctor");
+    await answer(INFO_OK);
+    await p;
+    expect(spawned[0].args).toEqual(["info", "--json"]);
+    // started in a network folder not allowed: not run either
+    spawned = [];
+    const other = make({ paths: win, startDir: "\\\\nas2\\show", writeRoots: () => ["C:\\out"] }).c;
+    expect(blockText(await other.run("doctor"))).toMatch(/not run: \\\\nas2\\show is on the network server nas2/);
+    expect(spawned).toEqual([]);
   });
 
   it("no corridorkey, or an info that fails, is a row of its own; --json prints the rows as JSON", async () => {

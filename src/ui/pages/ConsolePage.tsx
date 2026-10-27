@@ -224,6 +224,13 @@ export function ConsolePage(props: {
                 <span className="hint-text">Not elevated. Elevation also ends when the screen locks, the computer sleeps, and at quit.</span>
               )}
             </Row>
+            {session.droppedFolders.length > 0 && (
+              <Row label="Allowed folders dropped" hint="named in the settings file, but allow never takes a root or a system folder">
+                <span className="chip warn">
+                  <ShieldAlert size={14} aria-hidden /> Not allowed, removed from the settings: {session.droppedFolders.join(", ")}
+                </span>
+              </Row>
+            )}
             {state.system.platform === "win32" && (
               <Row label="Network servers" hint="allow-server <name>: the Console opens \\name\… only after it, until the app quits">
                 <span className="hint-text">{session.servers.length ? session.servers.join(", ") : "None allowed this session."}</span>

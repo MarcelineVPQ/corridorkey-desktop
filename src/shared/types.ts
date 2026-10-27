@@ -555,6 +555,8 @@ export interface ConsoleSession {
   cliFound: boolean;
   // the network servers (\\server\…) the Console may open until the app quits: allow-server (Windows only)
   servers: string[];
+  // allowed folders the settings file named that allow refuses (a root or a system folder): dropped at start, shown
+  droppedFolders: string[];
 }
 
 // A line in the Console's history (electron/main/console/logs.ts): its stable number, folder and time, and how it ended

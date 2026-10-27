@@ -195,6 +195,10 @@ export class Console {
   private closing = false;
   /** the network servers allowed this session (allow-server; Windows only, never saved) */
   private readonly servers = new Set<string>();
+  /** the settings' allowed folders checked once with allow's own refusal (row 136): started by session() or a write */
+  private allowedCheck: Promise<void> | null = null;
+  /** the allowed folders the check dropped (shown in Session) */
+  private readonly droppedFolders: string[] = [];
 
   constructor(private readonly d: ConsoleDeps) {
     // every read of the file system answers in time, or says the drive or share didn't (senior review 2026-10-26 N11)
@@ -235,7 +239,46 @@ export class Console {
   }
 
   session(): ConsoleSession {
-    return { cwd: this.cwd, elevatedUntil: this.d.elevation.expiresAt, running: this.job?.block.line ?? null, cliFound: this.d.cli() !== null, servers: [...this.servers] };
+    // loop: NOT-WORTH — once per session: the settings' allowed folders checked (checkAllowed)
+    void (this.allowedCheck ??= this.checkAllowed());
+    return {
+      cwd: this.cwd,
+      elevatedUntil: this.d.elevation.expiresAt,
+      running: this.job?.block.line ?? null,
+      cliFound: this.d.cli() !== null,
+      servers: [...this.servers],
+      droppedFolders: [...this.droppedFolders],
+    };
+  }
+
+  /** The folders the Console may write to, once the settings' allowed folders have been checked (allowedChecked). */
+  private async writeRoots(): Promise<string[]> {
+    await (this.allowedCheck ??= this.checkAllowed());
+    return this.d.writeRoots();
+  }
+
+  /**
+   * The allowed folders loaded from settings go through allow's own refusal (backlog row 136): a root or a system
+   * folder (by realpath) is dropped from the settings, audited as removed, and named in Session; never trusted.
+   */
+  private async checkAllowed(): Promise<void> {
+    const list = this.d.allowed();
+    if (!list.length) return;
+    const real = (p: string) => this.d.paths.realpath(p).catch(() => p);
+    const system = systemFolders(this.d.paths.platform, process.env);
+    // loop: NOT-WORTH — ≤ 15 system folders, one async realpath each, once per session
+    const sys = [...system, ...(await Promise.all(system.map(real)))];
+    const home = await real(this.d.paths.home);
+    const dropped: string[] = [];
+    // loop: NOT-WORTH — ≤ 100 folders, one async realpath each, once per session
+    for (const f of list) if (allowVerdict(await real(f), home, sys, this.d.paths.platform) === "refuse") dropped.push(f);
+    if (!dropped.length) return;
+    // loop: NOT-WORTH — ≤ 100 folders
+    this.d.setAllowed(this.d.allowed().filter((f) => !dropped.includes(f)));
+    this.droppedFolders.push(...dropped);
+    // loop: NOT-WORTH — one async append [bounded: a local file write]
+    await this.d.audit.append({ event: "removed", targets: dropped });
+    this.d.sessionChanged();
   }
 
   /** The network server `p` (absolute) opens when it isn't allowed this session, else null (uncServer: Windows only). */
@@ -708,6 +751,7 @@ export class Console {
    * and the audit log has it; a folder it may already write to needs none. allow alone: the folders allowed.
    */
   private async allow(b: ConsoleBlock, folder: string | undefined): Promise<ConsoleBlock> {
+    await this.writeRoots();
     const list = this.d.allowed();
     if (folder === undefined) {
       if (!list.length) return this.finish(b, "done", "No folder allowed yet: allow <folder> lets the Console write in one (after you confirm).");
@@ -734,7 +778,7 @@ export class Console {
     const verdict = allowVerdict(dir, await real(this.d.paths.home), [...system, ...(await Promise.all(system.map(real)))], this.d.paths.platform);
     if (verdict === "refuse")
       return this.finish(b, "refused", `${dir} is a drive's root or a system folder: the Console never writes there. Allow a folder of your own instead (a show or shot folder).`);
-    if ((await checkWrite(dir, this.cwd, this.d.writeRoots(), this.d.paths)).ok) return this.finish(b, "done", `The Console may already write in ${dir}.`);
+    if ((await checkWrite(dir, this.cwd, await this.writeRoots(), this.d.paths)).ok) return this.finish(b, "done", `The Console may already write in ${dir}.`);
     if (list.length >= WRITE_FOLDERS_MAX) return this.finish(b, "refused", `${WRITE_FOLDERS_MAX} folders are allowed already: remove one in App settings → Console first.`);
     if (!(await this.d.confirmAllow(visible(dir), verdict === "home"))) return this.finish(b, "refused", "Not allowed: the confirmation was cancelled.");
     if (!(await this.d.audit.append({ event: "allowed", targets: [dir] }))) return this.finish(b, "refused", "Not allowed: the audit log couldn't record it (see the app's log for why).");
@@ -1023,7 +1067,13 @@ export class Console {
       });
     else {
       rows.push({ check: "corridorkey", status: "ok", detail: bin, fix: null, path: bin });
-      rows.push(...infoRows(await this.cliInfo(bin)));
+      // never a network server not allowed this session (row 139): its program, its folder, the app's paths it is given
+      const at = this.infoServer(bin);
+      rows.push(
+        ...(at
+          ? [{ check: "corridorkey info", status: "warn" as const, detail: `not run: ${fsErrorText(serverNotAllowed(at.server), at.path)}`, fix: `allow-server ${at.server}` }]
+          : infoRows(await this.cliInfo(bin))),
+      );
     }
     const app = this.d.doctor();
     rows.push(...app.rows);
@@ -1045,6 +1095,21 @@ export class Console {
     const count = (s: DoctorRow["status"]) => rows.filter((r) => r.status === s).length;
     const [warn, fail] = [count("warn"), count("fail")];
     return print([`${rows.length} checks: ${rows.length - warn - fail} ok${warn ? `, ${warn} warning${warn === 1 ? "" : "s"}` : ""}${fail ? `, ${fail} problem${fail === 1 ? "" : "s"}` : ""}`]);
+  }
+
+  /**
+   * The first network server not allowed this session that `corridorkey info` would open: its program, the folder it
+   * starts in, or a path the app gives it (the CK_ variables: models, ONNX Runtime, TensorRT cache); null: none.
+   */
+  private infoServer(bin: string): { server: string; path: string } | null {
+    // loop: NOT-WORTH — the environment's few CK_ variables, once per doctor
+    const given = Object.entries(this.d.cliEnv()).flatMap(([k, v]) => (k.startsWith("CK_") && v ? [v] : []));
+    // loop: NOT-WORTH — a few paths
+    for (const path of [bin, this.cwd, ...given]) {
+      const server = this.notAllowed(path);
+      if (server) return { server, path };
+    }
+    return null;
   }
 
   /** `corridorkey info --json`: its JSON, or what went wrong (its error line, without the exit code it prints). */
@@ -1128,7 +1193,7 @@ export class Console {
         if (!jobs.includes(j)) jobs.push(j);
       }
     }
-    const w = await checkWrite(out, this.cwd, this.d.writeRoots(), this.d.paths);
+    const w = await checkWrite(out, this.cwd, await this.writeRoots(), this.d.paths);
     if (!w.ok) return this.finish(b, "refused", `-o: ${w.reason}`);
     const farmJobs: FarmJob[] = [];
     // loop: NOT-WORTH — the exported jobs, one async range read each
@@ -1156,7 +1221,7 @@ export class Console {
     // dangling one reads as "not there"): senior review 2026-10-27 M2
     // loop: NOT-WORTH — the export's few files, one async realpath and lstat each
     for (const f of paths) {
-      const c = await checkWrite(f, this.cwd, this.d.writeRoots(), this.d.paths);
+      const c = await checkWrite(f, this.cwd, await this.writeRoots(), this.d.paths);
       if (!c.ok) return this.finish(b, "refused", `${f}: ${c.reason}`);
       const l = await this.d.fs.lstat(f).catch(() => null);
       if (l?.isSymbolicLink()) return this.finish(b, "refused", `${f} is a link: farm export never writes through one (remove the link, or export into another folder).`);
@@ -1628,7 +1693,7 @@ export class Console {
       const written = q.options.filter((o) => o.arg.writes && o.value !== null && !(movesFolder && !a.isAbsolute(expandHome(o.value!, this.d.paths))));
       // loop: NOT-WORTH — one or two written folders
       for (const o of written) {
-        const w = await checkWrite(o.value!, this.cwd, this.d.writeRoots(), this.d.paths);
+        const w = await checkWrite(o.value!, this.cwd, await this.writeRoots(), this.d.paths);
         if (!w.ok || paths.includes(w.path)) continue;
         paths.push(w.path);
         // loop: NOT-WORTH — the line's few arguments
@@ -1807,13 +1872,13 @@ export class Console {
         const taken = names.map((n) => n.name);
         const next = first && nextVersion(v, taken, this.d.paths.platform);
         if (next) {
-          const w = await checkWrite(next.path, this.cwd, this.d.writeRoots(), this.d.paths);
+          const w = await checkWrite(next.path, this.cwd, await this.writeRoots(), this.d.paths);
           if (w.ok) versions.push(w.path);
           v = next.path;
         }
       }
       if (a.writes) {
-        const w = await checkWrite(v, this.cwd, this.d.writeRoots(), this.d.paths);
+        const w = await checkWrite(v, this.cwd, await this.writeRoots(), this.d.paths);
         if (!w.ok) refusals.push(`${a.long ? `--${a.long}` : a.id}: ${w.reason}`);
         targets.push(w.path);
         return w.path;
@@ -1976,7 +2041,7 @@ export class Console {
     ] as const) {
       // loop: NOT-WORTH — a command's ~50 flags
       if (given.has(flag) || typeof v !== "string" || !v || !args.some((a) => a.id === flag && a.writes)) continue;
-      const w = await checkWrite(v, this.cwd, this.d.writeRoots(), this.d.paths);
+      const w = await checkWrite(v, this.cwd, await this.writeRoots(), this.d.paths);
       if (!w.ok) refusals.push(`--job's ${key}: ${w.reason}`);
       targets.push(w.path);
       flags.push(`--${flag}`, w.path);

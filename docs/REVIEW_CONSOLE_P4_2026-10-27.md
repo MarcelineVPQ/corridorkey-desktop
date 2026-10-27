@@ -251,9 +251,9 @@ before, except N6 and N9 (documented there; Marcy decided them on 2026-10-27 and
 | N3 a pasted line with an open quote | refused before anything runs (`leavesQuoteOpen`, the same scan as `pieces`) | 59e8b63 |
 | N4 special files | read up to TEXT_MAX when the size says 0; readRange (now files.ts) opens with O_NONBLOCK and checks fstat | 59ec9ae |
 | N5 `du` through links | a link inside a folder counts its own size (lstat) | de7d7fc |
-| N6 `allow /`, `allow ~` | the doc says what `allow` trusts (settings are shape-checked only); Marcy 2026-10-27: `/`, a drive's root and system folders refused (also by realpath), the home folder itself warned in the confirmation | 62613aa, 440449f |
+| N6 `allow /`, `allow ~` | the doc says what `allow` trusts (settings are shape-checked only); Marcy 2026-10-27: `/`, a drive's root and system folders refused (also by realpath), the home folder itself warned in the confirmation; a settings-loaded folder goes through the same refusal (dropped, audited, shown in Session) | 62613aa, 440449f, senior-decisions |
 | N7 OpenJD `{{` | refused for OpenJD, naming the value | 60255c6 |
-| N9 UNC paths | Marcy 2026-10-27: a network server is opened only after `allow-server <server>`, this session only, listed in Session | 448f9b5, 440449f |
+| N9 UNC paths | Marcy 2026-10-27: a network server is opened only after `allow-server <server>`, this session only, listed in Session; `doctor`'s `corridorkey info` checked too | 448f9b5, 440449f, senior-decisions |
 
 Not tested on a real screen lock: S1's busctl read answered on this desktop (`b false`), but locking Marcy's screen to
 see it turn true was not done (never her screen); the decision logic is tested with a fake reader.
