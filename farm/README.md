@@ -109,7 +109,9 @@ corridorkey render -i … -o … -s <start> -e <end> --progress-format deadline 
 
 - `<start>` and `<end>` come from `GetStartFrame()` and `GetEndFrame()`.
 - `--overwrite` is always passed, because a retried task finds the frames its earlier try already renamed into place.
-- Paths go through Deadline's path mapping.
+- Paths go through Deadline's path mapping. On Windows workers each path is quoted by MSVC's rules (as Python's
+  `subprocess.list2cmdline`), so a folder ending in `\` (`D:\shows\key\`) stays one argument; elsewhere paths go in
+  double quotes.
 - **GPU affinity.** When the worker or the job overrides GPU affinity (`OverrideGpuAffinity()`), the task gets
   `--gpu` set to one card from `GpuAffinity()`, picked by the task's thread number. Without an override,
   `corridorkey` uses the worker's `CUDA_VISIBLE_DEVICES` or its first card. `--gpu N` counts cards in CUDA's order.
@@ -134,6 +136,8 @@ seams invisible hasn't been measured yet (docs/CLI.md, "Warm-up"). Until it is, 
   - A throwaway run with stand-in `Deadline` modules checked the plugin's logic. It confirmed the built command
     line, the GPU pick, the progress, status and error handlers, and the exit-code failure. That stub run isn't in
     the repo.
+  - The quoting: `farm/deadline10/test_quote.py` (`npm run test:farm`, part of `npm run check`) splits the quoted
+    command line by MSVC's rules for Windows paths ending in `\`, with spaces, quotes and UNC shares.
 - **Not yet run on a real Deadline.**
 - The plugin uses these API names from the Deadline 10 scripting reference and Thinkbox's own plugins:
   - `DeadlinePlugin`, `PluginType.Simple`, `InitializeProcessCallback`, `RenderExecutableCallback`,

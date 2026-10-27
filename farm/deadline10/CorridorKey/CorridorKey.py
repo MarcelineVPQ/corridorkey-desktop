@@ -14,6 +14,7 @@ Written against the Deadline 10 scripting reference (DeadlinePlugin, StdoutHandl
 CheckExitCodeCallback, GpuAffinity, OverrideGpuAffinity). Not yet run on a real Deadline (farm/README.md).
 """
 import os
+import subprocess
 
 from Deadline.Plugins import DeadlinePlugin, PluginType
 from Deadline.Scripting import FileUtils, RepositoryUtils
@@ -42,7 +43,12 @@ EXIT_MEANINGS = {
 }
 
 
-def quote(s):
+def quote(s, windows=os.name == "nt"):
+    """One argument of the task's command line. Windows programs split it by MSVC's rules, where `\\"` is a literal
+    quote: a folder like D:\\out\\ in plain double quotes swallowed the rest of the line. There it is quoted as
+    subprocess.list2cmdline does (backslashes before a quote doubled); elsewhere in double quotes, as before."""
+    if windows:
+        return subprocess.list2cmdline([s])
     return '"%s"' % s
 
 
