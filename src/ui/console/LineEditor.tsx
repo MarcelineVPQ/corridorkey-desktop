@@ -106,8 +106,8 @@ export const LineEditor = forwardRef<LineEditorHandle, Props>(function LineEdito
     focus: () => inputRef.current?.focus(),
   }));
 
-  /** The completion for the line as it is now (asked from the main process; a newer answer wins). */
-  // one question per (line, cursor) in flight: a second Tab while the first waits shares its answer
+  // The completion for the line as it is now, asked from the main process (only an answer for the line as it still
+  // is counts). One question per (line, cursor) in flight: a second Tab while the first waits shares its answer.
   const inFlight = useRef<{ line: string; cursor: number; answer: Promise<void> } | null>(null);
   const ask = useCallback(
     (line: string, cursor: number): Promise<void> => {
