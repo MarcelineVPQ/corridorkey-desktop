@@ -39,7 +39,8 @@ missing there).
   padding, `sim.9999` `sim.10000`, are one sequence, while `a.0001` and `a.01` are two (SME review 2026-10-27 M2)), `cls` / `clear`. **Sequences
   everywhere:** a path whose file name is a frame pattern, `plate.####.exr`, `plate.%04d.exr`, `plate.$F4.exr` or
   `plate.@@@@.exr` (one digit per `@`; the frames read as ck-cli's `frame_of` reads them), is one item with its frame
-  set to every built-in that takes a path: `dir <pattern>` lists that sequence's row (`-f` its frames), `open
+  set to every built-in that takes a path: `dir <pattern>` lists that sequence's row (`-f` its frames; the summary counts the
+  folder's other names as not matching the pattern, and "hidden" only for dot files `-a` shows), `open
   <pattern>` shows its first frame, `cd` and `allow` take its folder; a pattern with no frame says so with the `dir`
   line to type (`sequenceOf` in sequences.ts). `verify`'s missing frames come from the CLI as ranges, ready for a
   requeue (`missing frames: 1012-1015, 1040 (re-render them: -F 1012-1015,1040)`, docs/CLI.md); the block shows
@@ -212,7 +213,8 @@ inner loop's words);
 - **Output** goes to the page as blocks (`ConsoleBlock` in `src/shared/types.ts`): the line, its state and exit code,
   progress, the last 2000 lines, `dir`'s rows, `doctor`'s rows. A program's commands (blocks with a parent) are one row
   each (SME review 2026-10-27 S8; `childRow` / `childOpens` in model.ts): a button with ✓ / ✗ / ■, the line, its time
-  and its last output line; click, Enter or Space shows the whole block, whose header then has a visible Collapse button;
+  and its last output line (its paths shortened as below, whole on hover), a filled-in line with its `from <what was
+  typed>`; click, Enter or Space shows the whole block, whose header then has a visible Collapse button;
   one that runs, failed or was refused shows whole on its own. A listing's Name column takes the room and stays on one
   line (a long name or a sequence's gaps end in …, never broken inside a number; the whole text on hover and in Copy
   output); `doctor` is a table (mark, check, detail, a problem's fix on its own line under its detail); `tree`'s

@@ -345,7 +345,7 @@ describe("a program's commands are one row each (review 2026-10-27 S8)", () => {
   const html = (b: ConsoleBlock) => renderToStaticMarkup(createElement(OutputBlock, { b, registry: reg, onReinsert: () => {} }));
 
   it("a done command is one row: a button (keyboard reachable, collapsed) with its mark, line, time and last output line", () => {
-    expect(childRow(kid({}))).toEqual({ mark: "✓", last: "a.exr" });
+    expect(childRow(kid({}), "/home/m")).toEqual({ mark: "✓", last: "a.exr", full: "a.exr", source: "from echo ${f}" });
     expect([childOpens(kid({})), childOpens(kid({ state: "cancelled" }))]).toEqual([false, false]);
     const h = html(kid({}));
     expect(h).toMatch(/^<article class="cblock child row tone-ok"/);
@@ -353,7 +353,29 @@ describe("a program's commands are one row each (review 2026-10-27 S8)", () => {
     expect(h).toContain("a.exr");
     expect(h).toContain("0.4 s");
     // none of the full block's chrome
-    expect(h).not.toMatch(/cb-actions|Copy command|from echo/);
+    expect(h).not.toMatch(/cb-actions|Copy command/);
+  });
+
+  // Marcy's screenshots 2026-10-27 (02-for-loop-collapsed.png): a loop's rows showed the folder whole
+  // (/home/…/plates: 124 files…), and a filled-in line (cd "@sh010") without what was typed
+  it("a row's last line shows its known paths as the blocks do (~, the middle as …), whole on hover", () => {
+    const dir = "/home/m/.cache/claude-scratch/ck-wikigate/iso/home/shots/sh010/plates";
+    const text = `${dir}: 124 files (12 B), 123 of them in 2 sequences (dir -f lists the frames), 0 folders`;
+    const ls = kid({ line: "ls plates", lines: [{ kind: "out", text }], paths: [dir] });
+    const row = childRow(ls, "/home/m");
+    expect(row.last).toBe("~/…/ck-wikigate/iso/home/shots/sh010/plates: 124 files (12 B), 123 of them in 2 sequences (dir -f lists the frames), 0 folders");
+    expect(row.full).toBe(text);
+    expect(row.source).toBeNull();
+  });
+
+  it("a filled-in line's row shows it as it ran and what was typed (the block's from line)", () => {
+    const cd = kid({ line: 'cd "@sh010"', lines: [{ kind: "info", text: "from cd @${s}" }] });
+    expect(childRow(cd, "/home/m")).toEqual({ mark: "✓", last: null, full: null, source: "from cd @${s}" });
+    const h = html(cd);
+    expect(h).toContain("cd &quot;@sh010&quot;");
+    expect(h).toMatch(/class="cb-row-from">from cd @\$\{s\}</);
+    // a line typed as it ran has no source
+    expect(childRow(kid({ line: "ls plates", lines: [] }), "/home/m").source).toBeNull();
   });
 
   it("one that runs, failed or was refused shows whole on its own, with a Collapse button; a top-level block never folds", () => {
@@ -364,7 +386,7 @@ describe("a program's commands are one row each (review 2026-10-27 S8)", () => {
       expect(h, state).toMatch(/class="cb-collapse" aria-expanded="true"/);
       expect(h, state).toContain("Copy command");
     }
-    expect(childRow(kid({ state: "failed" })).mark).toBe("✗");
+    expect(childRow(kid({ state: "failed" }), "/home/m").mark).toBe("✗");
     expect(html(block(1))).not.toMatch(/cb-row|cb-collapse/);
   });
 });

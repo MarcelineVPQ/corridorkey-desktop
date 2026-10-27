@@ -121,13 +121,19 @@ export const compactBlock = (b: ConsoleBlock): boolean => b.argv === null && b.p
  */
 export const childOpens = (b: ConsoleBlock): boolean => b.state === "running" || b.state === "failed" || b.state === "refused";
 
-/** The row's mark (✓ done, ✗ failed or refused, ■ stopped, … running) and the command's last output line. */
-export function childRow(b: ConsoleBlock): { mark: string; last: string | null } {
+/**
+ * The row's mark (✓ done, ✗ failed or refused, ■ stopped, … running), the command's last output line with its known
+ * paths shown as the blocks show them (`full`: as printed, for hover), and what was typed when the line ran filled in
+ * (the block's `from <what was typed>`), else null.
+ */
+export function childRow(b: ConsoleBlock, home: string): { mark: string; last: string | null; full: string | null; source: string | null } {
   const mark = { running: "…", done: "✓", failed: "✗", refused: "✗", cancelled: "■" }[b.state];
   // the last line it printed, not the Console's own note (from <what was typed>)
   // loop: NOT-WORTH — a block's lines, from the end, per render of a changed row
-  const last = [...b.lines].reverse().find((l) => l.kind !== "info")?.text ?? null;
-  return { mark, last };
+  const full = [...b.lines].reverse().find((l) => l.kind !== "info")?.text ?? null;
+  const first = b.lines[0];
+  const source = first?.kind === "info" && first.text.startsWith("from ") ? first.text : null;
+  return { mark, last: full === null ? null : shortenKnown(full, b.paths, home), full, source };
 }
 
 /** How long it took ("0.4 s", "2 min 05 s"); null while it runs. */

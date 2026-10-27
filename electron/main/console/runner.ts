@@ -838,13 +838,15 @@ export class Console {
     }
     // dot files only with -a (ls's rule; dir /a)
     const all = has("all");
-    const total = names.length;
-    // loop: NOT-WORTH — one folder's names, per dir / ls
-    names = all || glob?.startsWith(".") ? names : names.filter((n) => !n.name.startsWith("."));
+    // a pattern's own names: the others are left out by the pattern, not hidden (Marcy's screenshots 2026-10-27)
     const only = pat?.seq ? new Set(pat.seq.names) : null;
+    // loop: NOT-WORTH — one folder's names, per dir / ls
+    const matching = only ? names.filter((n) => only.has(n.name)) : names;
+    const unmatched = names.length - matching.length;
     // loop: NOT-WORTH — as above
-    if (only) names = names.filter((n) => only.has(n.name));
-    const hidden = total - names.length;
+    names = all || glob?.startsWith(".") ? matching : matching.filter((n) => !n.name.startsWith("."));
+    // dot files -a would show (never for a file-name pattern: ls -a *.exr leaves them out too)
+    const hidden = glob ? 0 : matching.length - names.length;
     if (glob) {
       const re = globRegExp(glob, this.d.paths.platform === "win32" || this.d.paths.platform === "darwin");
       // loop: NOT-WORTH — as above
@@ -910,7 +912,8 @@ export class Console {
     const summary =
       `${dir}: ${fileCount} files (${fileSizeText(bytes)}${unread ? `; the sizes of ${unread} frames not read` : ""})` +
       `${seqs.length ? `, ${framed} of them in ${seqs.length} sequence${seqs.length === 1 ? "" : "s"} (dir -f lists the frames)` : ""}` +
-      `, ${entries.length - files.length} folders${more > 0 ? `; ${more} more not listed` : ""}${hidden > 0 ? `; ${hidden} hidden (dir -a shows them)` : ""}`;
+      `, ${entries.length - files.length} folders${more > 0 ? `; ${more} more not listed` : ""}${hidden > 0 ? `; ${hidden} hidden (dir -a shows them)` : ""}` +
+      `${unmatched > 0 ? `; ${unmatched} other${unmatched === 1 ? "" : "s"} not matching the pattern` : ""}`;
     if (has("names")) {
       // names only (ls -1, dir /w /b): one per line, folders with a separator
       b.entries = null;

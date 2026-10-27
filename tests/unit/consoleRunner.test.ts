@@ -1404,6 +1404,23 @@ describe("Phase 4: sequences everywhere", () => {
     expect([none.state, none.lines[0].text]).toEqual(["failed", `No frame of sh020_plate.####.exr in ${join(d, "plates")}. dir ${join(d, "plates")} lists what is there.`]);
   });
 
+  // Marcy's screenshots 2026-10-27 (06-ls-exr-sequences.png): ls -l sh010_plate.%04d.exr said "25 hidden (dir -a shows
+  // them)" for files the pattern only left out
+  it("dir <pattern> counts the files the pattern leaves out as such; hidden only for dot files (-a shows them)", async () => {
+    const d = shot();
+    writeFileSync(join(d, "plates", ".DS_Store"), "x");
+    const { c } = make({ startDir: d });
+    const summary = async (line: string) => (await c.run(line)).lines[0].text;
+    expect(await summary("dir plates/sh010_plate.####.exr")).toBe(
+      `${join(d, "plates")}: 10 files (100 B), 10 of them in 1 sequence (dir -f lists the frames), 0 folders; 2 others not matching the pattern`,
+    );
+    expect(await summary("dir -a plates/sh010_plate.####.exr")).toMatch(/; 2 others not matching the pattern$/);
+    expect(await summary("dir plates")).toMatch(/; 1 hidden \(dir -a shows them\)$/);
+    expect(await summary("dir -a plates")).not.toMatch(/hidden|matching/);
+    // a file-name pattern never shows dot files, -a or not: none counted as hidden
+    expect(await summary("ls plates/*.exr")).not.toMatch(/hidden/);
+  });
+
   it("open <pattern> shows its first frame; cd and allow take a pattern's folder", async () => {
     const d = shot();
     const { c } = make({ startDir: d });

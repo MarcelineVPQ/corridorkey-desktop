@@ -38,10 +38,11 @@ export const OutputBlock = memo(function OutputBlock(props: BlockProps) {
   const { b } = props;
   // a program's command: null follows childOpens (running, failed, refused), else what the user chose
   const [open, setOpen] = useState<boolean | null>(null);
+  const home = useContext(HomeContext);
   if (b.parent === null) return <FullBlock {...props} onCollapse={null} />;
   if (open ?? childOpens(b)) return <FullBlock {...props} onCollapse={() => setOpen(false)} />;
   const st = blockStatus(b);
-  const row = childRow(b);
+  const row = childRow(b, home);
   const took = duration(b);
   return (
     <article className={`cblock child row tone-${st.tone}`} aria-label={b.line}>
@@ -52,8 +53,13 @@ export const OutputBlock = memo(function OutputBlock(props: BlockProps) {
         </span>
         <span className="sr-only">{st.word}</span>
         <code className="cb-row-line">{b.line}</code>
+        {row.source !== null && <span className="cb-row-from">{row.source}</span>}
         {took && <span className="cb-took">{took}</span>}
-        {row.last !== null && <span className="cb-row-last">{row.last}</span>}
+        {row.last !== null && (
+          <span className="cb-row-last" title={row.last !== row.full ? (row.full ?? undefined) : undefined}>
+            {row.last}
+          </span>
+        )}
       </button>
     </article>
   );

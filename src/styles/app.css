@@ -828,6 +828,16 @@ select {
   font-family: var(--font-mono);
   color: var(--text-1);
 }
+/* what was typed, when the line ran filled in (the block's from line) */
+.cb-row-from {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  color: var(--text-3);
+}
 .cb-row .cb-took {
   flex: none;
   color: var(--text-3);
