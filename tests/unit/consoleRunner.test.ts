@@ -2362,3 +2362,15 @@ describe("SME reviews: the expert suggestions", () => {
     expect(b.lines[0].text).toMatch(/: 1 file \(1 B\), 1 folder$/);
   });
 });
+
+describe("SME reviews: set all or nothing", () => {
+  it("P4 N2 (row 141): set a=1 b sets nothing when b isn't a variable; set a=1 a prints the new value", async () => {
+    const { c } = make();
+    const b = await c.run("set a=1 b");
+    expect(b.state).toBe("failed");
+    expect(b.lines.at(-1)!.text).toMatch(/No variable b .*nothing was set/);
+    expect((await c.run("echo ${a}")).state).toBe("refused");
+    const ok = await c.run("set a=2 a");
+    expect([ok.state, ok.lines.map((l) => l.text)]).toEqual(["done", ["a=2"]]);
+  });
+});

@@ -461,6 +461,8 @@ export class Console {
     }
     const next = { ...kept };
     const lines: string[] = [];
+    // every assignment is checked before any is made: set a=1 b (no b) sets nothing (SME review 2026-10-27 N2)
+    const sets = new Map<string, string>();
     // loop: NOT-WORTH — the line's few assignments
     for (const a of assigns) {
       const eq = a.indexOf("=");
@@ -468,21 +470,23 @@ export class Console {
       if (!VAR_NAME.test(name)) return this.finish(b, "refused", `${name} can't be a variable's name: a letter or _ first, then letters, digits, _ (set name=value).`);
       if ((READ_ONLY as readonly string[]).includes(name)) return this.finish(b, "refused", `\${${name}} is the Console's own: it can't be set.`);
       if (eq < 0) {
-        const v = this.lookup(name);
-        if (v === undefined) return this.finish(b, "failed", `No variable ${name} (set lists them).`);
+        const v = sets.get(name) ?? this.lookup(name);
+        if (v === undefined) return this.finish(b, "failed", `No variable ${name} (set lists them); nothing was set.`);
         lines.push(`${name}=${v}`);
         continue;
       }
       const value = a.slice(eq + 1);
       if (value.length > VALUE_MAX || value.includes("\0")) return this.finish(b, "refused", `${name}: a value is at most ${VALUE_MAX} characters, without NUL.`);
-      if (!this.vars.has(name) && this.vars.size >= VARIABLES_SESSION_MAX) return this.finish(b, "refused", `${VARIABLES_SESSION_MAX} variables already: unset some first.`);
+      if (!this.vars.has(name) && !sets.has(name) && this.vars.size + sets.size >= VARIABLES_SESSION_MAX) return this.finish(b, "refused", `${VARIABLES_SESSION_MAX} variables already: unset some first.`);
       // a kept variable stays kept (set changes it everywhere); -p keeps a new one
       if (keep || Object.hasOwn(kept, name)) {
         if (!Object.hasOwn(next, name) && Object.keys(next).length >= VARIABLES_MAX) return this.finish(b, "refused", `${VARIABLES_MAX} kept variables already: unset some first.`);
         next[name] = value;
       }
-      this.vars.set(name, value);
+      sets.set(name, value);
     }
+    // loop: NOT-WORTH — the line's few assignments
+    for (const [k, v] of sets) this.vars.set(k, v);
     // loop: NOT-WORTH — ≤ VARIABLES_MAX names
     if (Object.keys(next).some((k) => next[k] !== kept[k]) || Object.keys(next).length !== Object.keys(kept).length) this.d.setVariables(next);
     return this.finish(b, "done", ...lines);
