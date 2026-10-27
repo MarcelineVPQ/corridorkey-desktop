@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
 # Every gate before every commit (git config core.hooksPath .hooks). Skip once with `git commit --no-verify`.
+# The gates judge what is being committed: they run on a copy of the index (git checkout-index, ~27 MB, tracked files
+# only), not on the working tree, so a partly staged commit isn't judged by its unstaged files (review N10).
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 # no node_modules: fail, never pass silently (senior review 2026-10-27 S7: agents' worktrees skipped every gate)
 [ -d node_modules ] || { echo "pre-commit: no node_modules here, so the gates can't run: run npm ci first (or commit with --no-verify on purpose)" >&2; exit 1; }
-NODE_OPTIONS=--max-old-space-size=1024 npm run -s gates
+git_dir="$(git rev-parse --absolute-git-dir)"
+staged="$(mktemp -d "${TMPDIR:-/tmp}/ck-pre-commit-XXXXXX")"
+trap 'rm -rf "$staged"' EXIT
+git checkout-index -a --prefix="$staged/"
+ln -s "$PWD/node_modules" "$staged/node_modules"
+cd "$staged"
+# the gates that ask git (history, branches) ask this repository; its work tree is the copy
+GIT_DIR="$git_dir" GIT_WORK_TREE="$staged" NODE_OPTIONS=--max-old-space-size=1024 npm run -s gates
