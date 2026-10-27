@@ -110,8 +110,13 @@ export interface ConsoleDeps {
   showInFolder: (path: string) => void;
   /** `allow`'s native confirmation, naming the folder; true: confirmed */
   confirmAllow: (folder: string) => Promise<boolean>;
-  /** take the graphics card for a job: null when taken, else why not (the queue runs) */
-  takeGpu: () => string | null;
+  /**
+   * take the graphics card for a job: null when taken, else why not (the queue runs); resolves once the engines it
+   * stopped (the memory estimate's, the background TensorRT build's) have exited, so their memory is free
+   */
+  takeGpu: () => Promise<string | null>;
+  /** why corridorkey can't touch the card now (the queue keys), or null: `info` asks it (it starts CUDA) without taking the card */
+  gpuBusy: () => string | null;
   releaseGpu: () => void;
   /** the native confirmation (index.ts: dialog.showMessageBox); true: confirmed */
   confirm: (req: ElevationRequest) => Promise<boolean>;
@@ -1808,13 +1813,24 @@ export class Console {
       b.elevated = false;
       return now(this.finish(b, "refused", AUDIT_FAILED));
     }
-    // the dialog (and the folder) took time: another command may have started meanwhile; from here to the spawn
-    // nothing awaits, so the slot can't be taken twice
-    if (this.job && !(inScript && this.job.block.id === b.parent)) return now(this.finish(b, "refused", `Busy with ${this.job.block.line} (one command at a time).`));
-    // a command still in its checks when the app quits never starts (shutdown() stops only what runs)
-    if (this.closing) return now(this.finish(b, "refused", "Not run: the app is quitting."));
-    const gpuRefusal = cmd.gpu ? this.d.takeGpu() : null;
-    if (gpuRefusal) return now(this.finish(b, "refused", gpuRefusal));
+    // the dialog (and the folder) took time: another command may have started meanwhile; a command still in its checks
+    // when the app quits never starts (shutdown() stops only what runs)
+    const blocked = () =>
+      this.job && !(inScript && this.job.block.id === b.parent) ? `Busy with ${this.job.block.line} (one command at a time).` : this.closing ? "Not run: the app is quitting." : null;
+    const busy = blocked() ?? (cmd.name === "info" ? this.d.gpuBusy() : null);
+    if (busy) return now(this.finish(b, "refused", busy));
+    if (cmd.gpu) {
+      // taking the card waits for the engines it stops to exit (senior review 2026-10-26 N9): check the slot again
+      // after it; from there to the spawn nothing awaits, so the slot can't be taken twice
+      // loop: NOT-WORTH — one wait per command that uses the card, for the engines it stopped [bounded: GPU_RELEASE_MS in index.ts]
+      const gpuRefusal = await this.d.takeGpu();
+      if (gpuRefusal) return now(this.finish(b, "refused", gpuRefusal));
+      const late = blocked();
+      if (late) {
+        this.d.releaseGpu();
+        return now(this.finish(b, "refused", late));
+      }
+    }
     return this.spawnCli(b, bin, argv, cmd.gpu, inScript, targets);
   }
 

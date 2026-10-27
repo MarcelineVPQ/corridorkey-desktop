@@ -82,6 +82,8 @@ export function estimateErrorText(r: EngineReply): string {
 export class Estimator {
   private cache = new Map<string, MemoryEstimate>();
   private proc: EngineHandle | null = null;
+  // the engine stop() killed, until it has exited
+  private ending: EngineHandle | null = null;
   // one estimate engine at a time: each ask waits for the one before
   private chain: Promise<unknown> = Promise.resolve();
   private seq = 0;
@@ -109,8 +111,14 @@ export class Estimator {
 
   /** Stop a running estimate engine (the queue is starting, or the app quits). */
   stop(): void {
+    if (this.proc) this.ending = this.proc;
     this.proc?.kill();
     this.proc = null;
+  }
+
+  /** The engine stop() killed hasn't exited yet (its graphics memory may still be held). */
+  get engineEnding(): boolean {
+    return this.ending?.running ?? false;
   }
 
   private async read(input: string, limitGb: number | null, modelScale: number): Promise<MemoryEstimateResult> {

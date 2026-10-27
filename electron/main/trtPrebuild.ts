@@ -164,6 +164,8 @@ export function overallFraction(ranges: readonly PrebuildRange[]): number {
 export class Prebuilder {
   state: TrtPrebuild;
   private proc: EngineHandle | null = null;
+  // the engine pause() / stop() killed, until it has exited
+  private ending: EngineHandle | null = null;
   // an automatic start reading the graphics card (othersOnGpu)
   private checking = false;
   // Build now pressed while that reading ran: the start that reads goes ahead whatever it finds
@@ -181,6 +183,11 @@ export class Prebuilder {
 
   get running(): boolean {
     return this.proc !== null;
+  }
+
+  /** The engine pause() or stop() killed hasn't exited yet (its graphics memory may still be held). */
+  get engineEnding(): boolean {
+    return this.ending?.running ?? false;
   }
 
   /**
@@ -304,6 +311,7 @@ export class Prebuilder {
     const proc = this.proc;
     if (!proc) return false;
     this.proc = null;
+    this.ending = proc;
     proc.kill();
     // loop: NOT-WORTH — the few chosen sizes
     for (const r of this.state.ranges) if (r.state === "building") Object.assign(r, { state: "todo", piece: null, fraction: 0 });

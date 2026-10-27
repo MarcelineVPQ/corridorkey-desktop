@@ -9,7 +9,7 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { EngineProcess, rustEngineEnv, type EngineReply } from "./engine";
 import { Estimator } from "./estimate";
-import { GPU_POLL_MS, otherGpuUsers, readGpu } from "./gpu";
+import { GPU_POLL_MS, otherGpuUsers, readGpu, untilEnded } from "./gpu";
 import { expandPaths, frameDirLinearFor, probeClip, still, STILL_WIDTH, VIDEO_EXT, HINT_IMAGE_EXT } from "./media";
 import { clearJobTemps, Queue } from "./queue";
 import { checkRustEngine, loadSettings, saveSettings } from "./settings";
@@ -236,6 +236,7 @@ function rustEngineProcess(onReply: (r: EngineReply) => void, onExit: (code: num
 
 // the Console's corridorkey has the graphics card (the Console, below)
 let consoleGpu = false;
+const QUEUE_HAS_GPU = "The queue is keying on the graphics card: wait for it, or stop it, then run this.";
 // the computer stays awake while the queue or the Console's corridorkey runs (keepAwake.ts)
 const keepAwake = keepAwakeWhile(powerSaveBlocker);
 const queue = new Queue({
@@ -474,16 +475,21 @@ const appConsole = new Console({
   },
   confirmAllow,
   showInFolder: (p) => shell.showItemInFolder(p),
-  takeGpu: () => {
-    if (queue.running || queue.engineEnding) return "The queue is keying on the graphics card: wait for it, or stop it, then run this.";
+  takeGpu: async () => {
+    if (queue.running || queue.engineEnding) return QUEUE_HAS_GPU;
     if (cacheMoving) return "The cache folder is moving: wait for it, then run this.";
-    // one engine at a time: an estimate gives way, the background TensorRT build waits (as for the queue)
+    if (consoleGpu) return "The Console's corridorkey has the graphics card already (one command at a time).";
+    // one engine at a time: an estimate gives way, the background TensorRT build waits (as for the queue), and the
+    // run starts once their engines have exited, so the CLI's automatic window doesn't count their memory as used
     estimator.stop();
     prebuild.pause();
     consoleGpu = true;
     keepAwake("console", true);
+    // loop: NOT-WORTH — one wait per Console command that uses the card [bounded: GPU_RELEASE_MS]
+    await untilEnded(() => estimator.engineEnding || prebuild.engineEnding);
     return null;
   },
+  gpuBusy: () => (queue.running || queue.engineEnding ? QUEUE_HAS_GPU : null),
   releaseGpu: () => {
     consoleGpu = false;
     keepAwake("console", false);

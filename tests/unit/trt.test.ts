@@ -100,10 +100,11 @@ describe("the background TensorRT build", () => {
     let kills = 0;
     let allowed = true;
     let queue = false;
+    let last: { running: boolean } | null = null;
     const b = new Prebuilder({
       makeEngine: (onReply) => {
         reply = onReply;
-        const h: EngineHandle = {
+        const h: EngineHandle & { running: boolean } = {
           running: true,
           start: () => Promise.resolve({ type: "pong" }),
           send: (m) => sent.push(m),
@@ -111,6 +112,7 @@ describe("the background TensorRT build", () => {
           kill: () => kills++,
           stderrTail: () => [],
         };
+        last = h;
         return h;
       },
       changed: () => {},
@@ -123,7 +125,7 @@ describe("the background TensorRT build", () => {
       recordBuild: (range, secs) => records.push([range, secs]),
       now: () => 0,
     });
-    return { b, sent, sizes, records, reply: (r: EngineReply) => reply(r), kills: () => kills, allow: (v: boolean) => (allowed = v), queue: (v: boolean) => (queue = v) };
+    return { b, sent, sizes, records, reply: (r: EngineReply) => reply(r), kills: () => kills, engine: () => last, allow: (v: boolean) => (allowed = v), queue: (v: boolean) => (queue = v) };
   }
 
   it("builds 4K then HD until other sizes are chosen, moves its bar by network, and is done after both", async () => {
@@ -142,6 +144,16 @@ describe("the background TensorRT build", () => {
     // a part of the networks built (resumed, or reused): no time recorded, it wouldn't be the whole build
     expect(r.records).toHaveLength(1);
     expect(r.b.state.ranges[1].fallbacks).toEqual({ stage1: "no tactic" });
+  });
+
+  it("says while the engine pause() killed hasn't exited (the Console's corridorkey waits for it; senior review 2026-10-26 N9)", async () => {
+    const r = rig();
+    await r.b.start(false);
+    expect(r.b.engineEnding).toBe(false);
+    r.b.pause();
+    expect(r.b.engineEnding).toBe(true);
+    r.engine()!.running = false;
+    expect(r.b.engineEnding).toBe(false);
   });
 
   it("gives way to the queue and goes on after it; never starts by itself while another program uses the card", async () => {

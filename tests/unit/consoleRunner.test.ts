@@ -81,6 +81,8 @@ let scriptAsks: ScriptElevationRequest[];
 let gpuTaken: number;
 let gpuReleased: number;
 let gpuRefusal: string | null;
+// takeGpu's wait for the engines it stopped (null: none)
+let gpuWait: Promise<void> | null;
 let killed: number[];
 let t: number;
 let blocks: Map<number, ConsoleBlock>;
@@ -123,11 +125,13 @@ function make(over: Partial<ConsoleDeps> = {}, files = mkdtempSync(join(root, "u
     setVariables: (v) => void (keptVars = v),
     confirmAllow: async (f) => (allowAsked.push(f), allowAnswer),
     showInFolder: (p) => void shown.push(p),
-    takeGpu: () => {
+    takeGpu: async () => {
       if (gpuRefusal) return gpuRefusal;
       gpuTaken++;
+      await gpuWait;
       return null;
     },
+    gpuBusy: () => gpuRefusal,
     releaseGpu: () => void gpuReleased++,
     confirm: async (r) => (confirms.push(r), confirmAnswer),
     confirmScript: async (r) => (scriptAsks.push(r), confirmAnswer),
@@ -166,6 +170,7 @@ beforeEach(() => {
   gpuTaken = 0;
   gpuReleased = 0;
   gpuRefusal = null;
+  gpuWait = null;
   killed = [];
   t = 1_000_000;
   blocks = new Map();
@@ -267,13 +272,31 @@ describe("corridorkey from the Console", () => {
     await finish(spawned[0].child, [], 0);
   });
 
-  it("is refused while the queue has the graphics card; info and verify don't need it", async () => {
+  it("is refused while the queue has the graphics card; so is info (it starts CUDA); verify doesn't need it", async () => {
     gpuRefusal = "The queue is keying on the graphics card: wait for it, or stop it, then run this.";
     const { c } = make();
     const b = await c.run("render shot.mov -o ../out/a");
     expect([b.state, b.lines[0].text]).toEqual(["refused", gpuRefusal]);
-    await c.run("info --json");
-    expect(spawned.map((s) => s.args)).toEqual([["info", "--json"]]);
+    // senior review 2026-10-26 N9 (BACKLOG row 114): info initialises CUDA, so it waits for the queue too
+    const i = await c.run("info --json");
+    expect([i.state, i.lines[0].text]).toEqual(["refused", gpuRefusal]);
+    await c.run("verify shot.mov -o ../out/a");
+    expect(spawned.map((s) => s.args[0])).toEqual(["verify"]);
+    await finish(spawned[0].child, [], 0);
+  });
+
+  it("N9 (BACKLOG row 114): waits for the card's stopped engines, then checks the slot again; a command that took it meanwhile wins", async () => {
+    let free!: () => void;
+    gpuWait = new Promise((r) => (free = r));
+    const { c } = make();
+    const first = c.run("render shot.mov -o ../out/w/");
+    await vi.waitFor(() => expect(gpuTaken).toBe(1));
+    expect(spawned).toHaveLength(0);
+    await c.run("verify shot.mov -o ../out/w/");
+    free();
+    const b = await first;
+    expect([b.state, b.lines[0].text]).toEqual(["refused", "Busy with verify shot.mov -o ../out/w/ (one command at a time)."]);
+    expect([gpuReleased, spawned.map((s) => s.args[0])]).toEqual([1, ["verify"]]);
     await finish(spawned[0].child, [], 0);
   });
 

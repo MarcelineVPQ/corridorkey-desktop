@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ESTIMATE_FRESH_MS, Estimator, estimateErrorText, estimateRequest, parseEstimate } from "../../electron/main/estimate";
 import type { EngineReply } from "../../electron/main/engine";
+import { untilEnded } from "../../electron/main/gpu";
 import type { EngineHandle } from "../../electron/main/queue";
 import { MANUAL_WINDOWS, VRAM_LIMIT_AUTO_HELP } from "../../src/shared/types";
 
@@ -46,6 +47,33 @@ function harness(answer: (req: Record<string, unknown>) => EngineReply | null = 
   });
   return { est, engines, tick: (ms: number) => (clock += ms) };
 }
+
+describe("the estimate gives way to the Console (senior review 2026-10-26 N9)", () => {
+  it("says while the engine stop() killed hasn't exited", async () => {
+    const h = { running: true, start: () => Promise.resolve({ type: "pong", protocol: 1 }), send: () => {}, quit: () => {}, kill: () => {}, stderrTail: () => [] };
+    let made = false;
+    const est = new Estimator({ makeEngine: () => ((made = true), h) });
+    void est.ask("/c.mov", false);
+    await vi.waitFor(() => expect(made).toBe(true));
+    expect(est.engineEnding).toBe(false);
+    est.stop();
+    expect(est.engineEnding).toBe(true);
+    h.running = false;
+    expect(est.engineEnding).toBe(false);
+  });
+
+  it("untilEnded resolves once the stopped engines are gone, or at its deadline", async () => {
+    let ending = true;
+    setTimeout(() => (ending = false), 20);
+    const t0 = Date.now();
+    await untilEnded(() => ending, 5000, 5);
+    expect(ending).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(1000);
+    const t1 = Date.now();
+    await untilEnded(() => true, 30, 5);
+    expect(Date.now() - t1).toBeGreaterThanOrEqual(25);
+  });
+});
 
 describe("memory estimate (backlog row 41)", () => {
   it("asks for every manual window in both modes", () => {

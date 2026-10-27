@@ -9,6 +9,18 @@ import { OTHER_GPU_USER_MB, type GpuInfo, type GpuProcess } from "../../src/shar
 export const GPU_POLL_MS = 2000;
 // nvidia-smi answers in ~50 ms; a driver in trouble can hang it: the read gives up (and says so) instead.
 export const GPU_READ_TIMEOUT_MS = 5000;
+/** How long taking the card waits for the engines it stopped to exit (a killed process ends in milliseconds). */
+export const GPU_RELEASE_MS = 5000;
+
+/**
+ * Resolves once `ending()` is false (the engines stopped for the Console's corridorkey have exited, so their graphics
+ * memory is free; senior review 2026-10-26 N9), or after `maxMs`.
+ */
+export async function untilEnded(ending: () => boolean, maxMs = GPU_RELEASE_MS, stepMs = 50): Promise<void> {
+  const end = Date.now() + maxMs;
+  // loop: SERIAL-REQUIRED — a look every 50 ms at the stopped engines, once per Console command that uses the card [bounded: maxMs]
+  while (ending() && Date.now() < end) await new Promise((r) => setTimeout(r, stepMs));
+}
 
 /** Parse `nvidia-smi --query-gpu=name,memory.total,memory.used,utilization.gpu --format=csv,noheader,nounits`. */
 export function parseGpuLine(line: string): Omit<GpuInfo, "processes" | "at"> | null {

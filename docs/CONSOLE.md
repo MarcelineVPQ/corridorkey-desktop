@@ -68,7 +68,9 @@ missing there).
   "Output safety"). One Console job at a time: a `run` script takes the slot before it reads its file, and a command
   checks the slot again right before it starts, with nothing awaited in between. `render` and `prepare` use the graphics card: refused
   while the queue runs; while they run the queue doesn't start, the memory estimate stops and the background TensorRT
-  build waits. The app's quit stops a running corridorkey (SIGTERM, killed after 7 s): the CLI doesn't end with its
+  build waits, and they start once those engines have exited (at most 5 s), so the CLI's automatic window doesn't count
+  their memory as used. `info` starts CUDA too: refused while the queue runs (it doesn't take the card; `doctor`'s
+  own `info` check isn't held back). The app's quit stops a running corridorkey (SIGTERM, killed after 7 s): the CLI doesn't end with its
   parent on its own. Once the quit has begun nothing starts: a command still in its checks is refused.
 - **Teach by echo.** Every job the queue starts carries its exact `corridorkey render …` line (`Job.command`, built by
   `src/shared/console/jobCommand.ts` from the job's settings with the mapping queue.ts sends the engine, and
