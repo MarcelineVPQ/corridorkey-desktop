@@ -34,9 +34,10 @@
 //! TIGHT rows are those runs' highest peak per point, rounded up to 0.01 GiB and made monotone, at 960x720, 1280x1080
 //! and 1920x1080; every cell they didn't measure is the table's (1920x1080 16/8 low-VRAM too: it ran at 5.45 GiB but
 //! took 394 s for 32 frames, 8x its 8/4's time per frame, so it doesn't count as fitting); 960x720 low-VRAM 2/1 and
-//! 8/4-24/12 take 1280x1080's (the size rule above). The estimate is the table's peak, but no more than the budget
-//! lets a window peak (Profile::fits) as long as the TIGHT peak fits it, else the TIGHT peak: a window fits a budget
-//! when its TIGHT peak does. That rests on a job that ran within 7.4 GiB running within any larger budget (more
+//! 8/4-24/12 take 1280x1080's (the size rule above). With a graphics-memory limit (the runs above had one) the estimate
+//! is the table's peak, but no more than the budget lets a window peak (Profile::fits) as long as the TIGHT peak fits
+//! it, else the TIGHT peak: a window fits a budget when its TIGHT peak does. Without a limit (the app's Auto: no arena
+//! is capped) it is the table's peak until Auto is measured on an 8 GB card (senior review 2026-10-27 S2). That rests on a job that ran within 7.4 GiB running within any larger budget (more
 //! memory free) and within a smaller one its TIGHT peak plus the margin fits (less free): an assumption, not measured
 //! below 7.0 GiB. The margin is Profile::fits' (x 1.1 + 0.3 GiB on top of the +6 % uplift): a window needs at least
 //! its highest measured peak + 16.6 % + 0.3 GiB of budget.
@@ -160,12 +161,13 @@ impl Profile {
 
 /// runtime.select_vram_profile's search: the largest window that fits `budget_gb` (a larger low-VRAM window beats a
 /// smaller normal one, the normal mode first at the same window); a single-frame low-VRAM window when nothing fits.
-/// `low_only` (a TensorRT job): low-VRAM mode only. The table's normal-mode peaks are measured on CUDA only, and
+/// `limited`: the budget is a graphics-memory limit (the job's or the engine's), so the TIGHT peaks, measured under one,
+/// are read (estimate_peak_vram_gb); without one, the table's. `low_only` (a TensorRT job): low-VRAM mode only. The table's normal-mode peaks are measured on CUDA only, and
 /// with them a 16 GB card's free memory would put HD 48/24 and 4K 8/4 in the normal mode, where TensorRT's peaks
 /// are unmeasured; TensorRT keeps the low mode it had before the measured table (row 41) until they are measured.
 /// The window is CUDA's, or shorter where the low mode's measured peak is above the normal one's (onnx.4: 960x720 at
 /// 80 frames).
-pub fn select_vram_profile(shape_hw: (usize, usize), num_frames: usize, budget_gb: f64, low_only: bool) -> Profile {
+pub fn select_vram_profile(shape_hw: (usize, usize), num_frames: usize, budget_gb: f64, limited: bool, low_only: bool) -> Profile {
     let mp = (shape_hw.0 * shape_hw.1) as f64 / 1e6;
     let mut estimate = 0.0;
     for chunk in AUTO_WINDOWS {
@@ -178,7 +180,7 @@ pub fn select_vram_profile(shape_hw: (usize, usize), num_frames: usize, budget_g
                 chunk,
                 stride: (chunk / 2).max(1),
                 low_vram: low,
-                estimate_gb: estimate_peak_vram_gb(mp, chunk.min(num_frames), low, Some(budget_gb)),
+                estimate_gb: estimate_peak_vram_gb(mp, chunk.min(num_frames), low, limited.then_some(budget_gb)),
             };
             estimate = p.estimate_gb;
             if p.fits(budget_gb) {
@@ -238,15 +240,21 @@ pub fn parse_windows(v: Option<&serde_json::Value>) -> Result<Vec<Window>, crate
 /// The `estimate` reply's windows: per window, the same peak estimate the automatic window and the `memory` reply
 /// use (estimate_peak_vram_gb over the padded shape, the window capped at the clip's frames), in bytes; what the
 /// automatic window requires of the budget for it (the estimate x MARGIN_SCALE + MARGIN_GB, Profile::fits); and
-/// whether that fits `budget` (None: no memory reading, so no verdict).
-pub fn window_estimates(shape_hw: (usize, usize), num_frames: usize, windows: &[Window], budget: Option<u64>) -> Vec<serde_json::Value> {
+/// whether that fits `budget` (None: no memory reading, so no verdict). `limited`: the budget is a limit, as
+/// select_vram_profile's.
+pub fn window_estimates(shape_hw: (usize, usize), num_frames: usize, windows: &[Window], budget: Option<u64>, limited: bool) -> Vec<serde_json::Value> {
     let mp = (shape_hw.0 * shape_hw.1) as f64 / 1e6;
     // loop: NOT-WORTH — at most MAX_WINDOWS windows, once per estimate request
     windows
         .iter()
         .map(|&(chunk, stride, low)| {
             let frames = chunk.min(num_frames);
-            let p = Profile { chunk, stride, low_vram: low, estimate_gb: estimate_peak_vram_gb(mp, frames, low, budget.map(|b| b as f64 / GIB)) };
+            let p = Profile {
+                chunk,
+                stride,
+                low_vram: low,
+                estimate_gb: estimate_peak_vram_gb(mp, frames, low, budget.filter(|_| limited).map(|b| b as f64 / GIB)),
+            };
             let needs = p.estimate_gb * MARGIN_SCALE + MARGIN_GB;
             serde_json::json!({
                 "hann_chunk": chunk, "hann_stride": stride, "low_vram": low, "frames": frames,
@@ -270,8 +278,9 @@ pub fn estimate(
     cap_gb: Option<f64>,
 ) -> Result<serde_json::Value, crate::Error> {
     let meta = crate::clip::probe_size(std::path::Path::new(input), num_frames, model_scale)?;
+    let limited = cap_gb.is_some() && mem.is_some_and(|m| m.source == "gpu");
     let budget = mem.map(|m| match cap_gb {
-        Some(cap) if m.source == "gpu" => m.budget.min((cap * GIB) as u64),
+        Some(cap) if limited => m.budget.min((cap * GIB) as u64),
         _ => m.budget,
     });
     Ok(serde_json::json!({
@@ -280,7 +289,7 @@ pub fn estimate(
         "total_bytes": mem.and_then(|m| m.total), "free_bytes": mem.map(|m| m.free), "budget_bytes": budget,
         "budget_source": mem.map(|m| m.source), "budget_cap_gb": cap_gb, "provider": mem.map(|m| m.provider),
         "estimate_basis": "onnxruntime-cuda-measured", "margin_scale": MARGIN_SCALE, "margin_gb": MARGIN_GB,
-        "windows": window_estimates((meta.shape_h, meta.shape_w), meta.num_frames, windows, budget),
+        "windows": window_estimates((meta.shape_h, meta.shape_w), meta.num_frames, windows, budget, limited),
     }))
 }
 
@@ -508,14 +517,14 @@ mod tests {
 
     #[test]
     fn an_8_gb_card_gets_the_window_it_ran() {
-        // the 8 GB card's free memory (7.4 GiB measured; 7.0 with more of the desktop on the card): 1280x1080 runs
+        // the 8 GB card's free memory as a limit, as it ran (7.4 GiB; 7.0 with more of the desktop on the card): 1280x1080 runs
         // 24/12 low-VRAM (measured 5.34 GiB at 7.4; the table's 8.04 put it at 8/4), 1920x1080 8/4 normal (measured
         // 4.92; the table's 6.17 put it in low-VRAM mode); 1920x1080 16/8 low-VRAM starved and 24/12 is unmeasured
         // loop: NOT-WORTH — four cases
         for (budget, shape, want) in
             [(7.4, (1152, 1280), (24, 12, true)), (7.0, (1152, 1280), (24, 12, true)), (7.4, (1152, 1920), (8, 4, false)), (7.0, (1152, 1920), (8, 4, false))]
         {
-            let p = select_vram_profile(shape, 240, budget, false);
+            let p = select_vram_profile(shape, 240, budget, true, false);
             assert_eq!((p.chunk, p.stride, p.low_vram), want, "{shape:?} at {budget} GiB");
             assert!(p.fits(budget));
             let peak = MEASURED_8GB.iter().filter(|m| m.0 == shape && m.1 == p.chunk && m.2 == p.low_vram).map(|m| m.3).fold(f64::NAN, f64::max);
@@ -537,10 +546,34 @@ mod tests {
             (14.5, (1152, 1920), (24, 12, false)),
             (14.5, (2176, 4096), (8, 4, false)),
         ];
-        // loop: NOT-WORTH — eight cases
+        // loop: NOT-WORTH — eight cases x with and without a limit
         for (budget, shape, want) in cases {
-            let p = select_vram_profile(shape, 240, budget, false);
-            assert_eq!((p.chunk, p.stride, p.low_vram), want, "{shape:?} at {budget} GiB");
+            // loop: NOT-WORTH — two readings
+            for limited in [false, true] {
+                let p = select_vram_profile(shape, 240, budget, limited, false);
+                assert_eq!((p.chunk, p.stride, p.low_vram), want, "{shape:?} at {budget} GiB, limited={limited}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_8_gb_card_on_auto_keeps_the_16_gb_tables_windows() {
+        // the TIGHT peaks were all measured under a limit; Auto (no limit, no arena capped) keeps the 16 GB card's
+        // table until it is measured on an 8 GB card (senior review 2026-10-27 S2): 1280x1080 8/4 normal (the TIGHT
+        // reading: 24/12 low), 1920x1080 8/4 low (TIGHT: 8/4 normal), 6 GB's 5.5 GiB 2/1 low at 1920x1080 (TIGHT: 8/4)
+        // loop: NOT-WORTH — five cases
+        for (budget, shape, auto, limited) in [
+            (7.4, (1152, 1280), (8, 4, false), (24, 12, true)),
+            (7.0, (1152, 1280), (8, 4, false), (24, 12, true)),
+            (7.4, (1152, 1920), (8, 4, true), (8, 4, false)),
+            (7.0, (1152, 1920), (8, 4, true), (8, 4, false)),
+            (5.5, (1152, 1920), (2, 1, true), (8, 4, true)),
+        ] {
+            let p = select_vram_profile(shape, 240, budget, false, false);
+            assert_eq!((p.chunk, p.stride, p.low_vram), auto, "Auto {shape:?} at {budget} GiB");
+            assert_eq!(p.estimate_gb, estimate_peak_vram_gb((shape.0 * shape.1) as f64 / 1e6, p.chunk, p.low_vram, None));
+            let q = select_vram_profile(shape, 240, budget, true, false);
+            assert_eq!((q.chunk, q.stride, q.low_vram), limited, "limited {shape:?} at {budget} GiB");
         }
     }
 
@@ -549,7 +582,7 @@ mod tests {
         // a 1920x1080 clip with a 16 GB card's ~14.5 GiB free: 48/24 low ran out of memory on onnx.4 at a 14 GiB
         // budget, so the automatic window is one that ran, with its measured peak inside the budget
         let shape = (1152, 1920);
-        let p = select_vram_profile(shape, 240, 14.5, false);
+        let p = select_vram_profile(shape, 240, 14.5, false, false);
         assert!(!OUT_OF_MEMORY.contains(&(shape, p.chunk, p.low_vram)), "{p:?} ran out of memory");
         let peak = MEASURED.iter().filter(|m| m.0 == shape && m.1 == p.chunk && m.2 == p.low_vram).map(|m| m.3).fold(f64::NAN, f64::max);
         assert!(peak <= 14.5, "{p:?}: measured peak {peak} GiB (NaN: not measured)");
@@ -572,7 +605,7 @@ mod tests {
         ];
         // loop: NOT-WORTH — seven cases
         for (shape, frames, want) in cases {
-            let p = select_vram_profile(shape, frames, 12.0, false);
+            let p = select_vram_profile(shape, frames, 12.0, false, false);
             assert_eq!((p.chunk, p.stride, p.low_vram), want, "{shape:?} {frames} frames");
         }
     }
@@ -586,21 +619,21 @@ mod tests {
         let cases = [((1152, 1280), 250, 14.5, 48, 48), ((2176, 4096), 120, 14.5, 8, 8), ((768, 1024), 349, 12.0, 80, 48)];
         // loop: NOT-WORTH — three cases
         for (shape, frames, budget, chunk, trt_chunk) in cases {
-            let cuda = select_vram_profile(shape, frames, budget, false);
-            let trt = select_vram_profile(shape, frames, budget, true);
+            let cuda = select_vram_profile(shape, frames, budget, false, false);
+            let trt = select_vram_profile(shape, frames, budget, false, true);
             assert_eq!((cuda.chunk, cuda.stride, cuda.low_vram), (chunk, chunk / 2, false), "CUDA {shape:?} {frames} frames");
             assert_eq!((trt.chunk, trt.stride, trt.low_vram), (trt_chunk, trt_chunk / 2, true), "TensorRT {shape:?} {frames} frames");
             assert!(trt.fits(budget));
         }
         // nothing fits: the single-frame low window either way
-        assert_eq!(select_vram_profile((1152, 1920), 240, 1.0, true), select_vram_profile((1152, 1920), 240, 1.0, false));
+        assert_eq!(select_vram_profile((1152, 1920), 240, 1.0, false, true), select_vram_profile((1152, 1920), 240, 1.0, false, false));
     }
 
     #[test]
     fn selection_prefers_long_windows() {
-        let p = select_vram_profile((1152, 1920), 240, 15.0, false);
+        let p = select_vram_profile((1152, 1920), 240, 15.0, false, false);
         assert!(p.fits(15.0));
-        let tiny = select_vram_profile((1152, 1920), 240, 1.0, false);
+        let tiny = select_vram_profile((1152, 1920), 240, 1.0, false, false);
         assert_eq!((tiny.chunk, tiny.stride, tiny.low_vram), (1, 1, true));
     }
 
@@ -609,7 +642,7 @@ mod tests {
         // 1920x1080 pads to 1920x1152; the same function the automatic window and the memory reply use
         let shape = (1152, 1920);
         let mp = (1152.0 * 1920.0) / 1e6;
-        let w = window_estimates(shape, 240, &[(24, 12, false), (48, 24, true), (80, 40, true)], Some((15.0 * GIB) as u64));
+        let w = window_estimates(shape, 240, &[(24, 12, false), (48, 24, true), (80, 40, true)], Some((15.0 * GIB) as u64), true);
         assert_eq!(w.len(), 3);
         let peak = |i: usize| w[i]["peak_bytes"].as_u64().unwrap() as f64 / GIB;
         assert!((peak(0) - estimate_peak_vram_gb(mp, 24, false, Some(15.0))).abs() < 1e-6);
@@ -620,15 +653,15 @@ mod tests {
         assert_eq!(w[0]["fits"], json!(needs <= 15.0));
         assert_eq!(w[2]["fits"], json!(false), "80 frames at HD don't fit 15 GiB");
         // the window the automatic choice picks for 15 GiB fits by the same rule, with the same estimate
-        let auto = select_vram_profile(shape, 240, 15.0, false);
-        let a = window_estimates(shape, 240, &[(auto.chunk, auto.stride, auto.low_vram)], Some((15.0 * GIB) as u64));
+        let auto = select_vram_profile(shape, 240, 15.0, true, false);
+        let a = window_estimates(shape, 240, &[(auto.chunk, auto.stride, auto.low_vram)], Some((15.0 * GIB) as u64), true);
         assert_eq!(a[0]["fits"], json!(true));
         assert!((a[0]["peak_bytes"].as_u64().unwrap() as f64 / GIB - auto.estimate_gb).abs() < 1e-6);
     }
 
     #[test]
     fn a_window_longer_than_the_clip_is_capped_and_no_reading_gives_no_verdict() {
-        let w = window_estimates((768, 1024), 10, &[(48, 24, false), (8, 4, false)], None);
+        let w = window_estimates((768, 1024), 10, &[(48, 24, false), (8, 4, false)], None, false);
         assert_eq!(w[0]["frames"], json!(10));
         assert_eq!(w[0]["fits"], Value::Null);
         // 10 frames: between the table's 8 and 24 columns, so above the 8-frame window

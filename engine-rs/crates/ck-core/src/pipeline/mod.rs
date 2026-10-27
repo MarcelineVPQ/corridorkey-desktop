@@ -783,10 +783,10 @@ impl Pipeline<OrtLoader> {
                 Provider::Cpu => (crate::gpu::host_available().unwrap_or(0) as f64 / 1073741824.0, "host"),
                 _ => (crate::gpu::budget().map(|b| b.0).unwrap_or(0) as f64 / 1073741824.0, "gpu"),
             };
-            // the job's budget caps what the card has free
-            let budget = match job.vram_budget_gb {
-                Some(cap) if provider != Provider::Cpu => seen.min(cap),
-                _ => seen,
+            // the job's budget caps what the card has free; only a limited job reads the TIGHT peaks (vram.rs)
+            let (budget, limited) = match job.vram_budget_gb {
+                Some(cap) if provider != Provider::Cpu => (seen.min(cap), true),
+                _ => (seen, false),
             };
             // a TensorRT job keeps low-VRAM mode: the table's normal-mode peaks are CUDA's, TensorRT's are
             // unmeasured (row 41; lifted once they are). A later fallback to CUDA runs the low mode, as before.
@@ -794,7 +794,7 @@ impl Pipeline<OrtLoader> {
             // `tensorrt_build: false`: a range not built yet (or one TensorRT can't take) runs exactly as a job without
             // TensorRT, CUDA's own window included, instead of building inside the job
             if tensorrt && !job.tensorrt_build {
-                let p = select_vram_profile((sh, sw), t_all, budget, true);
+                let p = select_vram_profile((sh, sw), t_all, budget, limited, true);
                 let why = match self.trt_range((sh, sw), p.chunk, p.low_vram) {
                     Ok(r) if r.built => None,
                     Ok(r) => {
@@ -809,7 +809,7 @@ impl Pipeline<OrtLoader> {
                     tensorrt = false;
                 }
             }
-            let p = select_vram_profile((sh, sw), t_all, budget, tensorrt);
+            let p = select_vram_profile((sh, sw), t_all, budget, limited, tensorrt);
             chunk = p.chunk;
             stride = p.stride;
             low_vram = p.low_vram;
@@ -826,7 +826,7 @@ impl Pipeline<OrtLoader> {
             if !p.fits(budget) {
                 sink.log("  [WARNING] Even a single-frame window may not fit this GPU at this resolution. Inference may run out of memory.");
             }
-            let est = estimate_peak_vram_gb((sh * sw) as f64 / 1e6, chunk.min(t_all), low_vram, Some(budget));
+            let est = estimate_peak_vram_gb((sh * sw) as f64 / 1e6, chunk.min(t_all), low_vram, limited.then_some(budget));
             sink.send(json!({
                 "type": "memory", "hann_chunk": chunk, "hann_stride": stride, "low_vram": low_vram, "auto": true,
                 "budget_gb": (budget * 100.0).round() / 100.0, "estimate_gb": (est * 100.0).round() / 100.0,
@@ -1108,13 +1108,14 @@ impl Pipeline<OrtLoader> {
         }
         let (sh, sw) = (crate::image::ceil_to_multiple(height, crate::clip::SHAPE_QUANTUM), crate::image::ceil_to_multiple(width, crate::clip::SHAPE_QUANTUM));
         let seen = crate::gpu::budget().map(|b| b.0).unwrap_or(0) as f64 / 1073741824.0;
-        let budget = vram_budget_gb.or(self.loader.rt.cfg.vram_budget_gb).map(|cap| seen.min(cap)).unwrap_or(seen);
+        let limit = vram_budget_gb.or(self.loader.rt.cfg.vram_budget_gb);
+        let budget = limit.map(|cap| seen.min(cap)).unwrap_or(seen);
         // the window a TensorRT job of this size picks (run_job: low-VRAM mode, the same table)
-        let p = select_vram_profile((sh, sw), frames, budget, true);
+        let p = select_vram_profile((sh, sw), frames, budget, limit.is_some(), true);
         let r = self.trt_range((sh, sw), p.chunk, p.low_vram).map_err(Error::bad_request)?;
         self.trt_drop_stale(&r.card_dir, sink);
         sink.log(&format!("  TensorRT build for {width}x{height}: window {}/{} at {} GB available, range {}", p.chunk, p.stride, f1(budget), r.bucket.key()));
-        let cap = vram_budget_gb.or(self.loader.rt.cfg.vram_budget_gb).map(|g| (g * 1073741824.0) as u64);
+        let cap = limit.map(|g| (g * 1073741824.0) as u64);
         let key = ModelKey { provider: Provider::TensorRt, precision: Precision::Fp16, trt_cache: Some(r.dir.clone()), vram_cap: cap, coreml: None };
         let was_built = r.built;
         self.trt_prepare(&key, &r.bucket, sink)?;

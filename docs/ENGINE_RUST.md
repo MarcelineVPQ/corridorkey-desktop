@@ -236,7 +236,10 @@ arenas, the architecture) isn't measured.
 Every point estimated within the budget ran and every out-of-memory point was estimated above it: safe, but 8 GB
 cards got 8/4 at HD. `vram.rs` now has a second table, TIGHT, the 8 GB card's highest peak per point (rounded up,
 monotone; 960×720, 1280×1080 and 1920×1080; the 16 GB table's value wherever it didn't measure, and for 1920×1080
-16/8 low-VRAM, which ran but took 394 s for 32 frames, 8× its 8/4's time per frame). One formula for both:
+16/8 low-VRAM, which ran but took 394 s for 32 frames, 8× its 8/4's time per frame). It is read only for a job with a
+graphics-memory limit (its `vram_budget_gb` or `CK_ENGINE_VRAM_BUDGET_GB`), as every run above had: without one (the
+app's Auto, no arena capped) the estimate is the 16 GB table's, dev.1's windows, until Auto is measured on an 8 GB card
+(senior review 2026-10-27 S2). With a limit, one formula for both:
 
 - a window fits a budget when its TIGHT peak (+6 %) does, by the same rule as before (× 1.1 + 0.3 GiB): a window needs
   at least its highest measured peak + 16.6 % + 0.3 GiB (HD 24/12 low: measured 5.34, its 16/8's 5.65 carried up,
@@ -248,7 +251,8 @@ It rests on an assumption the runs don't show: a job that ran within 7.0-7.4 GiB
 within a smaller one its TIGHT peak plus the margin fits. Not measured: the app's Auto (no limit, the card's whole
 free memory), budgets under 7.0 GiB, and a 16 GB card held to 7.4 GiB (if its peaks don't come down, the automatic
 window's out-of-memory retry halves the window). Tests: `the_8_gb_cards_peaks_are_bounded_at_any_budget`,
-`an_8_gb_card_gets_the_window_it_ran`, `larger_cards_keep_their_windows`.
+`an_8_gb_card_gets_the_window_it_ran`, `an_8_gb_card_on_auto_keeps_the_16_gb_tables_windows`,
+`larger_cards_keep_their_windows`.
 
 | Card (budget GiB) | 1280×1080 before → after | 1920×1080 before → after | 4096×2160 |
 |---|---|---|---|
