@@ -36,6 +36,11 @@ export const pathArg = (v: unknown): string | null => (typeof v === "string" && 
 /** A Console line: a string of at most `max` characters without NUL (anything else: null, refused). */
 export const consoleLineArg = (v: unknown, max: number): string | null => (typeof v === "string" && v.length <= max && !v.includes("\0") ? v : null);
 
+/** Pasted lines (2 to 1000, each a line as consoleLineArg takes it, no line breaks inside), or null. */
+export const consoleLinesArg = (v: unknown, max: number): string[] | null =>
+  // loop: NOT-WORTH — ≤ 1000 lines, once per paste run
+  Array.isArray(v) && v.length >= 2 && v.length <= 1000 && v.every((l) => consoleLineArg(l, max) !== null && !/[\r\n]/.test(l as string)) ? (v as string[]) : null;
+
 /** A cursor position within `line`, or null. */
 export const cursorArg = (v: unknown, line: string): number | null => (typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= line.length ? v : null);
 

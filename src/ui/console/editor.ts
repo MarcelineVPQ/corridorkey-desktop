@@ -42,6 +42,8 @@ export interface EditorState {
   autosuggest: boolean;
   /** what Ctrl+U, Ctrl+K, Ctrl+W or Alt+D cut last (Ctrl+Y puts it back) */
   kill: string;
+  /** several lines pasted at once, offered as a script (Enter runs them, Esc keeps the first); never joined */
+  paste: string[] | null;
 }
 
 export interface Key {
@@ -65,7 +67,7 @@ export interface KeyContext {
   suggestFrom?: readonly string[];
 }
 
-export type Effect = { kind: "run"; line: string } | { kind: "cancel" } | { kind: "clear" } | { kind: "mode"; mode: SuggestMode };
+export type Effect = { kind: "run"; line: string } | { kind: "script"; lines: string[] } | { kind: "cancel" } | { kind: "clear" } | { kind: "mode"; mode: SuggestMode };
 
 export interface KeyResult {
   state: EditorState;
@@ -85,6 +87,7 @@ export const initialEditor = (mode: SuggestMode = "inline", autosuggest = true):
   mode,
   autosuggest,
   kill: "",
+  paste: null,
 });
 
 /** The history without repeats, newest first (the file keeps non-adjacent duplicates). */
@@ -263,6 +266,20 @@ export const completion = (s: EditorState, line: string, cursor: number, data: C
 /** A line put in the editor from outside (History, Re-run): the cursor at its end, ready to edit. */
 export const setLine = (s: EditorState, line: string): EditorState => ({ ...at(s, line, line.length), hist: null, list: null, search: null, lastTab: null });
 
+/**
+ * Pasted text: one line goes in at the cursor (a trailing line break dropped); several are offered as a script (the
+ * page asks: Enter runs them in order, Esc keeps the first), never joined into one line.
+ */
+export function pasted(s: EditorState, text: string): EditorState {
+  // loop: NOT-WORTH — the pasted text's lines, once per paste
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length <= 1) return insertAt(s, lines[0] ?? "");
+  return { ...s, paste: lines, list: null, search: null, hist: null, lastTab: null };
+}
+
 /** Keys that need the completion for the line as it is now (the component asks first, then calls keyDown). */
 export function needsCompletion(k: Key, s: EditorState): boolean {
   if (s.search || s.list) return false;
@@ -293,6 +310,14 @@ export function keyDown(s0: EditorState, k: Key, ctx: KeyContext): KeyResult {
   // an Alt combination by its physical key (macOS's Option+F types ƒ), else by the key itself
   const altKey = k.code && /^Key[A-Z]$/.test(k.code) ? k.code.slice(3).toLowerCase() : k.code === "Period" ? "." : k.key.toLowerCase();
   let s = s0;
+
+  // --- lines pasted at once: Enter runs them as a script, Esc keeps the first, Ctrl+C drops them; nothing else ---
+  if (s.paste) {
+    if (plain && k.key === "Enter") return ok({ ...s, paste: null }, { kind: "script", lines: s.paste });
+    if (plain && k.key === "Escape") return ok(insertAt({ ...s, paste: null }, s.paste[0]));
+    if (ctrl && (k.key.toLowerCase() === "c" || k.key.toLowerCase() === "g")) return ok({ ...s, paste: null });
+    return ok(s);
+  }
 
   // --- Ctrl+R: incremental search, newest first ---
   if (s.search) {

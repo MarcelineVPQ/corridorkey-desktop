@@ -678,6 +678,8 @@ export interface CorridorKeyApi {
   // the Console (docs/CONSOLE.md): run a typed line (the main process parses and checks it; null: refused as input)
   consoleRun(line: string): Promise<ConsoleBlock | null>;
   // Ctrl+C: the running command stops cleanly; a second one ends it at once
+  // lines pasted at once (2 or more), run as a script after the page's offer (each checked as a typed line; null: refused as input)
+  consoleRunLines(lines: string[]): Promise<ConsoleBlock | null>;
   consoleCancel(): Promise<void>;
   // Tab: completions for the word at the cursor
   consoleComplete(line: string, cursor: number): Promise<ConsoleCompletion>;

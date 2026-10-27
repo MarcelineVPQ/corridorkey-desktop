@@ -85,6 +85,8 @@ export interface ConsoleDeps {
   releaseGpu: () => void;
   /** the native confirmation (index.ts: dialog.showMessageBox); true: confirmed */
   confirm: (req: ElevationRequest) => Promise<boolean>;
+  /** a script's one confirmation, up front, listing all its lines that replace files */
+  confirmScript: (req: ScriptElevationRequest) => Promise<boolean>;
   elevation: Elevation;
   audit: AuditLog;
   history: History;
@@ -104,6 +106,14 @@ interface Job {
   block: ConsoleBlock;
   child: ChildProcess | null;
   cancels: number;
+  /** a script whose lines that replace files were confirmed up front (its own, never the session's elevation) */
+  scriptGrant?: boolean;
+}
+
+/** A script's lines that replace files, as its one confirmation lists them (control and bidi characters shown). */
+export interface ScriptElevationRequest {
+  script: string;
+  lines: string[];
 }
 
 const AUDIT_FAILED = "Not run: the audit log couldn't record it (every elevated command is logged first; see the app's log for why).";
@@ -265,6 +275,9 @@ export class Console {
     }
     const cmd = p.command;
     if (!cmd) return now(this.finish(b, "done"));
+    // sudo on a line that replaces nothing: said, then run as it is (backlog 107)
+    // loop: NOT-WORTH — the line's few options
+    if (p.sudo && !p.options.some((o) => o.arg.destructive)) this.note(b, "info", "sudo isn't needed for this (it replaces no files): ran it as it is.");
     // as the CLI prints it (clap: "corridorkey 1.0.0", "corridorkey-render 1.0.0"), without running it
     if (p.version) return now(this.finish(b, "done", `${cmd === this.d.registry.cli ? "corridorkey" : `corridorkey-${cmd.name}`} ${this.d.version}`));
     if (p.help) return now(this.finish(b, "done", ...(cmd.name === "help" && cmd.kind === "builtin" ? overview(this.d.registry) : commandHelp(this.d.registry, cmd))));
@@ -517,19 +530,65 @@ export class Console {
       // error: SHOWN — the block says why
       return now(this.finish(b, "failed", `Can't read the script: ${fsErrorText(e, path)}. dir lists the files here; Tab completes a name.`));
     }
+    return this.runText(b, job, text, a.basename(path));
+  }
+
+  /**
+   * Lines pasted into the input (more than one), run as a script once the page's offer is taken: the same path as
+   * `run`, so the same checks, the same stop at the first that fails, the same one confirmation up front.
+   */
+  async runLines(lines: readonly string[]): Promise<ConsoleBlock> {
+    const b = this.block(lines.join("\n"), null);
+    if (this.job) return this.finish(b, "refused", `Busy with ${this.job.block.line} (one command at a time; Ctrl+C stops it).`);
+    const job: Job = { block: b, child: null, cancels: 0 };
+    this.job = job;
+    this.d.sessionChanged();
+    return (await this.runText(b, job, lines.join("\n"), "pasted")).block;
+  }
+
+  /**
+   * A script's text, line by line. Before any line runs: a line that replaces files must say `sudo` (else the script is
+   * refused), and all such lines are listed in ONE confirmation (cancelled: nothing runs). A script never uses or
+   * extends the session's elevation, and its confirmation never elevates the session.
+   */
+  private async runText(b: ConsoleBlock, job: Job, text: string, name: string): Promise<{ block: ConsoleBlock; done: Promise<ConsoleBlock> }> {
+    const now = (x: ConsoleBlock) => ({ block: x, done: Promise.resolve(x) });
+    const release = (x: ConsoleBlock) => {
+      this.job = null;
+      this.d.sessionChanged();
+      return now(x);
+    };
+    // loop: NOT-WORTH — a script's lines (≤ 1 MiB), parsed once before it runs
+    const lines = text
+      .split(/\r?\n/)
+      .map((raw, i) => ({ n: i + 1, line: raw.trim() }))
+      .filter((x) => x.line && !x.line.startsWith("#"));
+    // loop: NOT-WORTH — as above
+    const destructive = lines.map((x) => ({ ...x, p: parse(x.line, this.d.registry, this.opts) })).filter((x) => !x.p.errors.length && x.p.options.some((o) => o.arg.destructive));
+    // loop: NOT-WORTH — as above
+    const bare = destructive.find((x) => !x.p.sudo);
+    if (bare) return release(this.finish(b, "refused", `${name}:${bare.n} replaces files: a script says so with sudo (sudo ${bare.line}); nothing ran.`));
+    if (destructive.length) {
+      // loop: NOT-WORTH — as above
+      const listed = destructive.map((x) => visible(`${name}:${x.n}  ${x.line}`));
+      const ok = await this.d.confirmScript({ script: visible(name), lines: listed });
+      const logged = await this.d.audit.append({ event: ok ? "granted" : "refused", argv: ["run", name], reason: `the script's ${listed.length} line(s) that replace files: ${listed.join(" | ")}` });
+      if (!ok) return release(this.finish(b, "refused", "Not run: the confirmation was cancelled (nothing ran)."));
+      if (!logged) return release(this.finish(b, "refused", AUDIT_FAILED));
+      job.scriptGrant = true;
+      b.elevated = true;
+    }
     const done = (async () => {
       let failed: ConsoleBlock | null = null;
       // loop: SERIAL-REQUIRED — a script's lines run one after another, each waiting for the last [bounded: the file's lines]
-      for (const [i, raw] of text.split(/\r?\n/).entries()) {
-        const line = raw.trim();
-        if (!line || line.startsWith("#")) continue;
+      for (const { n, line } of lines) {
         if (job.cancels > 0 || this.closing) break;
-        this.note(b, "info", `${a.basename(path)}:${i + 1}  ${line}`);
+        this.note(b, "info", `${name}:${n}  ${line}`);
         const r = await this.runLine(line, b.id);
         const end = await r.done;
         if (end.state !== "done") {
           failed = end;
-          this.note(b, "err", `stopped at line ${i + 1}: ${end.state}${end.exitCode !== null ? ` (exit ${end.exitCode})` : ""}`);
+          this.note(b, "err", `stopped at line ${n}: ${end.state}${end.exitCode !== null ? ` (exit ${end.exitCode})` : ""}`);
           break;
         }
       }
@@ -615,7 +674,11 @@ export class Console {
     const destructive = p.options.filter((o) => o.arg.destructive);
     // loop: NOT-WORTH — one or two flags
     if (destructive.length && !p.sudo) return now(this.finish(b, "refused", `${destructive.map((o) => o.name).join(", ")} replaces files that are already there: run it as sudo ${b.line.trim()}`));
-    if (p.sudo && destructive.length) {
+    if (p.sudo && destructive.length && inScript) {
+      // a script's line: covered only by its own confirmation up front, never by (or extending) the session's elevation
+      if (!this.job?.scriptGrant) return now(this.finish(b, "refused", "Not run: a script's line that replaces files runs only after the script's own confirmation."));
+      b.elevated = true;
+    } else if (p.sudo && destructive.length) {
       if (!this.d.elevation.active) {
         // the clip's name (render's own naming: docs/CLI.md "Outputs"): the files the run writes start with it
         // loop: NOT-WORTH — the line's few arguments

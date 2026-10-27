@@ -26,7 +26,9 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   which Tab completion uses too: one candidate per sequence, never one per frame), `cls` / `clear`,
   `history [N|term]` (`--audit`: the elevated log), `version` (also `corridorkey --version`, `render --version`: the app's
   version, which its corridorkey shares; answered without running it), `run <file.ckcmd>` (a script of Console lines, one per line, `#` comments;
-  each line through the same checks; stops at the first that fails; no script inside a script), `sudo <command>`,
+  each line through the same checks; stops at the first that fails; no script inside a script; its elevation: Security
+  rules below). Several lines pasted at once are never joined: the page offers them as a script (Enter runs them in
+  order through `consoleRunLines`, the same path as `run`; Esc keeps the first line; Ctrl+C drops them), `sudo <command>`,
   `sudo -k`, and `corridorkey render | verify | prepare | info` (also bare `render` …). Other command lines' names get
   an answer instead of "unknown command" (`ANSWERS` in registry.ts): `exit` / `quit` (the Console stays open), `rm` /
   `del` / `rmdir` (the Console never deletes files), `cp` / `mv`, `cat` / `type` / `echo` (a later version, Phase 4),
@@ -96,7 +98,12 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   bytes; confirmed, the Console stays elevated for 5 minutes, each elevated command extending it, never past 15
   minutes after the confirmation. Dropped by `sudo -k` (or the panel), a screen lock or sleep (Electron's `powerMonitor` `lock-screen` / `suspend`),
   quit and restart, never by the window losing focus (Alt+Tab to Nuke and back is the look-dev loop sudo is for); it lives in memory
-  only, never on disk. A line the file scope refuses is refused before any dialog. (A typed folder name for bulk
+  only, never on disk. A line the file scope refuses is refused before any dialog. `sudo` on a line that replaces
+  nothing says so ("sudo isn't needed for this") and runs it as it is; the hint drops "(needs sudo)" once `sudo` is on
+  the line. **Scripts** (`run`, pasted lines) never use, extend or grant the session's elevation: before any line runs,
+  a line that replaces files must say `sudo` (else the whole script is refused), and all such lines are listed in ONE
+  native dialog (confirmed: they run without asking again; cancelled: nothing runs), audited as `granted` / `refused`
+  with the script's name and lines. (A typed folder name for bulk
   deletes comes with the first command that deletes in bulk; none does yet. A native message box has no text field,
   so it needs a dialog of the main process's own.)
 - **Audit log** (`userData/console-audit.jsonl`): every elevation granted, refused or dropped (and why), every

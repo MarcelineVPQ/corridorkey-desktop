@@ -1145,6 +1145,25 @@ select {
   color: var(--text-3);
   font-family: var(--font-ui);
 }
+.cline-paste {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--status-info);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-1);
+}
+.cp-lines {
+  margin: 0;
+  max-height: 140px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  white-space: pre;
+  color: var(--text-2);
+}
 .cline-search {
   display: flex;
   align-items: baseline;

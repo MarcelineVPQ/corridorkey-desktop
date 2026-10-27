@@ -38,6 +38,7 @@ export const IPC = {
   restartToUpdate: "ck:restart-to-update",
   backToStable: "ck:back-to-stable",
   consoleRun: "ck:console-run",
+  consoleRunLines: "ck:console-run-lines",
   consoleCancel: "ck:console-cancel",
   consoleComplete: "ck:console-complete",
   consoleHistory: "ck:console-history",

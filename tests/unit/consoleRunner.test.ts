@@ -8,11 +8,11 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { clipName, Console, type ConsoleDeps, type ElevationRequest } from "../../electron/main/console/runner";
+import { clipName, Console, type ConsoleDeps, type ElevationRequest, type ScriptElevationRequest } from "../../electron/main/console/runner";
 import { dropOnLockAndSleep, Elevation } from "../../electron/main/console/elevation";
 import { AuditLog, History } from "../../electron/main/console/logs";
 import { BlockPusher, PUSH_EVERY_MS } from "../../electron/main/console/push";
-import { consoleLineArg, cursorArg, fromAppPage } from "../../electron/main/validate";
+import { consoleLineArg, consoleLinesArg, cursorArg, fromAppPage } from "../../electron/main/validate";
 import { makeRegistry } from "../../src/shared/console/registry";
 import type { ConsoleBlock } from "../../src/shared/types";
 
@@ -58,6 +58,7 @@ async function finish(c: FakeChild, stdout: string[], code: number | null, stder
 let spawned: { cmd: string; args: string[]; opts: SpawnOptions; child: FakeChild }[];
 let confirms: ElevationRequest[];
 let confirmAnswer: boolean;
+let scriptAsks: ScriptElevationRequest[];
 let gpuTaken: number;
 let gpuReleased: number;
 let gpuRefusal: string | null;
@@ -98,6 +99,7 @@ function make(over: Partial<ConsoleDeps> = {}, files = mkdtempSync(join(root, "u
     },
     releaseGpu: () => void gpuReleased++,
     confirm: async (r) => (confirms.push(r), confirmAnswer),
+    confirmScript: async (r) => (scriptAsks.push(r), confirmAnswer),
     elevation: new Elevation(() => t),
     audit: new AuditLog(join(files, "console-audit.jsonl")),
     history: new History(join(files, "console-history.jsonl")),
@@ -120,6 +122,7 @@ beforeEach(() => {
   spawned = [];
   confirms = [];
   confirmAnswer = true;
+  scriptAsks = [];
   allowedFolders = [];
   allowAsked = [];
   allowAnswer = true;
@@ -806,10 +809,10 @@ describe("review 2026-10-26 probes", () => {
     await finish(spawned[0].child, [], 2);
   });
 
-  it("P8 (N2, BACKLOG row 107, open): sudo on a command that replaces nothing runs it normally, without a word", async () => {
+  it("P8 (N2, BACKLOG row 107, built by SME S11): sudo on a command that replaces nothing runs it normally, and says so", async () => {
     const { c } = make();
     const b = await c.run("sudo render shot.mov -o ../out/d/");
-    expect([b.state, b.elevated, confirms.length, b.lines]).toEqual(["running", false, 0, []]);
+    expect([b.state, b.elevated, confirms.length, b.lines.map((l) => l.text)]).toEqual(["running", false, 0, ["sudo isn't needed for this (it replaces no files): ran it as it is."]]);
     await finish(spawned[0].child, [], 0);
   });
 });
@@ -948,5 +951,64 @@ describe("SME review 2026-10-26: sequences (M4, S1)", () => {
     const f = await c.run("dir -f");
     expect(f.entries!.filter((e) => e.name.startsWith("sh010_plate.1"))).toHaveLength(11);
     expect((await c.run("ls -1")).lines.map((l) => l.text)).toContain("sh010_plate.####.exr");
+  });
+});
+
+describe("SME review 2026-10-26: scripts and elevation (S11), pasted lines (S2)", () => {
+  const settle = () => new Promise((r) => setTimeout(r, 20));
+
+  it("a script's lines that replace files are listed in one dialog up front; cancelled, nothing runs", async () => {
+    const { c, files } = make();
+    writeFileSync(join(shots, "d.ckcmd"), "pwd\nsudo render shot.mov -o ../out/e/ --overwrite\nsudo render shot.mov -o ../out/f/ --overwrite\n");
+    confirmAnswer = false;
+    const b = await c.run("run d.ckcmd");
+    expect([b.state, b.lines[0].text]).toEqual(["refused", "Not run: the confirmation was cancelled (nothing ran)."]);
+    expect(scriptAsks).toEqual([{ script: "d.ckcmd", lines: ["d.ckcmd:2  sudo render shot.mov -o ../out/e/ --overwrite", "d.ckcmd:3  sudo render shot.mov -o ../out/f/ --overwrite"] }]);
+    expect([confirms, spawned, [...blocks.values()].filter((x) => x.parent === b.id)]).toEqual([[], [], []]);
+    expect(readFileSync(join(files, "console-audit.jsonl"), "utf8")).toMatch(/"event":"refused","argv":\["run","d.ckcmd"\]/);
+    expect(c.session().running).toBeNull();
+  });
+
+  it("confirmed: its lines run without a dialog each, and the session is never elevated by it", async () => {
+    const { c } = make();
+    writeFileSync(join(shots, "e.ckcmd"), "sudo render shot.mov -o ../out/g/ --overwrite\n");
+    const b = await c.run("run e.ckcmd");
+    await settle();
+    expect([scriptAsks.length, confirms.length, spawned.length]).toEqual([1, 0, 1]);
+    expect([...blocks.values()].find((x) => x.parent === b.id)!.elevated).toBe(true);
+    expect(c.session().elevatedUntil).toBeNull();
+    await finish(spawned[0].child, [], 0);
+  });
+
+  it("an active elevation is never inherited: the script still asks (backlog 110)", async () => {
+    const { c } = make();
+    await c.run("sudo render shot.mov -o ../out/h/ --overwrite");
+    await finish(spawned[0].child, [], 0);
+    expect(c.session().elevatedUntil).not.toBeNull();
+    writeFileSync(join(shots, "f.ckcmd"), "sudo render shot.mov -o ../out/i/ --overwrite\n");
+    confirmAnswer = false;
+    expect((await c.run("run f.ckcmd")).state).toBe("refused");
+    expect([scriptAsks.length, spawned.length]).toEqual([1, 1]);
+  });
+
+  it("a script line that replaces files without sudo refuses the whole script before anything runs", async () => {
+    const { c } = make();
+    writeFileSync(join(shots, "g.ckcmd"), "pwd\nrender shot.mov -o ../out/j/ --overwrite\n");
+    const b = await c.run("run g.ckcmd");
+    expect([b.state, b.lines[0].text]).toEqual(["refused", "g.ckcmd:2 replaces files: a script says so with sudo (sudo render shot.mov -o ../out/j/ --overwrite); nothing ran."]);
+    expect([scriptAsks, spawned]).toEqual([[], []]);
+  });
+
+  it("pasted lines run as a script: in order, the same checks, stopping at the first that fails", async () => {
+    const { c } = make();
+    const b = await c.runLines(["cd ..", "cd nowhere", "pwd"]);
+    await settle();
+    expect(b.line).toBe("cd ..\ncd nowhere\npwd");
+    const end = blocks.get(b.id)!;
+    expect([end.state, end.lines.map((l) => l.text)]).toEqual(["failed", ["pasted:1  cd ..", "pasted:2  cd nowhere", "stopped at line 2: failed"]]);
+    // loop: NOT-WORTH — a few lines
+    expect(consoleLinesArg(["pwd"], 100)).toBeNull();
+    expect(consoleLinesArg(["pwd", "dir\nrm x"], 100)).toBeNull();
+    expect(consoleLinesArg(["pwd", "dir"], 100)).toEqual(["pwd", "dir"]);
   });
 });

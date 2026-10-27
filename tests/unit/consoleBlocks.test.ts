@@ -14,6 +14,7 @@ import {
   highlight,
   mergeBlocks,
   isoTime,
+  lineHint,
   sequenceText,
   visibleBlocks,
   writtenPaths,
@@ -231,5 +232,13 @@ describe("SME review 2026-10-26: quieter blocks (S9)", () => {
     expect(css).toMatch(/@media \(hover: none\) \{\s*\.cb-actions \{\s*opacity: 1;/);
     // display: none / visibility: hidden would take them out of the keyboard's reach
     expect(css).not.toMatch(/\.cb-actions \{[^}]*(display: none|visibility: hidden)/);
+  });
+});
+
+describe("SME review 2026-10-26: the sudo hint (S11)", () => {
+  it("says (needs sudo) on a flag that replaces files only until sudo is on the line", () => {
+    const at = (line: string) => lineHint(parse(line, reg, opts), line, line.length, reg, false)?.text;
+    expect(at("render a.mov -o out/ --overwrite")).toMatch(/\(needs sudo\)$/);
+    expect(at("sudo render a.mov -o out/ --overwrite")).not.toMatch(/needs sudo/);
   });
 });

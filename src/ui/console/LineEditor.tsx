@@ -1,10 +1,11 @@
 // The Console's input line (no dependency of its own): an <input> with a highlight layer under it, coloured from the
 // shared parser's tokens (an unknown command, a bad flag or value is marked before Enter; a destructive flag reads as a
-// warning), the grey suggestion after the cursor, the completion list (an ARIA combobox), and Ctrl+R's search. What
+// warning), the grey suggestion after the cursor, the completion list (an ARIA combobox), Ctrl+R's search, and the
+// offer to run several pasted lines as a script. What
 // each key does is editor.ts (pure, unit-tested); this component feeds it and carries out its effects.
 import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { parse, type Parsed } from "../../shared/console/parse";
-import { fullName, type Registry } from "../../shared/console/registry";
+import { parse } from "../../shared/console/parse";
+import type { Registry } from "../../shared/console/registry";
 import {
   acceptItem,
   caret,
@@ -14,6 +15,7 @@ import {
   input,
   keyDown,
   needsCompletion,
+  pasted,
   setLine,
   shownItems,
   suggestion,
@@ -21,10 +23,10 @@ import {
   type Key,
   type SuggestMode,
 } from "./editor";
-import { highlight } from "./model";
+import { highlight, lineHint } from "./model";
 
 export interface LineEditorHandle {
-  /** put a line in (History, Re-run): ready to edit, never run */
+  /** put a line in (History, Re-run): ready to edit, never run; several lines (a pasted script's Re-run) are offered again */
   insert(line: string): void;
   focus(): void;
 }
@@ -42,29 +44,10 @@ interface Props {
   autosuggest: boolean;
   onMode: (m: SuggestMode) => void;
   onRun: (line: string) => void;
+  /** lines pasted at once, run as a script after the offer was taken */
+  onRunLines: (lines: string[]) => void;
   onCancel: () => void;
   onClear: () => void;
-}
-
-/** What the line says about itself: a mistake (with did-you-mean), else the help of the argument at the cursor. */
-function lineHint(p: Parsed, line: string, cursor: number, reg: Registry, typing: boolean): { text: string; error: boolean } | null {
-  if (!line.trim()) return null;
-  // what the line still needs at its end ("needs a value"), or a word still being typed toward a suggestion, is what
-  // comes next, not a mistake
-  const pending = (e: { end: number; message: string }) => e.end >= line.length && (typing || / needs /.test(e.message));
-  // loop: HOT-PATH-OK — the line's few mistakes, per keystroke
-  const err = p.errors.find((e) => !pending(e)) ?? p.errors[0];
-  if (err && typing && pending(err)) return null;
-  if (err) return { text: err.message, error: !pending(err) };
-  // loop: HOT-PATH-OK — the line's tokens, per keystroke
-  const tok = p.tokens.find((t) => t.arg && cursor >= t.start && cursor <= t.end);
-  if (tok?.arg) {
-    const a = tok.arg;
-    const name = a.positional ? (a.valueName ?? a.id) : `${a.long ? `--${a.long}` : `-${a.short}`}${a.valueName ? ` ${a.valueName}` : ""}`;
-    return { text: `${name}: ${a.help}${a.destructive ? " (needs sudo)" : ""}${a.writes ? " (only into chosen folders)" : ""}`, error: false };
-  }
-  if (p.command) return { text: `${fullName(reg, p.command)}: ${p.command.about}`, error: false };
-  return null;
 }
 
 // the line being typed outlives the page (a switch to the Queue and back keeps it)
@@ -72,7 +55,7 @@ let draft: EditorState | null = null;
 
 export const LineEditor = forwardRef<LineEditorHandle, Props>(function LineEditor(props, ref) {
   const { registry, windows, history, running } = props;
-  const [s, setS] = useState<EditorState>(() => (draft ? { ...draft, comp: null, list: null, search: null } : initialEditor(props.mode, props.autosuggest)));
+  const [s, setS] = useState<EditorState>(() => (draft ? { ...draft, comp: null, list: null, search: null, paste: null } : initialEditor(props.mode, props.autosuggest)));
   const sRef = useRef(s);
   sRef.current = s;
   const inputRef = useRef<HTMLInputElement>(null);
@@ -100,7 +83,7 @@ export const LineEditor = forwardRef<LineEditorHandle, Props>(function LineEdito
 
   useImperativeHandle(ref, () => ({
     insert: (line: string) => {
-      apply(setLine(sRef.current, line), true);
+      apply(line.includes("\n") ? pasted(setLine(sRef.current, ""), line) : setLine(sRef.current, line), true);
       inputRef.current?.focus();
     },
     focus: () => inputRef.current?.focus(),
@@ -172,6 +155,7 @@ export const LineEditor = forwardRef<LineEditorHandle, Props>(function LineEdito
     if (r.state !== cur) apply(r.state, true);
     const fx = r.effect;
     if (fx?.kind === "run") props.onRun(fx.line);
+    else if (fx?.kind === "script") props.onRunLines(fx.lines);
     else if (fx?.kind === "cancel") props.onCancel();
     else if (fx?.kind === "clear") props.onClear();
     else if (fx?.kind === "mode") props.onMode(fx.mode);
@@ -188,6 +172,13 @@ export const LineEditor = forwardRef<LineEditorHandle, Props>(function LineEdito
   // a flag that replaces files reads as a warning in the list too
   // loop: HOT-PATH-OK — a command's ~50 flags, per render while the list is open
   const danger = (label: string) => parsed.command?.args.some((a) => a.destructive && label.startsWith(`--${a.long}`)) ?? false;
+  // the offer's buttons do what their keys do
+  const paste = (key: "Enter" | "Escape" | "c") => {
+    const r = keyDown(sRef.current, { key, ctrl: key === "c" }, { history, hasSelection: false, running });
+    apply(r.state, true);
+    if (r.effect?.kind === "script") props.onRunLines(r.effect.lines);
+    inputRef.current?.focus();
+  };
   const pick = (i: number) => {
     apply(acceptItem(sRef.current, i), true);
     inputRef.current?.focus();
@@ -213,6 +204,23 @@ export const LineEditor = forwardRef<LineEditorHandle, Props>(function LineEdito
             </li>
           ))}
         </ul>
+      )}
+      {s.paste && (
+        <div className="cline-paste" role="group" aria-label={`${s.paste.length} lines pasted`}>
+          <span role="status">{s.paste.length} lines pasted: run them in order, as a script? It stops at the first that fails.</span>
+          <pre className="cp-lines">{s.paste.join("\n")}</pre>
+          <span className="btn-row">
+            <button type="button" className="btn small" onMouseDown={(ev) => ev.preventDefault()} onClick={() => paste("Enter")}>
+              Run {s.paste.length} lines (Enter)
+            </button>
+            <button type="button" className="btn small" onMouseDown={(ev) => ev.preventDefault()} onClick={() => paste("Escape")}>
+              Keep the first (Esc)
+            </button>
+            <button type="button" className="btn small" onMouseDown={(ev) => ev.preventDefault()} onClick={() => paste("c")}>
+              Drop them (Ctrl+C)
+            </button>
+          </span>
+        </div>
       )}
       {s.search && (
         <div className={`cline-search ${s.search.failed ? "failed" : ""}`} role="status">
@@ -262,6 +270,13 @@ export const LineEditor = forwardRef<LineEditorHandle, Props>(function LineEdito
               if (el.selectionStart === el.selectionEnd && el.selectionStart !== null) apply(caret(sRef.current, el.selectionStart), false);
             }}
             onScroll={(e) => layerRef.current && (layerRef.current.scrollLeft = e.currentTarget.scrollLeft)}
+            onPaste={(e) => {
+              const text = e.clipboardData.getData("text");
+              // one line: the input takes it; several: offered as a script, never joined into one line
+              if (!/[\r\n]/.test(text)) return;
+              e.preventDefault();
+              apply(pasted(sRef.current, text), true);
+            }}
             onKeyDown={(e) => void onKeyDown(e)}
           />
         </div>

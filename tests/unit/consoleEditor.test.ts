@@ -9,6 +9,7 @@ import {
   input,
   keyDown,
   needsCompletion,
+  pasted,
   setLine,
   shownItems,
   suggestion,
@@ -350,5 +351,24 @@ describe("SME review 2026-10-26: readline's missing reflexes (S10)", () => {
 
   it("Cmd+K clears the screen, as in Terminal and iTerm", () => {
     expect(press(typed("pwd"), "k", { meta: true }).effect).toEqual({ kind: "clear" });
+  });
+});
+
+describe("SME review 2026-10-26: pasting several lines (S2)", () => {
+  it("one line goes in at the cursor (a trailing line break dropped); several are offered, never joined", () => {
+    expect(pasted(typed("cd "), "plates\n").line).toBe("cd plates");
+    const s = pasted(typed(""), "dir\r\ncd ..\n\npwd\n");
+    expect([s.line, s.paste]).toEqual(["", ["dir", "cd ..", "pwd"]]);
+  });
+
+  it("Enter runs them as a script; Esc keeps the first; Ctrl+C drops them; other keys type nothing meanwhile", () => {
+    const s = pasted(typed(""), "dir\ncd ..\npwd");
+    const run = press(s, "Enter");
+    expect([run.effect, run.state.paste]).toEqual([{ kind: "script", lines: ["dir", "cd ..", "pwd"] }, null]);
+    const keep = press(s, "Escape");
+    expect([keep.effect, keep.state.paste, keep.state.line]).toEqual([undefined, null, "dir"]);
+    expect(press(s, "c", { ctrl: true }).state).toMatchObject({ paste: null, line: "" });
+    const x = press(s, "x");
+    expect([x.handled, x.state.paste?.length, x.effect]).toEqual([true, 3, undefined]);
   });
 });

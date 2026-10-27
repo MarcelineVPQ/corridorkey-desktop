@@ -49,6 +49,7 @@ const api: CorridorKeyApi = {
   restartToUpdate: () => ipcRenderer.invoke(IPC.restartToUpdate),
   backToStable: () => ipcRenderer.invoke(IPC.backToStable),
   consoleRun: (line) => ipcRenderer.invoke(IPC.consoleRun, line),
+  consoleRunLines: (lines) => ipcRenderer.invoke(IPC.consoleRunLines, lines),
   consoleCancel: () => ipcRenderer.invoke(IPC.consoleCancel),
   consoleComplete: (line, cursor) => ipcRenderer.invoke(IPC.consoleComplete, line, cursor),
   consoleHistory: (query) => ipcRenderer.invoke(IPC.consoleHistory, query),

@@ -103,6 +103,14 @@ export function ConsolePage(props: {
     },
     [setBlocks, loadHistory],
   );
+  const runLines = useCallback(
+    async (lines: string[]) => {
+      stick.current = true;
+      const b = await window.ck.consoleRunLines(lines);
+      if (b) setBlocks((old) => mergeBlocks(old, [b]));
+    },
+    [setBlocks],
+  );
   const reinsert = useCallback((line: string) => editor.current?.insert(line), []);
   // loop: HOT-PATH-OK — a path's few parts, per render
   const folder = session.cwd === state.system.home ? "~" : (session.cwd.split(/[\\/]/).filter(Boolean).pop() ?? session.cwd);
@@ -161,6 +169,7 @@ export function ConsolePage(props: {
         autosuggest={autosuggest}
         onMode={setMode}
         onRun={(line) => void run(line)}
+        onRunLines={(lines) => void runLines(lines)}
         onCancel={() => void window.ck.consoleCancel()}
         onClear={() => setBlocks(clearScreen)}
       />

@@ -2,7 +2,7 @@
 // parser's tokens, and the output blocks as the page shows them (merged by id, cleared by cls or Ctrl+L, their status
 // words, the paths a command wrote, the text Copy output puts on the clipboard).
 import type { Parsed, Token } from "../../shared/console/parse";
-import type { Registry } from "../../shared/console/registry";
+import { fullName, type Registry } from "../../shared/console/registry";
 import type { ConsoleBlock, ConsoleEntry } from "../../shared/types";
 import { fileSizeText } from "../../shared/units";
 
@@ -180,4 +180,26 @@ export function errorSpans(line: string, errors: readonly { start: number; end: 
   }
   if (pos < line.length) out.push({ text: line.slice(pos), kind: "plain" });
   return out;
+}
+
+/** What the line says about itself: a mistake (with did-you-mean), else the help of the argument at the cursor. */
+export function lineHint(p: Parsed, line: string, cursor: number, reg: Registry, typing: boolean): { text: string; error: boolean } | null {
+  if (!line.trim()) return null;
+  // what the line still needs at its end ("needs a value"), or a word still being typed toward a suggestion, is what
+  // comes next, not a mistake
+  const pending = (e: { end: number; message: string }) => e.end >= line.length && (typing || / needs /.test(e.message));
+  // loop: HOT-PATH-OK — the line's few mistakes, per keystroke
+  const err = p.errors.find((e) => !pending(e)) ?? p.errors[0];
+  if (err && typing && pending(err)) return null;
+  if (err) return { text: err.message, error: !pending(err) };
+  // loop: HOT-PATH-OK — the line's tokens, per keystroke
+  const tok = p.tokens.find((t) => t.arg && cursor >= t.start && cursor <= t.end);
+  if (tok?.arg) {
+    const a = tok.arg;
+    const name = a.positional ? (a.valueName ?? a.id) : `${a.long ? `--${a.long}` : `-${a.short}`}${a.valueName ? ` ${a.valueName}` : ""}`;
+    // "(needs sudo)" only until sudo is on the line
+    return { text: `${name}: ${a.help}${a.destructive && !p.sudo ? " (needs sudo)" : ""}${a.writes ? " (only into chosen folders)" : ""}`, error: false };
+  }
+  if (p.command) return { text: `${fullName(reg, p.command)}: ${p.command.about}`, error: false };
+  return null;
 }

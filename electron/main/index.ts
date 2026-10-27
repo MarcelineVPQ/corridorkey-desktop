@@ -56,8 +56,8 @@ import {
 import { NOT_WHILE_BUSY } from "../../src/shared/texts";
 import type { DesktopPalette } from "../../src/ui/theme/palette";
 import { IPC } from "./ipc";
-import { consoleLineArg, cursorArg, fromAppPage, idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir, vramLimit } from "./validate";
-import { Console, LINE_MAX, type ElevationRequest } from "./console/runner";
+import { consoleLineArg, consoleLinesArg, cursorArg, fromAppPage, idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir, vramLimit } from "./validate";
+import { Console, LINE_MAX, type ElevationRequest, type ScriptElevationRequest } from "./console/runner";
 import { dropOnLockAndSleep, Elevation, ELEVATION_CAP_MS, ELEVATION_TTL_MS } from "./console/elevation";
 import { AuditLog, History } from "./console/logs";
 import { BlockPusher } from "./console/push";
@@ -323,6 +323,21 @@ async function confirmElevation(req: ElevationRequest): Promise<boolean> {
   });
   return r.response === 0;
 }
+/** A script's lines that replace files, all in one confirmation before any line runs. */
+async function confirmScript(req: ScriptElevationRequest): Promise<boolean> {
+  if (!mainWindow) return false;
+  const r = await dialog.showMessageBox(mainWindow, {
+    type: "warning",
+    buttons: ["Run the script", "Cancel"],
+    defaultId: 1,
+    cancelId: 1,
+    message: `Run ${req.script}? ${req.lines.length === 1 ? "One of its lines replaces" : `${req.lines.length} of its lines replace`} files`,
+    detail:
+      `${req.lines.join("\n")}\n\nConfirmed, these lines run without asking again, in order; nothing else is elevated (the script ` +
+      "doesn't use or extend the Console's elevation, and this doesn't elevate the Console). Every one is logged.",
+  });
+  return r.response === 0;
+}
 /** allow <folder>: the native confirmation names the folder and what the Console may then do there. */
 async function confirmAllow(folder: string): Promise<boolean> {
   if (!mainWindow) return false;
@@ -399,6 +414,7 @@ const appConsole = new Console({
     prebuild.queueStopped();
   },
   confirm: confirmElevation,
+  confirmScript,
   elevation: new Elevation(),
   audit: new AuditLog(join(userData, "console-audit.jsonl")),
   history: new History(join(userData, "console-history.jsonl")),
@@ -1076,6 +1092,11 @@ function registerIpc(): void {
   ipcMain.handle(IPC.consoleRun, (e, lineIn: unknown) => {
     const line = consoleLineArg(lineIn, LINE_MAX);
     return page(e) && line !== null ? appConsole.run(line) : null;
+  });
+  // lines pasted into the input, run as a script once the page's offer was taken (each line checked as a typed one)
+  ipcMain.handle(IPC.consoleRunLines, (e, linesIn: unknown) => {
+    const lines = consoleLinesArg(linesIn, LINE_MAX);
+    return page(e) && lines !== null ? appConsole.runLines(lines) : null;
   });
   ipcMain.handle(IPC.consoleCancel, (e) => {
     if (page(e)) appConsole.cancel();
