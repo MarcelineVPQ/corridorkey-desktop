@@ -755,7 +755,7 @@ export class Console {
       // loop: NOT-WORTH — as above
       return this.finish(b, "done", ...ranked.slice(0, JUMP_LISTED).map((r) => `${r.score.toFixed(2).padStart(7)}  ${r.folder}`));
     }
-    // loop: NOT-WORTH — the history's folders, best first; one async stat per match until one is a folder
+    // loop: NOT-WORTH — the history's folders, best first; one async stat per match until one is a folder [bounded: the history's folders (≤ 5000 lines); Ctrl+C at each]
     for (const r of ranked) {
       if (r.folder === this.cwd || !matches(r.folder, parts)) continue;
       const st = await this.d.fs.stat(r.folder).catch(() => null);
@@ -1519,7 +1519,7 @@ export class Console {
   /** Runs a list: each command after its operator says so (&&: the last ended 0, ||: it didn't); the last status. */
   private async runList(list: List, ctx: RunCtx, checked = ctx.name !== null): Promise<number> {
     let status = this.status;
-    // loop: SERIAL-REQUIRED — a program's commands run one after another, each waiting for the last [bounded: the program's commands, a loop's items]
+    // loop: SERIAL-REQUIRED — a program's commands run one after another, each waiting for the last [bounded: PROGRAM_COMMANDS_MAX commands in all, nested loops included; a turn of the event loop before each]
     for (const [i, { op, node }] of list.items.entries()) {
       if (ctx.job.cancels > 0 || this.closing || ctx.stopped) break;
       if ((op === "&&" && status !== 0) || (op === "||" && status === 0)) continue;
@@ -1543,7 +1543,7 @@ export class Console {
         }
         status = 0;
         const had = ctx.scope.get(node.name);
-        // loop: SERIAL-REQUIRED — each item's body runs after the last [bounded: ITEMS_MAX items]
+        // loop: SERIAL-REQUIRED — each item's body runs after the last [bounded: ITEMS_MAX items; PROGRAM_COMMANDS_MAX commands for the whole program]
         for (const v of items) {
           if (ctx.job.cancels > 0 || this.closing || ctx.stopped) break;
           ctx.scope.set(node.name, v);
@@ -1852,13 +1852,13 @@ export class Console {
     let bytes = 0;
     let names: Dirent[];
     try {
-      // loop: NOT-WORTH — one async readdir per folder, once per sudo confirmation [bounded: 200 000 entries]
+      // loop: NOT-WORTH — one async readdir per folder, per folder a sudo confirmation counts (or du) [bounded: 200 000 entries per folder counted (du: DU_ENTRIES in all)]
       names = await this.d.fs.readdir(dir);
     } catch {
       // error: NOT-WORTH — unreadable: counted as empty
       return { files, bytes };
     }
-    // loop: NOT-WORTH — one async stat per entry, once per sudo confirmation [bounded: 200 000 entries]
+    // loop: NOT-WORTH — one async stat per entry, per folder a sudo confirmation counts (or du) [bounded: 200 000 entries per folder counted (du: DU_ENTRIES in all; Ctrl+C at each)]
     for (const n of names) {
       if (budget.left-- <= 0 || budget.stop?.()) break;
       if (n.isDirectory()) {

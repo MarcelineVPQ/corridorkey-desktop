@@ -105,6 +105,21 @@ the first Empty; the deadline loops (`proc.rs`, `writers.rs` release) sleep 50 m
 none; the one engine retry (an automatic window that runs out of memory before any frame was written) halves the
 window each round (≤ 7 rounds).
 
+## Verdicts that weren't true (Console Phase 4 senior review, 2026-10-27)
+
+The gate checks that every loop has a verdict, not that the verdict is true. The senior review of Console Phase 4
+(docs/REVIEW_CONSOLE_P4_2026-10-27.md, S7) found bounds the code didn't keep; each was fixed so the verdict holds:
+
+| Where | The verdict said | What the code did | Done |
+|---|---|---|---|
+| `src/shared/console/script.ts` `lineOf` | NOT-WORTH, once per command | counted new lines from the start for every command: quadratic (30 000 lines: 5.1 s) | line starts found once, a binary search per command (S5) |
+| `electron/main/console/runner.ts` `forItems` | bounded: ITEMS_MAX | spread every match before the cap was checked (> 130 000: RangeError) | the cap is checked first, items added one by one (M4) |
+| `runner.ts` `runList` and its `for` | bounded: ITEMS_MAX items | the cap was per loop: nested loops multiplied it (10⁴ × 10⁴), and the loop never yielded | `PROGRAM_COMMANDS_MAX` for the whole program, a turn of the event loop before each command (M4) |
+| `runner.ts` `walk` | 200 000 entries, once per sudo confirmation | also du's walk, and a script's confirmation counts several folders | the verdict says per folder counted; du's budget and Ctrl+C at each entry (S6) |
+
+**A `[bounded: …]` must name a limit the code enforces where the loop runs.** Check it when writing the verdict: a
+per-loop cap inside another loop multiplies; a cap checked after the work is no cap.
+
 ## History moved out of the code (2026-10-24)
 
 The senior Rust review (finding 16) found engine annotations that carried this pass's history ("this pass:
