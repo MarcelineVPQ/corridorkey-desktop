@@ -45,6 +45,8 @@ function readWord(src: string, lookup: (name: string) => string | undefined, opt
     if (quote) {
       if (c === quote) quote = null;
       else if (quote === '"' && c === "\\" && !opts.windows && (src[i + 1] === '"' || src[i + 1] === "\\")) add(src[++i], false);
+      // \$ in "…" (Linux, macOS): no variable starts there (P4 senior review N1); both characters kept, as the tokenizer reads them
+      else if (quote === '"' && c === "\\" && !opts.windows && src[i + 1] === "$") add(c + src[++i], false);
       else if (quote === '"' && c === "$" && src[i + 1] === "{") {
         const r = take(src, i, lookup);
         if ("error" in r) return r;

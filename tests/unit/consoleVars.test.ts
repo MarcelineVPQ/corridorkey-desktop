@@ -1,7 +1,7 @@
 // The Console's variables (src/shared/console/vars.ts): ${name} only; a value is one quoted word; frame tokens literal.
 import { describe, expect, it } from "vitest";
 import { expandVars, forWords } from "../../src/shared/console/vars";
-import { parse } from "../../src/shared/console/parse";
+import { parse, tokenize } from "../../src/shared/console/parse";
 import { makeRegistry } from "../../src/shared/console/registry";
 
 const vars: Record<string, string> = { shot: "sh010", sp: "my shots", q: 'say "hi"', flag: "--overwrite", both: `it's "x"` };
@@ -17,6 +17,13 @@ describe("expandVars", () => {
 
   it("leaves frame tokens, other shells' variables, single quotes and escapes as typed", () => {
     for (const l of ["dir plate.$F4.exr", "dir $shot", "dir %04d ####.exr @@@@", "dir '${shot}'", "dir \\${shot}", "dir !$", "dir $HIP"]) expect(x(l)).toEqual({ line: l, changed: false });
+  });
+
+  it("never fills in after a backslash inside double quotes either (P4 senior review N1, BACKLOG row 131)", () => {
+    expect(x('echo "\\${shot}"')).toEqual({ line: 'echo "\\${shot}"', changed: false });
+    // in a word that is filled in elsewhere, the escaped one stays as the tokenizer reads it: \${shot}
+    expect(x('echo "\\${shot}-${shot}"')).toEqual({ line: 'echo "\\\\${shot}-sh010"', changed: true });
+    expect(tokenize((x('echo "\\${shot}-${shot}"') as { line: string }).line, { windows: false }).words.map((w) => w.value)).toEqual(["echo", "\\${shot}-sh010"]);
   });
 
   it("an expanded word is never a flag (it parses as a value)", () => {

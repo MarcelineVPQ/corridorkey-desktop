@@ -142,7 +142,7 @@ missing there).
   prints it; `set` alone lists them and the Console's own), `unset name…`, `echo …` prints its words. `${name}` is the
   only syntax, braces required: in this world `$F`, `$F4`, `$HIP`, `%04d`, `####`, `@@@@` and `!` are parts of file
   names, so nothing else is ever expanded. It is filled in outside quotes and inside `"…"`, never inside `'…'` or after
-  a backslash (Linux, macOS); an unknown name or an unclosed `${` refuses the line with the reason. A word with a
+  a backslash (Linux, macOS; inside `"…"` the `\$` stays as typed, as the tokenizer reads it); an unknown name or an unclosed `${` refuses the line with the reason. A word with a
   variable becomes ONE quoted word (on Windows `'…'` when the value has a `"`; a value with both quote marks is
   refused there): a value never splits into words and is never read as a flag, `sudo`, `?`, `--` or a command's name,
   so the flags a line has (and its destructive ones) are the ones typed, and the parser and the file scope check the
