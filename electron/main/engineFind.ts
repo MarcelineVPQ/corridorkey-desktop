@@ -8,7 +8,7 @@
 // (BACKLOG row 2) puts its downloads there. Newest first. A setting of null means "Automatic": the first
 // one found.
 import { isAppImageMount } from "./relaunch";
-import { MODELS_DIR, ortLibrary, PLATFORM, RUNTIME_DIR } from "./platform";
+import { isWin, MODELS_DIR, ortLibrary, PLATFORM, RUNTIME_DIR } from "./platform";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { EngineFileChoice, EngineFiles } from "../../src/shared/types";
@@ -117,8 +117,22 @@ export const TRT_BUILDER = "ck-trt-build";
  * TensorRT job's networks run on CUDA, saying why.
  */
 export function findTrtBuilder(binary: string | null, distDir: string | null, exists: (p: string) => boolean = existsSync): string | null {
-  // loop: NOT-WORTH — two candidates, two stats per engine start
-  return [binary ? join(dirname(binary), TRT_BUILDER) : null, distDir ? join(distDir, TRT_BUILDER) : null].find((p): p is string => !!p && exists(p)) ?? null;
+  return besideEngine(TRT_BUILDER, binary, distDir, exists);
+}
+
+/** `name` next to the engine at `binary`, else in `distDir` (the release build's folder), or null. */
+function besideEngine(name: string, binary: string | null, distDir: string | null, exists: (p: string) => boolean): string | null {
+  // loop: NOT-WORTH — two candidates, two stats per lookup
+  return [binary ? join(dirname(binary), name) : null, distDir ? join(distDir, name) : null].find((p): p is string => !!p && exists(p)) ?? null;
+}
+
+/**
+ * The command line (`corridorkey`, ck-cli; docs/CLI.md) that ships next to the engine (resources/engine), for the
+ * Console: beside the engine at `binary` (a dev engine's target/release has it too), else the release build's copy
+ * (engine-rs/target/dist). null: none found.
+ */
+export function findCli(binary: string | null, distDir: string | null, exists: (p: string) => boolean = existsSync, platform: NodeJS.Platform = PLATFORM): string | null {
+  return besideEngine(isWin(platform) ? "corridorkey.exe" : "corridorkey", binary, distDir, exists);
 }
 
 /** A path inside the running AppImage's mount (resources/…): it changes every launch, so it is never saved. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { effectivePath, findEngineFiles, findTrtBuilder, isInsideApp, windowTitle } from "../../electron/main/engineFind";
+import { effectivePath, findCli, findEngineFiles, findTrtBuilder, isInsideApp, windowTitle } from "../../electron/main/engineFind";
 import { addToPathList, appDirs } from "../../electron/main/platform";
 
 const dataDir = (env: NodeJS.ProcessEnv, home: string, platform: NodeJS.Platform) => appDirs(env, home, platform).data;
@@ -138,5 +138,28 @@ describe("TensorRT's builder", () => {
     );
     expect(findTrtBuilder("/e/corridorkey-engine", "/dist", has([]))).toBeNull();
     expect(findTrtBuilder(null, null, has([]))).toBeNull();
+  });
+});
+
+describe("the command line (corridorkey)", () => {
+  const has = (p: string[]) => (x: string) => p.includes(x);
+  it("is found next to the engine (packaged: resources/engine), else in the release build's folder", () => {
+    expect(findCli("/app/resources/engine/corridorkey-engine", null, has(["/app/resources/engine/corridorkey"]), "linux")).toBe("/app/resources/engine/corridorkey");
+    // a dev engine: target/release has its own corridorkey (cargo builds both), else target/dist's
+    expect(findCli("/src/engine-rs/target/release/corridorkey-engine", "/src/engine-rs/target/dist", has(["/src/engine-rs/target/release/corridorkey"]), "linux")).toBe(
+      "/src/engine-rs/target/release/corridorkey",
+    );
+    expect(findCli("/src/engine-rs/target/release/corridorkey-engine", "/src/engine-rs/target/dist", has(["/src/engine-rs/target/dist/corridorkey"]), "linux")).toBe(
+      "/src/engine-rs/target/dist/corridorkey",
+    );
+    expect(findCli("/e/corridorkey-engine", "/dist", has([]), "linux")).toBeNull();
+    expect(findCli(null, null, has([]), "linux")).toBeNull();
+  });
+  it("is corridorkey.exe on Windows", () => {
+    expect(findCli("C:/CK/resources/engine/corridorkey-engine.exe", null, has(["C:/CK/resources/engine/corridorkey.exe"]), "win32")).toBe("C:/CK/resources/engine/corridorkey.exe");
+    expect(findCli("C:/CK/resources/engine/corridorkey-engine.exe", null, has(["C:/CK/resources/engine/corridorkey"]), "win32")).toBeNull();
+    expect(findCli("/Applications/CorridorKey.app/Contents/Resources/engine/corridorkey-engine", null, has(["/Applications/CorridorKey.app/Contents/Resources/engine/corridorkey"]), "darwin")).toBe(
+      "/Applications/CorridorKey.app/Contents/Resources/engine/corridorkey",
+    );
   });
 });
