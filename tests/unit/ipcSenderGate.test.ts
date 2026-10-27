@@ -40,6 +40,12 @@ describe("IPC sender gate", () => {
       'ipcMain.handle("ping", () => "pong");',
       'ipcMain.handle("pong", () => "ping"); // ipc: any-sender — reads nothing',
       'ipcRenderer.on("ck:state", cb);',
+      'import { app, ipcMain } from "electron";',
+      "import {",
+      "  ipcMain,",
+      '} from "electron";',
+      "/* ipcMain handlers all go through fromAppPageOnly */",
+      "// see ipcMain.handle above",
     ].join("\n");
     const r = runGate(ok);
     expect(r.out).toBe("");
@@ -55,8 +61,18 @@ describe("IPC sender gate", () => {
     ["webContents.ipc.handle", 'win.webContents.ipc.handle("x", () => 1);'],
     ["a reason-less marker", '// ipc: any-sender\nipcMain.handle("x", () => 1);'],
     ["a marker two lines up", '// ipc: any-sender — why\nconst a = 1;\nipcMain.handle("x", () => 1);'],
+    // review N2: aliases hide a registration; the check in a comment isn't the check
+    ["a destructured ipcMain", 'const { handle } = ipcMain;\nhandle("x", () => 1);'],
+    ["ipcMain by index", 'ipcMain["handle"]("x", () => 1);'],
+    ["ipcMain kept in a variable", "const m = ipcMain;"],
+    ["a method kept in a variable", "const h = ipcMain.handle;"],
+    ["an aliased import", 'import { ipcMain as m } from "electron";'],
+    ["an .ipc alias", "const { handle } = win.webContents.ipc;"],
+    ["fromAppPageOnly in a comment on the next line", 'ipcMain.handle("x", () => 1);\n// fromAppPageOnly(appPage, fn)'],
+    ["fromAppPageOnly in a trailing comment", 'ipcMain.handle("x", (e) => 1); // TODO fromAppPageOnly(appPage, fn)'],
+    ["fromAppPageOnly in a block comment", 'ipcMain.handle("x", /* fromAppPageOnly( */ () => 1);'],
   ];
-  // loop: NOT-WORTH — eight fixtures
+  // loop: NOT-WORTH — seventeen fixtures
   for (const [name, code] of unchecked) {
     it(`fails on ${name} without the sender check`, () => {
       const r = runGate(code);
