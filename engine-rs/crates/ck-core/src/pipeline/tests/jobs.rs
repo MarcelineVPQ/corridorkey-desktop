@@ -525,8 +525,10 @@ fn bad_frame_ranges_are_refused() {
 const WEIGHTS: [(&str, u64); 5] = [("cradio", 1_725_204_048), ("moge", 178_173_376), ("rvm", 67_485_130), ("stage1", 926_574_332), ("stage2", 405_244_331)];
 
 /// A job at a budget of `cap` bytes on CUDA with the onnx.4 sizes (the CUDA context measured at 0.33 GiB): each
-/// network's arena limit and the networks loaded at any time while its arena held working memory (its first run to
-/// its drop).
+/// network's arena limit and the networks its budget leaves room for (`sharing`), after checking that every network
+/// the fake loader saw loaded while its arena held working memory (its first run to its drop) is one of them. The
+/// seen set can come out smaller than the real one, never larger: a load ahead logs from its own thread, after the
+/// drop it overlapped at times (3 in 40 full-suite runs), so the arithmetic uses the engine's set.
 fn budget_job(cap: u64, low_vram: bool) -> Vec<(&'static str, u64, BTreeSet<&'static str>)> {
     let mut h = Harness::new(FakeCfg::new(SHAPE), 9, options(json!({})));
     // loop: NOT-WORTH — five files
@@ -544,7 +546,7 @@ fn budget_job(cap: u64, low_vram: bool) -> Vec<(&'static str, u64, BTreeSet<&'st
             let first_run = events.iter().position(|e| matches!(e, Event::Run(r) if r.piece == p)).unwrap();
             let dropped = events.iter().position(|e| matches!(e, Event::Drop(d) if *d == p)).unwrap_or(events.len());
             // loop: NOT-WORTH — a test job's events
-            let shared = events
+            let seen: BTreeSet<&str> = events
                 .iter()
                 .enumerate()
                 .filter_map(|(i, e)| match e {
@@ -555,6 +557,8 @@ fn budget_job(cap: u64, low_vram: bool) -> Vec<(&'static str, u64, BTreeSet<&'st
                     _ => None,
                 })
                 .collect();
+            let shared: BTreeSet<&'static str> = sharing(p, low_vram).iter().copied().filter(|q| *q != p).collect();
+            assert!(seen.is_subset(&shared), "{p} (low_vram {low_vram}): loaded beside it {seen:?}, budgeted for {shared:?}");
             (p, cap.unwrap(), shared)
         })
         .collect()
