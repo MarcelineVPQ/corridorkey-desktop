@@ -44,9 +44,9 @@ Everything planned lives in one list, [docs/BACKLOG.md](docs/BACKLOG.md), each i
 (row numbers in brackets):
 
 **Working on now: the Mac (Apple Silicon).** The Core ML engine runs every network on an M6 Mac mini, but stage 1
-needs more memory than a 16 GB Mac has at a 4-frame window; shorter windows are next to measure. Then setup installs
-the Core ML models [59], Core ML for 1920×1080 HD (built, to try on a Mac) and 4K [60], the real-Mac gate against CUDA's mattes [24],
-and self-update on the Mac [57].
+needs more memory than a 16 GB Mac has at a 4-frame window; shorter windows are next to measure. The setup now
+installs the Core ML models; next Core ML for 1920×1080 HD (built, to try on a Mac) and 4K [60], the real-Mac gate
+against CUDA's mattes [24], and self-update on the Mac [57].
 
 **Next, toward 1.0:**
 - Keying on a real Windows PC with an NVIDIA card (only tested in a virtual machine so far)
@@ -56,7 +56,7 @@ and self-update on the Mac [57].
   "sizzle" than the original [53]
 - The documented DaVinci Resolve round trip [40]
 
-**Agreed, after 1.0:** a render-farm command line [32]; Nuke reading our outputs as they are, with a script for the
+**Agreed, after 1.0:** Nuke reading our outputs as they are, with a script for the
 farm command line, never a plugin (Corridor sells theirs) [33]; anamorphic and overscan plates [34]; 8K and studio
 Linux (Rocky) [35]; source timecode carried through [38]; a quick preview frame before the full run [39]; garbage and
 core mattes [46]; Marion Spates' core-matte and edge-band workflow, with a Nuke template [48]; an edge-sharpness metric
@@ -66,7 +66,9 @@ pick [61]; Windows code signing [28].
 **Experiments, measured first:** a temporal edge stabilizer [47], a hybrid edge mode [49], flicker against the
 temporal window [37].
 
-**Ideas, not decided:** making hints in the app [4], review tools (A/B wipe, alpha view, loupe) [7], keying a frame
+**Agreed, not scheduled yet:** making hints in the app, a mask painter [4].
+
+**Ideas, not decided:** review tools (A/B wipe, alpha view, loupe) [7], keying a frame
 range [9], a hint on any frame [11].
 
 Plus about 35 small engineering items from the October code passes and the independent senior review (rows 62-94):
