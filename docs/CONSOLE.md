@@ -327,7 +327,7 @@ quotes, flags, values, help, sudo; the registry), `consoleSafety.test.ts` (file 
 temp folder, Windows and macOS rules as logic; elevation's TTL, extension, cap, drop, never persisted; the audit log
 append-only; the history cap), `consoleRunner.test.ts` (a fake spawn: the exact argv, no shell, the process group,
 cancel then kill, the JSON events, one job at a time, the queue's card, refusals, the sudo flow and its audit, the
-built-ins, scripts, quit, completion, the throttled push, the IPC checks), `cliSpec.test.ts` (the drift check). The senior review of 2026-10-26 (docs/REVIEW_CONSOLE_2026-10-26.md) left 14
+built-ins, scripts, quit, completion, the throttled push, the IPC checks), `cliSpec.test.ts` (the drift check: skipped without a built corridorkey, which `npm run check` says loudly at its end; a `CK_CLI_BIN` that is set but isn't one fails). The senior review of 2026-10-26 (docs/REVIEW_CONSOLE_2026-10-26.md) left 14
 probes; each is a regression test (`consoleRunner.test.ts` "review 2026-10-26 probes", P9 in `consoleSafety.test.ts`,
 P10 in `consoleParse.test.ts`, the gate fixtures in `securityGate.test.ts`); P7-P9 check backlog rows 106-108, built. The
 Phase 4 senior review (docs/REVIEW_CONSOLE_P4_2026-10-27.md) proved its findings with probes; each is a test: hostile

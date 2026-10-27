@@ -5,7 +5,11 @@
 // are the CLI's own flags; checked in so a build without the engine still has them, and tests/unit/cliSpec.test.ts
 // fails when the copy and the binary differ.
 //
-//   node tools/gen_cli_spec.mjs   write the copy from the built binary (none built: the checked-in copy stays, said so)
+//   node tools/gen_cli_spec.mjs           write the copy from the built binary (none built: the checked-in copy stays, said so)
+//   node tools/gen_cli_spec.mjs --status  the last step of `npm run check`: says loudly when the drift check was skipped
+//
+// A CK_CLI_BIN that is set but missing, or doesn't answer `__spec`, is an error, never a silent skip (senior review
+// 2026-10-26 N10).
 //
 // The binary: CK_CLI_BIN, else the newest of engine-rs/target/{dist,release,debug}/corridorkey that runs here (dist can
 // hold another system's build after a cross-build: it is skipped).
@@ -28,8 +32,17 @@ export function findCliBins(env = process.env) {
   return found.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
 }
 
-/** The first binary that answers, with its spec; null when none does. */
+/** The first binary that answers, with its spec; null when none does. Throws when CK_CLI_BIN is set and isn't one. */
 export function hostSpec(env = process.env) {
+  if (env.CK_CLI_BIN) {
+    if (!existsSync(env.CK_CLI_BIN)) throw new Error(`CK_CLI_BIN=${env.CK_CLI_BIN}: no such file`);
+    try {
+      return { bin: env.CK_CLI_BIN, spec: readSpec(env.CK_CLI_BIN) };
+    } catch (e) {
+      // error: SHOWN — rethrown with the binary named
+      throw new Error(`CK_CLI_BIN=${env.CK_CLI_BIN} doesn't answer \`__spec --json\`: ${e.message}`);
+    }
+  }
   // loop: NOT-WORTH — at most three candidates, once per build
   for (const bin of findCliBins(env)) {
     try {
@@ -51,7 +64,15 @@ export function readSpec(bin) {
 
 export const specText = (spec) => JSON.stringify(spec, null, 2) + "\n";
 
-if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
+if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url)) && process.argv[2] === "--status") {
+  const found = hostSpec();
+  if (found) console.log(`gen_cli_spec: the Console's CLI spec was checked against ${found.bin}`);
+  else
+    console.error(
+      "\n*** gen_cli_spec: the CLI spec drift check was SKIPPED: no corridorkey binary built for this system ***\n" +
+        "*** build one (cargo build -p ck-cli) or set CK_CLI_BIN, then run the tests again ***\n",
+    );
+} else if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
   const found = hostSpec();
   if (!found) {
     console.log(`gen_cli_spec: no corridorkey binary built for this system; kept ${SPEC_FILE}`);
