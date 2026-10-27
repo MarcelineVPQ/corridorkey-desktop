@@ -225,3 +225,18 @@ describe("farm export: hostile names (review 2026-10-27 M1)", () => {
     expect(rows).toEqual([`${path}\t${out}`]);
   });
 });
+
+// senior review 2026-10-27 S3 (probe P2): /a/sh010.mov and /b/sh010.mov wrote "7 files" but the folder held one set
+describe("farm export: two clips with one name (review 2026-10-27 S3)", () => {
+  it("refuses them (names compared without case: a farm share may fold it) instead of one overwriting the other", () => {
+    const a = { ...fj("sh010"), clip: { path: "/a/sh010.mov", kind: "video" as const } };
+    const b = { ...fj("sh010"), clip: { path: "/b/sh010.mov", kind: "video" as const } };
+    const B = { ...fj("SH010"), clip: { path: "/b/SH010.mov", kind: "video" as const } };
+    // loop: NOT-WORTH — five formats
+    for (const f of ["openjd", "deadline", "opencue", "flamenco", "shell"] as const) {
+      expect(farmExport(f, [a, b], env).error, f).toBe(`"/a/sh010.mov" and "/b/sh010.mov" are both named sh010: their job files would replace each other; export them into separate folders.`);
+      expect(farmExport(f, [a, B], env).error, f).toMatch(/are both named/);
+      expect(farmExport(f, [a, b], env).files).toEqual([]);
+    }
+  });
+});

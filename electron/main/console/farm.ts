@@ -56,7 +56,8 @@ const CONTROL = /[\u0000-\u001f\u007f]/;
 /**
  * Why `jobs` can't be exported: a control character in a clip's name or path, its results folder, a flag's value or
  * the runtime's paths (senior review 2026-10-27 M1: a new line in a name added lines to the key=value files, the shot
- * lists and the scripts, and no quoting saves key=value or a tab-separated list). Null: it can.
+ * lists and the scripts, and no quoting saves key=value or a tab-separated list), or two clips with one name (S3).
+ * Null: it can.
  */
 function refusal(jobs: readonly FarmJob[], env: FarmEnv): string | null {
   // loop: NOT-WORTH — the exported jobs and their few values
@@ -67,6 +68,15 @@ function refusal(jobs: readonly FarmJob[], env: FarmEnv): string | null {
     const bad = values.find((v) => CONTROL.test(v));
     if (bad !== undefined)
       return `${JSON.stringify(j.clip.path)}: ${JSON.stringify(bad)} has a control character (a new line, a tab) that would add lines to the farm's files; rename it, then export again.`;
+  }
+  // two clips with one name: their job files (named by it) would replace each other (S3); compared without case, as a
+  // farm share on Windows or macOS compares them
+  const seen = new Map<string, FarmJob>();
+  // loop: NOT-WORTH — the exported jobs
+  for (const j of jobs) {
+    const other = seen.get(j.name.toLowerCase());
+    if (other) return `${JSON.stringify(other.clip.path)} and ${JSON.stringify(j.clip.path)} are both named ${j.name}: their job files would replace each other; export them into separate folders.`;
+    seen.set(j.name.toLowerCase(), j);
   }
   // loop: NOT-WORTH — two paths
   const bad = [env.models, env.ort].find((v) => v !== null && CONTROL.test(v));

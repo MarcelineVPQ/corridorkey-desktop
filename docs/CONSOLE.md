@@ -79,7 +79,8 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   (the block says to change them for the workers); Deadline and OpenCue need the shot's frame range (a video from
   1001, a frame folder by its files): a clip without one is left out, and said. A clip whose name, path, results
   folder, a flag's value or the runtime's paths has a control character (a new line, a tab) is refused, with which and
-  why: it would add lines to the farm's files (senior review 2026-10-27 M1). The folder goes through the write scope
+  why: it would add lines to the farm's files (senior review 2026-10-27 M1); so are two clips with one name (compared
+  without case), whose job files would replace each other (S3). The folder goes through the write scope
   (`-o` is a written path), and so does each file it writes, resolved (a linked folder inside that leads out is
   refused); a file name that is a link is refused, dangling or not, with sudo too, and each file is written as a new one
   renamed over the name, so a link raced in after the checks is replaced, never written through (M2). Files already
