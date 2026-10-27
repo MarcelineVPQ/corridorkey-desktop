@@ -99,18 +99,30 @@ function pieces(src: string, opts: ParseOptions): Piece[] | ScriptError {
   return out;
 }
 
-/** The source line `at` is on (1-based). */
-function lineOf(src: string, at: number): number {
-  let n = 1;
-  // loop: NOT-WORTH — counts new lines before a command, once per command parsed
-  for (let i = 0; i < at && i < src.length; i++) if (src[i] === "\n") n++;
-  return n;
+/** The source line an offset is on (1-based): the new lines found once, then a binary search per command (S5 of the
+ * senior review 2026-10-27: counting from the start for each command was quadratic). */
+function lineFinder(src: string): (at: number) => number {
+  const breaks: number[] = [];
+  // loop: NOT-WORTH — one pass over the program's text, once per parse
+  for (let i = src.indexOf("\n"); i !== -1; i = src.indexOf("\n", i + 1)) breaks.push(i);
+  return (at) => {
+    let lo = 0;
+    let hi = breaks.length;
+    // loop: NOT-WORTH — a binary search [bounded: log2 of the program's lines]
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (breaks[mid] < at) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo + 1;
+  };
 }
 
 /** Read a whole program: a typed line or a script's text. */
 export function parseProgram(src: string, opts: ParseOptions): { list: List } | { error: ScriptError } {
   const cut = pieces(src, opts);
   if (!Array.isArray(cut)) return { error: cut };
+  const lineOf = lineFinder(src);
   // each piece's words (positions in the source); empty pieces dropped, the operator before kept
   const queue: { start: number; end: number; op: Op | null; words: { value: string; start: number; end: number; quoted: boolean }[] }[] = [];
   // the operator joining the next command to the one before (null: none yet)
@@ -164,7 +176,7 @@ export function parseProgram(src: string, opts: ParseOptions): { list: List } | 
 
   const node = (q: (typeof queue)[number]): Out<ScriptNode> => {
     const k = kw(q);
-    const line = lineOf(src, q.start);
+    const line = lineOf(q.start);
     if (k === "for") {
       at++;
       const [, nameW, inW] = q.words;

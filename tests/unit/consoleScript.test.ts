@@ -84,3 +84,19 @@ describe("the page's reading of a line", () => {
     expect(commandStart("echo 'a;b' x", opts)).toBe(0);
   });
 });
+
+// senior review 2026-10-27 S5 (probe P10): each command's line number was counted from the start (30 000 short lines:
+// 5.1 s on the main process; a 1 MiB script about a minute)
+describe("a long program parses in linear time (review 2026-10-27 S5)", () => {
+  it("30 000 lines in well under a second, with the right line numbers", () => {
+    // loop: NOT-WORTH — the test's lines
+    const src = Array.from({ length: 30_000 }, (_, i) => `echo ${i}`).join("\n");
+    const t = performance.now();
+    const p = parseProgram(src, { windows: false });
+    const ms = performance.now() - t;
+    if ("error" in p) throw new Error(p.error.message);
+    expect(ms).toBeLessThan(500);
+    expect(p.list.items).toHaveLength(30_000);
+    expect([p.list.items[0].node, p.list.items[29_999].node]).toMatchObject([{ line: 1 }, { line: 30_000 }]);
+  });
+});
