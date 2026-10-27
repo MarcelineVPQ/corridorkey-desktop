@@ -2,5 +2,6 @@
 export const APP: string;
 export function codeOnly(src: string): string;
 export function branchesOn(code: string): string[];
-export function checkModule(module: string, code: string, tests: { path: string; code: string }[]): string[];
+export const EXCEPTIONS: Map<string, string>;
+export function checkModule(module: string, code: string, tests: { path: string; code: string }[], exceptions?: Map<string, string>): string[];
 export function checkAll(app?: string): string[];

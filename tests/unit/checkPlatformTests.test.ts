@@ -21,6 +21,10 @@ describe("the platform-test gate", () => {
     expect(checkModule("electron/main/console/runner", codeOnly(RUNNER), [old])).toEqual([expect.stringContaining('never run it as "darwin"')]);
     const now = { ...old, code: old.code + 'make({ platform: "darwin" });\n' };
     expect(checkModule("electron/main/console/runner", codeOnly(RUNNER), [now])).toEqual([]);
+    // a branch no test can take is listed with why; listed and tested is stale
+    const why = new Map([["electron/main/console/runner darwin", "why"]]);
+    expect(checkModule("electron/main/console/runner", codeOnly(RUNNER), [old], why)).toEqual([]);
+    expect(checkModule("electron/main/console/runner", codeOnly(RUNNER), [now], why)).toEqual([expect.stringContaining("remove it")]);
     // no test imports it: not this gate's business
     expect(checkModule("electron/main/other", codeOnly(RUNNER), [now])).toEqual([]);
   });

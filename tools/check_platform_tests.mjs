@@ -4,13 +4,18 @@
 // in tests/unit/ that import each module. A module branches on win32 / darwin / linux when its code has that quoted
 // name ("win32") or calls isWin( / isMac( / isLinux(. It fails when the tests importing such a module never name one of
 // its systems as a quoted string in their code (a test that runs it as that system passes "darwin" somewhere). A
-// module no test imports is the test-file gate's business (tools/check_test_files.mjs), not this one's.
+// module no test imports is the test-file gate's business (tools/check_test_files.mjs), not this one's. EXCEPTIONS
+// carries a branch no test can take, with why.
 //   node tools/check_platform_tests.mjs    the gate (npm run gates)
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const APP = join(dirname(fileURLToPath(import.meta.url)), "..");
+// "<module> <system>": a branch its tests can't take, and why
+export const EXCEPTIONS = new Map([
+  ["electron/main/appImageQuit linux", "holdAppImageMountUntilExit acts only in a Linux AppImage as it quits (a detached /bin/sh helper); its pure parts are tested"],
+]);
 const SYSTEMS = { win32: /"win32"|\bisWin\(/, darwin: /"darwin"|\bisMac\(/, linux: /"linux"|\bisLinux\(/ };
 
 /** A source without its comments (line comments not inside a URL or a string's start, block comments). */
@@ -25,15 +30,26 @@ export function branchesOn(code) {
 }
 
 /** `module`: its path without the extension (electron/main/queue); `tests`: [{ path, code }]. */
-export function checkModule(module, code, tests) {
+export function checkModule(module, code, tests, exceptions = EXCEPTIONS) {
   const systems = branchesOn(code);
   if (!systems.length) return [];
   const imports = new RegExp(`from "(\\.\\./)+${module.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`);
   // loop: NOT-WORTH — the unit tests, once per module that branches
   const mine = tests.filter((t) => imports.test(t.code));
   if (!mine.length) return [];
+  const out = [];
   // loop: NOT-WORTH — three systems, against a few tests
-  return systems.filter((s) => !mine.some((t) => t.code.includes(`"${s}"`))).map((s) => `${module}.ts branches on ${s}, but its tests (${mine.map((t) => t.path).join(", ")}) never run it as "${s}"`);
+  for (const s of systems) {
+    // loop: NOT-WORTH — a few tests
+    const run = mine.some((t) => t.code.includes(`"${s}"`));
+    if (exceptions.has(`${module} ${s}`)) {
+      if (run) out.push(`EXCEPTIONS lists "${module} ${s}", which its tests run now: remove it`);
+    } else if (!run) {
+      // loop: NOT-WORTH — a few test names in the message
+      out.push(`${module}.ts branches on ${s}, but its tests (${mine.map((t) => t.path).join(", ")}) never run it as "${s}"`);
+    }
+  }
+  return out;
 }
 
 export function checkAll(app = APP) {
