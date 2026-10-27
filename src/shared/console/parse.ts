@@ -369,6 +369,8 @@ export function parse(line: string, reg: Registry, opts: ParseOptions): Parsed {
       continue;
     }
     if (!arg.multiple) nextPositional++;
+    // watch's command: the rest of the line is its words, its flags too
+    if (arg.rest) endOfOptions = true;
     out.positionals.push({ arg, value: w.value, word: at });
     const problem = valueProblem(arg, w.value);
     if (problem) fail(problem, w.start, w.end, arg);

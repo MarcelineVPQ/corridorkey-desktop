@@ -35,6 +35,8 @@ export interface ConsoleArg {
   dos: readonly string[];
   /** a path that must be a folder (cd, pushd): Tab offers folders only (SME review 2026-10-26 N1) */
   folderOnly: boolean;
+  /** the rest of the line is its words, flags too (watch's command: watch -n 5 dir -l) */
+  rest: boolean;
 }
 
 export interface ConsoleCommand {
@@ -131,6 +133,7 @@ function cliCommand(c: SpecCommand): ConsoleCommand {
       conflicts: a.conflicts_with ?? [],
       dos: [],
       folderOnly: false,
+      rest: false,
     })),
     examples: c.examples,
     kind: "cli",
@@ -156,6 +159,7 @@ const arg = (a: ArgIn): ConsoleArg => ({
   conflicts: [],
   dos: [],
   folderOnly: false,
+  rest: false,
   ...a,
 });
 const builtin = (name: string, about: string, args: ConsoleArg[], examples: string[], aliases: string[] = []): ConsoleCommand => ({
@@ -316,6 +320,24 @@ const BUILTINS: ConsoleCommand[] = [
     "run a command and say how long it took (a render's frames per second too)",
     [arg({ id: "command", kind: "string", positional: true, multiple: true, required: true, valueName: "COMMAND", help: "the command line" })],
     ["time render shot.mov -o ~/renders/sh010", "time verify -i plates/sh010.####.exr -o out/key.####.exr"],
+  ),
+  builtin(
+    "watch",
+    "run a command again every N seconds in one block (a render folder filling up, verify while a farm writes); Ctrl+C stops it",
+    [
+      arg({ id: "interval", short: "n", kind: "number", range: [2, 3600], valueName: "SECONDS", help: "how often, from the end of one run to the start of the next (default 10)" }),
+      arg({
+        id: "command",
+        kind: "string",
+        positional: true,
+        required: true,
+        multiple: true,
+        rest: true,
+        valueName: "COMMAND",
+        help: "what to run: dir, du, tree, cat, head, tail, wc, exrheader, history or verify",
+      }),
+    ],
+    ["watch dir key/", "watch -n 30 verify -i plates/sh010.####.exr -o key/sh010.####.exr", "watch -n 5 du ~/renders"],
   ),
   builtin(
     "cat",

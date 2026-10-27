@@ -99,6 +99,7 @@ files must say `sudo`, and one dialog lists them all, with their `${…}` filled
 | `grep`, `count` | after a `\|`: keep the lines or rows with a word; how many there are ([below](#scripting)) |
 | `du [folder…]` | how much each folder takes on disk |
 | `tree [folder] [-L N] [-a]` | the folders as a tree, a frame sequence as one row |
+| `watch [-n S] <command>` | run a command that reads (`dir`, `du`, `verify`…) again every S seconds (default 10) in one block; Ctrl+C stops it |
 | `time <command>` | run a command and say how long it took (a render's frames per second too) |
 | `run [--keep-going] <file.ckcmd>` | run a script ([below](#scripting)); `source` is the same command |
 | `history [N or term]` | the lines typed before, numbered, with when and how each ended; `history --audit` the elevation log |
@@ -313,6 +314,9 @@ render --input plates/sh010.####.exr --output key/sh010.####.exr --frames 1012-1
 
 # a nightly script that stops at the first failure
 run nightly.ckcmd
+
+# watch a render folder fill up, or a farm's frames arrive
+watch -n 30 verify -i plates/sh010.####.exr -o key/sh010.####.exr
 
 # what took the disk
 du ~/renders

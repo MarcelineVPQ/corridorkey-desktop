@@ -2615,3 +2615,47 @@ describe("SME reviews: structured pipes between the Console's own commands", () 
     expect((await c.complete("dir | gr", 8)).items.map((i) => i.insert)).toEqual(["grep"]);
   });
 });
+
+describe("SME reviews: watch", () => {
+  /** a turn of the event loop at a time (setImmediate isn't faked) until `ok`, at most 200 */
+  const until = async (ok: () => boolean) => {
+    // loop: NOT-WORTH — a test's wait [bounded: 200 turns]
+    for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setImmediate(r));
+  };
+
+  it("row 128: watch -n 2 dir runs dir again in its one block every 2 s, the newest output in place, until Ctrl+C (which ends the wait at once)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { c } = make();
+      const d = mkdtempSync(join(root, "watch-"));
+      await c.run(`cd ${d}`);
+      const b = await c.run("watch -n 2 dir -1");
+      expect(b.state).toBe("running");
+      await until(() => /run 1 /.test(blocks.get(b.id)?.status ?? ""));
+      expect(blocks.get(b.id)!.lines.map((l) => l.text)).toEqual([]);
+      writeFileSync(join(d, "key.1001.exr"), "x");
+      await vi.advanceTimersByTimeAsync(2000);
+      await until(() => /run 2 /.test(blocks.get(b.id)?.status ?? ""));
+      expect(blocks.get(b.id)!.lines.map((l) => l.text)).toEqual(["key.1001.exr"]);
+      expect(blocks.get(b.id)!.state).toBe("running");
+      // one command at a time: a render waits for it
+      expect((await c.run("render shot.mov -o ../out/w")).state).toBe("refused");
+      c.cancel();
+      await until(() => blocks.get(b.id)!.state !== "running");
+      expect([blocks.get(b.id)!.state, c.session().running]).toEqual(["cancelled", null]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("row 128: only commands that read; never in a script; the interval is 2 to 3600 s", async () => {
+    const { c } = make();
+    const w = await c.run("watch render shot.mov -o ../out/w");
+    expect([w.state, w.lines[0].text]).toEqual(["refused", expect.stringMatching(/^watch runs a command that only reads: dir, /)]);
+    expect((await c.run("watch -n 1 dir")).lines[0].text).toMatch(/must be between 2 and 3600/);
+    await c.run("pwd; watch dir");
+    await until(() => [...blocks.values()].some((x) => x.line === "watch dir" && x.state === "refused"));
+    expect([...blocks.values()].find((x) => x.line === "watch dir")!.lines[0].text).toMatch(/^watch runs on a line of its own/);
+    expect(spawned).toHaveLength(0);
+  });
+});

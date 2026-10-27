@@ -154,6 +154,8 @@ interface Job {
   builtin?: boolean;
   /** a script's confirmed lines with `${…}`, as they were shown filled in: each must run as shown */
   confirmed?: Map<CmdNode, string>;
+  /** watch between runs: Ctrl+C (and the quit) end the wait at once */
+  wake?: () => void;
 }
 
 /**
@@ -370,6 +372,7 @@ export class Console {
       // Windows has no SIGTERM for a console program: the tree is ended (the output stays safe: docs/CLI.md)
       if (pid && this.d.paths.platform === "win32") this.killTree(pid);
       else job.child?.kill("SIGTERM");
+      job.wake?.();
     } else if (pid) {
       this.note(job.block, "info", "Stopped at once.");
       this.killTree(pid);
@@ -601,7 +604,8 @@ export class Console {
       if (qmark) this.note(b, "info", "An unquoted ? anywhere on a line asks for help, so this is the help; a file or value named ? goes in quotes: '?'.");
       return now(this.finish(b, "done", ...(cmd.name === "help" && cmd.kind === "builtin" ? overview(this.d.registry) : commandHelp(this.d.registry, cmd))));
     }
-    if (cmd.kind === "cli") return this.cli(b, p, parent !== null);
+    // a watch's run is its own block's (the held job's block): as a script's line, it runs inside the job it holds
+    if (cmd.kind === "cli") return this.cli(b, p, parent !== null || this.job?.block.id === b.id);
     // loop: NOT-WORTH — the line's few options
     const has = (id: string) => p.options.some((o) => o.arg.id === id);
     // loop: NOT-WORTH — the line's few positionals
@@ -697,6 +701,14 @@ export class Console {
         return this.script(b, pos("file")[0], parent !== null, has("keep-going"));
       case "time":
         return now(this.finish(b, "refused", "time goes first on the line: time sudo render …"));
+      case "watch": {
+        // the command as typed: the rest of the line from its first word
+        // loop: NOT-WORTH — the line's few positionals
+        const first = p.positionals.find((x) => x.arg.id === "command")!;
+        // loop: NOT-WORTH — the line's few options
+        const every = Number(p.options.find((o) => o.arg.id === "interval")?.value ?? WATCH_EVERY_S);
+        return this.watch(b, line.slice(p.words[first.word].start), every, parent !== null);
+      }
       case "cat":
         return now(await this.cat(b, pos("files")));
       case "grep":
@@ -728,6 +740,76 @@ export class Console {
         return now(await this.doctor(b, has("json")));
     }
     return now(this.finish(b, "refused", `${cmd.name} isn't a command this Console runs.`));
+  }
+
+  /**
+   * watch [-n SECONDS] COMMAND (backlog row 128): the command again and again in this one block, each run's output in
+   * place of the last, the interval from the end of one run to the start of the next, until Ctrl+C, the app's quit, or
+   * WATCH_MAX_MS. Only commands that read (WATCHABLE: never one that writes, replaces or keys); it holds the one slot
+   * like any job, so nothing else runs meanwhile.
+   */
+  private async watch(b: ConsoleBlock, inner: string, every: number, inScript: boolean): Promise<{ block: ConsoleBlock; done: Promise<ConsoleBlock> }> {
+    const now = (x: ConsoleBlock) => ({ block: x, done: Promise.resolve(x) });
+    if (inScript) return now(this.finish(b, "refused", "watch runs on a line of its own (never in a script or with ; && ||)."));
+    const p = parse(inner, this.d.registry, this.opts);
+    if (p.errors.length) {
+      b.errors = [];
+      // loop: NOT-WORTH — the command's few mistakes
+      return now(this.finish(b, "refused", ...p.errors.map((e) => e.message)));
+    }
+    const name = p.command?.name ?? "";
+    const stages = pipeStages(inner, this.opts);
+    if (!WATCHABLE.has(name) || p.sudo || !Array.isArray(stages) || stages.length !== 1) return now(this.finish(b, "refused", `watch runs a command that only reads: ${[...WATCHABLE].join(", ")}.`));
+    if (this.job) return now(this.finish(b, "refused", `Busy with ${this.job.block.line} (one command at a time; Ctrl+C stops it).`));
+    const job: Job = { block: b, child: null, cancels: 0, builtin: true };
+    this.job = job;
+    this.d.sessionChanged();
+    const started = this.now();
+    const clock = (t: number) => new Date(t).toTimeString().slice(0, 8);
+    const done = (async () => {
+      let last: ConsoleBlock = b;
+      let runs = 0;
+      try {
+        // loop: SERIAL-REQUIRED — watch's runs, one after the other, the wait between [bounded: WATCH_MAX_MS; Ctrl+C or the app's quit ends the wait at once]
+        for (;;) {
+          // each run in a fresh block with the watch's id and line: the page shows the newest in its place
+          const x: ConsoleBlock = { ...this.block(b.line, null), id: b.id, startedAt: started };
+          // Ctrl+C's note goes on the block shown
+          job.block = x;
+          const r = await this.runParsed(x, inner, null);
+          last = await r.done;
+          runs++;
+          if (job.cancels > 0 || this.closing) break;
+          if (this.now() - started >= WATCH_MAX_MS) {
+            this.note(last, "info", `watch stopped after ${WATCH_MAX_MS / 3_600_000} hours.`);
+            break;
+          }
+          last.state = "running";
+          last.finishedAt = null;
+          last.status = `every ${every} s · run ${runs} at ${clock(this.now())}${last.exitCode ? ` (exit ${last.exitCode})` : ""} · Ctrl+C stops`;
+          this.d.changed(last);
+          // loop: NOT-WORTH — one wait per run [bounded: every ≤ 3600 s; Ctrl+C or the quit wakes it]
+          await new Promise<void>((resolve) => {
+            // lifetime: OK — cleared by Ctrl+C or the quit (wake), else it fires once
+            // loop: NOT-WORTH — one timer per run [bounded: every ≤ 3600 s]
+            const t = setTimeout(resolve, every * 1000);
+            job.wake = () => {
+              clearTimeout(t);
+              resolve();
+            };
+          });
+          job.wake = undefined;
+          if (job.cancels > 0 || this.closing) break;
+        }
+      } finally {
+        this.job = null;
+        this.d.sessionChanged();
+      }
+      last.status = null;
+      last.state = "running";
+      return this.finish(last, job.cancels > 0 ? "cancelled" : "done");
+    })();
+    return { block: b, done };
   }
 
   /**
@@ -804,7 +886,7 @@ export class Console {
    */
   private async slotted(b: ConsoleBlock, inScript: boolean, run: (stop: () => boolean) => Promise<ConsoleBlock>): Promise<ConsoleBlock> {
     const held = this.job;
-    if (held && !(inScript && held.block.id === b.parent)) return this.finish(b, "refused", `Busy with ${held.block.line} (one command at a time; Ctrl+C stops it).`);
+    if (held && held.block.id !== b.id && !(inScript && held.block.id === b.parent)) return this.finish(b, "refused", `Busy with ${held.block.line} (one command at a time; Ctrl+C stops it).`);
     const job: Job = held ?? { block: b, child: null, cancels: 0, builtin: true };
     if (!held) {
       this.job = job;
@@ -1981,7 +2063,8 @@ export class Console {
     const cmd = p.command!;
     const bin = this.d.cli();
     if (!bin) return now(this.finish(b, "refused", "The corridorkey command line isn't part of this copy of the app (it ships next to the engine, in resources/engine)."));
-    if (this.job && !(inScript && this.job.block.id === b.parent)) return now(this.finish(b, "refused", `Busy with ${this.job.block.line} (one command at a time; Ctrl+C stops it).`));
+    if (this.job && !(inScript && (this.job.block.id === b.parent || this.job.block.id === b.id)))
+      return now(this.finish(b, "refused", `Busy with ${this.job.block.line} (one command at a time; Ctrl+C stops it).`));
 
     // the arguments, checked: written paths only into chosen folders (resolved: what was checked is what runs),
     // the runtime only from the Engine page's lists, the job file's own output folders too
@@ -2092,7 +2175,11 @@ export class Console {
     // the dialog (and the folder) took time: another command may have started meanwhile; a command still in its checks
     // when the app quits never starts (shutdown() stops only what runs)
     const blocked = () =>
-      this.job && !(inScript && this.job.block.id === b.parent) ? `Busy with ${this.job.block.line} (one command at a time).` : this.closing ? "Not run: the app is quitting." : null;
+      this.job && !(inScript && (this.job.block.id === b.parent || this.job.block.id === b.id))
+        ? `Busy with ${this.job.block.line} (one command at a time).`
+        : this.closing
+          ? "Not run: the app is quitting."
+          : null;
     const busy = blocked() ?? (cmd.name === "info" ? this.d.gpuBusy() : null);
     if (busy) return now(this.finish(b, "refused", busy));
     if (cmd.gpu) {
@@ -2604,6 +2691,11 @@ export function clipName(input: string, platform: NodeJS.Platform): string {
 
 /** Copy as Nuke Read: the frames stat'ed, at most, to find what a render wrote. */
 const READS_STATS = 20_000;
+/** watch: what it may run (commands that only read), its interval's default, how long it may go on. */
+const WATCHABLE = new Set(["dir", "du", "tree", "cat", "head", "tail", "wc", "exrheader", "history", "verify"]);
+const WATCH_EVERY_S = 10;
+const WATCH_MAX_MS = 12 * 3_600_000;
+
 /** A pipe's first command: the Console's read-only built-ins that print rows or lines (never a run, a script, a change). */
 const PIPE_SOURCES = new Set(["dir", "history", "help", "apropos", "man", "cat", "head", "tail", "exrheader", "set", "bookmarks", "j", "dirs", "tree", "du", "wc", "echo", "allow", "version", "jobs"]);
 /** What may come after a |. */

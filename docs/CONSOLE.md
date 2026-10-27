@@ -61,6 +61,12 @@ missing there).
   display window, the data window when it differs, channels with their pixel types and sampling, alpha (`A` or
   `*.A`), compression, line order, tiles or scan lines, each part of a multi-part file, other attributes by name; a
   frame pattern reads its first frame and says so: SME review 2026-10-27 N6),
+  `watch [-n SECONDS] COMMAND` (backlog row 128: the rest of the line is the command, flags too, `ConsoleArg.rest`;
+  only commands that read, `WATCHABLE`: dir, du, tree, cat, head, tail, wc, exrheader, history, verify; each run in a
+  fresh block with the watch's id and line, so the page shows the newest output in its place, the block's status
+  `every N s · run K at HH:MM:SS`; the interval 2-3600 s from one run's end to the next start; it holds the one slot
+  (a verify inside runs as its child: `inScript` for the held block's own id); Ctrl+C or the quit ends the wait at
+  once (`Job.wake`), else it stops itself after 12 hours; never in a script),
   `grep [-i] [-v] TERM`, `count`, and `head` / `tail` without a FILE: the filters after a `|` (alone, `grep` and
   `count` say so; backlog row 127, below),
   `history [N|term]` (`--audit`: the elevated log), `version` (also `corridorkey --version`, `render --version`: the app's
