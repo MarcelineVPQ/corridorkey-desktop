@@ -254,3 +254,44 @@ fn a_launcher_that_exits_first_doesnt_end_the_task() {
     let r: Value = serde_json::from_str(&std::fs::read_to_string(&report).expect("the orphaned task ran to its end")).unwrap();
     assert_eq!(r["exit_code"].as_i64(), Some(0));
 }
+
+/// A line pasted into a terminal (the Queue's Copy as command) gives no --models or --ort: the CLI falls back to the
+/// app's own install, the newest of each, and says which (P4 SME review 2026-10-27 S2). It stops here before the
+/// runtime (a missing input), so no card or real runtime is needed.
+#[test]
+fn falls_back_to_the_apps_models_and_runtime_and_says_so() {
+    let d = scratch("appinstall");
+    let app = d.0.join("data/corridorkey-desktop");
+    std::fs::create_dir_all(app.join("models/2.0.0-onnx.4")).unwrap();
+    std::fs::write(app.join("models/2.0.0-onnx.4/models.json"), "{}").unwrap();
+    let capi = app.join("runtime/ort-1.31.0/onnxruntime/capi");
+    std::fs::create_dir_all(&capi).unwrap();
+    let lib = if cfg!(windows) {
+        "onnxruntime.dll"
+    } else if cfg!(target_os = "macos") {
+        "libonnxruntime.1.31.0.dylib"
+    } else {
+        "libonnxruntime.so.1.31.0"
+    };
+    std::fs::write(capi.join(lib), "").unwrap();
+    std::fs::create_dir_all(app.join("runtime/ort-1.31.0/onnxruntime_gpu-1.31.0.dist-info")).unwrap();
+    let data = d.0.join("data");
+    let home = |c: &mut Command| {
+        c.env_remove("CK_ENGINE_ORT").env_remove("ORT_DYLIB_PATH").env("XDG_DATA_HOME", &data).env("LOCALAPPDATA", &data).env("HOME", &d.0);
+    };
+    let mut c = bin();
+    home(&mut c);
+    let o = c.args(["render", "-i", s(&d.0.join("nope.mov")), "-o", s(&d.0.join("out"))]).output().unwrap();
+    let err = text(&o.stderr);
+    if !cfg!(target_os = "macos") {
+        // macOS keeps Application Support under HOME: the same rule, checked in appinstall.rs's tests
+        assert!(err.contains(&format!("no --models given: using the app's model set {}", app.join("models/2.0.0-onnx.4").display())), "{err}");
+        assert!(err.contains(&format!("no --ort given: using the app's ONNX Runtime {}", capi.join(lib).display())), "{err}");
+    }
+    assert_eq!(o.status.code(), Some(3), "{err}");
+    // given, nothing is said
+    let mut c = bin();
+    home(&mut c);
+    let o = c.args(["render", "-i", s(&d.0.join("nope.mov")), "-o", s(&d.0.join("out")), "--models", "/m", "--ort", "/o"]).output().unwrap();
+    assert!(!text(&o.stderr).contains("using the app's"), "{}", text(&o.stderr));
+}

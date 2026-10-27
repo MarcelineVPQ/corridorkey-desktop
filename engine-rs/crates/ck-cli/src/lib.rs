@@ -1,5 +1,6 @@
 //! `corridorkey`: CorridorKey on the command line for render farms and power users (docs/CLI.md). It links ck-core
 //! directly: no JSON protocol, and no parent-death watch (a farm's launcher may be PID 1, or exit before its task).
+pub mod appinstall;
 pub mod args;
 pub mod exit;
 pub mod frames;

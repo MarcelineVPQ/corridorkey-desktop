@@ -55,6 +55,13 @@ pub fn main(argv: Vec<OsString>) -> i32 {
     ) {
         std::env::set_var("CUDA_VISIBLE_DEVICES", v);
     }
+    // a line pasted into a terminal (Copy as command) runs with the app's own models and runtime when none is given
+    // (appinstall.rs; on Linux this starts the CLI again once, with the runtime's library folders)
+    if matches!(name, "render" | "prepare" | "info") {
+        let given = |k: &str| sub.try_get_one::<String>(k).ok().flatten().is_some();
+        let f = crate::appinstall::fallback(given("models"), given("ort"), &|k| std::env::var(k).ok(), std::env::consts::OS);
+        crate::appinstall::apply(&f, sub.try_get_one::<bool>("quiet").ok().flatten() == Some(&true));
+    }
     ck_core::config::set_process_env();
     let verbosity = if sub.try_get_one::<bool>("quiet").ok().flatten() == Some(&true) {
         Verbosity::Quiet
