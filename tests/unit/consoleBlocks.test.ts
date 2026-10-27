@@ -22,6 +22,7 @@ import {
   isoTime,
   lineHint,
   lineWords,
+  nukeRead,
   rateText,
   sequenceCell,
   sequenceText,
@@ -462,5 +463,32 @@ describe("SME review 2026-10-26 N2 (row 119): the rate says what it measured", (
   it("frames per second and over how many frames, no ETA", () => {
     expect(rateText({ fps: 3.14, frames: 20 })).toBe("3.1 frames/s over the last 20 frames");
     expect(rateText({ fps: 24.4, frames: 1 })).toBe("24 frames/s over the last 1 frame");
+  });
+});
+
+describe("SME review 2026-10-27 N8 (row 147): Copy as Nuke Read", () => {
+  it("one Read node per sequence: %04d, first and last, forward slashes, a name from the file; braces, or quotes when the path has one", () => {
+    expect(nukeRead([{ path: "/mnt/show/sh 010/key/sh010_alpha_exr/sh010_alpha.####.exr", first: 1001, last: 1100 }])).toBe(
+      [
+        "Read {",
+        " inputs 0",
+        " file {/mnt/show/sh 010/key/sh010_alpha_exr/sh010_alpha.%04d.exr}",
+        " first 1001",
+        " last 1100",
+        " origfirst 1001",
+        " origlast 1100",
+        " origset true",
+        " name Read_sh010_alpha",
+        "}",
+      ].join("\n"),
+    );
+    const two = nukeRead([
+      { path: "D:\\shots #2\\key.#.exr", first: 1, last: 120 },
+      { path: "/k/{x}/fg.####.exr", first: -10, last: 20 },
+    ]);
+    expect(two).toContain(" file {D:/shots #2/key.%d.exr}");
+    expect(two).toContain(' file "/k/\\{x\\}/fg.%04d.exr"');
+    expect(two).toContain(" first -10");
+    expect(two.match(/^Read \{$/gm)).toHaveLength(2);
   });
 });

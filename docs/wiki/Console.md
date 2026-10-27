@@ -232,7 +232,9 @@ Every job the queue starts appears in the Console as its exact `corridorkey rend
 (**Console settings → Show GUI jobs as commands** turns it off). **Copy as command** on a clip in the Queue copies
 the same line, quoted so a terminal runs nothing hidden in a file name. Any `render`, `verify`, `prepare` or `info`
 block has **Copy as farm line**: the exact `corridorkey …` line the Console ran (paths as it resolved them, relative ones
-from its folder), quoted for this computer's shell, without the Console's own progress and temporary-folder flags. Pasted into a terminal it uses the app's own
+from its folder), quoted for this computer's shell, without the Console's own progress and temporary-folder flags. A `render` that
+finished adds **Copy as Nuke Read**: a `Read` node for each EXR sequence it wrote (`…%04d.exr`, its first and last
+frame there), ready to paste into Nuke's node graph. Pasted into a terminal it uses the app's own
 models and ONNX Runtime ([Command line: the runtime](Command-Line#the-runtime)). On Windows a path with `%`, `!`, `$`,
 a backtick or `"` gets no line (cmd.exe and PowerShell would read them inside quotes), and the Queue says so.
 

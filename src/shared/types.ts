@@ -605,6 +605,8 @@ export interface ConsoleBlock {
   // a failed verify (exit 9): the render line for its missing frames (-F <ranges>), which Re-render missing puts in the
   // input (never runs it)
   rerender?: string | null;
+  // a render that ended 0: the EXR sequences it wrote (path with ####, first and last frame there), for Copy as Nuke Read
+  reads?: { path: string; first: number; last: number }[] | null;
   elevated: boolean;
   state: "running" | "done" | "failed" | "refused" | "cancelled";
   exitCode: number | null;

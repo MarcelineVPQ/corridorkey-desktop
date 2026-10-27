@@ -233,7 +233,8 @@ instead (**F2** switches).
 and what it means, the CLI's progress (frames handed to the writers) and phase, and what it printed. **Copy
 command**, **Copy output** and **Re-run** (puts the line back in the input to edit; it never runs by itself) show on a
 block when you point at it (a `corridorkey` command's block adds **Copy as farm line**: the exact `corridorkey …` line it
-ran, quoted for this computer's shell, bash or cmd, without the Console's own progress and temporary-folder flags) or Tab to them (always on a touch screen); the blocks of the Console's own commands (`dir`,
+ran, quoted for this computer's shell, bash or cmd, without the Console's own progress and temporary-folder flags; a
+finished `render` adds **Copy as Nuke Read**, a Read node per EXR sequence it wrote) or Tab to them (always on a touch screen); the blocks of the Console's own commands (`dir`,
 `pwd`, `help`…) are compact, and `cd` prints nothing when it worked (the bar and the prompt show the folder); a render's output folder and report open with **Show in folder**. A listing's sizes are human (KiB, MiB, GiB, in its summary too) and its dates
 ISO-style local time (`2026-10-26 22:58`); a long name ends in … (point at it for all of it), long folders show as
 `~/…/sh010/plates`, and **Copy output** copies the same columns with everything whole. `doctor` is a table with each

@@ -2194,8 +2194,15 @@ export class Console {
               resolve(this.finish(b, state));
             });
           };
+          // a render that ended 0: the sequences it wrote, for Copy as Nuke Read (SME review 2026-10-27 N8)
+          if (argv[0] === "render" && code === 0)
+            // loop: NOT-WORTH — one async folder read per finished render [bounded: READS_STATS stats]
+            void this.writtenSequences(b, argv).then((r) => {
+              b.reads = r;
+              close();
+            });
           // a verify that found frames missing: the render line for them (SME reviews 2026-10-26 N6, 2026-10-27 N7)
-          if (argv[0] === "verify" && code === 9)
+          else if (argv[0] === "verify" && code === 9)
             // loop: NOT-WORTH — one async check per failed verify [bounded: RERENDER_STATS stats]
             void this.rerenderLine(b).then((l) => {
               b.rerender = l;
@@ -2250,6 +2257,45 @@ export class Console {
     // loop: NOT-WORTH — the line's few words
     const line = ["render", ...words].map((w) => (w === "--" ? w : quoteArg(w, this.opts))).join(" ");
     return partial ? `sudo ${line}` : line;
+  }
+
+  /**
+   * The EXR sequences a finished render wrote: in its -o folder (and that folder's `<clip>_<output>_exr` folders, the
+   * CLI's layout) or a pattern's folder, each sequence with a frame written since the block started (renames keep the
+   * time the frame was written), with the first and last frame there. Empty when it wrote videos.
+   */
+  private async writtenSequences(b: ConsoleBlock, argv: string[]): Promise<{ path: string; first: number; last: number }[]> {
+    const o = argv.indexOf("--output");
+    if (o < 0 || !argv[o + 1]) return [];
+    const a = this.d.paths.platform === "win32" ? win32 : posix;
+    const target = argv[o + 1];
+    const pattern = frameToken(a.basename(target)) !== null;
+    const root = pattern ? a.dirname(target) : target;
+    const folders = [root];
+    if (!pattern)
+      // loop: NOT-WORTH — one async readdir per finished render
+      for (const e of await this.d.fs.readdir(root).catch(() => [] as Dirent[])) if (e.isDirectory() && e.name.endsWith("_exr")) folders.push(a.join(root, e.name));
+    const out: { path: string; first: number; last: number }[] = [];
+    let stats = READS_STATS;
+    // loop: NOT-WORTH — the output folders (one, or one per output), one async readdir each [bounded: READS_STATS stats in all]
+    for (const dir of folders) {
+      // loop: NOT-WORTH — one folder's names
+      const names = (await this.d.fs.readdir(dir).catch(() => [] as Dirent[])).filter((e) => !e.isDirectory() && /\.exr$/i.test(e.name)).map((e) => e.name);
+      // loop: NOT-WORTH — the folder's few sequences
+      for (const q of groupSequences(names).sequences) {
+        let fresh = false;
+        // loop: NOT-WORTH — a sequence's frames until one was written by this run [bounded: READS_STATS]
+        for (const n of q.names) {
+          if (stats-- <= 0) break;
+          fresh = ((await this.d.fs.stat(a.join(dir, n)).catch(() => null))?.mtimeMs ?? 0) >= b.startedAt - 2000;
+          if (fresh) break;
+        }
+        // the range's first and last as numbers (a pre-roll's -10-20 too)
+        const m = /^(-?\d+)-(-?\d+)$/.exec(q.range);
+        if (fresh && m) out.push({ path: a.join(dir, q.pattern), first: Number(m[1]), last: Number(m[2]) });
+      }
+    }
+    return out;
   }
 
   private killTree(pid: number): void {
@@ -2444,6 +2490,8 @@ export function clipName(input: string, platform: NodeJS.Platform): string {
   return stem;
 }
 
+/** Copy as Nuke Read: the frames stat'ed, at most, to find what a render wrote. */
+const READS_STATS = 20_000;
 /** Re-render missing: the files a failed verify listed that are stat'ed, at most (one there is enough). */
 const RERENDER_STATS = 1000;
 

@@ -23,6 +23,7 @@ import {
   errorSpans,
   isoTime,
   lineWords,
+  nukeRead,
   rateText,
   sequenceCell,
   shortenKnown,
@@ -132,6 +133,7 @@ function FullBlock({ b, registry, windows, onReinsert, onCollapse }: BlockProps 
         <span className="cb-actions">
           <CopyButton label="Copy command" text={b.line} />
           {farm && "line" in farm && <CopyButton label="Copy as farm line" text={farm.line} />}
+          {b.reads && b.reads.length > 0 && <CopyButton label="Copy as Nuke Read" text={nukeRead(b.reads)} />}
           {farm && "error" in farm && (
             <button type="button" className="copy-btn" disabled title={farm.error}>
               <Copy size={13} aria-hidden /> Copy as farm line

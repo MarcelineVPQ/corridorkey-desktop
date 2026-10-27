@@ -2510,3 +2510,21 @@ describe("SME reviews: Re-render missing", () => {
     expect(blocks.get(ok.id)!.rerender ?? null).toBeNull();
   });
 });
+
+describe("SME reviews: Copy as Nuke Read", () => {
+  it("P4 N8 (row 147): a render that ended 0 knows the EXR sequences it wrote (the CLI's <clip>_<output>_exr folders) with their first and last frame", async () => {
+    const { c } = make();
+    const o = join(out, "nuke");
+    const b = await c.run("render shot.mov -o ../out/nuke");
+    mkdirSync(join(o, "shot_alpha_exr"), { recursive: true });
+    // loop: NOT-WORTH — three test frames
+    for (const f of [1001, 1002, 1003]) writeFileSync(join(o, "shot_alpha_exr", `shot_alpha.${f}.exr`), "x");
+    await finish(spawned[0].child, [], 0);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(blocks.get(b.id)!.reads).toEqual([{ path: join(o, "shot_alpha_exr", "shot_alpha.####.exr"), first: 1001, last: 1003 }]);
+    // a failed render offers none
+    const f = await c.run("render shot.mov -o ../out/nuke2");
+    await finish(spawned[1].child, [], 8);
+    expect(blocks.get(f.id)!.reads ?? null).toBeNull();
+  });
+});

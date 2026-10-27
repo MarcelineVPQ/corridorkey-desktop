@@ -163,6 +163,38 @@ export function rateText(r: { fps: number; frames: number }): string {
   return `${r.fps < 10 ? r.fps.toFixed(1) : Math.round(r.fps)} frames/s over the last ${r.frames} frame${r.frames === 1 ? "" : "s"}`;
 }
 
+/**
+ * Copy as Nuke Read (SME review 2026-10-27 N8): a Read node per sequence a render wrote, as Nuke pastes it from the
+ * clipboard: the file with %04d (forward slashes on every system, Nuke's own), its first and last frame there, a name
+ * from the file. The path in braces (Tcl reads nothing inside), or in quotes with Tcl's specials escaped when it has a
+ * brace itself.
+ */
+export function nukeRead(reads: readonly { path: string; first: number; last: number }[]): string {
+  // loop: NOT-WORTH — a render's few outputs
+  return reads
+    .map((r) => {
+      const slashed = r.path.replace(/\\/g, "/");
+      const cut = slashed.lastIndexOf("/") + 1;
+      // the frame token in the file's name only (a folder may have a # in its name)
+      const file = slashed.slice(0, cut) + slashed.slice(cut).replace(/#+/, (h) => (h.length === 1 ? "%d" : `%0${h.length}d`));
+      const tcl = /[{}]/.test(file) ? `"${file.replace(/[\\"$[\]{}]/g, "\\$&")}"` : `{${file}}`;
+      const stem = (file.split("/").pop() ?? "").replace(/\.%0?\d*d.*$|%0?\d*d.*$/, "").replace(/[^A-Za-z0-9_]/g, "_");
+      return [
+        "Read {",
+        " inputs 0",
+        ` file ${tcl}`,
+        ` first ${r.first}`,
+        ` last ${r.last}`,
+        ` origfirst ${r.first}`,
+        ` origlast ${r.last}`,
+        " origset true",
+        ` name Read_${stem.replace(/^_+|_+$/g, "") || "corridorkey"}`,
+        "}",
+      ].join("\n");
+    })
+    .join("\n");
+}
+
 /** How long it took ("0.4 s", "2 min 05 s"); null while it runs. */
 export function duration(b: ConsoleBlock): string | null {
   // a queue job's echoed line ran nothing here: no time to show
