@@ -1,6 +1,6 @@
 // CorridorKey desktop: main process. One window, one queue, one engine.
 import { execFile } from "node:child_process";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, net, powerMonitor, protocol, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, net, powerMonitor, powerSaveBlocker, protocol, shell } from "electron";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
@@ -38,6 +38,7 @@ import { jobLogText, saveJobLog } from "./jobLog";
 import { readDesktopPalette, watchDesktopPalette } from "./desktopTheme";
 import { Updater } from "./updater";
 import { holdAppImageMountUntilExit } from "./appImageQuit";
+import { keepAwakeWhile } from "./keepAwake";
 import {
   LOG_SHOWN,
   type AppState,
@@ -235,6 +236,8 @@ function rustEngineProcess(onReply: (r: EngineReply) => void, onExit: (code: num
 
 // the Console's corridorkey has the graphics card (the Console, below)
 let consoleGpu = false;
+// the computer stays awake while the queue runs (keepAwake.ts)
+const keepAwake = keepAwakeWhile(powerSaveBlocker);
 const queue = new Queue({
   makeEngine: rustEngineProcess,
   // job temp files stay on the system's local cache folder whatever the chosen location (Marcy 2026-10-26)
@@ -248,6 +251,7 @@ const queue = new Queue({
   changed: () => {
     // the queue's end resumes a paused background TensorRT build
     if (!queue.running) prebuild.queueStopped();
+    keepAwake(queue.running);
     scheduleSend();
   },
   finished: (job) => {
