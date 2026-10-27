@@ -213,3 +213,34 @@ writes `sh010_alpha.####.exr` next to it (M1). One shot from an outsourced vendo
 4. EXR header look (N6), Re-render missing (N7), Copy as Nuke Read (N8): the comp lead's week.
 5. Then the deferred list, in this order: `watch` (a folder or a verify, for dailies), then `jobs`. Pipes last, and
    maybe never: the block model plus Copy output covers most of what people pipe to.
+
+---
+
+## Status (2026-10-27, branch `feat/console`)
+
+Every MUST and SHOULD is fixed, each with tests that failed on the code before the fix (the probes became the tests);
+the NICE items are backlog rows. `npm run check`, `check:engine` and `check:targets` pass.
+
+| Finding | Done | Where |
+|---|---|---|
+| M1 farm frames under other names | every format renders the queue's own `-o <results folder>` (the CLI's folder layout: `<clip>_<output>_exr/<clip>_<output>.####.exr`); OpenJD's `--output {{Param.OutputDir}}`, OutputPattern gone; Deadline `OutputDirectoryN` / `OutputFilenameN` per output with the shot's padding; the notes say where frames land. Test: each format's `-o` equals `jobArgs`' | e996524 |
+| M2 range short by digit count | `groupSequences` joins an unpadded run and a run that outgrows its padding (frame_of's rule; `dir` and Tab too); `folderRange` takes all of a folder's frames; a folder of several sequences refuses the export, naming them. Tests: both probe folders, a Deadline export of each | 1e6bfba |
+| M3 a variable turns off a `for` pattern | `forWords`: per character, only what was typed unquoted can be a glob or frame pattern; a value never is; an inner loop sees the outer loop's variable. Tests: `${dir}/*.exr`, `${dir}/x.####.exr`, a value with `*` / `####` literal | 759cdaa |
+| S1 `ls *.exr`, `ls -lh` | `dir` / `ls` take an unquoted file-name pattern (a folder's real `[` name is itself); `-h` taken (sizes are human), `-h` alone still help | d2a3d78 |
+| S2 Copy as command in a terminal | ck-cli falls back to the app's install (newest model set and ONNX Runtime, per-OS data folder), says which, adds the runtime's library folders (Linux: restarts itself once with `LD_LIBRARY_PATH`). Tests: `appinstall.rs` on temp folders; a CLI run with a fake install | d989dfc |
+| S3 this desktop's runtime paths | `farm export … --models DIR --ort LIB` (a kept `${…}` works); without them the notes name the paths as this computer's | 6e433ef |
+| S4 thin Deadline export | `<clip>_verify_*` (Command=verify) submitted with `-SubmitMultipleJobs -dependent`; `BatchName` (the export folder), `--pool`, `--group` (your GPU group; warned when missing), `--priority` (default 50) | 6e433ef |
+| S5 Flamenco platform; replace policy | `--platform` (linux, windows, darwin), default this computer's; one policy, `--overwrite` in every format, said in each export's notes (backlog row 138 done) | 6e433ef |
+| S6 shell lists clobber logs, `&&` | `--logs "$here/logs/<list>"` each; every list runs; `exit $status` is 1 when any failed (run by `/bin/sh` in the test) | 6e433ef |
+| S7 OpenJD folder as FILE | a frame folder's Input is `objectType: DIRECTORY` (CHOOSE_DIRECTORY); `openjd check` and `openjd summary` with the exported values pass (openjd-cli 0.8.0, scratch venv); the note says Deadline Cloud hasn't run it | 6e433ef |
+| S8 a loop's output is chrome | a program's commands are one row each (a button: ✓/✗/■, line, time, last line); open on click / Enter, Collapse when open; running, failed or refused ones open on their own | a500e32 |
+| S9 sudo as a tax | `render -o …_v###/` picks the next free version (no sudo; checked by the write scope; said; audited as `version`) | a1f39aa |
+| S10 no list variable | `for s in ${shots[@]}` splits a value at white space (each item one word, never a flag or pattern); `${shots}` stays one item and says how to split; `[@]` elsewhere refused | 759cdaa |
+| Flaky test | "cls clears; history lists …" awaits the History's `ended()` instead of a 5 ms sleep | 1121fad |
+| N1-N12 | backlog rows 140-151 (idea) | docs/BACKLOG.md |
+| Docs | CONSOLE.md, GUIDE.md "Console" (examples parse), CLI.md "The runtime", farm/README.md | c481b63 |
+
+Not done or not verified here: the Deadline, OpenCue and Flamenco files are checked by parsing, not on a real scheduler
+(the review's next step: a Deadline 10 repository in a VM); a DIRECTORY input on Deadline Cloud is unverified (no
+account); S2's restart with the CUDA folders was tested with a fake runtime (no GPU run); S8's rows were checked as
+rendered markup, not yet in an isolated copy of the app.
