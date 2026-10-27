@@ -2,8 +2,9 @@
 // it (the DS5 SplitView). The panel is shown or hidden only by the rail item of
 // the page you're on (no show button on the page, no hide button in the panel);
 // opening a page shows it. Narrow windows: the panel opens as a drawer over the
-// page, the page behind is dimmed, and the same rail item, Escape or a click on the dimmed page closes it.
-import { useEffect, type ReactNode } from "react";
+// page, the page behind is dimmed, and the same rail item, Escape or a click on the dimmed page closes it. The drawer
+// is modal: focus moves into it when it opens, and the page behind is inert (no focus, no keys) until it closes.
+import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import { useGlass } from "../glass/useGlass";
 import { REGULAR_GLASS } from "../glass/variants";
 
@@ -12,6 +13,20 @@ export const NARROW = 1100;
 export function SplitView(props: { main: ReactNode; panel: ReactNode; panelTitle: string; panelSub?: string; shown: boolean; narrow: boolean; glass: boolean; onEscape: () => void }) {
   const { main, panel, panelTitle, panelSub, shown, narrow, glass, onEscape } = props;
   const glassRef = useGlass(glass && narrow && shown, REGULAR_GLASS);
+  const mainRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
+  const asideRef = useCallback(
+    (el: HTMLElement | null) => {
+      panelRef.current = el;
+      glassRef(el);
+    },
+    [glassRef],
+  );
+  const drawer = narrow && shown;
+  useEffect(() => {
+    if (mainRef.current) mainRef.current.inert = drawer;
+    if (drawer) panelRef.current?.focus();
+  }, [drawer]);
   useEffect(() => {
     if (!narrow || !shown) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onEscape();
@@ -21,11 +36,13 @@ export function SplitView(props: { main: ReactNode; panel: ReactNode; panelTitle
   }, [narrow, shown, onEscape]);
   return (
     <div className={`split ${narrow ? "narrow" : ""}`}>
-      <div className="split-main">{main}</div>
+      <div ref={mainRef} className="split-main">
+        {main}
+      </div>
       {/* the page behind the drawer is dimmed; a click on it closes the drawer, as Escape does */}
       {narrow && shown && <div className="split-scrim" aria-hidden onClick={onEscape} />}
       {shown && (
-        <aside ref={glassRef} className={`split-panel ${narrow ? "drawer" : ""} ${glass ? "glass" : ""}`} aria-label={panelTitle}>
+        <aside ref={asideRef} tabIndex={-1} className={`split-panel ${narrow ? "drawer" : ""} ${glass ? "glass" : ""}`} aria-label={panelTitle}>
           <header className="panel-head">
             <h2>{panelTitle}</h2>
             {panelSub && <div className="panel-sub">{panelSub}</div>}

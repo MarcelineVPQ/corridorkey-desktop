@@ -16,7 +16,7 @@ import { usePref } from "../prefs";
 import { LineEditor, type LineEditorHandle } from "../console/LineEditor";
 import { OutputBlock } from "../console/OutputBlock";
 import { uniqueHistory, type SuggestMode } from "../console/editor";
-import { announcement, clearScreen, mergeBlocks, visibleBlocks, type BlockList } from "../console/model";
+import { announcement, clearScreen, inputTakesFocus, mergeBlocks, visibleBlocks, type BlockList } from "../console/model";
 
 const registry = makeRegistry();
 
@@ -85,8 +85,15 @@ export function ConsolePage(props: {
   );
   useEffect(() => {
     loadHistory();
-    editor.current?.focus();
   }, [loadHistory]);
+
+  // the input line takes focus when the page opens and when the drawer over it closes, never behind it
+  const covered = props.narrow && props.panelShown;
+  const wasCovered = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (inputTakesFocus(wasCovered.current, covered)) editor.current?.focus();
+    wasCovered.current = covered;
+  }, [covered]);
 
   // the elevation's countdown: a tick a second, only while elevated
   const elevatedFor = session.elevatedUntil === null ? 0 : session.elevatedUntil - now;

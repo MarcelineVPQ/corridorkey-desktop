@@ -17,6 +17,7 @@ import {
   errorSpans,
   expansionHint,
   highlight,
+  inputTakesFocus,
   mergeBlocks,
   isoTime,
   lineHint,
@@ -388,5 +389,19 @@ describe("a program's commands are one row each (review 2026-10-27 S8)", () => {
     }
     expect(childRow(kid({ state: "failed" }), "/home/m").mark).toBe("✗");
     expect(html(block(1))).not.toMatch(/cb-row|cb-collapse/);
+  });
+});
+
+describe("the input line's focus beside the narrow-window drawer", () => {
+  it("takes focus when the page opens uncovered and when the drawer over it closes", () => {
+    expect(inputTakesFocus(null, false)).toBe(true);
+    expect(inputTakesFocus(true, false)).toBe(true);
+  });
+  it("never takes focus while the drawer covers it (the page opened from the rail opens with its drawer)", () => {
+    expect(inputTakesFocus(null, true)).toBe(false);
+    expect(inputTakesFocus(false, true)).toBe(false);
+  });
+  it("leaves focus alone when nothing about the drawer changed", () => {
+    expect(inputTakesFocus(false, false)).toBe(false);
   });
 });

@@ -257,6 +257,10 @@
   z-index: 20;
   box-shadow: -8px 0 24px var(--shadow);
 }
+/* the drawer takes focus when it opens (SplitView) so keys go to it; it is no control, so no ring round all of it */
+.split-panel:focus-visible {
+  outline: 0;
+}
 .panel-head {
   padding: 14px 16px 10px;
   border-bottom: 1px solid var(--border-1);

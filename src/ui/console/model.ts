@@ -1,12 +1,20 @@
 // The Console page's view model, pure (tests/unit/consoleBlocks.test.ts): the typed line's colouring from the shared
 // parser's tokens, and the output blocks as the page shows them (merged by id, cleared by cls or Ctrl+L, their status
-// words, the paths a command wrote, the text Copy output puts on the clipboard).
+// words, the paths a command wrote, the text Copy output puts on the clipboard), and where the input line wants focus.
 import type { Parsed, Token } from "../../shared/console/parse";
 import { expandHistory, hasExpansion, type HistoryLine } from "../../shared/console/expand";
 import { fullName, type Registry } from "../../shared/console/registry";
 import type { ConsoleBlock, ConsoleEntry, DoctorRow } from "../../shared/types";
 import { shortenPath } from "../paths";
 import { fileSizeText } from "../../shared/units";
+
+/**
+ * Does the input line take focus? When the page opens and when the narrow-window drawer that covered it closes
+ * (Escape, the dimmed page, the rail item); never while the drawer covers it. `wasCovered` is null on the first run.
+ */
+export function inputTakesFocus(wasCovered: boolean | null, covered: boolean): boolean {
+  return !covered && wasCovered !== false;
+}
 
 export type SpanKind = "plain" | "command" | "flag" | "value" | "path" | "string" | "error" | "danger";
 
