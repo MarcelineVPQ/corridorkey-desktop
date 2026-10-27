@@ -230,6 +230,10 @@
   min-height: 0;
   overflow: auto;
 }
+/* it takes focus back when the drawer closes (SplitView.tsx): no ring around the whole page */
+.split-main:focus {
+  outline: none;
+}
 .split-panel {
   flex: 0 0 380px;
   /* stays 380 px: a long unbreakable line (a path) shortens with … instead of widening it */

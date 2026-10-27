@@ -3,8 +3,10 @@
 // the page you're on (no show button on the page, no hide button in the panel);
 // opening a page shows it. Narrow windows: the panel opens as a drawer over the
 // page, the page behind is dimmed, and the same rail item, Escape or a click on the dimmed page closes it. The drawer
-// is modal: focus moves into it when it opens, and the page behind is inert (no focus, no keys) until it closes.
+// is modal: focus moves into it when it opens, and the page behind is inert (no focus, no keys) until it closes; then
+// focus returns to the page's main view.
 import { useCallback, useEffect, useRef, type ReactNode } from "react";
+import { mainTakesFocus } from "./drawerFocus";
 import { useGlass } from "../glass/useGlass";
 import { REGULAR_GLASS } from "../glass/variants";
 
@@ -23,9 +25,13 @@ export function SplitView(props: { main: ReactNode; panel: ReactNode; panelTitle
     [glassRef],
   );
   const drawer = narrow && shown;
+  const wasDrawer = useRef<boolean | null>(null);
   useEffect(() => {
     if (mainRef.current) mainRef.current.inert = drawer;
     if (drawer) panelRef.current?.focus();
+    // runs before the page's own effects: the Console's input line still takes focus after this
+    else if (mainTakesFocus(wasDrawer.current, drawer)) mainRef.current?.focus();
+    wasDrawer.current = drawer;
   }, [drawer]);
   useEffect(() => {
     if (!narrow || !shown) return;
@@ -36,7 +42,7 @@ export function SplitView(props: { main: ReactNode; panel: ReactNode; panelTitle
   }, [narrow, shown, onEscape]);
   return (
     <div className={`split ${narrow ? "narrow" : ""}`}>
-      <div ref={mainRef} className="split-main">
+      <div ref={mainRef} tabIndex={-1} className="split-main">
         {main}
       </div>
       {/* the page behind the drawer is dimmed; a click on it closes the drawer, as Escape does */}
