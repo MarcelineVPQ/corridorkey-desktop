@@ -105,13 +105,16 @@ instead (**F2** switches).
 | Ctrl+Space | Open the list |
 | →, End, Ctrl+F | Take the grey suggestion |
 | Alt+→, Alt+F | Take one word of it (else a word forward) |
-| ↑ ↓ | Earlier lines that start with what you typed |
+| ↑ ↓, Ctrl+P Ctrl+N | Earlier lines that start with what you typed |
 | Ctrl+R | Search the history as you type; again for older; Enter runs; Esc or Ctrl+G cancels |
+| Alt+. | Insert the last word of the line before (the output path you just used) |
 | Ctrl+A, Ctrl+E | Start, end of the line |
-| Alt+B, Alt+← | A word back |
-| Ctrl+U, Ctrl+K, Ctrl+W | Delete to the start, to the end, the word before |
+| Alt+B, Alt+← | A word back (Option on a Mac, Option+F a word forward) |
+| Ctrl+U, Ctrl+K, Ctrl+W, Alt+D | Cut to the start, to the end, the word before, the word after |
+| Ctrl+Y | Paste back what was cut last |
+| Ctrl+D | Delete the character under the cursor; on an empty line nothing (the Console never closes) |
 | Ctrl+C | Copy the selection; else stop the running command (again: at once); else clear the line |
-| Ctrl+L | Clear the screen (`cls` too); a running command's block stays |
+| Ctrl+L, Cmd+K | Clear the screen (`cls` too); a running command's block stays |
 | F2 | Completions inline or as a list |
 
 **Output.** Each command is a block: the line, its state (running, done, failed, refused, stopped), the exit code

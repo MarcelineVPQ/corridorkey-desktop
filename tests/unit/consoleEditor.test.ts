@@ -305,3 +305,50 @@ describe("the suggestion's source", () => {
     expect(r.state.line).toBe("render a.mov");
   });
 });
+
+describe("SME review 2026-10-26: readline's missing reflexes (S10)", () => {
+  it("Alt+. inserts the last word of the previous line (the output path just used)", () => {
+    const h = ctx(["render a.mov -o ~/renders/sh010/key.####.exr", "pwd"]);
+    const r = press(typed("verify -o "), ".", { alt: true }, h);
+    expect([r.handled, r.state.line, r.state.cursor]).toEqual([true, "verify -o ~/renders/sh010/key.####.exr", 38]);
+    expect(press(typed(""), ".", { alt: true }, ctx()).state.line).toBe("");
+  });
+
+  it("Ctrl+U, Ctrl+K, Ctrl+W and Alt+D cut; Ctrl+Y puts the cut text back", () => {
+    const cutK = press(typed("render a.mov -o out", 12), "k", { ctrl: true });
+    expect(cutK.state.line).toBe("render a.mov");
+    expect(press(typed("x ", 2, cutK.state), "y", { ctrl: true }).state.line).toBe("x  -o out");
+    const cutW = press(typed("render a.mov"), "w", { ctrl: true });
+    expect(press(cutW.state, "y", { ctrl: true }).state.line).toBe("render a.mov");
+    const altD = press(typed("render a.mov -o out", 6), "d", { alt: true });
+    expect([altD.state.line, altD.state.cursor]).toEqual(["render -o out", 6]);
+    expect(press(altD.state, "y", { ctrl: true }).state.line).toBe("render a.mov -o out");
+  });
+
+  it("Ctrl+P and Ctrl+N walk the history as ↑ and ↓ do", () => {
+    const h = ctx(["dir", "pwd"]);
+    const p = press(typed(""), "p", { ctrl: true }, h);
+    expect(p.state.line).toBe("dir");
+    expect(press(p.state, "p", { ctrl: true }, h).state.line).toBe("pwd");
+    expect(press(p.state, "n", { ctrl: true }, h).state.line).toBe("");
+  });
+
+  it("Ctrl+D on an empty line does nothing (never closes); on a line it deletes the character under the cursor", () => {
+    const empty = press(typed(""), "d", { ctrl: true });
+    expect([empty.handled, empty.state.line, empty.effect]).toEqual([true, "", undefined]);
+    expect(press(typed("pwdx", 3), "d", { ctrl: true }).state.line).toBe("pwd");
+  });
+
+  it("macOS: Option+F / Option+B move by words from the key's code (the key itself is ƒ / ∫)", () => {
+    const s = typed("render a.mov -o out", 0);
+    const f = press(s, "ƒ", { alt: true, code: "KeyF" });
+    expect([f.handled, f.state.line, f.state.cursor]).toEqual([true, "render a.mov -o out", 6]);
+    const b = press(f.state, "∫", { alt: true, code: "KeyB" });
+    expect([b.handled, b.state.cursor]).toEqual([true, 0]);
+    expect(press(typed("verify "), "≥", { alt: true, code: "Period" }, ctx(["render a.mov"])).state.line).toBe("verify a.mov");
+  });
+
+  it("Cmd+K clears the screen, as in Terminal and iTerm", () => {
+    expect(press(typed("pwd"), "k", { meta: true }).effect).toEqual({ kind: "clear" });
+  });
+});

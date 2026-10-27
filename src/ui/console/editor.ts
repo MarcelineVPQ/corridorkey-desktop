@@ -40,10 +40,14 @@ export interface EditorState {
   search: SearchState | null;
   mode: SuggestMode;
   autosuggest: boolean;
+  /** what Ctrl+U, Ctrl+K, Ctrl+W or Alt+D cut last (Ctrl+Y puts it back) */
+  kill: string;
 }
 
 export interface Key {
   key: string;
+  /** the physical key (KeyboardEvent.code): Option+F on macOS has key "ƒ" but code "KeyF" */
+  code?: string;
   ctrl?: boolean;
   alt?: boolean;
   shift?: boolean;
@@ -80,6 +84,7 @@ export const initialEditor = (mode: SuggestMode = "inline", autosuggest = true):
   search: null,
   mode,
   autosuggest,
+  kill: "",
 });
 
 /** The history without repeats, newest first (the file keeps non-adjacent duplicates). */
@@ -264,6 +269,18 @@ export function needsCompletion(k: Key, s: EditorState): boolean {
   return (k.key === "Tab" && !k.ctrl && !k.alt) || (k.ctrl && (k.key === " " || k.key === "Spacebar")) === true;
 }
 
+/** Cut from..to into the kill buffer (Ctrl+Y puts it back); an empty cut keeps the last one. */
+function cut(s: EditorState, from: number, to: number): EditorState {
+  const kill = to > from ? s.line.slice(from, to) : s.kill;
+  return { ...at(s, s.line.slice(0, from) + s.line.slice(to), from), kill, hist: null, lastTab: null };
+}
+
+/** Text typed in at the cursor. */
+function insertAt(s: EditorState, text: string): EditorState {
+  if (!text) return s;
+  return { ...at(s, s.line.slice(0, s.cursor) + text + s.line.slice(s.cursor), s.cursor + text.length), hist: null, list: null, lastTab: null };
+}
+
 const ok = (state: EditorState, effect?: Effect): KeyResult => ({ state, handled: true, effect });
 const pass = (state: EditorState): KeyResult => ({ state, handled: false });
 
@@ -273,6 +290,8 @@ export function keyDown(s0: EditorState, k: Key, ctx: KeyContext): KeyResult {
   const ctrl = !!k.ctrl && !k.alt && !k.meta;
   const alt = !!k.alt && !k.ctrl && !k.meta;
   const plain = !k.ctrl && !k.alt && !k.meta;
+  // an Alt combination by its physical key (macOS's Option+F types ƒ), else by the key itself
+  const altKey = k.code && /^Key[A-Z]$/.test(k.code) ? k.code.slice(3).toLowerCase() : k.code === "Period" ? "." : k.key.toLowerCase();
   let s = s0;
 
   // --- Ctrl+R: incremental search, newest first ---
@@ -283,7 +302,7 @@ export function keyDown(s0: EditorState, k: Key, ctx: KeyContext): KeyResult {
     if (plain && k.key === "Enter") {
       const line = search.failed ? search.original.line : s.line;
       if (!line.trim()) return ok({ ...s, search: null });
-      return ok({ ...initialEditor(s.mode, s.autosuggest) }, { kind: "run", line });
+      return ok({ ...initialEditor(s.mode, s.autosuggest), kill: s.kill }, { kind: "run", line });
     }
     if (plain && k.key === "Backspace") return ok(runSearch(s, { ...search, query: search.query.slice(0, -1), skip: 0 }, history));
     if (!k.ctrl && !k.alt && !k.meta && k.key.length === 1) return ok(runSearch(s, { ...search, query: search.query + k.key, skip: 0 }, history));
@@ -338,14 +357,15 @@ export function keyDown(s0: EditorState, k: Key, ctx: KeyContext): KeyResult {
   // --- run, stop, clear ---
   if (plain && k.key === "Enter") {
     if (!s.line.trim()) return ok(at(s, "", 0));
-    return ok({ ...initialEditor(s.mode, s.autosuggest) }, { kind: "run", line: s.line });
+    return ok({ ...initialEditor(s.mode, s.autosuggest), kill: s.kill }, { kind: "run", line: s.line });
   }
   if (ctrl && k.key.toLowerCase() === "c") {
     if (ctx.hasSelection) return pass(s); // the input copies it
     if (ctx.running) return ok(s, { kind: "cancel" });
-    return ok({ ...initialEditor(s.mode, s.autosuggest) });
+    return ok({ ...initialEditor(s.mode, s.autosuggest), kill: s.kill });
   }
-  if (ctrl && k.key.toLowerCase() === "l") return ok(s, { kind: "clear" });
+  // Ctrl+L; Cmd+K as in Terminal and iTerm
+  if ((ctrl && k.key.toLowerCase() === "l") || (k.meta && !k.ctrl && !k.alt && k.key.toLowerCase() === "k")) return ok(s, { kind: "clear" });
 
   // --- the suggestion ---
   const sug = suggestion(s, ctx.suggestFrom ?? history);
@@ -353,7 +373,7 @@ export function keyDown(s0: EditorState, k: Key, ctx: KeyContext): KeyResult {
     const line = s.line + sug;
     return ok({ ...at(s, line, line.length), lastTab: null });
   }
-  if (sug && ((alt && (k.key === "ArrowRight" || k.key.toLowerCase() === "f")) || (k.ctrl && !k.alt && k.key === "ArrowRight"))) {
+  if (sug && ((alt && (k.key === "ArrowRight" || altKey === "f")) || (k.ctrl && !k.alt && k.key === "ArrowRight"))) {
     const line = s.line + firstWord(sug);
     return ok({ ...at(s, line, line.length), lastTab: null });
   }
@@ -374,21 +394,33 @@ export function keyDown(s0: EditorState, k: Key, ctx: KeyContext): KeyResult {
       case "b":
         return ok(at(s, s.line, Math.max(0, s.cursor - 1)));
       case "u":
-        return ok({ ...at(s, s.line.slice(s.cursor), 0), hist: null, lastTab: null });
+        return ok(cut(s, 0, s.cursor));
       case "k":
-        return ok({ ...at(s, s.line.slice(0, s.cursor), s.cursor), hist: null, lastTab: null });
-      case "w": {
-        const from = wordStart(s.line, s.cursor);
-        return ok({ ...at(s, s.line.slice(0, from) + s.line.slice(s.cursor), from), hist: null, lastTab: null });
-      }
+        return ok(cut(s, s.cursor, s.line.length));
+      case "w":
+        return ok(cut(s, wordStart(s.line, s.cursor), s.cursor));
+      case "y":
+        return ok(insertAt(s, s.kill));
+      case "p":
+        return ok(historyStep(s, history, 1));
+      case "n":
+        return s.hist ? ok(historyStep(s, history, -1)) : ok(s);
+      case "d":
+        // on an empty line: nothing (a terminal would close; the Console stays); else the character under the cursor
+        return ok(s.line ? { ...at(s, s.line.slice(0, s.cursor) + s.line.slice(s.cursor + 1), s.cursor), hist: null, lastTab: null } : s);
     }
   }
   if (alt) {
-    switch (k.key === "ArrowLeft" ? "b" : k.key === "ArrowRight" ? "f" : k.key.toLowerCase()) {
+    switch (k.key === "ArrowLeft" ? "b" : k.key === "ArrowRight" ? "f" : altKey) {
       case "b":
         return ok(at(s, s.line, wordStart(s.line, s.cursor)));
       case "f":
         return ok(at(s, s.line, wordEnd(s.line, s.cursor)));
+      case "d":
+        return ok(cut(s, s.cursor, wordEnd(s.line, s.cursor)));
+      case ".":
+        // the last word of the line before (the output path just used): bash's yank-last-arg
+        return ok(insertAt(s, /\S+$/.exec((history[0] ?? "").trimEnd())?.[0] ?? ""));
     }
   }
   return s === s0 ? pass(s) : ok(s);

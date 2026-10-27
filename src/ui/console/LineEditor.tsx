@@ -154,7 +154,7 @@ export const LineEditor = forwardRef<LineEditorHandle, Props>(function LineEdito
 
   const onKeyDown = async (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.nativeEvent.isComposing) return;
-    const k: Key = { key: e.key, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey };
+    const k: Key = { key: e.key, code: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey };
     const el = e.currentTarget;
     const ctx = { history, suggestFrom: runnable, hasSelection: el.selectionStart !== el.selectionEnd, running };
     let cur = sRef.current;

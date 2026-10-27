@@ -27,14 +27,17 @@ export const KEYS: [string, string][] = [
   ["Ctrl+Space", "Open the list"],
   ["→, End, Ctrl+F", "Take the grey suggestion (never runs it)"],
   ["Alt+→, Alt+F", "Take one word of it (else: a word forward)"],
-  ["↑ ↓", "Earlier lines that start with what you typed"],
+  ["↑ ↓, Ctrl+P Ctrl+N", "Earlier lines that start with what you typed"],
   ["Ctrl+R", "Search the history; again for older; Enter runs; Esc or Ctrl+G cancels"],
+  ["Alt+.", "Insert the last word of the line before (the path you just used)"],
   ["Ctrl+A, Ctrl+E", "Start, end of the line"],
-  ["Alt+B, Alt+←", "A word back"],
-  ["Ctrl+U, Ctrl+K", "Delete to the start, to the end"],
-  ["Ctrl+W", "Delete the word before the cursor"],
+  ["Alt+B, Alt+←", "A word back (Option on a Mac)"],
+  ["Ctrl+U, Ctrl+K", "Cut to the start, to the end"],
+  ["Ctrl+W, Alt+D", "Cut the word before, the word after the cursor"],
+  ["Ctrl+Y", "Paste back what was cut last"],
+  ["Ctrl+D", "Delete the character under the cursor (on an empty line: nothing)"],
   ["Ctrl+C", "Copy the selection; else stop the command; else clear the line"],
-  ["Ctrl+L", "Clear the screen (cls also does)"],
+  ["Ctrl+L, Cmd+K", "Clear the screen (cls also does)"],
   ["F2", "Completions inline or as a list"],
 ];
 
@@ -222,7 +225,7 @@ export function ConsolePage(props: {
         {() => (
           <table className="console-keys">
             <tbody>
-              {/* loop: NOT-WORTH — fifteen rows */}
+              {/* loop: NOT-WORTH — eighteen rows */}
               {KEYS.map(([k, what]) => (
                 <tr key={k}>
                   <th scope="row">
