@@ -464,16 +464,15 @@ describe("built-ins", () => {
     expect(c.session().cwd).toBe(root);
   });
 
-  it("dir / ls list with sizes and dates, in natural order", async () => {
+  it("dir / ls list with sizes and dates; plate 9 and plate 10 are one unpadded sequence (lsseq, SME 2026-10-27 M2)", async () => {
     const { c } = make();
     const b = await c.run("ls");
     expect(b.entries!.map((e) => [e.name, e.folder, e.bytes])).toEqual([
-      ["plate 9.exr", false, 1],
-      ["plate 10.exr", false, 1],
+      ["plate #.exr", false, 2],
       ["shot.mov", false, 1],
     ]);
     expect(b.entries![0].modified).toBeGreaterThan(0);
-    expect(b.lines[0].text).toMatch(/3 files \(3 B\), 0 folders/);
+    expect(b.lines[0].text).toMatch(/3 files \(3 B\), 2 of them in 1 sequence .*, 0 folders/);
     expect((await c.run("dir ..")).entries!.some((e) => e.name === "out" && e.folder)).toBe(true);
   });
 
@@ -627,7 +626,7 @@ describe("completion", () => {
     const { c } = make();
     await c.run("cd ..");
     expect(await items(c, "cd my")).toEqual(['"my shots/"']);
-    expect(await items(c, "render my\\ shots/pl")).toEqual(['"my shots/plate 9.exr"', '"my shots/plate 10.exr"']);
+    expect(await items(c, "render my\\ shots/pl")).toEqual(['"my shots/plate #.exr"']);
     expect(await items(c, "render shot.mov -o o")).toEqual(["out/"]);
     const r = await c.complete("render x -o o", 13);
     expect([r.start, r.end]).toEqual([12, 13]);
@@ -1229,6 +1228,36 @@ describe("Phase 4: farm export", () => {
     const one = await c.run(`farm export flamenco sh020.mov -o ${join(out, "farm2")}`);
     expect(one.state).toBe("done");
     expect(await readdir(join(out, "farm2"))).toEqual(["scripts", "sh020.flamenco.json"]);
+  });
+
+  // SME review 2026-10-27 M2 (probe): an unpadded folder grouped as 1-9, 10-99, 100-120 and Deadline keyed 9 of 120
+  // frames, ending green; a folder of two sequences is refused (corridorkey would key them as one clip)
+  it("SME M2: a frame folder's range is all of its frames; a folder of several sequences is refused", async () => {
+    const folder = (name: string, files: string[]) => {
+      const d = join(root, "m2", name);
+      mkdirSync(d, { recursive: true });
+      // loop: NOT-WORTH — a test's frames
+      for (const f of files) writeFileSync(join(d, f), "x");
+      return qjob(name, { clip: { ...qjob(name).clip, path: d, name, kind: "frames", frames: files.length } });
+    };
+    queued = [
+      folder(
+        "unpadded",
+        Array.from({ length: 120 }, (_, i) => `frame.${i + 1}.exr`),
+      ),
+      folder("sim", ["sim.9997.exr", "sim.9998.exr", "sim.9999.exr", "sim.10000.exr", "sim.10001.exr", "sim.10002.exr"]),
+    ];
+    const { c } = make();
+    const b = await c.run(`farm export deadline --queue -o ${join(out, "farm-m2")}`);
+    expect(b.state, b.lines.map((l) => l.text).join("\n")).toBe("done");
+    expect(readFileSync(join(out, "farm-m2", "unpadded_job_info.txt"), "utf8")).toContain("Frames=1-120\n");
+    expect(readFileSync(join(out, "farm-m2", "sim_job_info.txt"), "utf8")).toContain("Frames=9997-10002\n");
+    queued = [folder("two", ["a.1001.exr", "a.1002.exr", "b.1001.exr", "b.1002.exr"])];
+    const two = await c.run(`farm export openjd --queue -o ${join(out, "farm-m2b")}`);
+    expect([two.state, two.lines[0].text]).toEqual([
+      "refused",
+      `${join(root, "m2", "two")}: it holds several sequences or other frames (a.####.exr 1001-1002, b.####.exr 1001-1002), and corridorkey keys a whole folder as one clip: put each sequence in a folder of its own`,
+    ]);
   });
 
   it("refuses: no -o, a clip not in the queue, an empty queue, a folder outside the write scope", async () => {

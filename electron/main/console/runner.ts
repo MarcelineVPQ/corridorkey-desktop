@@ -21,7 +21,7 @@ import { commandHelp, findLines, overview } from "./help";
 import type { AuditLog, History } from "./logs";
 import { checkWrite, expandHome, fsErrorText, resolveReal, type PathDeps } from "./paths";
 import { expandHistory, hasExpansion } from "../../../src/shared/console/expand";
-import { frameToken, groupSequences, sequenceOf, type Sequence } from "../../../src/shared/console/sequences";
+import { folderRange, frameToken, groupSequences, isFrameFile, sequenceOf, type Sequence } from "../../../src/shared/console/sequences";
 import { commands, globRegExp, isCompound, parseProgram, type CmdNode, type List } from "../../../src/shared/console/script";
 import { tokenize } from "../../../src/shared/console/parse";
 import { BOOKMARK_NAME, BOOKMARKS_MAX, VARIABLES_MAX, WRITE_FOLDERS_MAX } from "../settings";
@@ -1030,7 +1030,11 @@ export class Console {
     if (!w.ok) return this.finish(b, "refused", `-o: ${w.reason}`);
     const farmJobs: FarmJob[] = [];
     // loop: NOT-WORTH — the exported jobs, one async range read each
-    for (const j of jobs) farmJobs.push({ ...j, name: clipName(j.clip.path, this.d.paths.platform), range: await this.shotRange(j) });
+    for (const j of jobs) {
+      const range = await this.shotRange(j);
+      if (range && "error" in range) return this.finish(b, "refused", range.error);
+      farmJobs.push({ ...j, name: clipName(j.clip.path, this.d.paths.platform), range });
+    }
     const env = this.d.cliEnv();
     const exp = farmExport(format, farmJobs, { models: env.CK_ENGINE_MODELS ?? null, ort: env.CK_ENGINE_ORT ?? null });
     if (exp.error) return this.finish(b, "refused", exp.error);
@@ -1081,15 +1085,19 @@ export class Console {
     return this.finish(b, "done", `Wrote ${exp.files.length} files in ${w.path}:`, ...fileList(exp.files, this.opts.windows), ...exp.notes);
   }
 
-  /** A queued clip's frame numbers as corridorkey numbers them (ck-core clip.rs FrameNumbers): a video from 1001, a frame folder by its files. */
-  private async shotRange(j: QueueJob): Promise<[number, number] | null> {
+  /**
+   * A queued clip's first and last frame as corridorkey numbers them (ck-core clip.rs FrameNumbers): a video from 1001,
+   * a frame folder by all of its files (sequences.ts folderRange; a folder of several sequences is an error). Null: not
+   * known (a video not probed, a folder that can't be read).
+   */
+  private async shotRange(j: QueueJob): Promise<[number, number] | null | { error: string }> {
     if (j.clip.kind === "video") return j.clip.frames ? [1001, 1000 + j.clip.frames] : null;
     // loop: NOT-WORTH — one async readdir per frame folder exported
-    const names = await this.d.fs.readdir(j.clip.path).catch(() => [] as Dirent[]);
+    const names = await this.d.fs.readdir(j.clip.path).catch(() => null);
+    if (!names) return null;
     // loop: NOT-WORTH — the folder's names
-    const seq = groupSequences(names.filter((n) => !n.isDirectory() && /\.(exr|png|jpe?g)$/i.test(n.name)).map((n) => n.name)).sequences[0];
-    // loop: NOT-WORTH — two numbers
-    return seq ? (seq.range.split("-").map(Number) as [number, number]) : null;
+    const r = folderRange(names.filter((n) => !n.isDirectory() && isFrameFile(n.name)).map((n) => n.name));
+    return "error" in r ? { error: `${j.clip.path}: ${r.error}` } : r.range;
   }
 
   /** A path whose file name is a frame pattern (####, %04d, $F4, @@@@) and that isn't a file or folder itself: its folder. */

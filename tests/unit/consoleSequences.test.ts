@@ -26,11 +26,27 @@ describe("groupSequences (SME review S1, M4)", () => {
   it("keeps different paddings, prefixes and extensions apart; one numbered file is a single file", () => {
     const { sequences, singles } = groupSequences(["a.0001.exr", "a.0002.exr", "a.01.exr", "a.02.exr", "b_001.png", "b_002.png", "c.1001.exr", "plate 9.exr", "plate 10.exr"]);
     expect(sequences.map((s) => [s.pattern, s.range])).toEqual([
-      ["a.####.exr", "1-2"],
       ["a.##.exr", "1-2"],
+      ["a.####.exr", "1-2"],
       ["b_###.png", "1-2"],
+      ["plate #.exr", "9-10"],
     ]);
-    expect(singles).toEqual(["c.1001.exr", "plate 9.exr", "plate 10.exr"]);
+    expect(singles).toEqual(["c.1001.exr"]);
+  });
+
+  // SME review 2026-10-27 M2 (probe): split by digit count, unpadded frames were three sequences and a shot past 9999
+  // two, and the farm export took the first one's range (Frames=1-9 of 120, ending green)
+  it("an unpadded run and a run that outgrows its padding are one sequence, as lsseq and the CLI's frame_of read them", () => {
+    const unpadded = groupSequences(Array.from({ length: 120 }, (_, i) => `frame.${i + 1}.exr`));
+    expect(unpadded.sequences.map((s) => [s.pattern, s.range, s.count, s.missing])).toEqual([["frame.#.exr", "1-120", 120, null]]);
+    expect(unpadded.singles).toEqual([]);
+    const sim = groupSequences(["sim.9997.exr", "sim.9998.exr", "sim.9999.exr", "sim.10000.exr", "sim.10001.exr", "sim.10002.exr"]);
+    expect(sim.sequences.map((s) => [s.pattern, s.range, s.count])).toEqual([["sim.####.exr", "9997-10002", 6]]);
+    // the pattern reads back every frame (sequenceOf is the CLI's frame_of)
+    expect(sequenceOf(sim.sequences[0].pattern, sim.sequences[0].names)!.count).toBe(6);
+    expect(sequenceOf(unpadded.sequences[0].pattern, unpadded.sequences[0].names)!.count).toBe(120);
+    // a wider run with its own leading zeros is its own padding: two sequences
+    expect(groupSequences(["s.1.exr", "s.2.exr", "s.0001.exr", "s.0002.exr"]).sequences.map((s) => s.pattern)).toEqual(["s.#.exr", "s.####.exr"]);
   });
 
   it("never groups videos (shot01.mov and shot02.mov are two clips, not a pattern the CLI reads)", () => {
