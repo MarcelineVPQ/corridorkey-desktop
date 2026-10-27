@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parse, quoteArg, tokenize, valueProblem } from "../../src/shared/console/parse";
 import { makeRegistry, MEANINGS, suggest } from "../../src/shared/console/registry";
@@ -364,5 +365,18 @@ describe("SME review 2026-10-26: values by meaning (S12)", () => {
         id,
       ).toBe(true);
     }
+  });
+});
+
+describe("docs/GUIDE.md's Console examples", () => {
+  it("each one parses without a mistake (the guide never shows a line the Console refuses)", () => {
+    const guide = readFileSync(new URL("../../docs/GUIDE.md", import.meta.url), "utf8");
+    const section = guide.slice(guide.indexOf("## Console"));
+    const block = /Examples:\s*```\n([\s\S]*?)```/.exec(section)![1];
+    // loop: NOT-WORTH — the guide's few examples
+    const lines = block.split("\n").filter((l) => l.trim());
+    expect(lines.length).toBeGreaterThanOrEqual(5);
+    // loop: NOT-WORTH — as above
+    for (const l of lines) expect(parse(l, reg, posix).errors, l).toEqual([]);
   });
 });

@@ -219,3 +219,29 @@ syntax around frame tokens before writing any of it.
 `~/.cache/claude-scratch/ck-console-sme/shots/`: `dir.png` (frames one per row; `ls -la` refused),
 `tab-frames.png` (Tab lists frames, not the sequence), `sudo-line.png` (hint "(needs sudo)" with sudo on the line),
 `ghost.png`, `after-clear.png`, `after.png`.
+
+## Status (2026-10-27)
+
+Marcy approved the 5 MUSTs and the 12 SHOULDs; the 9 NICE items are backlog rows. Each fix has a test that fails on the
+code before it.
+
+| Finding | Where |
+| --- | --- |
+| M1 write scope: `allow <folder>` | 5c8d930 |
+| M2 elevation survives Alt+Tab | 4f55ee6 |
+| M3 `ls -la`, `dir /w`, `cd -` | 7a75a7d |
+| M4 sequences in Tab | cd3598e |
+| M5 `find` → `help -k` / `apropos` | 93a5700 |
+| S1 sequence-aware `dir` | cd3598e |
+| S2 multi-line paste | d73d8bf |
+| S3 the CLI's conflicts | bf1dc4a |
+| S4 plain errors | b7582ee |
+| S5 foreign commands | b7582ee |
+| S6 `history [N\|term]` | b8656c3 |
+| S7 `--version`, `version` | 98fb947 |
+| S8 dates and sizes | 9b8525c |
+| S9 quieter blocks | 337d500 |
+| S10 readline keys | fff05bd (also backlog 113) |
+| S11 scripts and elevation | d73d8bf (also backlog 107, 110) |
+| S12 values by meaning | 5620c7c (suggested by meaning, never taken in place: the Console accepts what the CLI accepts) |
+| N1-N9 | BACKLOG rows 118-126 |
