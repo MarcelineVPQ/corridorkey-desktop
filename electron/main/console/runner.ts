@@ -814,8 +814,18 @@ export class Console {
       folder = m;
     }
     let dir = a.resolve(this.cwd, expandHome(folder ?? ".", this.d.paths));
+    // a pattern typed unquoted in the file name (ls *.exr, dir plates\*.exr): the files it matches there, by name (as
+    // for's); a variable's value is quoted, so never one (SME review 2026-10-27 S1)
+    // loop: NOT-WORTH — the line's few arguments
+    const typed = p.positionals.find((x) => x.arg.id === "folder");
+    // (a folder whose real name has [ or * is itself)
+    // loop: NOT-WORTH — one async stat, only for a path with * ? or [
+    const unquoted = folder !== undefined && typed !== undefined && !p.words[typed.word].quoted && /[*?[]/.test(dir) && !(await this.d.fs.stat(dir).catch(() => null));
+    const glob = unquoted && /[*?[]/.test(a.basename(dir)) ? a.basename(dir) : null;
+    if (unquoted && /[*?[]/.test(a.dirname(dir))) return this.finish(b, "refused", `${folder}: a pattern goes in the file's name only (plates/*.exr), not in its folders.`);
+    if (glob) dir = a.dirname(dir);
     // a frame pattern (dir plates/plate.####.exr): that one sequence, in its folder
-    const pat = folder !== undefined ? await this.patternAt(dir) : null;
+    const pat = folder !== undefined && !glob ? await this.patternAt(dir) : null;
     if (pat && !pat.seq) return this.finish(b, "failed", noFrames(pat, this.opts));
     if (pat) dir = pat.dir;
     let names: Dirent[];
@@ -830,11 +840,17 @@ export class Console {
     const all = has("all");
     const total = names.length;
     // loop: NOT-WORTH — one folder's names, per dir / ls
-    names = all ? names : names.filter((n) => !n.name.startsWith("."));
+    names = all || glob?.startsWith(".") ? names : names.filter((n) => !n.name.startsWith("."));
     const only = pat?.seq ? new Set(pat.seq.names) : null;
     // loop: NOT-WORTH — as above
     if (only) names = names.filter((n) => only.has(n.name));
     const hidden = total - names.length;
+    if (glob) {
+      const re = globRegExp(glob, this.d.paths.platform === "win32" || this.d.paths.platform === "darwin");
+      // loop: NOT-WORTH — as above
+      names = names.filter((n) => re.test(n.name) && (glob.startsWith(".") || !n.name.startsWith(".")));
+      if (!names.length) return this.finish(b, "failed", `No file matches ${folder} (dir lists the folder; Tab completes a name).`);
+    }
     // loop: NOT-WORTH — sorts one folder's names, per dir / ls
     names.sort((x, y) => naturalCompare(x.name, y.name));
     // a sequence is one row (lsseq: sh010_plate.####.exr  1001-1100, its gaps), unless -f asks for the frames

@@ -240,8 +240,9 @@ const BUILTINS: ConsoleCommand[] = [
     "dir",
     "list a folder's files with their sizes and dates",
     [
-      arg({ id: "folder", kind: "path", positional: true, valueName: "FOLDER", help: "the folder (default: the current one)" }),
+      arg({ id: "folder", kind: "path", positional: true, valueName: "FOLDER", help: "the folder (default: the current one), or the files a pattern matches there (*.exr)" }),
       arg({ id: "long", short: "l", kind: "switch", help: "sizes and dates (the table dir always shows)" }),
+      arg({ id: "human", short: "h", kind: "switch", help: "human sizes (ls -lh; dir always shows them)" }),
       arg({ id: "all", short: "a", dos: ["/a"], kind: "switch", help: "dot files too" }),
       arg({ id: "time", short: "t", kind: "switch", help: "newest first" }),
       arg({ id: "size", short: "S", kind: "switch", help: "largest first" }),
@@ -257,7 +258,7 @@ const BUILTINS: ConsoleCommand[] = [
         help: "DOS's order: /o:n name, /o:s smallest first, /o:d oldest first; /o:-d the other way round",
       }),
     ],
-    ["dir", "ls plates", "ls -la", "ls -tr", "dir /o:-d"],
+    ["dir", "ls plates", "ls -la", "ls -lh *.exr", "ls -tr", "dir /o:-d"],
     ["ls"],
   ),
   builtin(

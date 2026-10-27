@@ -476,6 +476,27 @@ describe("built-ins", () => {
     expect((await c.run("dir ..")).entries!.some((e) => e.name === "out" && e.folder)).toBe(true);
   });
 
+  // SME review 2026-10-27 S1 (probe): `ls *.exr` said "… isn't there" and `ls -lh` "only switches combine in one word"
+  it("SME S1: ls / dir take a file-name pattern; ls -lh (human sizes, already shown) is taken", async () => {
+    const { c } = make();
+    const names = async (line: string) => (await c.run(line)).entries?.map((e) => e.name);
+    expect(await names("ls *.exr")).toEqual(["plate #.exr"]);
+    expect(await names("dir *.mov")).toEqual(["shot.mov"]);
+    expect(await names("ls -lh")).toEqual(["plate #.exr", "shot.mov"]);
+    expect(await names("ls -ltrh ../out/sh010/*.exr")).toEqual(["key.####.exr"]);
+    const none = await c.run("ls *.nope");
+    expect([none.state, none.lines[0].text]).toEqual(["failed", "No file matches *.nope (dir lists the folder; Tab completes a name)."]);
+    // quoted (or a variable's value) it is a name, never a pattern
+    expect((await c.run("ls '*.exr'")).state).toBe("failed");
+    expect((await c.run("ls */x.exr")).lines[0].text).toMatch(/a pattern goes in the file's name only/);
+    // a folder whose real name has [ in it is itself
+    mkdirSync(join(root, "take[old]"), { recursive: true });
+    writeFileSync(join(root, "take[old]", "a.txt"), "x");
+    expect(await names("ls ../take[old]")).toEqual(["a.txt"]);
+    // -h alone is still help
+    expect((await c.run("ls -h")).lines[0].text).toBe("usage: dir [OPTIONS] [FOLDER]");
+  });
+
   it("help, <command> ?, help -k, apropos", async () => {
     const { c } = make();
     expect((await c.run("help")).lines.map((l) => l.text).join("\n")).toMatch(/render .*uses the graphics card/);
