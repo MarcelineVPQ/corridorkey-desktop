@@ -175,6 +175,7 @@ export function folderRange(names: readonly string[]): { range: [number, number]
   if (!names.length) return { error: "no frames (.exr, .png, .jpg) in it" };
   const { sequences, singles } = groupSequences(names);
   if (sequences.length === 1 && !singles.length) {
+    // loop: NOT-WORTH — two numbers
     const [a, b] = sequences[0].range.split("-").map(Number);
     // loop: NOT-WORTH — the pattern's # run
     return { range: [a, b], pad: sequences[0].pattern.split("").filter((c) => c === "#").length };

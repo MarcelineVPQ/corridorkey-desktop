@@ -60,13 +60,13 @@ export function outputPaths(j: FarmJob): { dir: string; file: string }[] {
   });
 }
 /** The note naming where the frames land (the queue's layout). */
-// loop: NOT-WORTH — the exported jobs' outputs
-const LAYOUT_NOTE = (jobs: readonly FarmJob[]) =>
-  jobs.length
-    ? `The frames land where the queue writes them: ${outputPaths(jobs[0])
-        .map((p) => `${p.dir}/${p.file}`)
-        .join(", ")}${jobs.length > 1 ? " (and so on for each clip)" : ""}.`
-    : "";
+function layoutNote(jobs: readonly FarmJob[]): string {
+  if (!jobs.length) return "";
+  const slash = (dir: string) => (dir.includes("\\") && !dir.includes("/") ? "\\" : "/");
+  // loop: NOT-WORTH — ≤ four outputs
+  const paths = outputPaths(jobs[0]).map((p) => `${p.dir}${slash(p.dir)}${p.file}`);
+  return `The frames land where the queue writes them: ${paths.join(", ")}${jobs.length > 1 ? " (and so on for each clip)" : ""}.`;
+}
 /** POSIX shell words (the scripts and the extra-argument fields are read as a shell would). */
 // loop: NOT-WORTH — a command's few words
 const sh = (words: readonly string[]) => words.map((w) => (/^[\w@%+=:,./-]+$/.test(w) ? w : `'${w.replace(/'/g, `'\\''`)}'`)).join(" ");
@@ -179,7 +179,7 @@ export function farmExport(format: FarmFormat, jobs: readonly FarmJob[], env: Fa
       notes.push(`Run: bash run-shots.sh (one shot per graphics card at a time; --gpus 0,1 in it for more cards). ${RUNTIME_NOTE}`);
       break;
   }
-  if (files.length) notes.push(LAYOUT_NOTE(ranged));
+  if (files.length) notes.push(layoutNote(ranged));
   return { files, notes };
 }
 
