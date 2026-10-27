@@ -297,3 +297,19 @@ describe("SME review 2026-10-26: versions", () => {
     expect(parse("render a.mov", reg, posix).version).toBe(false);
   });
 });
+
+describe("SME review 2026-10-26: ls and dir flags (M3)", () => {
+  it("reads -la, -1 and DOS's /w /o:d as dir's flags; a path that only starts like one stays a path", () => {
+    expect(parse("ls -la", reg, posix).options.map((o) => o.arg.id)).toEqual(["long", "all"]);
+    expect(parse("ls -1", reg, posix).options.map((o) => o.arg.id)).toEqual(["names"]);
+    expect(parse("dir /o:-d /W", reg, posix).options.map((o) => [o.arg.id, o.value])).toEqual([
+      ["order", "-d"],
+      ["names", null],
+    ]);
+    // loop: NOT-WORTH — a few paths
+    for (const l of ["dir /opt", "dir /a/b", "dir /w/x", 'dir "/w"']) expect(parse(l, reg, posix).positionals.length, l).toBe(1);
+    expect(parse("dir /o:x", reg, posix).errors[0].message).toMatch(/^\/o takes n, s, d/);
+    // -1 is a value where the command has no such flag
+    expect(parse("render a.mov --brightness -1", reg, posix).options[0].value).toBe("-1");
+  });
+});

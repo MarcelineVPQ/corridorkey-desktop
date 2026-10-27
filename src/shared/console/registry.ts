@@ -31,6 +31,8 @@ export interface ConsoleArg {
   refused: string | null;
   /** the ids of the arguments it can't be used with (the CLI's conflicts_with, as declared on this one) */
   conflicts: readonly string[];
+  /** DOS spellings (dir's /w, /b, /a, /o:d), read on every system */
+  dos: readonly string[];
 }
 
 export interface ConsoleCommand {
@@ -125,6 +127,7 @@ function cliCommand(c: SpecCommand): ConsoleCommand {
       destructive: (DESTRUCTIVE[c.name] ?? []).includes(a.id),
       refused: REFUSED[a.id] ?? null,
       conflicts: a.conflicts_with ?? [],
+      dos: [],
     })),
     examples: c.examples,
     kind: "cli",
@@ -148,6 +151,7 @@ const arg = (a: ArgIn): ConsoleArg => ({
   destructive: false,
   refused: null,
   conflicts: [],
+  dos: [],
   ...a,
 });
 const builtin = (name: string, about: string, args: ConsoleArg[], examples: string[], aliases: string[] = []): ConsoleCommand => ({
@@ -187,8 +191,24 @@ const BUILTINS: ConsoleCommand[] = [
   builtin(
     "dir",
     "list a folder's files with their sizes and dates",
-    [arg({ id: "folder", kind: "path", positional: true, valueName: "FOLDER", help: "the folder (default: the current one)" })],
-    ["dir", "ls plates"],
+    [
+      arg({ id: "folder", kind: "path", positional: true, valueName: "FOLDER", help: "the folder (default: the current one)" }),
+      arg({ id: "long", short: "l", kind: "switch", help: "sizes and dates (the table dir always shows)" }),
+      arg({ id: "all", short: "a", dos: ["/a"], kind: "switch", help: "dot files too" }),
+      arg({ id: "time", short: "t", kind: "switch", help: "newest first" }),
+      arg({ id: "size", short: "S", kind: "switch", help: "largest first" }),
+      arg({ id: "reverse", short: "r", kind: "switch", help: "the other way round" }),
+      arg({ id: "names", short: "1", dos: ["/w", "/b"], kind: "switch", help: "names only" }),
+      arg({
+        id: "order",
+        dos: ["/o"],
+        kind: "enum",
+        values: ["n", "s", "d", "-n", "-s", "-d"],
+        valueName: "ORDER",
+        help: "DOS's order: /o:n name, /o:s smallest first, /o:d oldest first; /o:-d the other way round",
+      }),
+    ],
+    ["dir", "ls plates", "ls -la", "ls -tr", "dir /o:-d"],
     ["ls"],
   ),
   builtin("cls", "clear the screen", [], ["cls"], ["clear"]),

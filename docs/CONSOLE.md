@@ -19,7 +19,8 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   safety") are marked destructive, each argument carries the CLI's own `conflicts_with` (the parser marks `-F` with
   `-s`/`-e`, `-q` with `-v`, `--overwrite` with `--skip-existing`, `-i` with INPUT before Enter), `render`'s `-o`, `--report`, `--temp` (and `verify`'s and `prepare`'s `--report`) as written paths.
 - **Commands.** `help [command]` (also `command ?`), `help -k <term>` / `apropos <term>` (search the help; `find` is
-  kept free for a file search and says so), `cd`, `pwd`, `dir` / `ls`, `cls` / `clear`,
+  kept free for a file search and says so), `cd` (`cd -`: the folder before), `pwd`, `dir` / `ls` (`-l -a -t -S -r -1`,
+  combined like `-la`, and DOS's `/w /b /a /o:d` on every system; dot files only with `-a`), `cls` / `clear`,
   `history` (`--audit`: the elevated log), `version` (also `corridorkey --version`, `render --version`: the app's
   version, which its corridorkey shares; answered without running it), `run <file.ckcmd>` (a script of Console lines, one per line, `#` comments;
   each line through the same checks; stops at the first that fails; no script inside a script), `sudo <command>`,

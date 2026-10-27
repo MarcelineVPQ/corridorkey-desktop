@@ -100,6 +100,8 @@ const PROGRESS = ["--progress-format", "json"];
 
 export class Console {
   private cwd: string;
+  /** the folder before the last cd (cd -) */
+  private prevCwd: string | null = null;
   private job: Job | null = null;
   private nextId = 1;
   private expiryTimer: NodeJS.Timeout | null = null;
@@ -265,10 +267,13 @@ export class Console {
         return now(this.finish(b, "done", ...findLines(this.d.registry, pos("term"))));
       case "pwd":
         return now(this.finish(b, "done", this.cwd));
-      case "cd":
-        return now(await this.cd(b, pos("folder")[0]));
+      case "cd": {
+        // loop: NOT-WORTH — the line's one positional
+        const back = p.positionals.some((x) => x.value === "-" && !p.words[x.word].quoted);
+        return now(await this.cd(b, pos("folder")[0], back));
+      }
       case "dir":
-        return now(await this.dir(b, pos("folder")[0]));
+        return now(await this.dir(b, pos("folder")[0], p));
       case "version":
         return now(this.finish(b, "done", `CorridorKey ${this.d.version} (the app and its corridorkey command line: one version)`));
       case "cls":
@@ -285,7 +290,11 @@ export class Console {
     return now(this.finish(b, "refused", `${cmd.name} isn't a command this Console runs.`));
   }
 
-  private async cd(b: ConsoleBlock, to: string | undefined): Promise<ConsoleBlock> {
+  private async cd(b: ConsoleBlock, to: string | undefined, back = false): Promise<ConsoleBlock> {
+    if (back) {
+      if (this.prevCwd === null) return this.finish(b, "failed", "No previous folder yet: cd - goes back to the folder you were in before the last cd.");
+      to = this.prevCwd;
+    }
     let dir: string;
     try {
       dir = await resolveReal(to ?? this.d.paths.home, this.cwd, this.d.paths);
@@ -295,12 +304,25 @@ export class Console {
       // error: SHOWN — the block says why
       return this.finish(b, "failed", `Can't go to ${to}: ${(e as Error).message}`);
     }
+    this.prevCwd = this.cwd;
     this.cwd = dir;
     this.d.sessionChanged();
     return this.finish(b, "done", dir);
   }
 
-  private async dir(b: ConsoleBlock, folder: string | undefined): Promise<ConsoleBlock> {
+  private async dir(b: ConsoleBlock, folder: string | undefined, p: Parsed): Promise<ConsoleBlock> {
+    // loop: NOT-WORTH — the line's few options
+    const has = (id: string) => p.options.some((o) => o.arg.id === id);
+    // ls: -t newest first, -S largest first, -r the other way; DOS /o: n name, s smallest first, d oldest first, -x reversed
+    // loop: NOT-WORTH — as above
+    const order = p.options.find((o) => o.arg.id === "order")?.value ?? null;
+    let by: "name" | "time" | "size" = has("time") ? "time" : has("size") ? "size" : "name";
+    let reverse = has("reverse");
+    if (order) {
+      by = order.endsWith("d") ? "time" : order.endsWith("s") ? "size" : "name";
+      // DOS's d and s are oldest and smallest first: ls's -t and -S the other way round
+      reverse = (by !== "name") !== order.startsWith("-");
+    }
     const a = this.d.paths.platform === "win32" ? win32 : posix;
     const dir = a.resolve(this.cwd, expandHome(folder ?? ".", this.d.paths));
     let names: Dirent[];
@@ -311,21 +333,39 @@ export class Console {
       // error: SHOWN — the block says why
       return this.finish(b, "failed", `Can't list ${dir}: ${(e as Error).message}`);
     }
+    // dot files only with -a (ls's rule; dir /a)
+    const all = has("all");
+    const total = names.length;
+    // loop: NOT-WORTH — one folder's names, per dir / ls
+    names = all ? names : names.filter((n) => !n.name.startsWith("."));
+    const hidden = total - names.length;
     // loop: NOT-WORTH — sorts one folder's names, per dir / ls
     names.sort((x, y) => naturalCompare(x.name, y.name));
-    const entries: ConsoleEntry[] = [];
+    let entries: ConsoleEntry[] = [];
     // loop: NOT-WORTH — one async stat per listed entry, at most LIST_MAX, per dir / ls
     for (const n of names.slice(0, LIST_MAX)) {
       const s = await this.d.fs.stat(a.join(dir, n.name)).catch(() => null);
       entries.push({ name: n.name, folder: s?.isDirectory() ?? n.isDirectory(), bytes: s && !s.isDirectory() ? s.size : null, modified: s?.mtimeMs ?? null });
     }
+    // newest / largest first (a folder counts as size 0), ties by name; -r reverses
+    const key = (e: ConsoleEntry) => (by === "time" ? (e.modified ?? 0) : (e.bytes ?? 0));
+    // loop: NOT-WORTH — sorts ≤ LIST_MAX rows, per dir / ls
+    if (by !== "name") entries.sort((x, y) => key(y) - key(x) || naturalCompare(x.name, y.name));
+    if (reverse) entries = entries.reverse();
     b.entries = entries;
     // loop: NOT-WORTH — the listed entries
     const files = entries.filter((e) => !e.folder);
     // loop: NOT-WORTH — as above
     const bytes = files.reduce((n, e) => n + (e.bytes ?? 0), 0);
     const more = names.length - entries.length;
-    return this.finish(b, "done", `${dir}: ${files.length} files (${bytes} bytes), ${entries.length - files.length} folders${more > 0 ? `; ${more} more not listed` : ""}`);
+    const summary = `${dir}: ${files.length} files (${bytes} bytes), ${entries.length - files.length} folders${more > 0 ? `; ${more} more not listed` : ""}${hidden > 0 ? `; ${hidden} hidden (dir -a shows them)` : ""}`;
+    if (has("names")) {
+      // names only (ls -1, dir /w /b): one per line, folders with a separator
+      b.entries = null;
+      // loop: NOT-WORTH — ≤ LIST_MAX names, per dir -1
+      return this.finish(b, "done", ...entries.map((e) => e.name + (e.folder ? a.sep : "")));
+    }
+    return this.finish(b, "done", summary);
   }
 
   private async historyBlock(b: ConsoleBlock, audit: boolean): Promise<ConsoleBlock> {

@@ -4,7 +4,7 @@ import { fullName, type ConsoleArg, type ConsoleCommand, type Registry } from ".
 
 const flagLabel = (a: ConsoleArg): string => {
   // loop: NOT-WORTH — two names
-  const names = [a.short ? `-${a.short}` : null, a.long ? `--${a.long}` : null].filter(Boolean).join(", ");
+  const names = [a.short ? `-${a.short}` : null, a.long ? `--${a.long}` : null, ...a.dos].filter(Boolean).join(", ");
   return a.kind === "switch" ? names : `${names} ${a.valueName ?? "VALUE"}`;
 };
 

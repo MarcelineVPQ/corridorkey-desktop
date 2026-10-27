@@ -65,7 +65,7 @@ The **Console** (its own icon on the rail) is a command line inside the app for 
 `render`, `verify`, `prepare` and `info` with the same flags, output and exit codes, plus `help`, `apropos`, `cd`, `pwd`,
 `dir` / `ls`, `cls`, `history`, `version`, `run` (a `.ckcmd` script of Console lines) and `sudo`. Every command and flag comes
 from the `corridorkey` CLI's own definitions, so the Console and the farm never differ. `help` lists the commands,
-`help render` or `render ?` explains one with examples, `help -k overwrite` (or `apropos overwrite`) searches them.
+The shell reflexes work: `ls -la`, `ls -tr`, `dir /o:-d`, `cd -`. `help render` or `render ?` explains one with examples, `help -k overwrite` (or `apropos overwrite`) searches them.
 
 **Safety.** It is not a system shell: only its own commands, each one parsed and checked (no variables, pipes, globs
 or other programs). It **reads anywhere** you can, and **writes only into the folders you chose**: the results folder

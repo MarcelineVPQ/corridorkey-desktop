@@ -1,7 +1,7 @@
 // The Console's runner with a fake spawn (as engine.test.ts): the exact argv, never a shell, cancel semantics, the CLI's
 // JSON events into blocks, the file scope and the sudo flow end to end. Real files only in a temp folder of its own.
 import { EventEmitter } from "node:events";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { mkdir, readdir, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -371,7 +371,7 @@ describe("built-ins", () => {
     expect(h.join("\n")).toMatch(/--overwrite .*\(needs sudo\)/);
     expect(h.join("\n")).toMatch(/-o, --output DIR\|PATTERN .*\(only into chosen folders\)/);
     expect(h).not.toContain(expect.stringMatching(/progress-format/));
-    expect((await c.run("help ls")).lines[0].text).toBe("usage: dir [FOLDER]");
+    expect((await c.run("help ls")).lines[0].text).toBe("usage: dir [OPTIONS] [FOLDER]");
     expect((await c.run("help -k overwrite")).lines.map((l) => l.text).join("\n")).toMatch(/corridorkey render --overwrite/);
     expect((await c.run("apropos overwrite")).lines.map((l) => l.text).join("\n")).toMatch(/corridorkey render --overwrite/);
     expect((await c.run("apropos zzzz")).lines[0].text).toMatch(/Nothing matches/);
@@ -742,5 +742,66 @@ describe("SME review 2026-10-26", () => {
     expect((await c.run("render --version")).lines.map((l) => l.text)).toEqual(["corridorkey-render 1.0.0-dev.9"]);
     expect((await c.run("version")).lines[0].text).toBe("CorridorKey 1.0.0-dev.9 (the app and its corridorkey command line: one version)");
     expect(spawned).toHaveLength(0);
+  });
+});
+
+describe("SME review 2026-10-26: shell reflexes (M3)", () => {
+  /** a folder: big.exr (oldest, 300 B), mid.exr (200 B), new.exr (newest, 10 B), .hidden, sub/ */
+  function listing() {
+    const d = mkdtempSync(join(root, "ls-"));
+    writeFileSync(join(d, "big.exr"), "x".repeat(300));
+    writeFileSync(join(d, "mid.exr"), "x".repeat(200));
+    writeFileSync(join(d, "new.exr"), "x".repeat(10));
+    writeFileSync(join(d, ".hidden"), "x");
+    mkdirSync(join(d, "sub"));
+    utimesSync(join(d, "big.exr"), 1000, 1000);
+    utimesSync(join(d, "mid.exr"), 2000, 2000);
+    utimesSync(join(d, "new.exr"), 3000, 3000);
+    utimesSync(join(d, "sub"), 1500, 1500);
+    return d;
+  }
+  const names = (b: ConsoleBlock) => b.entries!.map((e) => e.name);
+
+  it("ls / dir take -l -a -t -S -r -1, combined like -la; dot files only with -a", async () => {
+    const { c } = make({ startDir: listing() });
+    const plain = await c.run("ls");
+    expect(names(plain)).toEqual(["big.exr", "mid.exr", "new.exr", "sub"]);
+    expect(plain.lines[0].text).toMatch(/1 hidden \(dir -a shows them\)/);
+    expect(names(await c.run("ls -la"))).toEqual([".hidden", "big.exr", "mid.exr", "new.exr", "sub"]);
+    expect((await c.run("ls -l")).state).toBe("done");
+    expect(names(await c.run("ls -t"))).toEqual(["new.exr", "mid.exr", "sub", "big.exr"]);
+    expect(names(await c.run("ls -tr"))).toEqual(["big.exr", "sub", "mid.exr", "new.exr"]);
+    expect(names(await c.run("ls -S"))).toEqual(["big.exr", "mid.exr", "new.exr", "sub"]);
+    expect(names(await c.run("ls -Sr"))).toEqual(["sub", "new.exr", "mid.exr", "big.exr"]);
+    const one = await c.run("ls -1");
+    expect([one.entries, one.lines.map((l) => l.text)]).toEqual([null, ["big.exr", "mid.exr", "new.exr", "sub/"]]);
+    expect((await c.run("ls -1a")).lines.map((l) => l.text)[0]).toBe(".hidden");
+  });
+
+  it("dir takes DOS's /w /b /a /o:d on every system", async () => {
+    const d = listing();
+    const { c } = make({ startDir: d });
+    expect((await c.run("dir /w")).lines.map((l) => l.text)).toEqual(["big.exr", "mid.exr", "new.exr", "sub/"]);
+    expect((await c.run("dir /b /a")).lines.map((l) => l.text)).toContain(".hidden");
+    expect(names(await c.run("dir /a"))).toContain(".hidden");
+    expect(names(await c.run("dir /o:d"))).toEqual(["big.exr", "sub", "mid.exr", "new.exr"]);
+    expect(names(await c.run("dir /o:-d"))).toEqual(["new.exr", "mid.exr", "sub", "big.exr"]);
+    expect(names(await c.run("dir /o:s"))).toEqual(["sub", "new.exr", "mid.exr", "big.exr"]);
+    expect(names(await c.run("dir /O:D"))).toEqual(["big.exr", "sub", "mid.exr", "new.exr"]);
+    expect(names(await c.run("dir /od"))).toEqual(["big.exr", "sub", "mid.exr", "new.exr"]);
+    // a folder named like one is still reachable quoted
+    expect((await c.run(`dir "${d}"`)).state).toBe("done");
+    expect((await c.run("dir /o:x")).state).toBe("refused");
+  });
+
+  it("cd - goes back to the previous folder and says where", async () => {
+    const { c } = make();
+    const first = await c.run("cd -");
+    expect([first.state, first.lines[0].text]).toEqual(["failed", expect.stringMatching(/no previous folder/i)]);
+    await c.run("cd ..");
+    const back = await c.run("cd -");
+    expect([back.state, back.lines.map((l) => l.text), c.session().cwd]).toEqual(["done", [shots], shots]);
+    await c.run("cd -");
+    expect(c.session().cwd).toBe(root);
   });
 });

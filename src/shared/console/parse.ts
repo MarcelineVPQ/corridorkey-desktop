@@ -146,7 +146,7 @@ const FRAMES = /^\d+(-\d+([x:]\d+)?)?([, ]+\d+(-\d+([x:]\d+)?)?)*$/;
 
 /** What is wrong with a flag's value, or null. */
 export function valueProblem(arg: ConsoleArg, v: string): string | null {
-  const name = arg.long ? `--${arg.long}` : arg.short ? `-${arg.short}` : (arg.valueName ?? arg.id);
+  const name = arg.long ? `--${arg.long}` : arg.short ? `-${arg.short}` : (arg.dos[0] ?? arg.valueName ?? arg.id);
   if (arg.kind === "enum" && !arg.values.includes(v)) {
     const s = suggest(v, arg.values);
     return `${name} takes ${arg.values.join(", ")}, not '${v}'${s ? ` (did you mean ${s}?)` : ""}`;
@@ -163,7 +163,7 @@ export function valueProblem(arg: ConsoleArg, v: string): string | null {
 }
 
 const valueKind = (a: ConsoleArg): TokenKind => (a.kind === "path" ? "path" : a.kind === "command" ? "command" : a.kind === "string" ? "string" : "value");
-const flagName = (a: ConsoleArg) => (a.long ? `--${a.long}` : `-${a.short}`);
+const flagName = (a: ConsoleArg) => (a.long ? `--${a.long}` : a.short ? `-${a.short}` : (a.dos[0] ?? a.id));
 
 /** Parse a line against the registry. Never throws: every problem is an error with its range. */
 export function parse(line: string, reg: Registry, opts: ParseOptions): Parsed {
@@ -260,8 +260,23 @@ export function parse(line: string, reg: Registry, opts: ParseOptions): Parsed {
       out.tokens.push({ kind: "flag", start: w.start, end: w.end });
       continue;
     }
+    // dir's DOS switches (/w, /b, /a, /o:d), on every system; a path that only starts like one stays a path
+    const dos = endOfOptions || w.quoted ? null : /^(\/[a-z])(:?-?[a-z])?$/i.exec(w.value);
+    // loop: HOT-PATH-OK — a command's few arguments, per word starting with /
+    const dosArg = dos && cmd.args.find((a) => a.dos.includes(dos[1].toLowerCase()) && (a.kind === "switch" ? !dos[2] : true));
+    if (dos && dosArg) {
+      const value = dosArg.kind === "switch" ? null : (dos[2] ?? "n").replace(/^:/, "").toLowerCase();
+      out.options.push({ arg: dosArg, name: dos[1].toLowerCase(), value, word: at });
+      const problem = value === null ? null : valueProblem(dosArg, value);
+      if (problem) fail(problem, w.start, w.end, dosArg);
+      else out.tokens.push({ kind: "flag", start: w.start, end: w.end, arg: dosArg });
+      continue;
+    }
     const isLong = !endOfOptions && !w.quoted && w.value.startsWith("--");
-    const isShort = !endOfOptions && !isLong && looksLikeFlag(w) && !w.value.startsWith("--");
+    // -1 (ls's names only) is a flag where the command has it; elsewhere -0.5 is a value
+    // loop: HOT-PATH-OK — a command's few arguments, per word
+    const digitFlag = !w.quoted && /^-\d/.test(w.value) && cmd.args.some((a) => a.short === w.value[1]);
+    const isShort = !endOfOptions && !isLong && (looksLikeFlag(w) || digitFlag) && !w.value.startsWith("--");
     if (isLong || isShort) {
       let name: string;
       let inline: string | null = null;
