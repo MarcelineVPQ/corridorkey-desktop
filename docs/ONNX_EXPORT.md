@@ -549,8 +549,21 @@ ML set's numbers, only old against new on equal terms). Core ML partitions / nod
   Sizzle (tools/temporal_stability.py, the static hair-edge band's mean frame-to-frame change) is equal or lower on
   every clip; speed 1-7 % faster, graphics memory the same, host memory up to 0.3 GB lower at 4K. **The max bar
   (≤ 1/255 against onnx.4) fails on 3 of 10 clips** (1.12, 3.24 and 3.98 /255), on a few hair-edge pixels: at most
-  0.0007 % of pixels over 1/255 (04_5d: about 60 pixels a frame), MAE ≤ 3.4e-5. onnx.4's own run-to-run spread and
-  its distance to the original (bf16) were not measured in this run, so these maxima have no floor to compare with.
+  0.0007 % of pixels over 1/255 (04_5d: about 60 pixels a frame), MAE ≤ 3.4e-5.
+- Floor (same day, Marcy's OK; onnx.4 twice at test 4's settings, and `tools/vs_original.sh --steps quality`: the
+  original twice and onnx.4 once). Alpha max ×255 / MAE / % of pixels over 1/255:
+
+| clip (window) | onnx.4 vs onnx.4 | original vs original | onnx.4 vs original | onnx.5 vs onnx.4 |
+|---|---|---|---|---|
+| smoke (48/24) | 0 / 0 / 0 | 3.98 / 1.4e-4 / 0.011 | 38.6 / 7.5e-4 / 6.0 | 1.12 / 2.4e-5 / 3e-7 |
+| walking_sitting (48/24) | 0 / 0 / 0 | 12.95 / 4.0e-5 / 0.016 | 93.5 / 1.8e-4 / 0.83 | 3.24 / 9.4e-6 / 5e-4 |
+| 04_5d (8/4) | 0 / 0 / 0 | 7.97 / 1.5e-4 / 0.042 | 40.5 / 2.8e-4 / 0.98 | 3.98 / 8.4e-6 / 7e-4 |
+
+  onnx.4 is bit-reproducible on CUDA, so onnx.5's differences come from its graph (stage 1's token order inside a
+  region, the masked stage-2 kernel, the written-out RMSNorm), not from run-to-run noise. They are below the
+  original's own run-to-run spread on every clip (3.98 vs 3.98, 3.24 vs 12.95, 3.98 vs 7.97 /255 at the max; 6-17×
+  lower MAE) and 10-30× below onnx.4's distance to the original. (`vs_original.sh` keys our side at a 12 GB budget:
+  04_5d then runs at 4/2 against the original's 8/4; the 04_5d onnx.4 vs original row above is onnx.4 at 8/4.)
 
 Not measured: TensorRT and CPU engine runs, whether Apple's Neural Engine now compiles stage 2, a MIGraphX run on an
 AMD card.
