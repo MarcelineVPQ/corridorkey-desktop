@@ -241,7 +241,8 @@ the NICE items are backlog rows. `npm run check`, `check:engine` and `check:targ
 
 The NICE items, 2026-10-27: N8 came with the P4 SME review's S5; the others on branch `senior-nices` (Marcy: "when a
 senior dev gives you recommendations, you implement the recommendations"). Each has a test that fails on the code
-before, except N6 and N9 (documented; the behaviour is left for Marcy).
+before, except N6 and N9 (documented there; Marcy decided them on 2026-10-27 and they were built on branch
+`senior-decisions`, with tests).
 
 | Finding | Done | Where |
 |---|---|---|
@@ -250,9 +251,9 @@ before, except N6 and N9 (documented; the behaviour is left for Marcy).
 | N3 a pasted line with an open quote | refused before anything runs (`leavesQuoteOpen`, the same scan as `pieces`) | 59e8b63 |
 | N4 special files | read up to TEXT_MAX when the size says 0; readRange (now files.ts) opens with O_NONBLOCK and checks fstat | 59ec9ae |
 | N5 `du` through links | a link inside a folder counts its own size (lstat) | de7d7fc |
-| N6 `allow /`, `allow ~` | the doc says what `allow` trusts (settings are shape-checked only); a stronger warning or a refusal is Marcy's call | 62613aa |
+| N6 `allow /`, `allow ~` | the doc says what `allow` trusts (settings are shape-checked only); Marcy 2026-10-27: `/`, a drive's root and system folders refused (also by realpath), the home folder itself warned in the confirmation | 62613aa, 440449f |
 | N7 OpenJD `{{` | refused for OpenJD, naming the value | 60255c6 |
-| N9 UNC paths | documented as a limit; refusing hosts not yet visited is Marcy's call | 448f9b5 |
+| N9 UNC paths | Marcy 2026-10-27: a network server is opened only after `allow-server <server>`, this session only, listed in Session | 448f9b5, 440449f |
 
 Not tested on a real screen lock: S1's busctl read answered on this desktop (`b false`), but locking Marcy's screen to
 see it turn true was not done (never her screen); the decision logic is tested with a fake reader.
