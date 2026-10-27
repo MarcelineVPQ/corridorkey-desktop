@@ -884,7 +884,8 @@ export class Console {
       // loop: NOT-WORTH — as above
       b.paths = ranked.slice(0, JUMP_LISTED).map((r) => r.folder);
       // loop: NOT-WORTH — as above
-      return this.finish(b, "done", ...ranked.slice(0, JUMP_LISTED).map((r) => `${r.score.toFixed(2).padStart(7)}  ${r.folder}`));
+      // a rank, not zoxide's score (SME review 2026-10-27 N10: the scores were noise)
+      return this.finish(b, "done", ...ranked.slice(0, JUMP_LISTED).map((r, i) => `${String(i + 1).padStart(3)}  ${r.folder}`));
     }
     // loop: NOT-WORTH — the history's folders, best first; one async stat per match until one is a folder [bounded: the history's folders (≤ 5000 lines); Ctrl+C at each]
     for (const r of ranked) {

@@ -137,7 +137,7 @@ missing there).
   jumps like zoxide: the folders the history's lines were typed in, ranked by frecency (each line counts 4 within the
   hour, 2 within the day, ½ within the week, ¼ older: `src/shared/console/frecency.ts`), the best one whose path has
   every part in order with the last one in its last folder's name, still there, and not the current one; it prints
-  where it went; `j` alone prints the ranking. `pushd <folder>` goes there and remembers the folder before, `pushd`
+  where it went; `j` alone prints the ranking (a rank column, 1 is the best; not the scores). `pushd <folder>` goes there and remembers the folder before, `pushd`
   alone swaps with the newest remembered, `popd` goes back, `dirs` lists them (0 is the current folder; at most 50,
   this session only); each prints the list, as bash does. On Windows a network path (`\\host\share`, `//host/…`,
   `\\?\UNC\host\…`; a mapped drive too if Windows' realpath names its server: not yet tried) is opened only for a server allowed this

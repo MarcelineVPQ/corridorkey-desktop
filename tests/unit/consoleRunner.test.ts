@@ -1769,7 +1769,9 @@ describe("Phase 4: bookmarks, j, pushd and popd", () => {
     expect((await c.run("j out")).state).toBe("failed");
     expect((await c.run("j else")).lines[0].text).toBe(elsewhere);
     const list = (await c.run("j")).lines.map((l) => l.text.trim());
-    expect(list[0]).toMatch(/^\d+\.\d\d  /);
+    // ranks, not scores (SME review 2026-10-27 N10, row 149)
+    expect(list[0]).toMatch(/^1  /);
+    expect(list[1]).toMatch(/^2  /);
     expect(list[0].endsWith(join(out, "sh010"))).toBe(true);
   });
 

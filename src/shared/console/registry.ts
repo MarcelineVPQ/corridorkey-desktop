@@ -202,7 +202,7 @@ const BUILTINS: ConsoleCommand[] = [
   builtin("bookmarks", "the bookmarks (cd @name goes to one)", [], ["bookmarks"]),
   builtin(
     "j",
-    "jump to the folder you use most and lately whose path has these parts (the last one in its name); alone: the folders ranked",
+    "jump to the folder you use most and lately whose path has these parts (the last one in its name); alone: the folders ranked, best first",
     [arg({ id: "parts", kind: "string", positional: true, multiple: true, valueName: "PART", help: "parts of the folder's path, in order" })],
     ["j sh010", "j sq01 key", "j"],
     ["z"],
