@@ -27,6 +27,7 @@ engine-rs/
     writers.rs         ffmpeg writers (lossless H.264 / DNxHR 444 / x264 CRF 12, 10-bit 4:4:4; the cutout premultiplied, no alpha) and EXR sequences
     job.rs, settings.rs  run options (ck_engine.py's defaults), <clip>_settings.txt
   crates/ck-engine/    the corridorkey-engine binary: the protocol loop (lib.rs) and main.rs
+  crates/ck-cli/       the corridorkey command line for render farms and power users (docs/CLI.md): ck-core linked in
   tools/gen_fixtures.py   parity fixtures from the upstream Python functions
   tools/e2e_cpu.sh        CPU end-to-end parity check
   tools/trt-build/        ck-trt-build: strongly typed TensorRT engine builder (C++), build.sh

@@ -46,6 +46,9 @@ linux:
     # it loads TensorRT's libraries from the opt-in TensorRT download (install.ts), so it is 5 MB here
     - from: engine-rs/target/dist/ck-trt-build
       to: engine/ck-trt-build
+    # the command line for render farms (ck-cli, docs/CLI.md), next to the engine, built with it
+    - from: engine-rs/target/dist/corridorkey
+      to: engine/corridorkey
   # The window's WM_CLASS matches the .desktop entry (DS5 does the same).
   syncDesktopName: true
   synopsis: Free desktop app for CorridorKey 2.0
@@ -59,6 +62,8 @@ win:
   extraResources:
     - from: engine-rs/target/dist/corridorkey-engine.exe
       to: engine/corridorkey-engine.exe
+    - from: engine-rs/target/dist/corridorkey.exe
+      to: engine/corridorkey.exe
   artifactName: CorridorKey-Desktop-${version}-Setup.${ext}
 
 nsis:
@@ -82,6 +87,8 @@ mac:
   extraResources:
     - from: engine-rs/target/dist/corridorkey-engine
       to: engine/corridorkey-engine
+    - from: engine-rs/target/dist/corridorkey
+      to: engine/corridorkey
   artifactName: CorridorKey-Desktop-${version}-arm64.${ext}
   # Signed with the Developer ID Application certificate (team FTQ95W942L) when the macOS workflow passes it in
   # (CSC_LINK / CSC_KEY_PASSWORD, GitHub secrets, only in the build step), hardened runtime, notarized with the App

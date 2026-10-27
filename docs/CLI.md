@@ -1,0 +1,247 @@
+# `corridorkey`: the command line
+
+`corridorkey` keys clips without the app: on a render farm (Deadline, AWS Deadline Cloud / Open Job Description,
+OpenCue, Flamenco), from a shell loop, or from a compositor's terminal. It is the same engine as the app (ck-core,
+linked in; [ENGINE_RUST.md](ENGINE_RUST.md)): a whole shot keyed here is bit for bit the app's matte (tested:
+`engine-rs/crates/ck-cli/tests/e2e.rs`). It never touches the network: models, ONNX Runtime and ffmpeg come from paths
+you give it.
+
+It ships next to the engine: `resources/engine/corridorkey` in the AppImage and the macOS app,
+`resources\engine\corridorkey.exe` in the Windows install. (A standalone farm archive per system comes with the
+release packaging.)
+
+```sh
+# a plate sequence to a matte sequence, the shot's own frame numbers (Nuke: -F, -o)
+corridorkey render -i plates/sh010.####.exr -o key/sh010_key.####.exr --linear --outputs alpha
+
+# a movie, frames 1001-1100 of it (a movie's frames count from 1001), alpha and fg into a folder
+corridorkey render shot.mov -o out/ -F 1001-1100
+
+# Blender's words: start and end (what Deadline's <STARTFRAME> / <ENDFRAME> fill in)
+corridorkey render -i plates/ -o key.%04d.exr -s 1001 -e 1050 --gpu 1
+
+# a farm task: OpenJD progress lines, a JSON report, quiet stderr
+corridorkey render --job sh010.json --progress-format openjd --report sh010.report.json -q
+
+# afterwards (or on another machine): is every frame there and whole?
+corridorkey verify -i plates/sh010.####.exr -o key/sh010_key.####.exr --outputs alpha
+```
+
+## Commands
+
+| command | does |
+|---|---|
+| `corridorkey render` | key a clip: EXR sequences (the default) or videos of `alpha`, `fg`, `cutout`, `checker` |
+| `corridorkey verify` | check that every requested frame is there and reads as a whole EXR (exit 0, or 9) |
+| `corridorkey prepare` | check the models, ONNX Runtime, the card, its free memory and ffmpeg before a farm's tasks start; `--tensorrt-size WxH` builds TensorRT's engines for that size (a one-time build of minutes, so no task waits on it) |
+| `corridorkey info` | version, model set, ONNX Runtime, provider, card, OpenColorIO, decoders (`--json`) |
+| `corridorkey help [COMMAND]` | the help; `corridorkey COMMAND -h` too, with examples. `corridorkey --version` |
+
+Options are GNU style: `--frames 1001-1100` or `--frames=1001-1100`, short ones `-F 1001-1100`; `--` ends the options
+(for a clip whose name starts with `-`). A mistake is exit 2 with what to type instead (`--frame` → "a similar
+argument exists: '--frames'").
+
+`verify` takes `render`'s arguments, so the render line with `verify` in place of `render` checks its own output.
+
+## Frames
+
+`-F` / `--frames SPEC` (Nuke's), repeatable; pieces separated by commas or spaces:
+
+| spec | frames |
+|---|---|
+| `1001-1100` | 1001 to 1100 |
+| `1001-1100x2`, `1001-1100:2` | every second frame: 1001, 1003, … |
+| `1001,1005,1010-1020` | a list |
+| `1001` | one frame |
+
+`-s` / `--start N` and `-e` / `--end N` (Blender's) give a range; either alone runs to the shot's end or from its
+start. They are what schedulers fill in: Deadline `-s <STARTFRAME> -e <ENDFRAME>`, OpenCue `-s #FRAME_START#
+-e #FRAME_END#`, OpenJD `-F {{Task.Param.Frame}}`. Without any of them the whole shot is keyed.
+
+Frame numbers are the shot's own: a frame folder's numbers (`plate.1001.exr` is 1001), a movie's from 1001 (its
+first frame is 1001), as the outputs are numbered. A frame outside the shot, or one a folder skips, is exit 2 saying
+the shot's range.
+
+The networks are temporal (RVM runs through every frame; the windows blend neighbours), so a step or a list is keyed
+over its whole span and only the frames asked for are kept: `-F 1001-1100x2` keys 1001-1100 and writes 50 frames.
+
+### Warm-up (`--preroll`, `--tail`) and chunks
+
+**Key one shot per task.** That is the app's matte, bit for bit. A chunk of a shot (`-F 1049-1096`) starts the
+recurrent state cold at its first frame, so its first frames differ slightly from the whole shot's. `--preroll N` keys
+N frames before the range and throws them away (and `--tail N` after it) so the chunk's edges have their temporal
+neighbours; a chunk is then near-identical to the whole shot, not bit-identical. How many warm-up frames make the
+seams invisible is measured in the farm plan's phase 3 (it becomes the default then); **until it is published, key
+the whole shot.**
+
+## Paths
+
+`-i` / `--input`, or the first argument: a movie, a frame folder, or a frame pattern `plate.####.exr` (its folder,
+which must hold only that sequence: the engine keys a whole folder, and says so when other frames share it).
+
+`-o` / `--output`:
+
+- **a folder**: the engine's own layout inside it, as the app writes it:
+  `out/<clip>_alpha_exr/<clip>_alpha.1001.exr`, `out/<clip>_fg_exr/…`, `out/<clip>_settings.txt` (videos:
+  `out/<clip>_alpha.mp4`).
+- **a pattern**, one file per frame, the padding from the pattern: `key.####.exr` (4 digits; one per `#`),
+  `key.%04d.exr` (printf), `key.$F4.exr` (Houdini; `$F` unpadded). One output writes exactly the pattern; several
+  add the output's name before the number: `key_alpha.1001.exr`, `key_fg.1001.exr`. The settings file goes beside them
+  (`key_settings.txt`). Patterns are for EXR; videos go in a folder.
+
+A name without a frame number (`-o out/key.exr`) is exit 2: give a folder or a pattern.
+
+### Output safety
+
+- The job writes into a hidden folder of its own beside the output (`.corridorkey-<pid>-<time>`, same drive). Only
+  when the whole job is done are the requested frames renamed to their final names. A failed, stopped or killed run
+  never leaves a frame at a final name, and two runs never share a folder.
+- Each EXR frame is written to a hidden `.<name>.partial` and renamed into place (ck-core, the app's jobs too): a
+  writer killed mid-frame never leaves a cut EXR at the frame's name.
+- Temporary files (the RVM features and states, GBs on long shots) go in a folder of the run's own under `--temp DIR`,
+  else `OPENJD_SESSION_WORKING_DIR` (OpenJD's session folder), else the job file's `temp_dir`, else `TMPDIR`.
+- Both folders are removed when the run ends, however it ends. A SIGKILL leaves them (hidden `.corridorkey-*` and
+  `corridorkey-*` folders, safe to delete).
+- Frames already at the output's names: the run refuses (exit 4) unless told. `--overwrite` replaces them;
+  `--skip-existing` does nothing (exit 0) when **every** requested frame is there and reads as a whole EXR, and keys
+  them all again otherwise (a part can't be keyed alone without changing the matte). Reruns give the same result.
+
+## Options
+
+### render (and verify)
+
+| flag | run option ([ENGINE_PROTOCOL.md](ENGINE_PROTOCOL.md)) | meaning |
+|---|---|---|
+| `-i`, `--input INPUT` (or the first argument) | `input` | the clip |
+| `-o`, `--output DIR\|PATTERN` | `output_dir` | where the results go (above) |
+| `-F`, `--frames SPEC`; `-s`, `--start N`; `-e`, `--end N` | `frame_start`, `frame_end` | the frames to write (above) |
+| `--preroll N`, `--tail N` | `preroll`, `tail` | warm-up frames keyed and never written (above) |
+| `--outputs LIST` | `outputs` | `alpha`, `fg`, `cutout`, `checker`, comma-separated (`alpha,fg`) |
+| `--format exr\|video` | `output_format` | EXR sequences (**the default here**; the app's is video) or videos (whole shots only) |
+| `--datatype half\|float` | `exr_dtype` | EXR pixel type (half) |
+| `--window C/S` | `hann_chunk`, `hann_stride` | a manual Hann window, C frames, stride S (`C` alone: S = C/2); default automatic from free memory |
+| `--low-vram` | `low_vram` | one phase's networks at a time |
+| `--max-vram GB` | `vram_budget_gb` | graphics memory this job may use |
+| `--tensorrt` | `tensorrt` | TensorRT (build the range first with `prepare --tensorrt-size`) |
+| `--no-tensorrt-build` | `tensorrt_build: false` | never build TensorRT inside the job; a range not built yet runs on CUDA |
+| `--hint FILE` | `hint_first_frame` | first-frame matte (the shot's first frame only: not with a chunk that starts later) |
+| `--hint-video PATH` | `hint_video` | a hint matte per frame |
+| `--hint-quality Q` | `hint_quality` | trust in the hint, 0-1 (0.95) |
+| `--no-carry-hint` | `carry_hint: false` | don't carry each window's matte into the next |
+| `--carry-hint-quality Q` | `carry_hint_quality` | 0-1 (0.95) |
+| `--despill S` | `despill_strength` | 0-1 (0.5) |
+| `--cutout-linear` | `cutout_linear` | a video cutout in linear light |
+| `--linear` | `frame_dir_linear` | scene-linear EXR plates (else display-coded, clipped to 0-1) |
+| `--fps FPS` | `frame_dir_fps` | a frame folder's rate for video outputs (24) |
+| `--model-scale S` | `model_scale` | the networks at S times the plate's size (above 0, up to 2) |
+| `--brightness G`, `--contrast C`, `--contrast-pivot P` | `linear_brightness`, `linear_contrast`, `linear_contrast_pivot` | linear adjust before keying (video inputs) |
+| `--input-bit-depth 8\|16` | `input_bit_depth` | 8 reads as CorridorKey 2.0 does; 16 keeps a deep source's bits |
+| `--ocio CONFIG` | `color_config` | OpenColorIO config: a path or `ocio://` name (`$OCIO`, else the ACES studio config) |
+| `--input-colorspace NAME`, `--output-colorspace NAME` | `input_colorspace`, `output_colorspace` | colour management (EXR and image sequences) |
+| `--codec NAME`, `--crf N`, `--preset NAME`, `--pix-fmt FMT` | `video_codec`, `crf`, `preset`, `pix_fmt` | video outputs |
+| `--job FILE.json` | the whole `run` object | the protocol's run object (`input`, `output_dir`, `temp_dir`, `options`); flags win over it |
+| `--temp DIR` | `temp_dir` (a folder of the run's own inside it) | temporary files |
+| `--overwrite`, `--skip-existing` | | frames already there (above) |
+| `--report FILE.json` | | the run as JSON (below) |
+| `--progress-format F` | | `openjd`, `deadline`, `plain`, `json` (below) |
+| `-v`, `--verbose`; `-q`, `--quiet` | | stderr: also every engine reply; or failures only |
+
+Run options without a flag, and why: `num_frames`, `start_mode`, `seed` pick a preview sample of a movie in the app;
+on the command line `--frames` picks the frames, and a `--job` file that sets them is refused (exit 2, saying so).
+Values are checked as the engine checks the protocol's options; a bad one is exit 2 naming the flag
+(`--hint-quality must be between 0 and 1, got 2`).
+
+### The runtime (render, prepare, info)
+
+| flag | environment | meaning |
+|---|---|---|
+| `--models DIR` | `CK_ENGINE_MODELS` | the ONNX model set's folder (the app's: `~/.local/share/corridorkey-desktop/models/<set>`) |
+| `--ort LIB` | `CK_ENGINE_ORT`, `ORT_DYLIB_PATH` | ONNX Runtime's library (the app's GPU runtime download) |
+| `--device auto\|cuda\|cpu\|coreml` | `CK_ENGINE_DEVICE` | the card (default); the CPU provider (slow; tests); Core ML (macOS) |
+| `--gpu N\|UUID` | `CUDA_VISIBLE_DEVICES`, `CUE_GPU_CORES` | the card, an index in CUDA's order or a `GPU-…` / `MIG-…` UUID (Nuke's `--gpu`). It sets `CUDA_VISIBLE_DEVICES` before the runtime starts. Without it a `CUDA_VISIBLE_DEVICES` already set is the farm's choice; without both, OpenCue's booking (`CUE_GPU_CORES`) gives its first card |
+| `-t`, `--threads N` | `CK_ENGINE_THREADS` | CPU threads per network (0: ONNX Runtime's choice) |
+
+Every other engine knob is its `CK_ENGINE_*` variable ([ENGINE_RUST.md](ENGINE_RUST.md) "Knobs"), as for the engine.
+`prepare` also takes `--tensorrt-size WxH` and `--max-vram GB`; `info` takes `--json`.
+
+## Exit codes
+
+Farms treat any non-zero exit as a failure and retry; the code says whether a retry can help. Never 1 for anything
+specific, never 33 or 137 (OpenCue's retry codes).
+
+| code | meaning | retry? |
+|---|---|---|
+| 0 | done (or `--skip-existing` found every frame whole; `verify`: every frame whole) | |
+| 2 | usage: a bad flag, value, frame list or job file; the engine refused the request | no: fix the command |
+| 3 | input: the clip, a hint or a frame can't be read, or isn't there | no |
+| 4 | output: the folder isn't writable, the disk is full, or frames are already there (no `--overwrite`) | after a fix |
+| 5 | no usable graphics card (or Core ML provider) | on another machine |
+| 6 | out of graphics memory | with `--max-vram` lower, `--low-vram`, a smaller `--window`, or a bigger card |
+| 7 | the models, ONNX Runtime, ffmpeg or a library are missing | after `corridorkey prepare` passes |
+| 8 | the engine failed (a bug: the message and report say what) | maybe |
+| 9 | `verify`: a requested frame is missing or not a whole EXR | re-render |
+| 130 | stopped by SIGINT (Ctrl+C), cleanly | |
+| 143 | stopped by SIGTERM (the farm's cancel), cleanly | |
+
+**Signals.** SIGTERM and SIGINT stop the run after the frame (or window) it is on: no frame goes to a final name, the
+run's folders are removed, then exit 143 / 130. A second signal ends it at once. On Windows Ctrl+C is SIGINT and
+Ctrl+Break, closing the console, log-off and shut-down are SIGTERM. Farms send SIGKILL after their grace time: the
+output stays safe (above), only the hidden folders are left.
+
+**No parent watch.** Unlike `corridorkey-engine` (which ends with the app), `corridorkey` keeps running when its parent
+exits or is PID 1 (containers, farm launchers). Tested: `tests/cli.rs` `a_launcher_that_exits_first_doesnt_end_the_task`.
+
+## Progress
+
+On stdout, one line at a time, flushed. `--progress-format`:
+
+| format | progress | phase | before a non-zero exit |
+|---|---|---|---|
+| (default) | `openjd_progress: 45` and `PROGRESS: 45%` | `openjd_status: keying: window 3/10 done` | `openjd_fail: <message> (exit 6, out-of-graphics-memory)` |
+| `openjd` (OpenJD, AWS Deadline Cloud) | `openjd_progress: 45` | `openjd_status: …` | `openjd_fail: …` |
+| `deadline` (Deadline 10 plugin handlers) | `PROGRESS: 45%` | `STATUS: …` | `ERROR: …` |
+| `plain` | `45% (45/100 frames)` | the phase | `failed: …` |
+| `json` | `{"event":"progress","percent":45,"done":45,"total":100}` | `{"event":"status","text":"…"}` | `{"event":"fail","exit_code":6,"reason":"out-of-graphics-memory","message":"…"}` |
+
+The percentage is the engine's own count of frames handed to the writers (its `frames` replies), one line per change
+of a whole percent: no estimate. A long shot sits at 0 % through the RVM pass and the first windows; the phase lines
+say where it is (`loading the models`, `reading the clip`, `building TensorRT`, `RVM pass (warm-up frames included)`,
+`foundation pass`, `keying: window i/n done`). The human log (what the app's log shows) goes to stderr.
+
+## Report
+
+`--report FILE.json` writes the run as JSON however it ends (written to a temporary name and renamed). Schema
+`corridorkey-report/1`:
+
+| key | value |
+|---|---|
+| `schema` | `"corridorkey-report/1"` |
+| `corridorkey` | the version |
+| `command` | `render`, `verify` or `prepare` |
+| `exit_code`, `exit_reason` | the exit code and its name: `done`, `usage`, `input`, `output`, `no-gpu`, `out-of-graphics-memory`, `assets`, `engine`, `incomplete`, `interrupted`, `terminated` |
+| `message` | why it failed (null when it didn't) |
+| `input`, `output` | as given |
+| `models` | `{"dir", "set"}`: the folder and its manifest's version (`2.0.0-onnx.4`) |
+| `onnxruntime` | ONNX Runtime's version |
+| `provider`, `precision`, `provider_fallback` | what ran the job (`cuda`, `tensorrt`, `tensorrt+cuda`, `cpu`, `coreml`; `fp16` / `fp32`) and why TensorRT wasn't used, if asked for |
+| `gpu` | `{"name", "driver", "vram_total_mb"}` or null |
+| `window` | `{"chunk", "stride", "low_vram", "auto"}`: the Hann window used (after any out-of-memory retry) |
+| `frames.requested` | the frames asked for, or null (the whole shot) |
+| `frames.keyed` | `{"first", "last"}`: the span keyed, warm-up and tail included |
+| `frames.written` | `{"first", "last", "count"}`: the frames put at their final names |
+| `frame_times` | `[{"frame", "done_s"}]`: seconds from the start at which each written frame was handed to the writers (the engine reports at most four times a second; frames reported together share a time) |
+| `seconds` | the run's wall time |
+| `skipped` | `--skip-existing` found every frame whole |
+| `missing` | `verify`: the files missing or not whole |
+
+## Tests
+
+`cargo test -p ck-cli` (no models or card): frame specs and patterns, flags, exit codes, progress lines, the report,
+the binary's usage errors, `verify`, `--skip-existing` / `--overwrite`, an orphaned task. With a model set (CPU, about
+40 s), the ignored end-to-end tests: a whole shot and a stepped list against the engine protocol, bit for bit, and a
+SIGTERM mid-run:
+
+```sh
+cd engine-rs && cargo build -p ck-engine && cargo test -p ck-cli --test e2e -- --ignored --test-threads=1
+# CK_TEST_MODELS=<model set> (default the app's 2.0.0-onnx.4), CK_TEST_PRECISION=fp32 for a set with fp32 files
+```

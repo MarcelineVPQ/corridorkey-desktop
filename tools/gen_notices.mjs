@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Rebuilds THIRD_PARTY_NOTICES.md (LICENSE §6) from the sources of truth, never by hand:
-//   the engine's Rust crates: cargo-about over engine-rs/Cargo.lock (engine-rs/about.toml: the three release targets,
-//     the release features of tools/build_engine.sh, build and dev crates left out);
+//   the engine's Rust crates: cargo-about over engine-rs/Cargo.lock, the whole workspace (the engine and the
+//     `corridorkey` command line ship together; engine-rs/about.toml: the three release targets, the release features
+//     of tools/build_engine.sh, build and dev crates left out);
 //   the app's npm packages: package-lock.json's production packages (what electron-builder puts in app.asar) and the
 //     licence file each one ships in node_modules;
 //   the first-run downloads: the wheels and model sets electron/main/install.ts pins;
@@ -50,7 +51,8 @@ function rustCrates() {
         "-c",
         "engine-rs/about.toml",
         "-m",
-        "engine-rs/crates/ck-engine/Cargo.toml",
+        "engine-rs/Cargo.toml",
+        "--workspace",
       ],
       { cwd: APP, encoding: "utf8", maxBuffer: 64 << 20, timeout: 120_000, stdio: ["ignore", "pipe", "pipe"] },
     );

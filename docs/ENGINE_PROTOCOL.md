@@ -91,6 +91,9 @@ CPU provider; null and no verdict where there is no reading, as on Core ML). A m
 The app gives `output_dir` as a staging folder inside the clip's output folder (`out_shot/.corridorkey-partial`,
 electron/main/partial.ts): it moves the results into place after `result`, and removes the folder after an `error`,
 a cancel (the engine killed) or a crash. The engine writes there as into any output folder and cleans up nothing.
+Each EXR frame (Rust engine, 2026-10-26) is written to a hidden `.<frame name>.partial` beside it and renamed into
+place, so a killed engine never leaves a cut frame at a frame's name (only a `.partial`, gone with the staging folder).
+The `corridorkey` command line ([CLI.md](CLI.md)) runs the same jobs without this protocol.
 
 `options` (all optional; missing = the `infer.py` default):
 

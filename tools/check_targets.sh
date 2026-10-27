@@ -22,6 +22,6 @@ for t in aarch64-apple-darwin x86_64-pc-windows-gnu; do
   fi
   echo "check_targets: $t ($features)"
   systemd-run --user --scope --quiet --collect ${CK_SLICE:+--slice=$CK_SLICE} -p MemoryMax=12G -p MemorySwapMax=0 -- \
-    env "${extra[@]}" cargo clippy -q --all-targets -p ck-core -p ck-engine --no-default-features --features "$features" --target "$t" -- -D warnings
+    env "${extra[@]}" cargo clippy -q --all-targets -p ck-core -p ck-engine -p ck-cli --no-default-features --features "$features" --target "$t" -- -D warnings
 done
 echo "check_targets: macOS and Windows lint clean"
