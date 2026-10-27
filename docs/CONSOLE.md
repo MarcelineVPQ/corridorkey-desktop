@@ -275,7 +275,10 @@ inner loop's words);
   inside it; confirmed, it is audited (`allowed`) and saved in settings (`consoleWriteFolders`: absolute paths only,
   each once, at most 100, checked on load), and App settings → Console lists each with **Remove** (no confirmation and
   no sudo: removing only narrows the scope; audited as `removed`). `allow` alone lists them. A folder the Console may
-  already write to needs no dialog; nothing adds one without it. Every "outside the folders the Console may write to"
+  already write to needs no dialog; nothing in the app adds one without it. The settings file itself is trusted as
+  the user's own: an allowed folder loaded from it is checked for shape on load (absolute, no NUL, at most 100), not
+  resolved or confirmed, so whoever can edit the user's settings file can widen the scope (P4 senior review
+  2026-10-27 N6). `allow /`, `allow ~` or a system folder take the same one confirmation as any other folder. Every "outside the folders the Console may write to"
   refusal ends with the exact line to type, `allow "<folder>"` (the folder typed with a trailing separator, else the
   nearest existing folder above the path). It is resolved with realpath first (symlinks and `..`; a path that
   doesn't exist yet through its nearest existing parent; on Windows and macOS the names realpath returned compare
