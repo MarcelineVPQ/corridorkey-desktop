@@ -4,11 +4,13 @@
 #   tools/release.sh            the version in package.json: X.Y.Z (Stable) or X.Y.Z-dev.N (Development)
 #
 # 1. checks: on main, clean, in step with origin; package.json and the lock carry the version; a CHANGELOG
-#    section for it; the signing key is there; THIRD_PARTY_NOTICES.md is current (tools/gen_notices.mjs --check,
-#    which needs cargo-about on PATH or CARGO_ABOUT=<path>); the published wiki is docs/wiki/ (a read-only clone of
-#    the wiki repository compared by tools/check_wiki.mjs --published; tools/publish_wiki.mjs publishes it)
-# 2. npm run check, then npm run dist:linux (the engine for glibc 2.28, then the AppImage) and npm run dist:win (the
-#    Windows engine cross-built here, then the NSIS installer through Wine), memory-capped
+#    section for it, its header not saying draft / unreleased; the signing key is there; THIRD_PARTY_NOTICES.md is
+#    current (tools/gen_notices.mjs --check, which needs cargo-about on PATH or CARGO_ABOUT=<path>); the published
+#    wiki is docs/wiki/ (a read-only clone of the wiki repository compared by tools/check_wiki.mjs --published;
+#    tools/publish_wiki.mjs publishes it)
+# 2. npm run check, npm run check:engine and tools/check_targets.sh (the engine's macOS / Windows lint), then
+#    npm run dist:linux (the engine for glibc 2.28, then the AppImage) and npm run dist:win (the Windows engine
+#    cross-built here, then the NSIS installer through Wine), memory-capped
 # 3. SHA256SUMS / SHA512SUMS of both files and the notes (the CHANGELOG section)
 # 4. pushes main, creates the GitHub release as a draft on that commit (no tag yet), uploads, then publishes it,
 #    which makes the tag (Development = prerelease, never Latest). A failure anywhere here can simply be rerun.
@@ -36,6 +38,7 @@ git fetch -q origin main
 # none = new; true = a draft left by a failed run (finished now); false = published (only the feeds are redone)
 state="$(gh release view "v$v" --json isDraft -q .isDraft 2>/dev/null || echo none)"
 grep -q "^## $v\( \|$\)" CHANGELOG.md || { echo "release: CHANGELOG.md has no '## $v' section" >&2; exit 1; }
+grep "^## $v\( \|$\)" CHANGELOG.md | grep -qiE 'draft|unreleased' && { echo "release: CHANGELOG.md's '## $v' header still says draft / unreleased" >&2; exit 1; }
 # the published wiki must be docs/wiki/ (docs/RELEASING.md "The wiki"): a read-only shallow clone, compared page by page
 wiki="$(mktemp -d)"; trap 'rm -rf "$wiki"' EXIT
 git clone -q --depth 1 "$(git remote get-url origin | sed 's/\.git$//').wiki.git" "$wiki"
@@ -47,6 +50,9 @@ export CARGO_ABOUT="${CARGO_ABOUT:-$HOME/.local/share/corridorkey-release/cargo-
 
 if [ "$state" != false ]; then
 NODE_OPTIONS=--max-old-space-size=4096 "${CAP[@]}" npm run -s check
+# the engine's own checks (cargo fmt, clippy -D warnings, cargo test) and its macOS / Windows lint (capped inside)
+systemd-run --user --scope --quiet --collect ${CK_SLICE:+--slice=$CK_SLICE} -p MemoryMax=12G -p MemorySwapMax=0 -- npm run -s check:engine
+tools/check_targets.sh
 NODE_OPTIONS=--max-old-space-size=4096 "${CAP[@]}" npm run -s dist:linux
 NODE_OPTIONS=--max-old-space-size=4096 "${CAP[@]}" npm run -s dist:win
 

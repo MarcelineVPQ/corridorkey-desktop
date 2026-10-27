@@ -87,8 +87,9 @@ spent 29 minutes waiting on a package mirror).
    Publish the wiki if `docs/wiki/` changed since it was last published (The wiki, below): the release refuses a
    published wiki that differs.
 2. `tools/release.sh`. It checks the version shape (`X.Y.Z` = Stable, `X.Y.Z-dev.N` = Development), the lock, a
-   clean `main` in step with GitHub, the CHANGELOG section and the signing key; runs `npm run check` and
-   `npm run dist:linux` (memory-capped; the engine is linked for glibc 2.28 with cargo-zigbuild, Zig in
+   clean `main` in step with GitHub, the CHANGELOG section (its header must not say draft or unreleased) and the
+   signing key; runs `npm run check`, `npm run check:engine` and `tools/check_targets.sh` (the engine's macOS and
+   Windows lint), then `npm run dist:linux` (memory-capped; the engine is linked for glibc 2.28 with cargo-zigbuild, Zig in
    `~/.local/share/corridorkey-release/zig/venv`; then `tools/build_trt_builder.sh` builds TensorRT's engine builder
    `ck-trt-build` with Zig's C++ for glibc 2.28 and the AppImage ships it next to the engine. It links against
    libnvinfer / libnvonnxparser from NVIDIA's pinned `tensorrt-cu13-libs` 10.16.1.11 wheel, the one the app's
