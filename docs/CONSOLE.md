@@ -272,6 +272,11 @@ append-only; the history cap), `consoleRunner.test.ts` (a fake spawn: the exact 
 cancel then kill, the JSON events, one job at a time, the queue's card, refusals, the sudo flow and its audit, the
 built-ins, scripts, quit, completion, the throttled push, the IPC checks), `cliSpec.test.ts` (the drift check). The senior review of 2026-10-26 (docs/REVIEW_CONSOLE_2026-10-26.md) left 14
 probes; each is a regression test (`consoleRunner.test.ts` "review 2026-10-26 probes", P9 in `consoleSafety.test.ts`,
-P10 in `consoleParse.test.ts`, the gate fixtures in `securityGate.test.ts`); P7-P9 pin open backlog rows 106-108.
+P10 in `consoleParse.test.ts`, the gate fixtures in `securityGate.test.ts`); P7-P9 pin open backlog rows 106-108. The
+Phase 4 senior review (docs/REVIEW_CONSOLE_P4_2026-10-27.md) proved its findings with probes; each is a test: hostile
+names per farm format and Deadline's argument split (`farmExport.test.ts`), the shell-safe copied line read back by
+`/bin/sh` (`jobCommand.test.ts`), the 30 000-line program (`consoleScript.test.ts`), and in `consoleRunner.test.ts`
+links in the export folder, a program's throws, budget and Ctrl+C, the long built-ins' slot, the script confirmation's
+filled-in lines and targets, and the Linux screen-lock watch ("review 2026-10-27" blocks).
 The page (`consoleBlocks.test.ts`): the output is a plain region; one polite `role="status"` says each command's
 start and end (`announcement()`), never its streamed lines.

@@ -218,3 +218,26 @@ The serious problems are elsewhere:
 ## Counts
 
 MUST 4 · SHOULD 7 · NICE 9. Proved by run: M1, M2, M3, M4, S2, S3, S4, S5, N1, N2. Code-read: S1, S6, S7, N3-N9.
+
+## Status (2026-10-27, branch `feat/console`)
+
+Every MUST and SHOULD is fixed, each with tests that failed on the code before the fix (the probes became the tests);
+the NICE items are backlog rows. `npm run check`, `check:engine` and `check:targets` pass.
+
+| Finding | Done | Where |
+|---|---|---|
+| M1 farm export injection | control characters refused in every clip name, path, results folder, flag value and runtime path (all formats); quotes, `$`, `%`, backticks round-trip through each farm's syntax | 0853f32 |
+| M2 symlinks in the export folder | each written path checked with `checkWrite`, a link at a written name refused (lstat), files written new and renamed over the name (`replaceFile`) | 39fbd06 |
+| M3 "Copy as command" not shell-safe | `shellWord`: POSIX `'…'` (`'\''`), Windows `"…"` and no line for `% ! $` `` ` `` `"`; control characters give no line; read back by a real `/bin/sh` in the test | e624850 |
+| M4 program robustness | built-in throws become failed blocks; the slot freed in `finally`; `for`'s cap checked before adding; one 10 000-command budget per program; a turn of the event loop before each command (Ctrl+C within 100 ms) | 3f8e088 |
+| S1 no `lock-screen` on Linux | logind `LockedHint` read every 5 s while elevated (busctl, argv, no shell); where it can't be read, the window's blur drops the elevation | a940de5 |
+| S2 script confirmation unfilled | lines shown with `${…}` filled in where known before they run (else said), the targets counted; a shown line runs only as shown | 67a2f91 |
+| S3 two clips with one name | refused (names compared without case) | 3ac3907 |
+| S4 Deadline `ExtraArguments` quoting | `list2cmdline`-style, tested against `farm/deadline10/test_quote.py`'s `msvc_argv` | b3ba6d3 |
+| S5 quadratic `lineOf` | line starts once, binary search; 30 000 lines in < 500 ms (5.4 s before) | f2133a7 |
+| S6 long built-ins | `du`, `tree`, `wc`, `j` take the slot (or their program's), Ctrl+C at each entry, chunk or folder | a5ce439 |
+| S7 tests and loop verdicts | the tests above; untrue `[bounded: …]` verdicts corrected, a LOOP_PASS section and rule | cba3d0e |
+| N1-N9 | backlog rows 131-139 (idea) | docs/BACKLOG.md |
+
+Not tested on a real screen lock: S1's busctl read answered on this desktop (`b false`), but locking Marcy's screen to
+see it turn true was not done (never her screen); the decision logic is tested with a fake reader.
