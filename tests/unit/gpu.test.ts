@@ -34,6 +34,27 @@ describe("nvidia-smi parsing", () => {
   });
 });
 
+// Marcy 2026-10-27: the Engine page showed other programs' whole command lines (Chromium rewrites its /proc cmdline
+// into one space-separated string, so the first NUL-separated part held every argument and the home path)
+describe("other programs' names leak nothing", () => {
+  const leaks = [
+    [
+      "/opt/Mullvad VPN/mullvad-gui --type=gpu-process --user-data-dir=/home/someone/.config/Mullvad VPN --gpu-preferences=WAAAAAAAAAAgAAAEAAAAAAAAAAAAAAAAAABgAAEAAAA4AAAAAAAAAAAAAAAEAAAAAAAAABAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAACAAAAAAAAAA= --shared-files --field-trial-handle=3,i,1\0\0\0",
+      "mullvad-gui",
+    ],
+    [
+      "/tmp/.mount_ds5dXyZ12/ds5-dongle-configurator --type=gpu-process --enable-crash-reporter=abc,production --user-data-dir=/home/someone/.config/ds5-dongle-configurator --ozone-platform=wayland",
+      "ds5-dongle-configurator",
+    ],
+    ["/tmp/.mount_ds5dXyZ12/ds5-dongle-configurator\0--type=gpu-process\0--user-data-dir=/home/someone/.config/ds5\0", "ds5-dongle-configurator"],
+  ];
+  it.each(leaks)("names %s by its program alone", (cmdline, name) => {
+    const shown = processName(cmdline);
+    expect(shown).toBe(name);
+    expect(shown).not.toMatch(/[\\/\s]|--|home/);
+  });
+});
+
 // bug hunt 2026-10-26 P6 (measured in an isolated copy: a paused build resumed at the queue's end was "blocked" by
 // "corridorkey-engine is using the graphics card", the queue's own engine still quitting, then waited a minute)
 describe("other programs on the card, for the background TensorRT build", () => {

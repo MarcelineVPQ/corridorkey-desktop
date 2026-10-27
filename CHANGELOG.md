@@ -75,6 +75,8 @@ on its own rail icon. Not a system shell: its own commands only, each parsed and
 
 - Appearance → Glass showed no glass in installed builds: the security policy blocked its displacement maps.
 - The engine said its version was 0.2.0 (in its replies, and so in logs): it now says the app's version.
+- The Engine page's list of programs using the graphics card showed other programs' whole command lines (a
+  Chromium-based app's arguments and home-folder paths): it now shows the program's name alone.
 
 **Docs**
 

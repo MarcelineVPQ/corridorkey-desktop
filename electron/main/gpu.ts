@@ -40,7 +40,9 @@ export function processName(cmdline: string): string {
   const lower = cmdline.toLowerCase();
   if (/mount_sonata|sonata\.appimage/.test(lower)) return "Sonata";
   if (/sonata-align|sonata_align|sonata-engine/.test(lower)) return "Sonata's word timing";
-  const first = cmdline.split("\0")[0] || cmdline;
+  // the program alone, never its arguments: Chromium/Electron rewrite /proc cmdline into one space-separated string
+  // ("/opt/Mullvad VPN/mullvad-gui --type=gpu-process --user-data-dir=/home/…"), so cut at the first " -" too
+  const first = (cmdline.split("\0")[0] || cmdline).split(/\s+-/)[0].trim();
   // either separator: Linux paths, and Windows' as nvidia-smi gives them
   return first.split(/[\\/]/).pop() || "unknown";
 }
