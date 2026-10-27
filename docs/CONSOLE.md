@@ -139,7 +139,10 @@ missing there).
   every part in order with the last one in its last folder's name, still there, and not the current one; it prints
   where it went; `j` alone prints the ranking. `pushd <folder>` goes there and remembers the folder before, `pushd`
   alone swaps with the newest remembered, `popd` goes back, `dirs` lists them (0 is the current folder; at most 50,
-  this session only); each prints the list, as bash does.
+  this session only); each prints the list, as bash does. On Windows `open`, `cd`, `j` and bookmarks take UNC paths
+  (`\\host\share`) as any other folder: a stat there, or Show in folder, makes Windows send the user's NTLM
+  credentials to that host, so a bookmark or a history line's folder edited in the user's files to name another host
+  would do it on `cd @name` or `j` (P4 senior review 2026-10-27 N9; low: it needs write access to those files).
 - **Variables** (`src/shared/console/vars.ts`; SME review item 6). `set name=value` (several at once; a name alone
   prints it; `set` alone lists them and the Console's own), `unset name…`, `echo …` prints its words. `${name}` is the
   only syntax, braces required: in this world `$F`, `$F4`, `$HIP`, `%04d`, `####`, `@@@@` and `!` are parts of file
