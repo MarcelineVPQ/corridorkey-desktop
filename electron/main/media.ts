@@ -195,13 +195,18 @@ async function probeImage(path: string): Promise<{ width: number; height: number
   return { width: s.width, height: s.height };
 }
 
-/** One frame of `source` at `seconds`, scaled to `width`, cached by path+mtime+time. Returns the file path. */
+/**
+ * One frame of `source` at `seconds`, scaled to `width`, cached by path+mtime+time. Returns the file path.
+ * Converted to RGB before the JPEG: straight from the engine's yuv444p10le TV-range video, ffmpeg's yuvj420p rounded
+ * near-black chroma to green, faint green lines in black areas (Marcy 2026-10-27). "rgb" in the cache key: the green
+ * stills made before are not reused.
+ */
 export async function still(cacheDir: string, source: string, seconds: number, width: number): Promise<string> {
   // loop: NOT-WORTH — one mkdir (exists after the first) per still
   mkdirSync(cacheDir, { recursive: true });
   const key = createHash("sha1")
     // loop: NOT-WORTH — one stat per still (the cache key)
-    .update(`${source}|${statSync(source).mtimeMs}|${seconds}|${width}`)
+    .update(`${source}|${statSync(source).mtimeMs}|${seconds}|${width}|rgb`)
     .digest("hex")
     .slice(0, 20);
   const out = join(cacheDir, `${key}.jpg`);
@@ -209,7 +214,7 @@ export async function still(cacheDir: string, source: string, seconds: number, w
   if (existsSync(out)) return out;
   const seek = seconds > 0 ? ["-ss", seconds.toFixed(3)] : [];
   // loop: SERIAL-REQUIRED — one ffmpeg still at a time, STILL_TIMEOUT_MS (this pass: had none)
-  await run("ffmpeg", ["-v", "error", "-y", ...seek, "-i", source, "-frames:v", "1", "-vf", `scale=${width}:-2`, "-q:v", "4", out], { timeout: STILL_TIMEOUT_MS });
+  await run("ffmpeg", ["-v", "error", "-y", ...seek, "-i", source, "-frames:v", "1", "-vf", `scale=${width}:-2,format=rgb24`, "-q:v", "4", out], { timeout: STILL_TIMEOUT_MS });
   return out;
 }
 

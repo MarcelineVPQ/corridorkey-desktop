@@ -80,6 +80,9 @@ on its own rail icon. Not a system shell: its own commands only, each parsed and
 - A folder of EXR frames started as "display-coded", clipping every value above 1 unless the box was noticed: an EXR
   folder now starts scene-linear (PNG/JPEG frames stay display-coded), and a choice you make on the box is kept for
   the frame folders you add after it. The `corridorkey` command line is unchanged (`--linear` to read scene-linear).
+- The Results stills showed faint green lines in black areas (the still's conversion from the engine's 10-bit video
+  rounded near-black to green; the outputs themselves were clean): stills are now converted to RGB first, black stays
+  black.
 
 **Docs**
 

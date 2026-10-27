@@ -1,8 +1,9 @@
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { clipName, expandPaths, findFirstFrameHint, findHintVideo, frameDirLinearFor, frameFiles, isCompanionHint, naturalCompare } from "../../electron/main/media";
+import { clipName, expandPaths, findFirstFrameHint, findHintVideo, frameDirLinearFor, frameFiles, isCompanionHint, naturalCompare, still } from "../../electron/main/media";
 
 // every folder a test made goes at the end (each run used to leave five in /tmp, which is RAM on many desktops)
 const made: string[] = [];
@@ -75,5 +76,25 @@ describe("a frame folder's scene-linear default", () => {
     // the user's own choice wins either way
     expect(frameDirLinearFor(exr, false)).toBe(false);
     expect(frameDirLinearFor(png, true)).toBe(true);
+  });
+});
+
+// Marcy 2026-10-27: the Results stills showed faint green lines in black areas. The engine's video is yuv444p10le,
+// TV range; straight to JPEG, ffmpeg's yuvj420p conversion rounded near-black chroma to green (G=1, whole block rows)
+const hasFfmpeg = spawnSync("ffmpeg", ["-version"]).status === 0;
+describe("a still of the engine's video", () => {
+  it.skipIf(!hasFfmpeg)("keeps black exactly black", async () => {
+    const d = dir([]);
+    const clip = join(d, "black_alpha.mp4");
+    // black, encoded as the engine's lossless H.264 is (ck-core writers.rs ffmpeg_args: bgr48le in, yuv444p10le, -qp 0)
+    const raw = execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=black:s=1920x1080:r=24:d=0.125", "-f", "rawvideo", "-pix_fmt", "bgr48le", "-"], { maxBuffer: 1 << 26 });
+    // prettier-ignore
+    execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "bgr48le", "-s:v", "1920x1080", "-r", "24", "-i", "pipe:0", "-an",
+      "-c:v", "libx264", "-preset", "veryfast", "-profile:v", "high444", "-pix_fmt", "yuv444p10le", "-qp", "0",
+      "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "iec61966-2-1", clip], { input: raw });
+    const file = await still(join(d, "cache"), clip, 0, 640);
+    const pixels = execFileSync("ffmpeg", ["-v", "error", "-i", file, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], { maxBuffer: 1 << 24 });
+    expect(pixels.length).toBe(640 * 360 * 3);
+    expect(pixels.some((v) => v !== 0)).toBe(false);
   });
 });
