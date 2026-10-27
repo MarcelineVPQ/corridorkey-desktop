@@ -141,10 +141,10 @@ corridorkey render -i … -o … -s <start> -e <end> --progress-format deadline 
   double quotes.
 - **GPU affinity.** When the worker or the job overrides GPU affinity (`OverrideGpuAffinity()`), the task gets
   `--gpu` set to one card from `GpuAffinity()`, picked by the task's thread number. Without an override,
-  `corridorkey` uses the worker's `CUDA_VISIBLE_DEVICES` or its first card. `--gpu N` counts cards in CUDA's order.
-  If Deadline's indices follow `nvidia-smi`'s order and the two orders differ on a worker, set
-  `CUDA_DEVICE_ORDER=PCI_BUS_ID` in that worker's environment. We haven't checked which order Deadline's affinity
-  indices use.
+  `corridorkey` uses the worker's `CUDA_VISIBLE_DEVICES` or its first card. `--gpu N` counts cards in CUDA's order,
+  so whenever the plugin passes `--gpu` it also sets `CUDA_DEVICE_ORDER=PCI_BUS_ID` for the task: CUDA then counts
+  in `nvidia-smi`'s order (PCI bus order), which differs from CUDA's default (fastest first) on mixed-card workers.
+  That assumes Deadline's affinity indices follow `nvidia-smi`'s order; not yet checked on a real Deadline.
 - **Progress and failures.**
   - `PROGRESS: N%` lines set the task's progress, and `STATUS: …` lines set its status.
   - On failure the CLI prints `ERROR: … (exit N, reason)` and then exits. The plugin keeps that line and fails the
@@ -165,6 +165,8 @@ seams invisible hasn't been measured yet (docs/CLI.md, "Warm-up"). Until it is, 
     the repo.
   - The quoting: `farm/deadline10/test_quote.py` (`npm run test:farm`, part of `npm run check`) splits the quoted
     command line by MSVC's rules for Windows paths ending in `\`, with spaces, quotes and UNC shares.
+  - `farm/deadline10/test_plugin.py` (same command) runs the plugin against stand-in Deadline modules: a GPU pick
+    sets `CUDA_DEVICE_ORDER=PCI_BUS_ID` for the task, no pick leaves the environment alone.
 - **Not yet run on a real Deadline.**
 - The plugin uses these API names from the Deadline 10 scripting reference and Thinkbox's own plugins:
   - `DeadlinePlugin`, `PluginType.Simple`, `InitializeProcessCallback`, `RenderExecutableCallback`,

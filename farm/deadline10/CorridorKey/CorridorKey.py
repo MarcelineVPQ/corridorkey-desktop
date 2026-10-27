@@ -143,6 +143,9 @@ class CorridorKeyPlugin(DeadlinePlugin):
                 # loop: NOT-WORTH — the worker's few cards, once per task
                 self.LogInfo("GPU affinity %s: this task uses card %d" % (",".join(str(g) for g in gpus), gpu))
                 args += ["--gpu", str(gpu)]
+                # --gpu counts in CUDA's order, fastest card first by default; PCI bus order makes it nvidia-smi's on
+                # mixed-card workers (farm senior review 2026-10-26 N8; ck-core's NVML pick follows it too)
+                self.SetProcessEnvironmentVariable("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
 
         extra = self.GetPluginInfoEntryWithDefault("ExtraArguments", "").strip()
         if extra:
