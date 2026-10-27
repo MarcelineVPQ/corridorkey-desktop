@@ -17,7 +17,8 @@ missing there).
   and passed to the CLI as the CLI spells it (`exr`); a word that means one of its values (`MEANINGS` in registry.ts:
   `--device gpu` → auto, `--format mp4` → video, `--datatype fp32` → float) is suggested by meaning, not by spelling,
   and never taken in its place (a test checks every target against the CLI's spec). The parser itself knows no
-  variables, globs, pipes or redirections: `${name}` is filled in before it reads the line (Variables, below).
+  variables, globs, pipes or redirections: `${name}` is filled in before it reads the line (Variables, below), and a
+  pipe's stages are cut before it reads each (Scripting, below).
 - **One registry.** `src/shared/console/registry.ts`: the built-ins and `corridorkey`'s commands. The CLI's part comes
   from `cliSpec.json`, which `tools/gen_cli_spec.mjs` writes from `corridorkey __spec --json` at build time (checked in;
   `tests/unit/cliSpec.test.ts` fails when it and the built binary differ). Each entry: name, aliases, arguments (kinds
@@ -60,6 +61,8 @@ missing there).
   display window, the data window when it differs, channels with their pixel types and sampling, alpha (`A` or
   `*.A`), compression, line order, tiles or scan lines, each part of a multi-part file, other attributes by name; a
   frame pattern reads its first frame and says so: SME review 2026-10-27 N6),
+  `grep [-i] [-v] TERM`, `count`, and `head` / `tail` without a FILE: the filters after a `|` (alone, `grep` and
+  `count` say so; backlog row 127, below),
   `history [N|term]` (`--audit`: the elevated log), `version` (also `corridorkey --version`, `render --version`: the app's
   version, which its corridorkey shares; answered without running it), `run [--keep-going] <file.ckcmd>` (a script: Scripting, below; no script
   inside a script; its elevation: Security rules below). Several lines pasted at once are never joined: the page offers them as a script (Enter runs them in
@@ -202,8 +205,13 @@ missing there).
 - **Scripting** (`src/shared/console/script.ts`; SME review item 7: "a small language, not a shell"). A typed line or a
   script's text is a list of commands joined by `;` (or a new line), `&&` (the next runs only if this one ended 0) and
   `||` (only if it didn't); `for NAME in WORDS; do …; done`; `if LIST; then …; [else …;] fi` on the last exit status;
-  `time COMMAND`. Nothing else: no subshells, no pipes (an unquoted `|` is refused with the reason), no redirections,
-  no background jobs, no `elif`, `while` or functions. The separators are found with the tokenizer's own quote and
+  `time COMMAND`; and pipes into the Console's own filters (backlog row 127, the SME review's structured pipes:
+  `pipeStages` cuts a command at each unquoted `|`, an empty side is a mistake; the runner's `pipe` runs the first
+  stage, one of `PIPE_SOURCES`, the read-only built-ins, `j` / `set` / `allow` only alone, into the block, then its data,
+  a listing's entries by name or else its `out` lines, goes through `grep [-i] [-v] TERM`, `head` / `tail [-n N]` and
+  `count` (last) in turn, all parsed before anything runs; the block keeps the line as typed and says how many rows came
+  through; never a run, a script or a program on either side, nothing written). Nothing else: no subshells, no
+  redirections, no background jobs, no `elif`, `while` or functions. The separators are found with the tokenizer's own quote and
   escape rules (`"a;b"`, `'x||y'`, `d\;e` are words); keywords count only as a command's first word, unquoted; `#` at
   a line's start is a comment; a new line after `&&` / `||` continues it. A mistake in the program (a `for` without
   `done`, a stray `fi`) refuses it before anything runs, with where. Each command is one Console line: filled in

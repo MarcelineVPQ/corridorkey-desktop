@@ -158,8 +158,9 @@ render …` says how long it took and the frames per second. Inside a script eac
 its time, its last line of output); click it or press Enter on it for the whole block, and one that fails opens on its
 own. Script files (`run nightly.ckcmd`) use the same, over
 several lines; a script stops at the first command that fails (not one on the left of `&&` / `||` or in an `if`),
-`run --keep-going` goes on and still ends failed; a typed line goes on. There are no pipes: the Console's commands
-never pass text to each other or to the system. A line with `;`, `&&`, `||`, `for`, `if` or `time` runs as a script:
+`run --keep-going` goes on and still ends failed; a typed line goes on. Pipes go only from one of the Console's
+commands that read (`dir`, `history`, `cat`…) to its own filters, `grep [-i] [-v] TERM`, `head` / `tail -n N` and
+`count`: `dir | grep sh010`, `ls *.exr | count`; never to a program or the system. A line with `;`, `&&`, `||`, `for`, `if` or `time` runs as a script:
 one at a time, and its commands that replace files say `sudo` and are confirmed together before anything runs (the
 dialog shows each with its `${…}` filled in, where known, and the files it would replace). A
 program runs at most 10 000 commands (a loop inside a loop counts them all), and Ctrl+C stops it after the command it is
@@ -175,8 +176,8 @@ Runtime, the models, TensorRT, ffmpeg, and each folder the Console writes to (th
 each with ✓, ⚠ or ✗, and under each problem what to do (a command, or where in the app). It only asks; it never keys
 on the card. `doctor --json` prints the same as JSON.
 
-**Safety.** It is not a system shell: only its own commands, each one parsed and checked (no pipes, subshells or
-other programs; its variables are `${name}` only, and a value is always one word, never a flag). It **reads anywhere** you can, and **writes only into the folders you chose**: the results folder
+**Safety.** It is not a system shell: only its own commands, each one parsed and checked (no subshells or other
+programs, its pipes only into its own filters; its variables are `${name}` only, and a value is always one word, never a flag). It **reads anywhere** you can, and **writes only into the folders you chose**: the results folder
 (App settings), the cache folder, the queued clips' results folders, and the folders you **allow**; anything else is
 refused with the reason and the line that allows it (`allow "/mnt/show/sq01"`), before anything runs. `allow <folder>`
 asks you to confirm, then the Console may write in that folder and every folder inside it, also after a restart;

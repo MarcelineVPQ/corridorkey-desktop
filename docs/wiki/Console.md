@@ -7,8 +7,9 @@ The **Console** (its own icon on the rail) is a command line inside the app for 
 on a farm, plus its own commands to get around, look at files, script and check the machine. Every command and flag
 comes from the `corridorkey` command line's own definitions, so the Console and the farm never differ.
 
-**It is not a system shell.** It runs only its own commands, each one parsed and checked before it runs: no pipes,
-no subshells, no other programs, nothing passed to the system's shell.
+**It is not a system shell.** It runs only its own commands, each one parsed and checked before it runs: no
+subshells, no other programs, nothing passed to the system's shell. Its pipes go from one of its own commands to its
+own filters (`dir | grep sh010 | count`), never to a program.
 
 **Contents:** [Getting started](#getting-started) · [Safety](#safety) · [Commands](#commands) ·
 [Frame sequences](#frame-sequences) · [Getting around](#getting-around) · [Variables](#variables) ·
@@ -95,6 +96,7 @@ files must say `sudo`, and one dialog lists them all, with their `${…}` filled
 | `cat` / `type`, `head`, `tail` | print a text file, its start or its end (`-n N`); a binary file isn't printed |
 | `exrheader <file or pattern>` | an EXR's header: resolution, data window, channels (alpha or not), pixel type, compression; a sequence's first frame |
 | `wc` | count a text file's lines, words and bytes |
+| `grep`, `count` | after a `\|`: keep the lines or rows with a word; how many there are ([below](#scripting)) |
 | `du [folder…]` | how much each folder takes on disk |
 | `tree [folder] [-L N] [-a]` | the folders as a tree, a frame sequence as one row |
 | `time <command>` | run a command and say how long it took (a render's frames per second too) |
@@ -179,8 +181,24 @@ and `${status}` (the last command's exit code). The block shows the line as it r
 ## Scripting
 
 A small language, not a shell: `;` (one after another), `&&` (the next only if this one worked), `||` (only if it
-didn't), `for NAME in WORDS; do …; done`, `if …; then …; else …; fi` and `time`. No pipes, redirections, subshells
-or background jobs: the Console's commands never pass text to each other or to the system.
+didn't), `for NAME in WORDS; do …; done`, `if …; then …; else …; fi`, `time`, and pipes into the Console's own
+filters. No redirections, subshells or background jobs, and nothing ever goes to a program or the system.
+
+**Pipes.** A listing or a command's printed lines go through `grep [-i] [-v] TERM` (keep what contains TERM; `-i` any
+case, `-v` what doesn't), `head` / `tail [-n N]` (the first or last N) and `count` (how many; last). A listing stays a
+listing, filtered by name, with how many rows came through:
+
+```
+dir | grep sh010
+ls *.exr | count
+ls -t | head -n 5
+history | grep -i render | tail -n 3
+cat notes.txt | grep -v draft
+```
+
+What goes in is a command of the Console's that only reads: `dir`, `history`, `cat`, `head`, `tail`, `exrheader`,
+`tree`, `du`, `wc`, `help`, `man`, `apropos`, `echo`, `version`, `bookmarks`, `dirs`, `jobs` and the lists of `j`,
+`set` and `allow`. A render, a script or anything that changes something never goes into a pipe.
 
 ```
 cd @sh010 && render plate.mov -o ~/renders/sh010

@@ -326,22 +326,33 @@ const BUILTINS: ConsoleCommand[] = [
   ),
   builtin(
     "head",
-    "print a text file's first lines",
+    "print a text file's first lines; after a |, the first lines or rows of the command before",
     [
       arg({ id: "lines", short: "n", kind: "number", integer: true, valueName: "N", help: "how many (default 10, at most 2000)" }),
-      arg({ id: "file", kind: "path", positional: true, required: true, valueName: "FILE", help: "the file" }),
+      arg({ id: "file", kind: "path", positional: true, valueName: "FILE", help: "the file (none after a |)" }),
     ],
-    ["head report.json", "head -n 40 notes.txt"],
+    ["head report.json", "head -n 40 notes.txt", "ls -t | head -n 5"],
   ),
   builtin(
     "tail",
-    "print a text file's last lines (a long log's end)",
+    "print a text file's last lines (a long log's end); after a |, the last lines or rows of the command before",
     [
       arg({ id: "lines", short: "n", kind: "number", integer: true, valueName: "N", help: "how many (default 10, at most 2000)" }),
-      arg({ id: "file", kind: "path", positional: true, required: true, valueName: "FILE", help: "the file" }),
+      arg({ id: "file", kind: "path", positional: true, valueName: "FILE", help: "the file (none after a |)" }),
     ],
-    ["tail render.log", "tail -n 100 render.log"],
+    ["tail render.log", "tail -n 100 render.log", "history | tail -n 3"],
   ),
+  builtin(
+    "grep",
+    "after a |: keep the lines (or rows) of the command before that contain TERM; the Console's own filter, never a program",
+    [
+      arg({ id: "term", kind: "string", positional: true, required: true, valueName: "TERM", help: "the text to look for" }),
+      arg({ id: "ignore-case", short: "i", kind: "switch", help: "any case" }),
+      arg({ id: "invert", short: "v", kind: "switch", help: "keep the ones without it" }),
+    ],
+    ["dir | grep sh010", "history | grep -i render", "cat notes.txt | grep -v draft"],
+  ),
+  builtin("count", "after a |: how many lines (or rows) the command before printed", [], ["ls *.exr | count", "history | grep render | count"]),
   builtin(
     "exrheader",
     "an EXR file's header: resolution, data window, channels (alpha or not), pixel type, compression; a sequence's first frame",
@@ -470,7 +481,6 @@ export const ANSWERS: Readonly<Record<string, string>> = {
   setenv: VARIABLES,
   setx: VARIABLES,
   lsseq: "dir lists a sequence as one row (lsseq's view: name.####.exr, its range and gaps); dir -f lists its frames",
-  grep: "history <term> finds the lines typed before, help -k <term> the commands and their options",
   which: "corridorkey is the app's own: version prints its version, corridorkey info checks its engine",
   where: "corridorkey is the app's own: version prints its version, corridorkey info checks its engine",
 };

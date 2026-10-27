@@ -50,7 +50,9 @@ describe("parseProgram", () => {
   });
 
   it("says what is wrong, with where", () => {
-    expect(err("ls | wc")).toMatch(/^\| \(a pipe\) isn't part of the Console/);
+    // a pipe is the Console's own (backlog row 127): only an empty side is a mistake
+    expect(err("ls |")).toMatch(/^\| needs a command on each side/);
+    expect(err("| grep x")).toMatch(/^\| needs a command on each side/);
     expect(err("dir &&")).toMatch(/at the end/);
     expect(err("&& dir")).toMatch(/needs a command before it/);
     expect(err("for f in a b; do dir")).toMatch(/done is missing/);
@@ -61,7 +63,7 @@ describe("parseProgram", () => {
     expect(err("done")).toMatch(/done without its for/);
     expect(err("for f in a; do; done")).toMatch(/needs a command/);
     expect(err("time")).toMatch(/time needs a command/);
-    expect(parseProgram("dir |x", opts)).toMatchObject({ error: { start: 4, end: 5 } });
+    expect(parseProgram("dir | ", opts)).toMatchObject({ error: { start: 4, end: 5 } });
   });
 });
 
@@ -73,7 +75,10 @@ describe("the page's reading of a line", () => {
     expect(p.errors.map((e) => line.slice(e.start, e.end))).toEqual(["--nope"]);
     expect(p.tokens.filter((t) => t.kind === "subcommand").map((t) => line.slice(t.start, t.end))).toEqual(["for", "do", "done"]);
     expect(p.command?.name).toBe("render");
-    expect(parseLine("dir | wc", reg, opts).errors[0].message).toMatch(/pipe/);
+    // a pipe's stages each parsed in place: grep's missing TERM marked at the line's end, the filter is the command
+    const piped = parseLine("dir *.exr | grep", reg, opts);
+    expect([piped.command?.name, piped.errors.map((e) => e.message)]).toEqual(["grep", ["grep needs TERM"]]);
+    expect(parseLine("dir | grep 'a|b'", reg, opts).errors).toEqual([]);
   });
 
   it("finds where the command at the cursor starts (Tab completes from there)", () => {

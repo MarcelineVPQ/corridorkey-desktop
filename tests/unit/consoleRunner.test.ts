@@ -1904,9 +1904,9 @@ describe("Phase 4: scripting", () => {
     await settle();
     expect([kids(f.id).length, blocks.get(f.id)!.state, blocks.get(f.id)!.exitCode]).toEqual([2, "failed", 1]);
     expect(c.history("")[0].line).toBe("pwd; cd nowhere");
-    // a pipe is refused, nothing runs
+    // a pipe goes only to the Console's filters (backlog row 127): wc isn't one, nothing runs
     const p = await c.run("dir | wc");
-    expect([p.state, p.lines.at(-1)!.text]).toEqual(["refused", expect.stringMatching(/^\| \(a pipe\) isn't part of the Console/)]);
+    expect([p.state, p.lines.at(-1)!.text]).toEqual(["refused", expect.stringMatching(/^After a \| comes grep, head, tail or count/)]);
   });
 
   it("for over words, a frame sequence's frames and a pattern's files (by name); a pattern matching nothing runs nothing", async () => {
@@ -2579,5 +2579,39 @@ describe("SME reviews: man pages", () => {
     expect((await c.run("man")).state).toBe("refused");
     expect((await c.run("man nothing")).state).toBe("refused");
     expect((await c.run("man corridorkey")).lines[0].text).toBe("NAME");
+  });
+});
+
+describe("SME reviews: structured pipes between the Console's own commands", () => {
+  it("row 127: dir | grep | count filters a listing's rows by name; head and tail take the first or last; the block says what came through", async () => {
+    const { c } = make();
+    const d = mkdtempSync(join(root, "pipe-"));
+    // loop: NOT-WORTH — a few test files
+    for (const n of ["sh010.mov", "sh020.mov", "sh010_notes.txt", "other.txt"]) writeFileSync(join(d, n), "x");
+    await c.run(`cd ${d}`);
+    const g = await c.run("dir | grep sh010");
+    expect([g.state, g.entries!.map((e) => e.name).sort(), g.lines.map((l) => l.text)]).toEqual(["done", ["sh010.mov", "sh010_notes.txt"], ["2 of 4 rows (| grep sh010)"]]);
+    expect((await c.run("ls | grep -v sh0 | count")).lines.map((l) => l.text)).toEqual(["1"]);
+    const h = await c.run("ls | grep -i SH0 | tail -n 1");
+    expect([h.entries!.length, h.lines[0].text]).toEqual([1, "1 of 4 rows (| grep -i SH0 | tail -n 1)"]);
+    expect((await c.run("echo one | count")).lines.map((l) => l.text)).toEqual(["1"]);
+    expect((await c.run("echo render a.mov | grep -v nothing")).lines.map((l) => l.text)).toEqual(["render a.mov"]);
+  });
+
+  it("row 127: never a run, a script or a program on either side; grep and count alone say what they are; count goes last", async () => {
+    const { c } = make();
+    const r = await c.run("render shot.mov -o ../out/p | count");
+    expect([r.state, r.lines[0].text]).toEqual(["refused", expect.stringMatching(/^Only a built-in's output goes into a \|/)]);
+    expect(spawned).toHaveLength(0);
+    expect((await c.run("dir | sh -c ls")).lines[0].text).toMatch(/^unknown command 'sh'|^After a \| comes/);
+    expect((await c.run("set a=1 | count")).lines[0].text).toBe("Only set alone (its list) goes into a |.");
+    expect((await c.run("echo ${a}")).state).toBe("refused");
+    expect((await c.run("dir | count | grep 1")).lines[0].text).toBe("count goes last (it prints one number).");
+    expect((await c.run("dir | head notes.txt")).lines[0].text).toMatch(/takes the command before's lines, not a file/);
+    expect((await c.run("count")).lines[0].text).toMatch(/^count filters a command's output after a \|/);
+    expect((await c.run("head")).lines[0].text).toMatch(/^head needs FILE, or a command before it/);
+    // a | inside quotes is a character; Tab after a | completes the filter
+    expect((await c.run("echo 'a|b'")).lines[0].text).toBe("a|b");
+    expect((await c.complete("dir | gr", 8)).items.map((i) => i.insert)).toEqual(["grep"]);
   });
 });

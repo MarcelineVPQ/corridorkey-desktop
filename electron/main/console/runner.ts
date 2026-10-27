@@ -23,7 +23,7 @@ import type { AuditLog, History } from "./logs";
 import { allowVerdict, answerWithin, checkWrite, expandHome, FS_ANSWER_MS, fsErrorText, nextVersion, resolveReal, serverNotAllowed, systemFolders, uncServer, type PathDeps } from "./paths";
 import { expandHistory, hasExpansion } from "../../../src/shared/console/expand";
 import { folderRange, frameToken, groupSequences, isFrameFile, sequenceOf, type Sequence } from "../../../src/shared/console/sequences";
-import { commands, globRegExp, isCompound, leavesQuoteOpen, parseProgram, type CmdNode, type List } from "../../../src/shared/console/script";
+import { commands, globRegExp, isCompound, leavesQuoteOpen, parseProgram, type CmdNode, type List, pipeStages } from "../../../src/shared/console/script";
 import { tokenize } from "../../../src/shared/console/parse";
 import { BOOKMARK_NAME, BOOKMARKS_MAX, VARIABLES_MAX, WRITE_FOLDERS_MAX } from "../settings";
 import { expandVars, forWords, READ_ONLY, VALUE_MAX, VAR_NAME } from "../../../src/shared/console/vars";
@@ -577,6 +577,10 @@ export class Console {
 
   private async runParsed(b: ConsoleBlock, line: string, parent: number | null): Promise<{ block: ConsoleBlock; done: Promise<ConsoleBlock> }> {
     const now = (x: ConsoleBlock) => ({ block: x, done: Promise.resolve(x) });
+    // a pipe (dir | grep sh010): the command's rows or lines through the Console's filters (backlog row 127)
+    const stages = pipeStages(line, this.opts);
+    if ("error" in stages) return now(this.finish(b, "refused", stages.error.message));
+    if (stages.length > 1) return now(await this.pipe(b, stages, parent));
     const p = parse(line, this.d.registry, this.opts);
     if (p.errors.length) {
       b.errors = p.errors;
@@ -695,8 +699,18 @@ export class Console {
         return now(this.finish(b, "refused", "time goes first on the line: time sudo render …"));
       case "cat":
         return now(await this.cat(b, pos("files")));
+      case "grep":
+      case "count":
+        return now(
+          this.finish(
+            b,
+            "refused",
+            `${cmd.name} filters a command's output after a | (dir | ${cmd.name === "grep" ? "grep sh010" : "count"}); history <term> finds the lines typed before, help -k <term> the commands and their options.`,
+          ),
+        );
       case "head":
       case "tail":
+        if (!pos("file").length) return now(this.finish(b, "refused", `${cmd.name} needs FILE, or a command before it: ${cmd.name} notes.txt, ls -t | ${cmd.name} -n 5.`));
         // loop: NOT-WORTH — the line's few options
         return now(await this.headTail(b, pos("file")[0], cmd.name === "tail", num(Number(p.options.find((o) => o.arg.id === "lines")?.value ?? 10))));
       case "exrheader":
@@ -714,6 +728,74 @@ export class Console {
         return now(await this.doctor(b, has("json")));
     }
     return now(this.finish(b, "refused", `${cmd.name} isn't a command this Console runs.`));
+  }
+
+  /**
+   * A pipe (backlog row 127, the SME review's structured pipes): the first stage, one of the Console's read-only
+   * built-ins, runs into this block; its data, a listing's rows (dir's entries, by name) or else what it printed (its
+   * output lines, not its notes), then goes through the filters in turn: grep [-i] [-v] TERM, head / tail [-n N], and
+   * count (last). Data never leaves the Console: no program, no system shell, no file written.
+   */
+  private async pipe(b: ConsoleBlock, stages: { text: string }[], parent: number | null): Promise<ConsoleBlock> {
+    const src = parse(stages[0].text, this.d.registry, this.opts);
+    const name = src.command?.kind === "builtin" ? src.command.name : null;
+    if (!src.errors.length && (!name || !PIPE_SOURCES.has(name)))
+      return this.finish(b, "refused", `Only a built-in's output goes into a | (${[...PIPE_SOURCES].join(", ")}); a run's output never goes anywhere else.`);
+    // j, set and allow change something when given words: only their lists go into a pipe
+    if ((name === "j" || name === "set" || name === "allow") && src.positionals.length) return this.finish(b, "refused", `Only ${name} alone (its list) goes into a |.`);
+    const filters: { name: string; p: Parsed }[] = [];
+    // loop: NOT-WORTH — a pipe's few filters, parsed before anything runs
+    for (const [i, st] of stages.slice(1).entries()) {
+      const p = parse(st.text.trim(), this.d.registry, this.opts);
+      // loop: NOT-WORTH — a filter's few mistakes
+      if (p.errors.length) return this.finish(b, "refused", ...p.errors.map((e) => e.message));
+      const f = p.command?.kind === "builtin" ? p.command.name : "";
+      if (!PIPE_FILTERS.has(f)) return this.finish(b, "refused", `After a | comes grep, head, tail or count (dir | grep sh010 | count), not ${st.text.trim().split(/\s+/)[0]}.`);
+      // loop: NOT-WORTH — the filter's few arguments
+      if (p.positionals.some((x) => x.arg.id === "file")) return this.finish(b, "refused", `After a |, ${f} takes the command before's lines, not a file: ${f} -n 5.`);
+      if (f === "count" && i < stages.length - 2) return this.finish(b, "refused", "count goes last (it prints one number).");
+      if (p.help) return this.finish(b, "done", ...commandHelp(this.d.registry, p.command!));
+      filters.push({ name: f, p });
+    }
+    const r = await this.runParsed(b, stages[0].text, parent);
+    const x = await r.done;
+    if (x.state !== "done") return x;
+    // the data: a listing's rows, else the lines it printed (its own notes, kind info, stay out)
+    let rows: ConsoleEntry[] | null = x.entries;
+    // loop: NOT-WORTH — the block's lines (≤ CONSOLE_LINES_KEPT)
+    let lines = x.entries ? [] : x.lines.filter((l) => l.kind === "out").map((l) => l.text);
+    const total = rows?.length ?? lines.length;
+    let counted: number | null = null;
+    // loop: NOT-WORTH — the pipe's few filters, each over ≤ LIST_MAX rows or CONSOLE_LINES_KEPT lines
+    for (const { name: f, p } of filters) {
+      // loop: NOT-WORTH — the filter's few options
+      const has = (id: string) => p.options.some((o) => o.arg.id === id);
+      if (f === "grep") {
+        const term = p.positionals[0].value;
+        const fold = has("ignore-case");
+        const keep = (t: string) => (fold ? t.toLowerCase().includes(term.toLowerCase()) : t.includes(term)) !== has("invert");
+        // loop: NOT-WORTH — as above
+        if (rows) rows = rows.filter((e) => keep(e.name));
+        // loop: NOT-WORTH — as above
+        else lines = lines.filter(keep);
+      } else if (f === "head" || f === "tail") {
+        // loop: NOT-WORTH — the filter's few options
+        const n = Math.max(1, Math.min(LINES_MAX, num(Number(p.options.find((o) => o.arg.id === "lines")?.value ?? 10))));
+        const cut = <T>(xs: T[]) => (f === "head" ? xs.slice(0, n) : xs.slice(-n));
+        if (rows) rows = cut(rows);
+        else lines = cut(lines);
+      } else counted = rows?.length ?? lines.length;
+    }
+    // the block shows what came through: the rows (with how many of how many), or the lines, or the count
+    x.lines = [];
+    x.linesDropped = 0;
+    x.entries = counted === null ? rows : null;
+    x.state = "running";
+    if (counted !== null) return this.finish(x, "done", String(counted));
+    // loop: NOT-WORTH — the pipe's few filters
+    const how = stages.slice(1).map((st) => `| ${st.text.trim()}`);
+    if (rows) return this.finish(x, "done", `${rows.length} of ${plural(total, "row")} (${how.join(" ")})`);
+    return this.finish(x, "done", ...lines);
   }
 
   /**
@@ -2522,6 +2604,11 @@ export function clipName(input: string, platform: NodeJS.Platform): string {
 
 /** Copy as Nuke Read: the frames stat'ed, at most, to find what a render wrote. */
 const READS_STATS = 20_000;
+/** A pipe's first command: the Console's read-only built-ins that print rows or lines (never a run, a script, a change). */
+const PIPE_SOURCES = new Set(["dir", "history", "help", "apropos", "man", "cat", "head", "tail", "exrheader", "set", "bookmarks", "j", "dirs", "tree", "du", "wc", "echo", "allow", "version", "jobs"]);
+/** What may come after a |. */
+const PIPE_FILTERS = new Set(["grep", "head", "tail", "count"]);
+
 /** Re-render missing: the files a failed verify listed that are stat'ed, at most (one there is enough). */
 const RERENDER_STATS = 1000;
 

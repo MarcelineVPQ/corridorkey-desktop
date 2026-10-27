@@ -1,8 +1,9 @@
 // The Console's small scripting language (Phase 4, SME review item 7): a typed line or a script file is a list of
 // commands joined by `;` (or a new line), `&&` (run the next only if this one ended 0) and `||` (only if it didn't);
-// `for NAME in WORDS; do …; done`; `if LIST; then …; [else …;] fi`; `time COMMAND`. Nothing else: no subshells, no
-// pipes, no redirections, no background jobs; each command is one Console line, read by the one parser (parse.ts) when
-// it runs. The separators are found with the tokenizer's own quote and escape rules, so a `;` or `&&` in quotes is part
+// `for NAME in WORDS; do …; done`; `if LIST; then …; [else …;] fi`; `time COMMAND`; and a command's output piped to the
+// Console's own filters, `dir | grep sh010 | count` (backlog row 127: structured, a built-in's rows or lines, never text
+// to a program or the system: pipeStages, the runner's pipe). Nothing else: no subshells, no redirections, no
+// background jobs; each command is one Console line, read by the one parser (parse.ts) when it runs. The separators are found with the tokenizer's own quote and escape rules, so a `;` or `&&` in quotes is part
 // of a word. Pure: the page colours a line with it, the main process runs it.
 import { parse, tokenize, type ParseOptions, type Parsed, type Token } from "./parse";
 import type { Registry } from "./registry";
@@ -108,7 +109,8 @@ function scan(src: string, opts: ParseOptions): { pieces: Piece[]; quote: string
       out.push({ start, end: i, sep: c === "&" ? "&&" : "||" });
       start = i + 2;
       i++;
-    } else if (c === "|") return { message: "| (a pipe) isn't part of the Console: one command's output never goes to another; quote a name with | in it", start: i, end: i + 1 };
+    }
+    // a single | stays inside the command: its pipe stages (pipeStages)
   }
   out.push({ start, end: src.length, sep: null });
   return { pieces: out, quote };
@@ -237,7 +239,10 @@ export function parseProgram(src: string, opts: ParseOptions): { list: List } | 
     }
     if (k) return fail(`${k} without its ${k === "done" || k === "do" ? "for" : "if"}`, q.start, q.words[0].end);
     at++;
-    return { kind: "cmd", text: src.slice(q.start, q.end), start: q.start, line, time: false };
+    const text = src.slice(q.start, q.end);
+    const stages = pipeStages(text, opts);
+    if ("error" in stages) return fail(stages.error.message, q.start + stages.error.start, q.start + stages.error.end);
+    return { kind: "cmd", text, start: q.start, line, time: false };
   };
 
   const top = list();
@@ -247,6 +252,40 @@ export function parseProgram(src: string, opts: ParseOptions): { list: List } | 
     return fail(`${kw(q)} without its ${kw(q) === "done" || kw(q) === "do" ? "for" : "if"}`, q.start, q.words[0].end);
   }
   return { list: top };
+}
+
+/**
+ * A command's pipe stages, cut at each `|` outside quotes and escapes (the tokenizer's rules): the command, then the
+ * filters its output goes through (`dir *.exr | grep sh010 | count`); one stage when there is no pipe. Each with its
+ * offset in `text`. A stage with no command is an error.
+ */
+export function pipeStages(text: string, opts: ParseOptions): { text: string; start: number }[] | { error: ScriptError } {
+  const out: { text: string; start: number }[] = [];
+  let start = 0;
+  let quote: string | null = null;
+  const push = (end: number) => {
+    out.push({ text: text.slice(start, end), start });
+    start = end + 1;
+  };
+  // loop: HOT-PATH-OK — one pass over a command's text (≤ 8 KiB), per keystroke in the page
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote) {
+      if (c === "\\" && quote === '"' && !opts.windows && (text[i + 1] === '"' || text[i + 1] === "\\")) i++;
+      else if (c === quote) quote = null;
+    } else if (c === "'" || c === '"') quote = c;
+    else if (c === "\\" && !opts.windows) i++;
+    else if (c === "|") push(i);
+  }
+  push(text.length);
+  if (out.length === 1) return out;
+  // loop: NOT-WORTH — a pipe's few stages
+  const empty = out.findIndex((x) => !x.text.trim());
+  if (empty >= 0) {
+    const at = empty === 0 ? out[1].start - 1 : out[empty].start - 1;
+    return { error: { message: `| needs a command on each side (dir | grep sh010)`, start: at, end: at + 1 } };
+  }
+  return out;
 }
 
 /** Every command in a program, in order (inside loops and ifs too). */
@@ -267,7 +306,7 @@ export function isCompound(list: List): boolean {
 export function parseLine(line: string, reg: Registry, opts: ParseOptions): Parsed {
   const prog = parseProgram(line, opts);
   if ("error" in prog || !isCompound(prog.list)) {
-    const p = parse(line, reg, opts);
+    const p = "error" in prog ? parse(line, reg, opts) : parsePiped(line, 0, reg, opts);
     if ("error" in prog) {
       p.errors.unshift(prog.error);
       p.tokens.push({ kind: "error", start: prog.error.start, end: Math.max(prog.error.end, prog.error.start), error: prog.error.message });
@@ -287,7 +326,7 @@ export function parseLine(line: string, reg: Registry, opts: ParseOptions): Pars
     if (!w.quoted && KEYWORDS.has(w.value) && !cmds.some((c) => w.start >= c.start && w.start < c.start + c.text.length)) extra.push({ kind: "subcommand", start: w.start, end: w.end });
   // loop: NOT-WORTH — the line's few commands
   for (const c of cmds) {
-    const p = parse(c.text, reg, opts);
+    const p = parsePiped(c.text, 0, reg, opts);
     // loop: NOT-WORTH — one command's tokens
     out.tokens.push(...p.tokens.map((t) => ({ ...t, start: t.start + c.start, end: t.end + c.start })));
     // loop: NOT-WORTH — one command's mistakes
@@ -301,6 +340,28 @@ export function parseLine(line: string, reg: Registry, opts: ParseOptions): Pars
 }
 
 /**
+ * One command with its pipe stages parsed in place: each stage's tokens and mistakes at their positions in `text`
+ * (offset by `at`), the last stage as the command (its hint, completion).
+ */
+function parsePiped(text: string, at: number, reg: Registry, opts: ParseOptions): Parsed {
+  const stages = pipeStages(text, opts);
+  if ("error" in stages || stages.length === 1) return parse(text, reg, opts);
+  const out = parse("", reg, opts);
+  // loop: NOT-WORTH — a pipe's few stages
+  for (const st of stages) {
+    const lead = st.text.length - st.text.trimStart().length;
+    const p = parse(st.text.trimStart(), reg, opts);
+    const off = at + st.start + lead;
+    // loop: NOT-WORTH — one stage's tokens
+    out.tokens.push(...p.tokens.map((t) => ({ ...t, start: t.start + off, end: t.end + off })));
+    // loop: NOT-WORTH — one stage's mistakes
+    out.errors.push(...p.errors.map((e) => ({ ...e, start: e.start + off, end: e.end + off })));
+    Object.assign(out, { command: p.command, sudo: out.sudo || p.sudo, help: p.help, options: p.options, positionals: p.positionals, expecting: p.expecting, version: p.version });
+  }
+  return out;
+}
+
+/**
  * Where the command the cursor is in starts (Tab completes from there): after the last separator, and after a keyword
  * that takes a command (do, then, else, if, time, and && …).
  */
@@ -309,6 +370,13 @@ export function commandStart(head: string, opts: ParseOptions): number {
   if (!Array.isArray(cut)) return 0;
   const last = cut[cut.length - 1];
   let start = last.start;
+  // after a |: the filter being typed
+  const stages = pipeStages(head.slice(start), opts);
+  if (Array.isArray(stages)) start += stages[stages.length - 1].start;
+  else {
+    const bar = head.lastIndexOf("|");
+    if (bar >= start) start = bar + 1;
+  }
   // loop: NOT-WORTH — a keyword or two at a command's start
   for (;;) {
     const words = tokenize(head.slice(start), opts).words;
