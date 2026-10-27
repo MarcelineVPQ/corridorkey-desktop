@@ -78,8 +78,8 @@ export interface CliSpec {
 const PATH_VALUES = new Set(["INPUT", "DIR", "DIR|PATTERN", "FILE", "FILE.json", "PATH", "LIB", "CONFIG"]);
 /** Flags whose path the CLI writes to (verify only reads its -o). */
 const WRITES: Record<string, readonly string[]> = { render: ["output", "report", "temp"], verify: ["report", "temp"], prepare: ["report"] };
-/** Flags that replace the user's files. */
-const DESTRUCTIVE: Record<string, readonly string[]> = { render: ["overwrite"] };
+/** Flags that replace the user's files (--skip-existing keys a set again, all of it, unless every frame is there and whole). */
+const DESTRUCTIVE: Record<string, readonly string[]> = { render: ["overwrite", "skip-existing"] };
 const REFUSED: Record<string, string> = { "progress-format": "the Console sets it (it shows the progress itself)" };
 const GPU = new Set(["render", "prepare"]);
 

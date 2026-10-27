@@ -593,4 +593,14 @@ describe("review 2026-10-26 probes", () => {
     expect(spawned[0].args).toContain(join(out, "j"));
     await finish(spawned[0].child, [], 0);
   });
+
+  it("P3 (M3): render --skip-existing (which re-keys a whole set that isn't complete) runs only as sudo, confirmed and audited", async () => {
+    const { c } = make();
+    const b = await c.run("render shot.mov -o ../out/ --skip-existing");
+    expect([b.state, b.lines[0].text]).toEqual(["refused", expect.stringMatching(/^--skip-existing replaces files that are already there: run it as sudo/)]);
+    expect(spawned).toEqual([]);
+    const s = await c.run("sudo render shot.mov -o ../out/ --skip-existing");
+    expect([s.elevated, confirms.length, spawned.length]).toEqual([true, 1, 1]);
+    await finish(spawned[0].child, [], 0);
+  });
 });
