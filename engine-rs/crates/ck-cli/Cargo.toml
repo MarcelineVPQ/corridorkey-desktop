@@ -1,0 +1,31 @@
+[package]
+name = "ck-cli"
+description = "corridorkey: CorridorKey on the command line, for render farms and power users (docs/CLI.md)"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license-file.workspace = true
+
+[[bin]]
+name = "corridorkey"
+path = "src/main.rs"
+
+# the engine's features, so tools/build_engine.sh builds both binaries alike
+[features]
+default = ["ort-static", "ocio"]
+ort-static = ["ck-core/ort-static"]
+ocio = ["ck-core/ocio"]
+ort-dynamic = ["ck-core/ort-dynamic"]
+cuda = ["ck-core/cuda"]
+tensorrt = ["ck-core/tensorrt"]
+
+[dependencies]
+ck-core = { path = "../ck-core", default-features = false }
+serde_json.workspace = true
+# the Rust standard for GNU-style options (`--frames=1001-1100`, `-F 1001-1100`, `--`, "did you mean"), pinned
+# exactly; without its colour and derive features: clap, clap_builder, clap_lex, anstyle and strsim, nothing else
+clap = { version = "=4.6.1", default-features = false, features = ["std", "help", "usage", "error-context", "suggestions"] }
+
+[dev-dependencies]
+# tests make small EXR plates and frames (the engine's own EXR library, already in the lock)
+exr = "1.73"

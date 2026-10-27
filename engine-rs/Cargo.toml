@@ -1,9 +1,10 @@
 # The CorridorKey engine on ONNX Runtime (docs/ENGINE_RUST.md).
 # ck-core: the pipeline as a library (decode, colour, Hann windows, the five networks, render, writers);
-# ck-engine: the `corridorkey-engine` binary speaking docs/ENGINE_PROTOCOL.md over stdio.
+# ck-engine: the `corridorkey-engine` binary speaking docs/ENGINE_PROTOCOL.md over stdio;
+# ck-cli: the `corridorkey` command line for render farms and power users (docs/CLI.md).
 [workspace]
 resolver = "2"
-members = ["crates/ck-core", "crates/ck-engine"]
+members = ["crates/ck-core", "crates/ck-engine", "crates/ck-cli"]
 # vendor/: patched third-party crates (vendor/README.md), not ours to lint or test
 exclude = ["vendor"]
 
