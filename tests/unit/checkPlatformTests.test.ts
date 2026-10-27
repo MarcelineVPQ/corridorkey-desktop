@@ -25,6 +25,9 @@ describe("the platform-test gate", () => {
     const why = new Map([["electron/main/console/runner darwin", "why"]]);
     expect(checkModule("electron/main/console/runner", codeOnly(RUNNER), [old], why)).toEqual([]);
     expect(checkModule("electron/main/console/runner", codeOnly(RUNNER), [now], why)).toEqual([expect.stringContaining("remove it")]);
+    // a test that only quotes the import in a fixture string doesn't import it
+    const quoted = { path: "tests/unit/x.test.ts", code: `const f = 'import { C } from "../../electron/main/console/runner";';\n` };
+    expect(checkModule("electron/main/console/runner", codeOnly(RUNNER), [quoted])).toEqual([]);
     // no test imports it: not this gate's business
     expect(checkModule("electron/main/other", codeOnly(RUNNER), [now])).toEqual([]);
   });

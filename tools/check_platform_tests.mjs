@@ -33,7 +33,7 @@ export function branchesOn(code) {
 export function checkModule(module, code, tests, exceptions = EXCEPTIONS) {
   const systems = branchesOn(code);
   if (!systems.length) return [];
-  const imports = new RegExp(`from "(\\.\\./)+${module.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`);
+  const imports = new RegExp(`^\\s*import\\b[^;'"\`]*?from "(\\.\\./)+${module.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`, "m");
   // loop: NOT-WORTH — the unit tests, once per module that branches
   const mine = tests.filter((t) => imports.test(t.code));
   if (!mine.length) return [];

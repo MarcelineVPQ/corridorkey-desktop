@@ -18,10 +18,11 @@ export const UNTESTED = new Map([
   ["electron/main/desktopTheme", "reads the desktop's colours through Electron (nativeTheme, systemPreferences) and KDE's files; their parsing is palette.ts (palette.test.ts)"],
 ]);
 
-/** The modules a source imports (relative imports, resolved against its own path, without extension). */
+/** The modules a source imports (relative import statements, not ones quoted in a fixture string; resolved against
+ * its own path, without extension). */
 export function importsOf(path, src) {
   // loop: NOT-WORTH — one file's imports
-  return [...src.matchAll(/from "(\.{1,2}\/[^"]+)"/g)].map((m) => normalize(join(dirname(path), m[1])).replace(/\.tsx?$/, ""));
+  return [...src.matchAll(/^\s*(?:import|export)\b[^;'"`]*?from "(\.{1,2}\/[^"]+)"/gm)].map((m) => normalize(join(dirname(path), m[1])).replace(/\.tsx?$/, ""));
 }
 
 /** `modules`: { path (no extension): source }; `tests`: { path: source }. */

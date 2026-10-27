@@ -31,6 +31,11 @@ describe("the test-file gate", () => {
     expect(checkModules(MODULES, now, new Map([["electron/main/index", "wiring"]]))).toEqual([]);
   });
 
+  it("an import inside a test's string (a fixture) isn't an import", () => {
+    expect(importsOf("tests/unit/a.test.ts", `const fixture = 'import { a } from "../../electron/main/queue";';\nimport { b } from "../../electron/main/run";`)).toEqual(["electron/main/run"]);
+    expect(importsOf("tests/unit/a.test.ts", 'import {\n  a,\n  b,\n} from "../../electron/main/queue";\n')).toEqual(["electron/main/queue"]);
+  });
+
   it("a stale UNTESTED entry fails", () => {
     const tests = { "tests/unit/x.test.ts": 'import { a } from "../../electron/main/appImageQuit";\nimport { b } from "../../electron/main/console/runner";\n' };
     const listed = new Map([
