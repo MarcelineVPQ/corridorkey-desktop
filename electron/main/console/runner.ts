@@ -86,6 +86,8 @@ interface Job {
   cancels: number;
 }
 
+const AUDIT_FAILED = "Not run: the audit log couldn't record it (every elevated command is logged first; see the app's log for why).";
+
 /** The CLI's progress as JSON events (docs/CLI.md "Progress"): the Console shows them itself. */
 const PROGRESS = ["--progress-format", "json"];
 
@@ -447,8 +449,9 @@ export class Console {
       if (!this.d.elevation.active) {
         const req: ElevationRequest = { command: `sudo ${fullName(this.d.registry, cmd)} ${argv.slice(1).join(" ")}`, targets: await this.measureTargets(targets) };
         const ok = await this.d.confirm(req);
-        void this.d.audit.append({ event: ok ? "granted" : "refused", argv, targets });
+        const logged = await this.d.audit.append({ event: ok ? "granted" : "refused", argv, targets });
         if (!ok) return now(this.finish(b, "refused", "Not run: the confirmation was cancelled."));
+        if (!logged) return now(this.finish(b, "refused", AUDIT_FAILED));
         this.d.elevation.grant();
         this.armExpiry();
       } else {
@@ -466,6 +469,11 @@ export class Console {
         // error: SHOWN — the block says why
         return now(this.finish(b, "failed", `Can't make ${temp}: ${(e as Error).message}`));
       }
+    }
+    // every elevated command is logged before it runs: unlogged, it doesn't run
+    if (b.elevated && !(await this.d.audit.append({ event: "run", argv, targets }))) {
+      b.elevated = false;
+      return now(this.finish(b, "refused", AUDIT_FAILED));
     }
     // the dialog (and the folder) took time: another command may have started meanwhile; from here to the spawn
     // nothing awaits, so the slot can't be taken twice
@@ -571,7 +579,6 @@ export class Console {
     const job: Job = own ? { block: b, child, cancels: 0 } : this.job!;
     if (own) this.job = job;
     else job.child = child;
-    if (b.elevated) void this.d.audit.append({ event: "run", argv, targets });
     this.d.sessionChanged();
     this.d.changed(b);
     let failMessage: string | null = null;
@@ -603,9 +610,14 @@ export class Console {
           else if (code === null) this.note(b, "err", `ended by ${signal ?? "a signal"}`);
           // stopped by Ctrl+C: 143 (130) on Linux and macOS; Windows' taskkill gives another code
           const cancelled = job.cancels > 0 && code !== 0;
-          if (b.elevated) void this.d.audit.append({ event: "exit", argv, exit: code });
           this.d.sessionChanged();
-          resolve(this.finish(b, code === 0 ? "done" : cancelled ? "cancelled" : "failed"));
+          const state = code === 0 ? "done" : cancelled ? "cancelled" : "failed";
+          if (!b.elevated) return resolve(this.finish(b, state));
+          // loop: NOT-WORTH — one async append per elevated command's end [bounded: a local file write]
+          void this.d.audit.append({ event: "exit", argv, exit: code }).then((ok) => {
+            if (!ok) this.note(b, "err", "The audit log couldn't record this command's exit.");
+            resolve(this.finish(b, state));
+          });
         };
         child.on("error", (e) => end(null, null, e));
         child.on("close", (code, signal) => end(code, signal));

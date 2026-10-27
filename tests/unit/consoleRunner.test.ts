@@ -654,4 +654,30 @@ describe("review 2026-10-26 probes", () => {
     expect(spawned).toEqual([]);
     expect(gpuTaken).toBe(0);
   });
+
+  it("P6 (S4): an elevated command doesn't run when the audit log can't record it", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { c } = make({ audit: new AuditLog(join(root, "no-such-folder", "console-audit.jsonl")) });
+      const b = await c.run("sudo render shot.mov -o ../out/z/ --overwrite");
+      expect([b.state, b.elevated, b.lines[0].text]).toEqual(["refused", false, expect.stringMatching(/^Not run: the audit log couldn't record it/)]);
+      expect([spawned.length, c.session().elevatedUntil]).toEqual([0, null]);
+    } finally {
+      err.mockRestore();
+    }
+  });
+
+  it("P6 (S4): already elevated, the run entry is written before the spawn; unwritable, nothing runs", async () => {
+    let writable = true;
+    const entries: string[] = [];
+    const audit = { append: async (e: { event: string }) => (writable && entries.push(e.event), writable), tail: async () => [] } as unknown as AuditLog;
+    const { c } = make({ audit });
+    await c.run("sudo render shot.mov -o ../out/sh010 --overwrite");
+    expect(entries).toEqual(["granted", "run"]);
+    await finish(spawned[0].child, [], 0);
+    expect(entries).toEqual(["granted", "run", "exit"]);
+    writable = false;
+    const b = await c.run("sudo render shot.mov -o ../out/sh010 --overwrite");
+    expect([b.state, spawned.length]).toEqual(["refused", 1]);
+  });
 });

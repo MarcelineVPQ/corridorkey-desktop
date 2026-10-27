@@ -2,7 +2,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { checkWrite, expandHome, isInside, realPathDeps, resolveReal, type PathDeps } from "../../electron/main/console/paths";
 import { Elevation, ELEVATION_CAP_MS, ELEVATION_TTL_MS } from "../../electron/main/console/elevation";
 import { AuditLog, History } from "../../electron/main/console/logs";
@@ -169,6 +169,13 @@ describe("audit log", () => {
     expect(lines.slice(1).map((l) => JSON.parse(l).event)).toEqual(["run", "exit"]);
     expect((await log.tail(2)).map((e) => e.event)).toEqual(["run", "exit"]);
     expect(await new AuditLog(join(tmp, "none.jsonl")).tail(5)).toEqual([]);
+  });
+
+  it("says whether an entry was written (an elevated command runs only when it was)", async () => {
+    expect(await new AuditLog(join(tmp, "console-audit-2.jsonl")).append({ event: "dropped", reason: "test" })).toBe(true);
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await new AuditLog(join(tmp, "no-such-folder", "a.jsonl")).append({ event: "dropped", reason: "test" })).toBe(false);
+    err.mockRestore();
   });
 
   it("never opens the log except to append (the source has no write, truncate or rename of it)", () => {

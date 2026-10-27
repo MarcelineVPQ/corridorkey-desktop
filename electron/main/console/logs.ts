@@ -35,10 +35,20 @@ export class AuditLog {
   private readonly serial = new Serial();
   constructor(private readonly file: string) {}
 
-  append(e: Omit<AuditEntry, "time">, now = new Date()): Promise<void> {
+  /** Resolves true once the entry is written, false when it couldn't be (an elevated command then doesn't run). */
+  append(e: Omit<AuditEntry, "time">, now = new Date()): Promise<boolean> {
     const line = JSON.stringify({ time: now.toISOString(), ...e }) + "\n";
     // loop: NOT-WORTH — one async append per elevation event [bounded: a local file write]
-    return this.serial.then(() => appendFile(this.file, line, { flag: "a" })).catch((err: Error) => console.error("[console] audit log:", err.message));
+    return this.serial
+      .then(() => appendFile(this.file, line, { flag: "a" }))
+      .then(
+        () => true,
+        (err: Error) => {
+          // error: SHOWN — the caller refuses the elevated command; logged here too
+          console.error("[console] audit log:", err.message);
+          return false;
+        },
+      );
   }
 
   /** The newest `n` entries (from the file's last AUDIT_TAIL_BYTES). */
