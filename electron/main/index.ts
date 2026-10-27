@@ -306,11 +306,11 @@ void refreshTrtBuilt();
 // build waits), and the queue doesn't start while it runs (consoleGpu, above the queue).
 const userData = app.getPath("userData");
 const consolePush = new BlockPusher((blocks) => mainWindow?.webContents.send(IPC.consoleBlocks, blocks));
-/** The sudo confirmation: the exact command and what it would replace, counted now. */
+/** The sudo confirmation: the line as typed, the command as it runs, and what it would replace, counted now. */
 async function confirmElevation(req: ElevationRequest): Promise<boolean> {
   if (!mainWindow) return false;
   // loop: NOT-WORTH — one or two targets per confirmation
-  const targets = req.targets.map((t) => `${t.path}: ${t.files} file${t.files === 1 ? "" : "s"} there now (${mbOrGbBytes(t.bytes)}); frames at the run's names are replaced.`);
+  const targets = req.targets.map((t) => `${t.path}: ${t.files} file${t.files === 1 ? "" : "s"} at the run's names there now (${mbOrGbBytes(t.bytes)}); the run replaces them.`);
   const r = await dialog.showMessageBox(mainWindow, {
     type: "warning",
     buttons: ["Run it", "Cancel"],
@@ -318,7 +318,7 @@ async function confirmElevation(req: ElevationRequest): Promise<boolean> {
     cancelId: 1,
     message: "Run this command elevated?",
     detail:
-      `${req.command}\n\n${targets.join("\n")}\n\n` +
+      `You typed: ${req.line}\nIt runs: ${req.command}\n\n${targets.join("\n")}\n\n` +
       `The Console stays elevated for ${ELEVATION_TTL_MS / 60_000} minutes (each elevated command extends it, at most ${ELEVATION_CAP_MS / 60_000}); sudo -k, leaving the window or quitting ends it. Every elevated command is logged.`,
   });
   return r.response === 0;

@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { Console, type ConsoleDeps, type ElevationRequest } from "../../electron/main/console/runner";
+import { clipName, Console, type ConsoleDeps, type ElevationRequest } from "../../electron/main/console/runner";
 import { Elevation } from "../../electron/main/console/elevation";
 import { AuditLog, History } from "../../electron/main/console/logs";
 import { BlockPusher, PUSH_EVERY_MS } from "../../electron/main/console/push";
@@ -268,8 +268,10 @@ describe("sudo", () => {
     const { c, files } = make();
     const b = await c.run("sudo render shot.mov -o ../out/sh010 --overwrite");
     expect(confirms).toHaveLength(1);
-    expect(confirms[0].command).toBe(`sudo corridorkey render --temp ${join(out, ".console-temp")} --progress-format json --output ${join(out, "sh010")} --overwrite -- shot.mov`);
-    expect(confirms[0].targets).toEqual([{ path: join(out, "sh010"), files: 2, bytes: 10 }]);
+    expect(confirms[0].line).toBe("sudo render shot.mov -o ../out/sh010 --overwrite");
+    expect(confirms[0].command).toBe(`sudo corridorkey render --output ${join(out, "sh010")} --overwrite -- shot.mov`);
+    // its key.* frames aren't at this run's names (shot_…): nothing there is replaced
+    expect(confirms[0].targets).toEqual([{ path: join(out, "sh010"), files: 0, bytes: 0 }]);
     expect([b.elevated, c.session().elevatedUntil]).toEqual([true, t + 5 * 60_000]);
     await finish(spawned[0].child, [], 0);
     t += 60_000;
@@ -679,5 +681,36 @@ describe("review 2026-10-26 probes", () => {
     writable = false;
     const b = await c.run("sudo render shot.mov -o ../out/sh010 --overwrite");
     expect([b.state, spawned.length]).toEqual(["refused", 1]);
+  });
+
+  it("S7: the sudo dialog shows the line as typed and a quoted argv without the Console's own flags, control and bidi characters escaped, and counts only the run's names", async () => {
+    const dir = join(out, "s7 out\u202e\nfake line");
+    mkdirSync(join(dir, "shot_alpha_exr"), { recursive: true });
+    mkdirSync(join(dir, "other_alpha_exr"), { recursive: true });
+    writeFileSync(join(dir, "shot_alpha_exr", "shot_alpha.1001.exr"), "123");
+    writeFileSync(join(dir, "shot_alpha_exr", "shot_alpha.1002.exr"), "123");
+    writeFileSync(join(dir, "shot_settings.txt"), "1");
+    writeFileSync(join(dir, "other_alpha_exr", "other_alpha.1001.exr"), "123456");
+    writeFileSync(join(dir, "notes.txt"), "123456");
+    const { c } = make();
+    await c.run(`sudo render shot.mov -o '${dir}' --overwrite`);
+    const shown = join(out, "s7 out\\u{202e}\\u{a}fake line");
+    expect(confirms[0].line).toBe(`sudo render shot.mov -o '${join(out, "s7 out\\u{202e}\\u{a}fake line")}' --overwrite`);
+    expect(confirms[0].command).toBe(`sudo corridorkey render --output "${shown}" --overwrite -- shot.mov`);
+    expect(confirms[0].targets).toEqual([{ path: shown, files: 3, bytes: 7 }]);
+    // loop: NOT-WORTH — the dialog's few strings
+    for (const s of [confirms[0].line, confirms[0].command, confirms[0].targets[0].path]) expect(s).not.toMatch(/[\n\u202e]/);
+    await finish(spawned[0].child, [], 0);
+  });
+
+  it("S7: names the clip as corridorkey does (ck-core clip.rs raw_clip_name's cases)", () => {
+    expect(["/clips/shot.mp4", "/clips/shot01/rgb/", "/clips/shot01/Frames", "/clips/a.b.mov", "/clips/.hidden"].map((p) => clipName(p, "linux"))).toEqual([
+      "shot",
+      "shot01",
+      "shot01",
+      "a.b",
+      ".hidden",
+    ]);
+    expect(clipName("D:\\plates\\sh010\\input", "win32")).toBe("sh010");
   });
 });

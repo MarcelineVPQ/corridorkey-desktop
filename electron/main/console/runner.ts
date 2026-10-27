@@ -10,7 +10,7 @@ import type { Dirent, Stats } from "node:fs";
 import { createInterface } from "node:readline";
 import { posix, win32 } from "node:path";
 import { naturalCompare } from "../media";
-import { parse, type Parsed, type ParseOptions } from "../../../src/shared/console/parse";
+import { parse, quoteArg, type Parsed, type ParseOptions } from "../../../src/shared/console/parse";
 import { EXIT_MEANINGS, fullName, type ConsoleArg, type Registry } from "../../../src/shared/console/registry";
 import type { ConsoleBlock, ConsoleEntry, ConsoleSession } from "../../../src/shared/types";
 import { complete } from "./complete";
@@ -40,8 +40,13 @@ export interface ConsoleFs {
   mkdir: (p: string) => Promise<void>;
 }
 
-/** What a sudo confirmation shows: the exact command and what it touches. */
+/**
+ * What a sudo confirmation shows: the line as typed, the command as it runs (each word quoted as the Console reads it,
+ * without the Console's own --progress-format and temporary folder) and what it replaces: the files at the run's names
+ * in each written folder. Control and bidi characters are shown as \u{…} (a crafted name can't add lines or reorder text).
+ */
 export interface ElevationRequest {
+  line: string;
   command: string;
   targets: { path: string; files: number; bytes: number }[];
 }
@@ -397,6 +402,7 @@ export class Console {
     // loop: NOT-WORTH — the line's few options
     const given = new Set(p.options.map((o) => o.arg.id));
     const jobFlags: string[] = [];
+    const job: { input: string | null } = { input: null };
     const pathValue = async (a: ConsoleArg, v: string): Promise<string> => {
       // --ocio's ocio://… names a built-in config, not a file; any other value is a path (C://… is one on Windows)
       if (a.id === "ocio" && !a.writes && v.startsWith("ocio://")) return v;
@@ -422,7 +428,7 @@ export class Console {
           refusals.push(`${flag}: the Console runs only the ${o.arg.id === "ort" ? "ONNX Runtime" : "model sets"} the Engine page lists (${v} isn't one; add it there first)`);
       }
       argv.push(flag, v);
-      if (o.arg.id === "job") jobFlags.push(...(await this.jobFileFlags(v, cmd.args, given, targets, refusals)));
+      if (o.arg.id === "job") jobFlags.push(...(await this.jobFileFlags(v, cmd.args, given, targets, refusals, job)));
     }
     // the job file's folders, checked and resolved, as flags (flags win over the file): the CLI uses what was checked
     // loop: NOT-WORTH — at most two flags
@@ -430,13 +436,15 @@ export class Console {
     argv.push(...jobFlags);
     // loop: NOT-WORTH — the line's positionals (render's clip)
     for (const x of p.positionals) positionals.push(x.arg.kind === "path" ? await pathValue(x.arg, x.value) : x.value);
+    // the clip after `--`: a name starting with - is never read as a flag
+    if (positionals.length) argv.push("--", ...positionals);
+    // what the user asked for, as the dialog shows it (before the Console's own flags go in)
+    const asked = argv.slice(1);
     // --progress-format json: progress as events (render, verify, prepare); render's temporary files in the app's cache
     // loop: NOT-WORTH — a command's ~50 flags
     if (cmd.args.some((a) => a.id === "progress-format")) argv.splice(1, 0, ...PROGRESS);
     const temp = cmd.name === "render" && !given.has("temp") ? this.d.cliTemp() : null;
     if (temp) argv.splice(1, 0, "--temp", temp);
-    // the clip after `--`: a name starting with - is never read as a flag
-    if (positionals.length) argv.push("--", ...positionals);
     b.argv = argv;
     if (refusals.length) return now(this.finish(b, "refused", ...refusals));
 
@@ -447,7 +455,15 @@ export class Console {
     if (destructive.length && !p.sudo) return now(this.finish(b, "refused", `${destructive.map((o) => o.name).join(", ")} replaces files that are already there: run it as sudo ${b.line.trim()}`));
     if (p.sudo && destructive.length) {
       if (!this.d.elevation.active) {
-        const req: ElevationRequest = { command: `sudo ${fullName(this.d.registry, cmd)} ${argv.slice(1).join(" ")}`, targets: await this.measureTargets(targets) };
+        // the clip's name (render's own naming: docs/CLI.md "Outputs"): the files the run writes start with it
+        // loop: NOT-WORTH — the line's few arguments
+        const input = p.positionals.find((x) => x.arg.id === "clip")?.value ?? p.options.find((o) => o.arg.id === "input")?.value ?? job.input;
+        const req: ElevationRequest = {
+          line: visible(b.line.trim()),
+          // loop: NOT-WORTH — the command's few words
+          command: visible(`sudo ${fullName(this.d.registry, cmd)} ${asked.map((w) => (w === "--" ? w : quoteArg(w, this.opts))).join(" ")}`),
+          targets: await this.measureTargets(targets, input ? clipName(input, this.d.paths.platform) : null),
+        };
         const ok = await this.d.confirm(req);
         const logged = await this.d.audit.append({ event: ok ? "granted" : "refused", argv, targets });
         if (!ok) return now(this.finish(b, "refused", "Not run: the confirmation was cancelled."));
@@ -490,7 +506,7 @@ export class Console {
    * resolved `--output` / `--temp` flags (flags win over the file, docs/CLI.md), so the CLI uses what was checked even
    * if the file changes after this. A file the app can't fully read and parse is refused (never passed on unchecked).
    */
-  private async jobFileFlags(path: string, args: readonly ConsoleArg[], given: Set<string>, targets: string[], refusals: string[]): Promise<string[]> {
+  private async jobFileFlags(path: string, args: readonly ConsoleArg[], given: Set<string>, targets: string[], refusals: string[], seen: { input: string | null }): Promise<string[]> {
     let job: unknown;
     try {
       const abs = (this.d.paths.platform === "win32" ? win32 : posix).resolve(this.cwd, path);
@@ -500,7 +516,8 @@ export class Console {
       refusals.push(`--job: can't check ${path} (${(e as Error).message}); the Console runs a job file only once it has read and checked it`);
       return [];
     }
-    const fields = job && typeof job === "object" ? (job as { output_dir?: unknown; temp_dir?: unknown }) : {};
+    const fields = job && typeof job === "object" ? (job as { input?: unknown; output_dir?: unknown; temp_dir?: unknown }) : {};
+    if (typeof fields.input === "string") seen.input = fields.input;
     const flags: string[] = [];
     // loop: NOT-WORTH — two fields, one async realpath each
     for (const [flag, v, key] of [
@@ -517,32 +534,37 @@ export class Console {
     return flags;
   }
 
-  /** The dialog's numbers: what each written target holds now (files and bytes; a frame pattern: its folder's frames). */
-  private async measureTargets(paths: string[]): Promise<ElevationRequest["targets"]> {
+  /**
+   * The dialog's numbers: what the run would replace in each written target (files and bytes there now). A folder: the
+   * files at the clip's names (`<clip>_…`, and inside its `<clip>_…_exr` folders), the whole folder when the clip is
+   * unknown; a frame pattern: its frames in its folder; a file: itself.
+   */
+  private async measureTargets(paths: string[], clip: string | null): Promise<ElevationRequest["targets"]> {
     const a = this.d.paths.platform === "win32" ? win32 : posix;
     const out: ElevationRequest["targets"] = [];
+    const ours = (n: string) => clip === null || n.startsWith(`${clip}_`);
     // loop: NOT-WORTH — one or two targets per elevation
     for (const path of paths) {
       const s = await this.d.fs.stat(path).catch(() => null);
-      if (s?.isFile()) out.push({ path, files: 1, bytes: s.size });
-      else if (s?.isDirectory()) out.push({ path, ...(await this.walk(path, () => true)) });
+      if (s?.isFile()) out.push({ path: visible(path), files: 1, bytes: s.size });
+      else if (s?.isDirectory()) out.push({ path: visible(path), ...(await this.walk(path, ours, true, undefined, ours)) });
       else {
         // key.####.exr / key.%04d.exr / key.$F4.exr: its frames (and key_alpha.1001.exr…) in the parent folder
         const base = a.basename(path);
         const m = /(#+|%0?\d*d|\$F\d*)/.exec(base);
         if (!m) {
-          out.push({ path, files: 0, bytes: 0 });
+          out.push({ path: visible(path), files: 0, bytes: 0 });
           continue;
         }
         const esc = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         const re = new RegExp(`^${esc(base.slice(0, m.index).replace(/[._]+$/, ""))}.*\\d+${esc(base.slice(m.index + m[0].length))}$`);
-        out.push({ path, ...(await this.walk(a.dirname(path), (n) => re.test(n), false)) });
+        out.push({ path: visible(path), ...(await this.walk(a.dirname(path), (n) => re.test(n), false)) });
       }
     }
     return out;
   }
 
-  private async walk(dir: string, keep: (name: string) => boolean, deep = true, budget = { left: 200_000 }): Promise<{ files: number; bytes: number }> {
+  private async walk(dir: string, keep: (name: string) => boolean, deep = true, budget = { left: 200_000 }, enter: (name: string) => boolean = () => true): Promise<{ files: number; bytes: number }> {
     const a = this.d.paths.platform === "win32" ? win32 : posix;
     let files = 0;
     let bytes = 0;
@@ -558,8 +580,8 @@ export class Console {
     for (const n of names) {
       if (budget.left-- <= 0) break;
       if (n.isDirectory()) {
-        if (!deep) continue;
-        const sub = await this.walk(a.join(dir, n.name), keep, deep, budget);
+        if (!deep || !enter(n.name)) continue;
+        const sub = await this.walk(a.join(dir, n.name), keep, deep, budget, enter);
         files += sub.files;
         bytes += sub.bytes;
       } else if (keep(n.name)) {
@@ -664,6 +686,23 @@ export class Console {
     if (this.expiryTimer) clearTimeout(this.expiryTimer);
     this.expiryTimer = null;
   }
+}
+
+/** Control and bidi characters as \u{…}: a dialog line shows exactly one line, in the order it is stored. */
+// loop: NOT-WORTH — one pass over a dialog string
+const visible = (t: string) => t.replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, (ch) => `\\u{${ch.codePointAt(0)!.toString(16)}}`);
+
+/** The clip's name as corridorkey names its outputs (ck-core clip.rs raw_clip_name): the file's stem, or the parent
+ * folder's name for input/frames/rgb. */
+export function clipName(input: string, platform: NodeJS.Platform): string {
+  const a = platform === "win32" ? win32 : posix;
+  const p = a.normalize(input).replace(/[\\/]+$/, "");
+  const base = a.basename(p);
+  const trimmed = base.replace(/^\.+/, "");
+  const dot = trimmed.lastIndexOf(".");
+  const stem = dot > 0 ? base.slice(0, base.length - trimmed.length + dot) : base;
+  if (["input", "frames", "rgb"].includes(stem.toLowerCase())) return a.basename(a.dirname(p)) || stem;
+  return stem;
 }
 
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
