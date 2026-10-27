@@ -587,6 +587,8 @@ describe("farm export: the CLI reproduces the app's job (round trip)", () => {
       // loop: NOT-WORTH — the Key step's words
       const args = t.steps.find((s) => s.name === "Key")!.script.actions.onRun.args.map((a) => a.replace(/\{\{Param\.(\w+)\}\}/g, (_, n: string) => v[n] ?? ""));
       args.splice(args.indexOf("--job"), 2);
+      // the farm's own progress lines: the Console refuses the flag (it shows progress itself)
+      args.splice(args.indexOf("--progress-format"), 2);
       // the embedded options.json: {"frame_dir_linear": Linear, "low_vram": LowVram}, null = absent
       const jobFile: Record<string, unknown> = { low_vram: v.LowVram === "true" };
       if (v.Linear !== "null") jobFile.frame_dir_linear = v.Linear === "true";
