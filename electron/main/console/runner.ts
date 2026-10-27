@@ -980,6 +980,7 @@ export class Console {
     for (const j of jobs) farmJobs.push({ ...j, name: clipName(j.clip.path, this.d.paths.platform), range: await this.shotRange(j) });
     const env = this.d.cliEnv();
     const exp = farmExport(format, farmJobs, { models: env.CK_ENGINE_MODELS ?? null, ort: env.CK_ENGINE_ORT ?? null });
+    if (exp.error) return this.finish(b, "refused", exp.error);
     // loop: NOT-WORTH — the files to write
     const paths = exp.files.map((f) => a.join(w.path, ...f.path.split("/")));
     const there: string[] = [];

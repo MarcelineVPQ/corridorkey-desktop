@@ -158,3 +158,70 @@ describe("farm export", () => {
     expect(words(run[1])).toContain("--linear");
   });
 });
+
+// senior review 2026-10-27 M1 (probe P1): a clip, folder or flag value with a new line put its own lines into the farm
+// files (the OpenCue script ran `touch PWNED`; Deadline's job info gained `Plugin=CommandLine`). Control characters are
+// refused, with the clip and why; other hostile characters reach each farm exactly as they are.
+describe("farm export: hostile names (review 2026-10-27 M1)", () => {
+  const FORMATS = ["openjd", "deadline", "opencue", "flamenco", "shell"] as const;
+  const hostile = (name: string): FarmJob => ({ ...fj("x"), name, clip: { path: `/shots/${name}.mov`, kind: "video" } });
+
+  it("refuses a control character in a clip's name, path, results folder, flag value or runtime path, in every format", () => {
+    const cases: [string, FarmJob, typeof env][] = [
+      ["new line (P1: OpenCue runs it)", hostile("x\ntouch PWNED\nx"), env],
+      ["new line (P1: a Deadline key)", hostile("a\nPlugin=CommandLine\nb"), env],
+      ["tab (a shot list's column)", hostile("a\tb"), env],
+      ["NUL", hostile("a\u0000b"), env],
+      ["carriage return", hostile("a\rb"), env],
+      ["DEL", hostile("a\u007fb"), env],
+      ["results folder", { ...fj("sh010"), outputDir: "/renders/a\nPlugin=CommandLine" }, env],
+      ["a flag's value", fj("sh010", { hintMode: "video", hintVideo: "/hints/a\nb.mov" }), env],
+      ["the models folder", fj("sh010"), { ...env, models: "/opt/ck\nmodels" }],
+    ];
+    // loop: NOT-WORTH — a test's few cases × five formats
+    for (const [what, job, e] of cases)
+      for (const f of FORMATS) {
+        const x = farmExport(f, [job], e);
+        expect(x.error, `${f}: ${what}`).toMatch(/control character .*rename/);
+        expect(x.files, `${f}: ${what}`).toEqual([]);
+      }
+    // the proved lines are never written
+    const p1 = farmExport("opencue", [hostile("x\ntouch PWNED\nx")], env);
+    expect(p1.files.some((f) => /^touch PWNED$/m.test(f.text))).toBe(false);
+    expect(farmExport("deadline", [hostile("a\nPlugin=CommandLine\nb")], env).files.some((f) => /^Plugin=CommandLine$/m.test(f.text))).toBe(false);
+  });
+
+  it("quotes, $, % and spaces reach each farm exactly as they are", () => {
+    const name = `it's "a" $(touch P) %PATH% \`id\` x`;
+    const j = hostile(name);
+    const path = `/shots/${name}.mov`;
+    const out = "/renders/x/" + name + ".####.exr";
+    const jj = { ...j, outputDir: "/renders/x" };
+    // OpenJD: YAML values
+    const o = farmExport("openjd", [jj], env);
+    expect(o.error).toBeUndefined();
+    const v = yaml.load(file(o, `${name}/parameter_values.yaml`)) as { parameterValues: { name: string; value: string }[] };
+    expect(v.parameterValues.find((p) => p.name === "Input")!.value).toBe(path);
+    // Deadline: one line per key, the value whole
+    const d = farmExport("deadline", [jj], env);
+    const plugin = file(d, `${name}_plugin_info.txt`).trim().split("\n");
+    expect(plugin).toContain(`InputPath=${path}`);
+    expect(plugin).toContain(`OutputPath=${out}`);
+    // OpenCue: the script's words, as a POSIX shell reads them
+    const c = farmExport("opencue", [jj], env);
+    const w = words(
+      file(c, `${name}_opencue.sh`)
+        .split("\n")
+        .find((l) => l.startsWith("exec "))!,
+    );
+    expect([w[w.indexOf("--shot") + 1], w[w.indexOf("-i") + 1], w[w.indexOf("-o") + 1]]).toEqual([name, path, out]);
+    // Flamenco: JSON
+    const fl = JSON.parse(file(farmExport("flamenco", [jj], env), `${name}.flamenco.json`)) as { settings: { input: string; output: string } };
+    expect([fl.settings.input, fl.settings.output]).toEqual([path, out]);
+    // shell: one INPUT<tab>OUTPUT row
+    const rows = file(farmExport("shell", [jj], env), "shots.txt")
+      .split("\n")
+      .filter((l) => l && !l.startsWith("#"));
+    expect(rows).toEqual([`${path}\t${out}`]);
+  });
+});

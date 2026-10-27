@@ -33,6 +33,8 @@ export interface FarmExport {
   files: { path: string; text: string }[];
   /** what to do with them, and what was left out */
   notes: string[];
+  /** why nothing can be exported (then no files) */
+  error?: string;
 }
 
 /** Flags a farm job carries: the job's, without the video ones (the farm writes EXR) and without --outputs. */
@@ -48,7 +50,32 @@ const y = (s: string) => JSON.stringify(s);
 const runtimeWords = (env: FarmEnv) => [...(env.models ? ["--models", env.models] : []), ...(env.ort ? ["--ort", env.ort] : [])];
 const RUNTIME_NOTE = "The models folder and ONNX Runtime library are this computer's: change them to the workers' paths.";
 
+/** A new line, tab, NUL or other control character: it would start a line or a column of its own in a farm file. */
+const CONTROL = /[\u0000-\u001f\u007f]/;
+
+/**
+ * Why `jobs` can't be exported: a control character in a clip's name or path, its results folder, a flag's value or
+ * the runtime's paths (senior review 2026-10-27 M1: a new line in a name added lines to the key=value files, the shot
+ * lists and the scripts, and no quoting saves key=value or a tab-separated list). Null: it can.
+ */
+function refusal(jobs: readonly FarmJob[], env: FarmEnv): string | null {
+  // loop: NOT-WORTH — the exported jobs and their few values
+  for (const j of jobs) {
+    // loop: NOT-WORTH — a job's few flags
+    const values = [j.name, j.clip.path, j.outputDir, ...farmFlags(j).map(([, v]) => v ?? "")];
+    // loop: NOT-WORTH — as above
+    const bad = values.find((v) => CONTROL.test(v));
+    if (bad !== undefined)
+      return `${JSON.stringify(j.clip.path)}: ${JSON.stringify(bad)} has a control character (a new line, a tab) that would add lines to the farm's files; rename it, then export again.`;
+  }
+  // loop: NOT-WORTH — two paths
+  const bad = [env.models, env.ort].find((v) => v !== null && CONTROL.test(v));
+  return bad ? `${JSON.stringify(bad)} (this computer's runtime) has a control character (a new line, a tab); rename it, then export again.` : null;
+}
+
 export function farmExport(format: FarmFormat, jobs: readonly FarmJob[], env: FarmEnv): FarmExport {
+  const error = refusal(jobs, env);
+  if (error) return { files: [], notes: [], error };
   const notes: string[] = [];
   // loop: NOT-WORTH — the exported jobs
   const video = jobs.filter((j) => j.options.outputFormat === "video").map((j) => j.name);
