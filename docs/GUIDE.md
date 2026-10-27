@@ -107,7 +107,8 @@ render …` says how long it took and the frames per second. Script files (`run 
 several lines; a script stops at the first command that fails (not one on the left of `&&` / `||` or in an `if`),
 `run --keep-going` goes on and still ends failed; a typed line goes on. There are no pipes: the Console's commands
 never pass text to each other or to the system. A line with `;`, `&&`, `||`, `for`, `if` or `time` runs as a script:
-one at a time, and its commands that replace files say `sudo` and are confirmed together before anything runs. A
+one at a time, and its commands that replace files say `sudo` and are confirmed together before anything runs (the
+dialog shows each with its `${…}` filled in, where known, and the files it would replace). A
 program runs at most 10 000 commands (a loop inside a loop counts them all), and Ctrl+C stops it after the command it is
 in.
 

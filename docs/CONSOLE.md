@@ -245,7 +245,11 @@ shell. This page is the main process side, `electron/main/console/` and `src/sha
   the line. **Scripts** (`run`, pasted lines) never use, extend or grant the session's elevation: before any line runs,
   a line that replaces files must say `sudo` (else the whole script is refused), and all such lines are listed in ONE
   native dialog (confirmed: they run without asking again; cancelled: nothing runs), audited as `granted` / `refused`
-  with the script's name and lines. (A typed folder name for bulk
+  with the script's name, lines and targets. The dialog shows each line with its `${…}` filled in (`→ …`) where the
+  values are known before it runs (a variable no line of the program sets, unsets or loops over, and `${home}`), else
+  says they are filled in when it runs; and what the lines would replace, counted as the single command's dialog counts
+  it (a folder given relative to the Console's folder is counted only while the script doesn't `cd`, `pushd`, `popd`
+  or `j`: then the dialog says so). A line shown filled in runs only as shown (senior review 2026-10-27 S2). (A typed folder name for bulk
   deletes comes with the first command that deletes in bulk; none does yet. A native message box has no text field,
   so it needs a dialog of the main process's own.)
 - **Audit log** (`userData/console-audit.jsonl`): every elevation granted, refused or dropped (and why), every

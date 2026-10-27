@@ -1357,7 +1357,17 @@ describe("SME review 2026-10-26: scripts and elevation (S11), pasted lines (S2)"
     confirmAnswer = false;
     const b = await c.run("run d.ckcmd");
     expect([b.state, b.lines[0].text]).toEqual(["refused", "Not run: the confirmation was cancelled (nothing ran)."]);
-    expect(scriptAsks).toEqual([{ script: "d.ckcmd", lines: ["d.ckcmd:2  sudo render shot.mov -o ../out/e/ --overwrite", "d.ckcmd:3  sudo render shot.mov -o ../out/f/ --overwrite"] }]);
+    expect(scriptAsks).toEqual([
+      {
+        script: "d.ckcmd",
+        lines: ["d.ckcmd:2  sudo render shot.mov -o ../out/e/ --overwrite", "d.ckcmd:3  sudo render shot.mov -o ../out/f/ --overwrite"],
+        targets: [
+          { path: join(out, "e"), files: 0, bytes: 0 },
+          { path: join(out, "f"), files: 0, bytes: 0 },
+        ],
+        movesFolder: false,
+      },
+    ]);
     expect([confirms, spawned, [...blocks.values()].filter((x) => x.parent === b.id)]).toEqual([[], [], []]);
     expect(readFileSync(join(files, "console-audit.jsonl"), "utf8")).toMatch(/"event":"refused","argv":\["run","d.ckcmd"\]/);
     expect(c.session().running).toBeNull();
@@ -1644,7 +1654,14 @@ describe("Phase 4: scripting", () => {
     const bare = await c.run("pwd && render shot.mov -o ../out/e/ --overwrite");
     expect([bare.state, bare.lines[0].text]).toEqual(["refused", "replaces files: a line with ; && || for or if says so with sudo (sudo render shot.mov -o ../out/e/ --overwrite); nothing ran."]);
     const b = await c.run("for s in e f; do sudo render shot.mov -o ../out/${s}/ --overwrite; done");
-    expect(scriptAsks).toEqual([{ script: "the line typed", lines: ["sudo render shot.mov -o ../out/${s}/ --overwrite"] }]);
+    expect(scriptAsks).toEqual([
+      {
+        script: "the line typed",
+        lines: ["sudo render shot.mov -o ../out/${s}/ --overwrite   (its ${…} are filled in when it runs: the program's loop or set gives them)"],
+        targets: [],
+        movesFolder: false,
+      },
+    ]);
     await settle();
     expect(spawned).toHaveLength(1);
     expect(spawned[0].args).toContain(join(out, "e"));
@@ -1838,5 +1855,49 @@ describe("review 2026-10-27 S6: the long built-ins take the slot and stop on Ctr
       // the slot is free again
       expect((await c.run("version")).state).toBe("done");
     }
+  });
+});
+
+// senior review 2026-10-27 S2 (probe P6): a program's one confirmation showed `-o ${o}` unfilled and no targets
+describe("review 2026-10-27 S2: a program's confirmation shows its lines filled in and what they replace", () => {
+  it("a session variable: the line as it will run and the files there now, counted as the single command's dialog counts them", async () => {
+    const d = join(out, "s2");
+    mkdirSync(join(d, "shot_alpha_exr"), { recursive: true });
+    writeFileSync(join(d, "shot_alpha_exr", "shot_alpha.1001.exr"), "123");
+    writeFileSync(join(d, "shot_alpha_exr", "shot_alpha.1002.exr"), "123");
+    writeFileSync(join(d, "other.txt"), "123456");
+    const { c } = make();
+    await c.run("set o=../out/s2/");
+    confirmAnswer = false;
+    await c.run("pwd; sudo render shot.mov -o ${o} --overwrite");
+    expect(scriptAsks).toEqual([
+      {
+        script: "the line typed",
+        lines: ['sudo render shot.mov -o ${o} --overwrite   →  sudo render shot.mov -o "../out/s2/" --overwrite'],
+        targets: [{ path: d, files: 2, bytes: 6 }],
+        movesFolder: false,
+      },
+    ]);
+  });
+
+  it("P6: a variable the program sets (or a loop's) is said to be filled in when it runs; a cd makes relative folders uncounted", async () => {
+    const { c } = make();
+    confirmAnswer = false;
+    await c.run("set o=../out/s3/; sudo render shot.mov -o ${o} --overwrite");
+    expect(scriptAsks[0].lines).toEqual(["sudo render shot.mov -o ${o} --overwrite   (its ${…} are filled in when it runs: the program's loop or set gives them)"]);
+    expect(scriptAsks[0].targets).toEqual([]);
+    await c.run("cd ..; sudo render shot.mov -o out/s4/ --overwrite");
+    expect(scriptAsks[1]).toMatchObject({ targets: [], movesFolder: true });
+  });
+
+  it("a confirmed line runs only as it was shown filled in", async () => {
+    const { c } = make();
+    await c.run("set o=../out/s5/");
+    const b = await c.run("pwd; sudo render shot.mov -o ${o} --overwrite");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0].args).toContain(join(out, "s5"));
+    await finish(spawned[0].child, [], 0);
+    expect(b.state).not.toBe("refused");
   });
 });

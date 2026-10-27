@@ -22,7 +22,7 @@ import type { AuditLog, History } from "./logs";
 import { checkWrite, expandHome, fsErrorText, resolveReal, type PathDeps } from "./paths";
 import { expandHistory, hasExpansion } from "../../../src/shared/console/expand";
 import { frameToken, groupSequences, sequenceOf, type Sequence } from "../../../src/shared/console/sequences";
-import { commands, globRegExp, isCompound, parseProgram, type List } from "../../../src/shared/console/script";
+import { commands, globRegExp, isCompound, parseProgram, type CmdNode, type List } from "../../../src/shared/console/script";
 import { tokenize } from "../../../src/shared/console/parse";
 import { BOOKMARK_NAME, BOOKMARKS_MAX, VARIABLES_MAX, WRITE_FOLDERS_MAX } from "../settings";
 import { expandVars, READ_ONLY, VALUE_MAX, VAR_NAME } from "../../../src/shared/console/vars";
@@ -139,12 +139,21 @@ interface Job {
   scriptGrant?: boolean;
   /** a long built-in (du, tree, wc, j): Ctrl+C stops it at its next entry, chunk or folder */
   builtin?: boolean;
+  /** a script's confirmed lines with `${…}`, as they were shown filled in: each must run as shown */
+  confirmed?: Map<CmdNode, string>;
 }
 
-/** A script's lines that replace files, as its one confirmation lists them (control and bidi characters shown). */
+/**
+ * A script's lines that replace files, as its one confirmation lists them (control and bidi characters shown): each
+ * with its `${…}` filled in where the values are known before it runs (else said), and what the lines known now would
+ * replace, counted as the single command's dialog counts it (senior review 2026-10-27 S2).
+ */
 export interface ScriptElevationRequest {
   script: string;
   lines: string[];
+  targets: ElevationRequest["targets"];
+  /** the script changes folder (cd, pushd, popd, j): a relative folder is resolved when its line runs, not counted */
+  movesFolder: boolean;
 }
 
 const AUDIT_FAILED = "Not run: the audit log couldn't record it (every elevated command is logged first; see the app's log for why).";
@@ -1384,7 +1393,7 @@ export class Console {
     const where = (n: number) => (name === null ? "" : `${name}:${n}  `);
     // loop: NOT-WORTH — a program's commands, parsed once before it runs
     const destructive = commands(list)
-      .map((c) => ({ ...c, p: parse(c.text, this.d.registry, this.opts) }))
+      .map((c) => ({ node: c, text: c.text, line: c.line, p: parse(c.text, this.d.registry, this.opts) }))
       // loop: NOT-WORTH — one command's options
       .filter((x) => x.p.options.some((o) => o.arg.destructive));
     // loop: NOT-WORTH — as above
@@ -1398,11 +1407,19 @@ export class Console {
         ),
       );
     if (destructive.length) {
+      const ask = await this.scriptAsk(list, destructive);
+      job.confirmed = ask.confirmed;
       // loop: NOT-WORTH — as above
-      const listed = destructive.map((x) => visible(`${where(x.line)}${x.text}`));
+      const listed = destructive.map((x, i) => visible(`${where(x.line)}${x.text}${ask.shown[i]}`));
       const label = name ?? "the line typed";
-      const ok = await this.d.confirmScript({ script: visible(label), lines: listed });
-      const logged = await this.d.audit.append({ event: ok ? "granted" : "refused", argv: ["run", label], reason: `the script's ${listed.length} line(s) that replace files: ${listed.join(" | ")}` });
+      const ok = await this.d.confirmScript({ script: visible(label), lines: listed, targets: ask.targets, movesFolder: ask.movesFolder });
+      const logged = await this.d.audit.append({
+        event: ok ? "granted" : "refused",
+        argv: ["run", label],
+        // loop: NOT-WORTH — the targets shown
+        targets: ask.targets.map((t) => t.path),
+        reason: `the script's ${listed.length} line(s) that replace files: ${listed.join(" | ")}`,
+      });
       if (!ok) return release(this.finish(b, "refused", "Not run: the confirmation was cancelled (nothing ran)."));
       if (!logged) return release(this.finish(b, "refused", AUDIT_FAILED));
       job.scriptGrant = true;
@@ -1432,6 +1449,71 @@ export class Console {
       return this.finish(b, "done");
     })();
     return { block: b, done };
+  }
+
+  /**
+   * What a program's one confirmation shows for its lines that replace files (S2): each line's `${…}` filled in with
+   * the values it will get, where they are known before it runs (a variable no line of the program sets, unsets or
+   * loops over; `${home}`), else said; and the files the lines known now would replace in their written folders,
+   * counted as a single command's dialog counts them (a relative folder only while the program doesn't change folder).
+   */
+  private async scriptAsk(
+    list: List,
+    lines: { node: CmdNode; p: Parsed }[],
+  ): Promise<{ shown: string[]; confirmed: Map<CmdNode, string>; targets: ElevationRequest["targets"]; movesFolder: boolean }> {
+    const a = this.d.paths.platform === "win32" ? win32 : posix;
+    // the names whose value changes while the program runs: its loops' and its set / unset's, and the Console's own
+    // (but ${home})
+    // loop: NOT-WORTH — five names
+    const changing = new Set<string>(READ_ONLY.filter((n) => n !== "home"));
+    let movesFolder = false;
+    // loop: NOT-WORTH — the program's commands, parsed once before it runs
+    for (const c of commands(list)) {
+      const q = parse(c.text, this.d.registry, this.opts);
+      const n = q.command?.name;
+      if (n === "cd" || n === "pushd" || n === "popd" || n === "j") movesFolder = true;
+      // loop: NOT-WORTH — one command's few words
+      if (n === "set" || n === "unset") for (const w of q.positionals) changing.add(w.value.split("=")[0]);
+    }
+    const loops = (l: List): void =>
+      // loop: NOT-WORTH — the program's nodes
+      l.items.forEach(({ node: x }) => {
+        if (x.kind === "for") {
+          changing.add(x.name);
+          loops(x.body);
+        } else if (x.kind === "if") {
+          // loop: NOT-WORTH — an if's three lists
+          [x.cond, x.then, x.else].forEach((y) => y && loops(y));
+        }
+      });
+    loops(list);
+    const shown: string[] = [];
+    const confirmed = new Map<CmdNode, string>();
+    const paths: string[] = [];
+    const targets: ElevationRequest["targets"] = [];
+    // loop: NOT-WORTH — the program's few lines that replace files, one async realpath per written folder
+    for (const { node } of lines) {
+      const v = expandVars(node.text, (k) => (changing.has(k) ? undefined : this.lookup(k)), this.opts);
+      if ("error" in v) {
+        shown.push("   (its ${…} are filled in when it runs: the program's loop or set gives them)");
+        continue;
+      }
+      shown.push(v.changed ? `   →  ${v.line}` : "");
+      if (v.changed) confirmed.set(node, v.line);
+      const q = parse(v.line, this.d.registry, this.opts);
+      // loop: NOT-WORTH — the line's few options
+      const written = q.options.filter((o) => o.arg.writes && o.value !== null && !(movesFolder && !a.isAbsolute(expandHome(o.value!, this.d.paths))));
+      // loop: NOT-WORTH — one or two written folders
+      for (const o of written) {
+        const w = await checkWrite(o.value!, this.cwd, this.d.writeRoots(), this.d.paths);
+        if (!w.ok || paths.includes(w.path)) continue;
+        paths.push(w.path);
+        // loop: NOT-WORTH — the line's few arguments
+        const input = q.positionals.find((x) => x.arg.id === "clip")?.value ?? q.options.find((x) => x.arg.id === "input")?.value;
+        targets.push(...(await this.measureTargets([w.path], q.command?.name === "render" && input ? clipName(input, this.d.paths.platform) : null)));
+      }
+    }
+    return { shown, confirmed, targets, movesFolder };
   }
 
   /** Runs a list: each command after its operator says so (&&: the last ended 0, ||: it didn't); the last status. */
@@ -1486,8 +1568,13 @@ export class Console {
       if (ctx.name !== null) this.note(ctx.b, "info", `${ctx.name}:${node.line}  ${node.time ? "time " : ""}${node.text}`);
       const v = this.expand(node.text, ctx.scope);
       const started = this.now();
-      const r = "error" in v ? null : await this.runLine(v.line, ctx.b.id, v.changed ? node.text : null);
-      const end = r ? await r.done : this.finish(this.block(node.text, ctx.b.id), "refused", (v as { error: string }).error);
+      // a confirmed line runs only as the confirmation showed it filled in
+      const shown = ctx.job.confirmed?.get(node);
+      const changed = shown !== undefined && !("error" in v) && v.line !== shown;
+      const r = "error" in v || changed ? null : await this.runLine(v.line, ctx.b.id, v.changed ? node.text : null);
+      const end = r
+        ? await r.done
+        : this.finish(this.block(node.text, ctx.b.id), "refused", changed ? `Not run: its \${…} changed since the confirmation (it showed ${shown}).` : (v as { error: string }).error);
       status = statusOf(end);
       this.status = status;
       if (node.time) this.note(ctx.b, "out", timeLine(end, this.now() - started));

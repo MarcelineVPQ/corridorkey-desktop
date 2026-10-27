@@ -338,7 +338,11 @@ async function confirmScript(req: ScriptElevationRequest): Promise<boolean> {
     cancelId: 1,
     message: `Run ${req.script}? ${req.lines.length === 1 ? "One of its lines replaces" : `${req.lines.length} of its lines replace`} files`,
     detail:
-      `${req.lines.join("\n")}\n\nConfirmed, these lines run without asking again, in order; nothing else is elevated (the script ` +
+      `${req.lines.join("\n")}\n\n` +
+      // loop: NOT-WORTH — the script's few written folders
+      req.targets.map((t) => `${t.path}: ${t.files} file${t.files === 1 ? "" : "s"} at the run's names there now (${mbOrGbBytes(t.bytes)}); the script replaces them.\n`).join("") +
+      (req.movesFolder ? "The script changes folder: a folder given relative to it is resolved, and its files replaced, when its line runs.\n" : "") +
+      "\nConfirmed, these lines run without asking again, in order; nothing else is elevated (the script " +
       "doesn't use or extend the Console's elevation, and this doesn't elevate the Console). Every one is logged.",
   });
   return r.response === 0;
