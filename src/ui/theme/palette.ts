@@ -127,16 +127,44 @@ export function legibleOnAll(fg: Rgb, grounds: Rgb[], target: number, ink: Rgb):
 export const css = (c: Rgb) => `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
 export const cssA = (c: Rgb, a: number) => `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${a})`;
 
-/** The accent tokens for one accent on the given surfaces (each accent-as-text use reaches 4.6:1 on all of them). */
+/** The built-in surfaces, tokens.css --bg-0..2 of each theme (palette.test.ts checks they match), for an accent-only
+ * palette's contrast math. */
+export const BUILTIN_GROUNDS: { dark: Rgb[]; light: Rgb[] } = {
+  dark: [
+    [22, 24, 29],
+    [29, 32, 39],
+    [37, 41, 50],
+  ],
+  light: [
+    [243, 244, 247],
+    [255, 255, 255],
+    [236, 238, 242],
+  ],
+}; // theme-exempt: the built-in surfaces (tokens.css --bg-0..2), checked against it in palette.test.ts
+
+/**
+ * The accent tokens for one accent on the given surfaces (each accent-as-text use reaches 4.6:1 on all of them): every
+ * token tokens.css derives from the built-in green, the marks beside green words included (senior review S2), so a
+ * desktop accent never leaves a second accent on screen. Status colors keep their meaning and aren't touched.
+ */
 export function accentVars(accent: Rgb, grounds: Rgb[], isDark: boolean): Record<string, string> {
   const ink = isDark ? WHITE : BLACK;
   const onAccent = wantsLightInk(accent) ? WHITE : BLACK;
+  const accentInk = css(legibleOnAll(accent, grounds, 4.6, ink));
+  const none = cssA(BLACK, 0);
+  // light: the accent as a mark beside the words (a disc, a dot, a link's underline band) with a dark edge; dark: the
+  // words themselves carry it, the ✓ in the accent's ink
+  const edge = css(mix(accent, BLACK, 0.85));
   return {
     "--accent": css(accent),
     "--accent-text": css(onAccent),
-    "--accent-ink": css(legibleOnAll(accent, grounds, 4.6, ink)),
+    "--accent-ink": accentInk,
     "--accent-soft": cssA(accent, isDark ? 0.18 : 0.14),
     "--focus-ring": css(accent),
+    "--mark-fill": isDark ? none : css(accent),
+    "--mark-ink": isDark ? accentInk : css(onAccent),
+    "--mark-edge": isDark ? none : edge,
+    "--link-mark": isDark ? none : css(accent),
   };
 }
 
@@ -166,19 +194,7 @@ export function paletteToCssVars(p: DesktopPalette): Record<string, string> {
       "--text-3": css(legibleOnAll(p.inactiveText ?? mix(pageText, page, 0.4), grounds, 4.5, p.isDark ? WHITE : BLACK)),
       "--progress-track": css(mix(button, pageText, 0.12)),
     });
-  } else {
-    grounds = p.isDark
-      ? [
-          [22, 24, 29],
-          [29, 32, 39],
-          [37, 41, 50],
-        ]
-      : [
-          [243, 244, 247],
-          [255, 255, 255],
-          [236, 238, 242],
-        ]; // theme-exempt: the built-in surfaces (tokens.css --bg-0..2), for an accent-only palette
-  }
+  } else grounds = p.isDark ? BUILTIN_GROUNDS.dark : BUILTIN_GROUNDS.light;
   Object.assign(vars, accentVars(p.accent, grounds, p.isDark));
   return vars;
 }

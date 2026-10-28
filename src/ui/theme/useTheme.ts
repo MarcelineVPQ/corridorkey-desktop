@@ -5,7 +5,7 @@
 // a new copy of the same palette).
 import { useEffect } from "react";
 import type { Appearance } from "../../shared/types";
-import { accentVars, paletteToCssVars, type DesktopPalette, type Rgb } from "./palette";
+import { accentVars, BUILTIN_GROUNDS, paletteToCssVars, type DesktopPalette } from "./palette";
 
 // cache: OK — key=none (the tokens this hook set); invalidated=on every apply; bound=one token set
 let applied: string[] = [];
@@ -21,18 +21,7 @@ export function useTheme(appearance: Appearance, palette: DesktopPalette | null)
     if (palette && appearance.theme === "desktop") vars = paletteToCssVars(palette);
     else if (palette && appearance.accent === "desktop") {
       const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-      const grounds: Rgb[] = dark
-        ? [
-            [22, 24, 29],
-            [29, 32, 39],
-            [37, 41, 50],
-          ]
-        : [
-            [243, 244, 247],
-            [255, 255, 255],
-            [236, 238, 242],
-          ]; // theme-exempt: the built-in surfaces (tokens.css --bg-0..2)
-      vars = accentVars(palette.accent, grounds, dark);
+      vars = accentVars(palette.accent, dark ? BUILTIN_GROUNDS.dark : BUILTIN_GROUNDS.light, dark);
     }
     // loop: NOT-WORTH — ≤ 20 tokens, on an appearance or desktop color change only
     for (const [k, v] of Object.entries(vars)) root.style.setProperty(k, v);

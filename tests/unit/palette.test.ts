@@ -1,5 +1,13 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { accentText, contrast, ensureContrast, paletteToCssVars, parseKdeGlobals, type Rgb } from "../../src/ui/theme/palette";
+import { accentText, accentVars, BUILTIN_GROUNDS, contrast, ensureContrast, paletteToCssVars, parseKdeGlobals, type Rgb } from "../../src/ui/theme/palette";
+
+const TOKENS = readFileSync(new URL("../../src/styles/tokens.css", import.meta.url), "utf8");
+const THEME_SRC = { dark: TOKENS.slice(0, TOKENS.indexOf("@media")), light: TOKENS.slice(TOKENS.indexOf("@media")) };
+/** a theme block's declarations, name → value */
+// loop: NOT-WORTH — one theme block's few dozen declarations, per test
+const decls = (src: string) => new Map([...src.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]));
+const hexRgb = (h: string): Rgb => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)) as Rgb;
 
 const BREEZE_DARK = `[General]
 AccentColor=61,174,233
@@ -38,5 +46,27 @@ describe("Desktop theme", () => {
     expect(accentText({ theme: "desktop", accent: "builtin" }, true)).toBe("desktop accent");
     expect(accentText({ theme: "dark", accent: "builtin" }, true)).toBe("built-in accent");
     expect(accentText({ theme: "dark", accent: "desktop" }, false)).toBe("built-in accent (no desktop colors found)");
+  });
+
+  it("review N9: the built-in surfaces the accent math uses are tokens.css's own --bg-0..2", () => {
+    // loop: NOT-WORTH — two themes × three surfaces
+    for (const theme of ["dark", "light"] as const) {
+      const d = decls(THEME_SRC[theme]);
+      expect(BUILTIN_GROUNDS[theme]).toEqual(["--bg-0", "--bg-1", "--bg-2"].map((k) => hexRgb(d.get(k)!)));
+    }
+  });
+  it("review S2: a desktop accent overrides every token tokens.css derives from the built-in green (the marks too)", () => {
+    // the built-in green and its dark ink; status colors keep their meaning (--status-ok)
+    const green = /#00b140|#0b1f13|rgba\(0, 177, 64/i;
+    // loop: NOT-WORTH — two themes
+    for (const theme of ["dark", "light"] as const) {
+      // loop: NOT-WORTH — one theme's few dozen tokens
+      const derived = [...decls(THEME_SRC[theme])].filter(([k, v]) => green.test(v) && k !== "--status-ok").map(([k]) => k);
+      expect(derived.length).toBeGreaterThan(3);
+      const vars = accentVars([61, 174, 233], BUILTIN_GROUNDS[theme], theme === "dark");
+      expect(derived.filter((k) => !(k in vars))).toEqual([]);
+      // no green left in what it sets
+      expect(Object.values(vars).filter((v) => /177, 64|\(0, 177/.test(v))).toEqual([]);
+    }
   });
 });
