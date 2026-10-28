@@ -1,6 +1,6 @@
 // Gives an element the liquid glass backdrop while `on`. Returns a callback
 // ref, so it attaches whenever the element appears (an element that mounts
-// later, like the save bar once the dongle connects, still gets it) and
+// later, like the settings panel's drawer once a narrow window opens it, still gets it) and
 // rebuilds the filter when the size changes (debounced; the map is per size).
 //
 // Two filters per element, as CSS variables the stylesheet chooses from:

@@ -1,7 +1,7 @@
 // The specular rim of a glass element: a thin bright edge whose highlight
 // sits where the light would catch it, following the pointer anywhere in the
 // window (CSS variables --lx / --ly, in % of the element, read by the rim
-// gradient in desktop.css). One shared listener, updated at most once a frame.
+// gradient in shell.css). One shared listener, updated at most once a frame.
 import { useEffect } from "react";
 
 // cache: OK — key=element; invalidated=removed on unmount; bound=mounted glass elements
