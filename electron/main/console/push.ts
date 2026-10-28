@@ -9,6 +9,8 @@ export class BlockPusher {
   private readonly pending = new Map<number, ConsoleBlock>();
   // per running block: how many of its lines (dropped ones included) the page has; a push sends only the ones after
   private readonly sentLines = new Map<number, number>();
+  // per running block: the object last pushed; watch reruns a command in a fresh block with the same id (review 2026-10-28 #1)
+  private readonly sentBlock = new Map<number, ConsoleBlock>();
   private timer: NodeJS.Timeout | null = null;
   private shown = false;
 
@@ -28,13 +30,23 @@ export class BlockPusher {
   /**
    * `b` with only the lines the page doesn't have yet (senior review 2026-10-26 N6: a push resent the whole block,
    * up to 2000 lines of 4000 characters, ten times a second). A block no longer running is forgotten; were it pushed
-   * again it would carry all its lines, which mergeBlocks places by number, so nothing is doubled.
+   * again it would carry all its lines, which mergeBlocks places by number, so nothing is doubled. A block whose lines
+   * were reset (a new object under the same id, as each `watch` run is, or fewer lines than the page has) goes whole,
+   * without `linesFrom`, so the page drops the earlier run's lines (review 2026-10-28 #1).
    */
   private appended(b: ConsoleBlock): ConsoleBlock {
     const total = b.linesDropped + b.lines.length;
-    const from = Math.max(this.sentLines.get(b.id) ?? 0, b.linesDropped);
-    if (b.state === "running") this.sentLines.set(b.id, total);
-    else this.sentLines.delete(b.id);
+    const sent = this.sentLines.get(b.id);
+    const reset = sent !== undefined && (this.sentBlock.get(b.id) !== b || total < sent);
+    if (b.state === "running") {
+      this.sentLines.set(b.id, total);
+      this.sentBlock.set(b.id, b);
+    } else {
+      this.sentLines.delete(b.id);
+      this.sentBlock.delete(b.id);
+    }
+    if (reset) return { ...b, lines: [...b.lines], linesFrom: undefined };
+    const from = Math.max(sent ?? 0, b.linesDropped);
     return { ...b, lines: b.lines.slice(from - b.linesDropped), linesFrom: from };
   }
 

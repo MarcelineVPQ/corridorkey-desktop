@@ -30,7 +30,7 @@ import { consoleLineArg, consoleLinesArg, cursorArg, fromAppPage } from "../../e
 import { makeRegistry } from "../../src/shared/console/registry";
 import { HISTORY_WINDOW } from "../../src/shared/console/expand";
 import { leavesQuoteOpen } from "../../src/shared/console/script";
-import { blockText, mergeBlocks } from "../../src/ui/console/model";
+import { blockText, mergeBlocks, type BlockList } from "../../src/ui/console/model";
 import { parseLine } from "../../src/shared/console/script";
 import { exrFile } from "./exrBytes";
 import { DEFAULT_OPTIONS, type ConsoleBlock, type DoctorRow, type Job } from "../../src/shared/types";
@@ -2657,6 +2657,42 @@ describe("SME reviews: watch", () => {
       c.cancel();
       await until(() => blocks.get(b.id)!.state !== "running");
       expect([blocks.get(b.id)!.state, c.session().running]).toEqual(["cancelled", null]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("review 2026-10-28 #1: through BlockPusher and mergeBlocks, the page shows the newest run's output, never the first run's", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      let page: BlockList = { blocks: [], clearedTo: 0 };
+      const p = new BlockPusher((bs) => void (page = mergeBlocks(page, bs)));
+      p.setShown(true);
+      const { c } = make({ changed: (b) => (blocks.set(b.id, structuredClone(b)), p.mark(b)) });
+      const d = mkdtempSync(join(root, "watch-"));
+      writeFileSync(join(d, "a.1001.exr"), "x");
+      await c.run(`cd ${d}`);
+      const b = await c.run("watch -n 2 dir -1");
+      await until(() => /run 1 /.test(blocks.get(b.id)?.status ?? ""));
+      await vi.advanceTimersByTimeAsync(PUSH_EVERY_MS);
+      const shownLines = () => page.blocks.find((x) => x.id === b.id)!.lines.map((l) => l.text);
+      expect(shownLines()).toEqual(["a.1001.exr"]);
+      // run 2 prints more lines than run 1, none of them run 1's
+      rmSync(join(d, "a.1001.exr"));
+      writeFileSync(join(d, "b.1001.exr"), "x");
+      writeFileSync(join(d, "c.1001.exr"), "x");
+      await vi.advanceTimersByTimeAsync(2000);
+      await until(() => /run 2 /.test(blocks.get(b.id)?.status ?? ""));
+      await vi.advanceTimersByTimeAsync(PUSH_EVERY_MS);
+      expect(shownLines()).toEqual(["b.1001.exr", "c.1001.exr"]);
+      // run 3 prints fewer
+      rmSync(join(d, "b.1001.exr"));
+      await vi.advanceTimersByTimeAsync(2000);
+      await until(() => /run 3 /.test(blocks.get(b.id)?.status ?? ""));
+      await vi.advanceTimersByTimeAsync(PUSH_EVERY_MS);
+      expect(shownLines()).toEqual(["c.1001.exr"]);
+      c.cancel();
+      await until(() => blocks.get(b.id)!.state !== "running");
     } finally {
       vi.useRealTimers();
     }
