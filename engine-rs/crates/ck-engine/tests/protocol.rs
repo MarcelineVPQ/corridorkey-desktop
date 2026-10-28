@@ -182,6 +182,32 @@ fn out_of_range_and_non_finite_options_are_bad_requests_without_running() {
     }
 }
 
+#[test]
+fn trt_build_refuses_invalid_fields_instead_of_ignoring_them() {
+    // final review 2026-10-28 N6: vram_budget_gb 0 / -1 / "x" and frames 0 were ignored, so the build sized its window
+    // for the whole card while the job used its budget, and the job's range said "not built"
+    // loop: NOT-WORTH — a test's few requests
+    for extra in [
+        json!({"vram_budget_gb": 0}),
+        json!({"vram_budget_gb": -1}),
+        json!({"vram_budget_gb": "x"}),
+        json!({"frames": 0}),
+        json!({"frames": -5}),
+        json!({"frames": 2.5}),
+    ] {
+        let mut req = json!({"cmd": "trt_build", "id": "b1", "width": 1920, "height": 1080});
+        // loop: NOT-WORTH — one field
+        for (k, v) in extra.as_object().unwrap() {
+            req[k] = v.clone();
+        }
+        let (r, _) = talk(&[req], &[]);
+        assert_eq!((r[0]["type"].as_str(), r[0]["code"].as_str(), r[0]["id"].as_str()), (Some("error"), Some("bad-request"), Some("b1")), "{extra}: {}", r[0]);
+    }
+    // absent or null: the defaults; valid values build
+    let (r, _) = talk(&[json!({"cmd": "trt_build", "id": "b1", "width": 1920, "height": 1080, "frames": 48, "vram_budget_gb": 8, "x": null})], &[]);
+    assert_eq!(r[0]["type"], "trt_built", "{}", r[0]);
+}
+
 fn run(id: &str, input: &str) -> Value {
     json!({"cmd": "run", "id": id, "input": input, "output_dir": "/o", "temp_dir": "/t", "options": {}})
 }

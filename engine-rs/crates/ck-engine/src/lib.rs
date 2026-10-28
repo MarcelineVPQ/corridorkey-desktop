@@ -41,9 +41,29 @@ fn trt_build_job<B: Backend, W: Write>(backend: &mut B, req: &Value, id: &str, r
         r.send(json!({"type": "error", "id": id, "code": "bad-request", "message": "trt_build needs width and height (1 to 16384)"}));
         return;
     };
-    // a long clip by default: the window a clip shorter than it would pick may differ (the `frames` it has)
-    let frames = req.get("frames").and_then(|v| v.as_u64()).filter(|v| *v > 0).map(|v| v as usize).unwrap_or(1000);
-    let cap = req.get("vram_budget_gb").and_then(|v| v.as_f64()).filter(|g| g.is_finite() && *g > 0.0);
+    // a long clip by default: the window a clip shorter than it would pick may differ (the `frames` it has). A field
+    // that is there but invalid is refused, as `estimate` does, never ignored (final review 2026-10-28 N6: the build
+    // sized its window for the whole card, the job used its budget, and the job's range said "not built")
+    let frames = match req.get("frames") {
+        None | Some(Value::Null) => 1000,
+        Some(v) => match v.as_u64().filter(|f| *f > 0) {
+            Some(f) => f as usize,
+            None => {
+                r.send(json!({"type": "error", "id": id, "code": "bad-request", "message": format!("trt_build frames: a whole number above 0, got {v}")}));
+                return;
+            }
+        },
+    };
+    let cap = match req.get("vram_budget_gb") {
+        None | Some(Value::Null) => None,
+        Some(v) => match v.as_f64().filter(|g| g.is_finite() && *g > 0.0) {
+            Some(g) => Some(g),
+            None => {
+                r.send(json!({"type": "error", "id": id, "code": "bad-request", "message": format!("vram_budget_gb: a positive number, got {v}")}));
+                return;
+            }
+        },
+    };
     r.job = Some(id.to_string());
     // a panic: the protocol loop's guard replies and resets the backend (it skipped the reset when caught here)
     let res = backend.trt_build(w, h, frames, cap, r);

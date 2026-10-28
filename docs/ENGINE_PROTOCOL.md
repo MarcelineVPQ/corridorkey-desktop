@@ -61,7 +61,8 @@ gets the same signal.
 
 `trt_build` (Rust engine, additive, 2026-10-25): build the TensorRT engines a clip of `width` × `height` would use,
 ahead of any job (the app's background build, so a job never waits on one). `frames` (default 1000, a long clip) and
-`vram_budget_gb` (as the run option) as a run takes them. The engine pads the size as a run does, picks the window a
+`vram_budget_gb` (as the run option) as a run takes them; either one present but invalid (not a whole number above
+0, not a positive number) is a `bad-request`, never ignored. The engine pads the size as a run does, picks the window a
 TensorRT job of that size picks (the automatic window in low-VRAM mode, against the free memory it reads now), and
 builds every network of that range not built yet with the same builder a job uses (`progress` replies, stage
 `optimize`, with `piece`; `log` lines). Then `{"type":"trt_built","id":"b1","width":4096,"height":2160,
