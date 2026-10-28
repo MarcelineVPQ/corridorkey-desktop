@@ -8,8 +8,11 @@
 // (`git log origin/main..HEAD`); without origin/main it checks nothing and says so.
 //   node tools/check_docs_touch.mjs                 the gate (npm run gates)
 //   node tools/check_docs_touch.mjs <A>..<B>        the commits in a range (tools/release.sh: since the last tag)
-//   node tools/check_docs_touch.mjs --staged <msg>  the commit being made: its staged files and message file
-//                                                   (.hooks/commit-msg; senior review 2026-10-27 S6)
+//   node tools/check_docs_touch.mjs --staged <msg> [--amend]  the commit being made: its staged files and message
+//                                                   file (.hooks/commit-msg; senior review 2026-10-27 S6); --amend: the
+//                                                   files against HEAD^, since the amended commit replaces HEAD
+//                                                   (release review 2026-10-28 #12: `--amend -m` with nothing staged
+//                                                   passed)
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -76,18 +79,30 @@ export function checkAll(app = APP, range) {
   return checkCommits(parseLog(git(["log", "--format=%x01%H%x02%B%x02", "--name-only", range ?? "origin/main..HEAD"])));
 }
 
-/** The commit being made in `app`: its staged files and the message in `msgFile` (git's commit-msg hook argument). */
-export function checkStaged(msgFile, app = APP) {
+/** The commit being made in `app`: its staged files and the message in `msgFile` (git's commit-msg hook argument).
+ * `amend`: the commit replaces HEAD, so its files are the index against HEAD's parent (the empty tree for a root). */
+export function checkStaged(msgFile, app = APP, amend = false) {
+  const git = gitIn(app);
+  // without a base: against HEAD (or nothing, before the first commit)
+  let base = [];
+  if (amend) {
+    try {
+      base = [git(["rev-parse", "--verify", "--quiet", "HEAD^"]).trim()];
+    } catch {
+      // error: NOT-WORTH — HEAD is a root commit: everything in the index is the commit's
+      base = ["4b825dc642cb6eb9a060e54bf8d69288fbee4904"];
+    }
+  }
   // loop: NOT-WORTH — one commit's staged files
-  const files = gitIn(app)(["diff", "--cached", "--name-only"])
+  const files = git(["diff", "--cached", "--name-only", ...base])
     .split("\n")
     .filter((f) => f.trim());
   return checkCommits([{ sha: "staged", message: readFileSync(msgFile, "utf8"), files }]);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
-  const [a, b] = process.argv.slice(2);
-  const problems = a === "--staged" ? checkStaged(b, process.cwd()) : checkAll(APP, a);
+  const [a, b, c] = process.argv.slice(2);
+  const problems = a === "--staged" ? checkStaged(b, process.cwd(), c === "--amend") : checkAll(APP, a);
   if (problems.length) {
     console.log("Docs-touch gate (tools/check_docs_touch.mjs):\n" + problems.join("\n"));
     process.exit(1);

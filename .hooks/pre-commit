@@ -3,6 +3,14 @@
 # The gates judge what is being committed: they run on a copy of the index (git checkout-index, ~27 MB, tracked files
 # only), not on the working tree, so a partly staged commit isn't judged by its unstaged files (review N10).
 set -euo pipefail
+# native Windows (Git Bash, MSYS2, Cygwin): the gates are POSIX-only (tools/run_gates.mjs), and ln -s below copies the
+# whole node_modules there; they'd refuse every commit, so they're skipped with a note (release review 2026-10-28 #10)
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*)
+    echo "pre-commit: native Windows: the gates run on Linux and macOS only, so they were skipped; commit from WSL to run them (CONTRIBUTING.md)" >&2
+    exit 0
+    ;;
+esac
 cd "$(git rev-parse --show-toplevel)"
 # no node_modules: fail, never pass silently (senior review 2026-10-27 S7: agents' worktrees skipped every gate)
 [ -d node_modules ] || { echo "pre-commit: no node_modules here, so the gates can't run: run npm ci first (or commit with --no-verify on purpose)" >&2; exit 1; }

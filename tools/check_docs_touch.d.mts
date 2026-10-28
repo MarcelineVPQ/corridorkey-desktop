@@ -11,4 +11,4 @@ export const EXCEPTIONS: Map<string, string>;
 export function parseLog(text: string): Commit[];
 export function checkCommits(commits: Commit[], exceptions?: Map<string, string>): string[];
 export function checkAll(app?: string, range?: string): string[];
-export function checkStaged(msgFile: string, app?: string): string[];
+export function checkStaged(msgFile: string, app?: string, amend?: boolean): string[];

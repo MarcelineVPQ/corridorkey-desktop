@@ -80,5 +80,14 @@ describe("the docs-touch gate", () => {
       expect(checkAll(repo)).toEqual([]);
       expect(checkAll(repo, "v0..HEAD")).toEqual([expect.stringContaining('"CLI: a flag" changes the CLI')]);
     });
+
+    // release review 2026-10-28 #12: `git commit --amend -m` with nothing staged passed, though the commit changes the CLI
+    it("--staged --amend judges the amended commit's files (against HEAD^), not only what is staged now", () => {
+      expect(checkStaged(msg("CLI: a flag, reworded\n"), repo)).toEqual([]);
+      expect(checkStaged(msg("CLI: a flag, reworded\n"), repo, true)).toEqual([expect.stringContaining("changes the CLI")]);
+      touch("docs/CLI.md", "docs/wiki/Command-Line.md", "docs/GUIDE.md");
+      expect(checkStaged(msg("CLI: a flag, with its docs\n"), repo, true)).toEqual([]);
+      git("reset", "-q");
+    });
   });
 });

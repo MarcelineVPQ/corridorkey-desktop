@@ -3,6 +3,13 @@
 # A CLI change (args.rs, cliSpec.json) needs docs/CLI.md, docs/wiki/Command-Line.md and docs/GUIDE.md staged, or a
 # line `docs: none-needed — why` in the message. Needs node only, no node_modules. Skip once with --no-verify.
 set -euo pipefail
+# native Windows: skipped like the pre-commit gates (which print the WSL note; release review 2026-10-28 #10)
+case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) exit 0 ;; esac
 msg="$(realpath "$1")"
 cd "$(git rev-parse --show-toplevel)"
-exec node tools/check_docs_touch.mjs --staged "$msg"
+# an amend replaces HEAD, so the commit's files are the index against HEAD^ (release review 2026-10-28 #12). git doesn't
+# tell this hook; its parent, `git commit`, has --amend among its arguments
+amend=""
+ps -o args= -p "$PPID" 2>/dev/null | grep -qE -- '(^| )--amend( |$)' && amend=--amend
+# shellcheck disable=SC2086 # amend is empty or one word
+exec node tools/check_docs_touch.mjs --staged "$msg" $amend
