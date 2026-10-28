@@ -55,8 +55,9 @@ interface Props {
   onJump: (by: -1 | 1) => void;
 }
 
-/** How long typing pauses before the suggestion's completion is asked (a fast typist's keys are ~50-100 ms apart). */
-const ASK_AFTER_MS = 60;
+/** How long typing pauses before the suggestion's completion is asked: longer than the 50-100 ms between a typist's
+ * keys, so a path on a big network folder isn't read from the main process per key (senior review N11). Tab asks at once. */
+export const ASK_AFTER_MS = 150;
 
 // the line being typed outlives the page (a switch to the Queue and back keeps it)
 let draft: EditorState | null = null;
