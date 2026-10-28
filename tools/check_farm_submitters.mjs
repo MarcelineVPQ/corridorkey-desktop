@@ -6,7 +6,11 @@
 //       `add_argument("--x"`, a shell `case` pattern `--x)`);
 //   (b) gives `--progress-format` a value the CLI doesn't take;
 //   (c) has a quoted short flag (`"-x"`, as an argv list writes it) that is neither a CLI short flag nor one of the
-//       file's own (`add_argument("-x"`).
+//       file's own (`add_argument("-x"`);
+//   (d) passes a command a flag only another command takes (release review 2026-10-28 #13: `prepare --frames` passed
+//       (a)). Where a line starts a command's argument list (`"render"` quoted, `(render ` in a shell array,
+//       `corridorkey render`, or a YAML item `- render` and the items under it), the flags after it on that line (or
+//       in those items) must be that command's. A shared list built elsewhere (`common`) is checked by (a) only.
 //   node tools/check_farm_submitters.mjs    the gate (npm run gates)
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -14,25 +18,57 @@ import { fileURLToPath } from "node:url";
 
 export const APP = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** The CLI's long and short flags and --progress-format's values, from its spec. */
+/** The CLI's long and short flags and --progress-format's values, from its spec; `commands`: each named, shown
+ * command's own flags (`--long` and `-s`). */
 export function cliFlags(spec) {
   const flags = new Set();
   const shorts = new Set();
+  const commands = new Map();
   let formats = [];
   // loop: NOT-WORTH — the CLI's few commands
   for (const c of spec.commands) {
+    const own = new Set();
     // loop: NOT-WORTH — one command's flags
     for (const a of c.args) {
-      if (a.long) flags.add(a.long);
-      if (a.short) shorts.add(a.short);
+      if (a.long) (flags.add(a.long), own.add(`--${a.long}`));
+      if (a.short) (shorts.add(a.short), own.add(`-${a.short}`));
       if (a.long === "progress-format") formats = a.possible_values ?? [];
     }
+    if (c.name && !c.hidden) commands.set(c.name, own);
   }
-  return { flags, shorts, formats };
+  return { flags, shorts, formats, commands };
 }
 
-/** (a), (b) and (c) for one submitter file. */
-export function checkFile(path, text, { flags, shorts, formats }) {
+/** (d): flags given to a command that it doesn't take, where the file starts that command's argument list. */
+export function checkCommands(path, text, commands) {
+  if (!commands?.size) return [];
+  const names = [...commands.keys()].join("|");
+  const start = new RegExp(`(?:["'](${names})["']|\\((${names})\\s|\\bcorridorkey (${names})\\b|^(\\s*)- (${names})\\s*$)`, "g");
+  const flag = /(?<![\w-])(--[a-z][a-z0-9-]*|-[A-Za-z])(?![\w-])/g;
+  const out = [];
+  const lines = text.split("\n");
+  // loop: NOT-WORTH — one file's lines
+  for (let i = 0; i < lines.length; i++) {
+    // loop: NOT-WORTH — the command starts on one line (one or two)
+    for (const m of lines[i].matchAll(start)) {
+      const cmd = m[1] ?? m[2] ?? m[3] ?? m[5];
+      let args = lines[i].slice(m.index + m[0].length);
+      // a YAML item: the items under it at the same indent are its arguments
+      if (m[5] !== undefined) {
+        // loop: NOT-WORTH — the list's items
+        for (let j = i + 1; j < lines.length && lines[j].startsWith(`${m[4]}- `); j++) args += ` ${lines[j].slice(m[4].length + 2)}`;
+      }
+      // loop: NOT-WORTH — the flags after the command
+      for (const f of new Set([...args.matchAll(flag)].map((x) => x[1]))) {
+        if (!commands.get(cmd).has(f)) out.push(`${path}:${i + 1}: ${cmd} is given ${f}, which \`corridorkey ${cmd}\` doesn't take (cliSpec.json)`);
+      }
+    }
+  }
+  return out;
+}
+
+/** (a)-(d) for one submitter file. */
+export function checkFile(path, text, { flags, shorts, formats, commands }) {
   const own = new Set();
   // loop: NOT-WORTH — a submitter's own options (a dozen)
   for (const m of text.matchAll(/add_argument\((?:\s*["']-\w["'],)?\s*["']--([\w-]+)["']|(?:^|\|)\s*--([\w-]+)\s*\)/gm)) own.add(m[1] ?? m[2]);
@@ -56,6 +92,7 @@ export function checkFile(path, text, { flags, shorts, formats }) {
   for (const f of new Set([...text.matchAll(/["']-([A-Za-z])["']/g)].map((m) => m[1]))) {
     if (!shorts.has(f) && !ownShort.has(f)) out.push(`${path}: -${f} is neither a corridorkey short flag (cliSpec.json) nor one of this file's own options`);
   }
+  out.push(...checkCommands(path, text, commands));
   return out;
 }
 
@@ -66,6 +103,8 @@ export function checkAll(app = APP) {
     // loop: NOT-WORTH — farm/'s few files, once per gate run
     for (const n of readdirSync(join(app, d))) {
       const p = join(d, n);
+      // Python test runs leave __pycache__ (git-ignored) beside the plugin: compiled bytes, not a submitter
+      if (n === "__pycache__") continue;
       if (statSync(join(app, p)).isDirectory()) walk(p);
       else if (n !== "README.md" && !n.endsWith(".txt")) out.push(...checkFile(p, readFileSync(join(app, p), "utf8"), cli));
     }

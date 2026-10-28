@@ -33,4 +33,24 @@ describe("the farm submitter gate", () => {
     // -r isn't the CLI's (a Deadline plugin passing it would fail every task)
     expect(checkFile("plugin.py", 'args = ["render", "-i", a, "-r", b]\n', CLI)).toEqual([expect.stringContaining("-r is neither")]);
   });
+
+  // release review 2026-10-28 #13: one flag set over every command let `prepare --frames` pass
+  it("(d) a flag only another command takes fails where the file starts that command's arguments", () => {
+    const named = cliFlags({
+      commands: [
+        { name: "render", args: [{ long: "frames", short: "F" }, { long: "report" }] },
+        { name: "prepare", args: [{ long: "report" }, { long: "tensorrt-size" }] },
+        { name: "run", hidden: true, args: [{ long: "keep-going" }] },
+      ],
+    });
+    expect(checkFile("a.py", 'cmd = [ck, "render", "--frames", f, "-F", g]\nprep = [ck, "prepare", "--tensorrt-size", s]\n', named)).toEqual([]);
+    expect(checkFile("a.py", 'prep = [ck, "prepare", "--frames", f, "--report", r]\n', named)).toEqual(["a.py:1: prepare is given --frames, which `corridorkey prepare` doesn't take (cliSpec.json)"]);
+    expect(checkFile("a.js", '["prepare"].concat(common, ["-F", x])', named)).toEqual([expect.stringContaining("prepare is given -F")]);
+    expect(checkFile("farm.sh", "args=(prepare --frames 1-2)\ncorridorkey render --tensorrt-size 1080\n", named)).toHaveLength(2);
+    // a YAML list: the items under `- prepare` at its indent, up to the next key
+    const yaml = "args:\n  - prepare\n  - --report\n  - r.json\n  - --frames\nother:\n  - --frames\n";
+    expect(checkFile("t.yaml", yaml, named)).toEqual([expect.stringContaining("t.yaml:2: prepare is given --frames")]);
+    // a hidden command's name is ordinary text ("run")
+    expect(checkFile("a.py", '"run", "--frames"', named)).toEqual([]);
+  });
 });
