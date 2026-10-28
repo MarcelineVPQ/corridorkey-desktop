@@ -159,6 +159,12 @@ export async function moveCache(from: string, to: string, owned: boolean, fromOw
   try {
     // loop: NOT-WORTH — two parts, once per move
     for (const part of MOVED_PARTS) plan.push(...(await filesUnder(join(from, part))).map((rel) => ({ part, rel })));
+    // a folder of ours that isn't the cache in use (the system's, or one with the marker): what a move cut short (the app
+    // quit mid-copy) left in its parts goes first, or the first leftover stopped every later move (review 2026-10-28 #4)
+    // loop: NOT-WORTH — one async stat per move
+    if (!made && resolve(from) !== resolve(to) && (owned || (await exists(join(to, CACHE_MARKER)))))
+      // loop: NOT-WORTH — two parts, once per move [bounded: the leftovers of one cut move]
+      for (const part of MOVED_PARTS) await rm(join(to, part), { recursive: true, force: true });
     await prepareTarget(to, owned);
     // loop: SERIAL-REQUIRED — one file copied and verified at a time, async (a few hundred files, a few GB at most)
     for (const { part, rel } of plan) {

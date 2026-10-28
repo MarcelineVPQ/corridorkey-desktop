@@ -55,6 +55,7 @@ import {
   type TrtState,
 } from "../../src/shared/types";
 import { NOT_WHILE_BUSY } from "../../src/shared/texts";
+import { restartRefusal, type BusyState } from "./busy";
 import type { DesktopPalette } from "../../src/ui/theme/palette";
 import { IPC } from "./ipc";
 import { appMenu } from "./appMenu";
@@ -265,6 +266,8 @@ const queue = new Queue({
   saveLog: (job) => saveJobLog(job, app.getVersion()),
 });
 // the manual window picker's graphics-memory estimate (backlog row 41): a short-lived Rust engine, only while no queue runs
+/** What runs now that a restart (or a quit) would cut short (busy.ts). */
+const busyState = (): BusyState => ({ queue: queue.running, consoleGpu, download: installAbort !== null, cacheMoving: cacheMoving !== null, trtBuild: prebuild.running });
 const estimator = new Estimator({ makeEngine: rustEngineProcess, busy: () => queue.running || consoleGpu });
 // the TensorRT ranges built for this card (read from the cache after a build, a job, a move or a removal; not per push)
 let trtBuilt: string[] = [];
@@ -1204,15 +1207,10 @@ function registerIpc(): void {
   handle(IPC.setUpdateChannel, (_e, c: unknown) => updater.setChannel(c === "dev" ? "dev" : "stable"));
   handle(IPC.setAutoUpdate, (_e, on: unknown) => updater.setAutomatic(on === true));
   handle(IPC.installUpdate, () => updater.download());
-  // Never restart into an update while the queue, the Console's corridorkey or a download runs (it would kill them).
+  // Never restart into an update while the queue, the Console's corridorkey, a download, a cache move or the background
+  // TensorRT build runs (it would kill them; a cut move left the target unusable: review 2026-10-28 #4).
   handle(IPC.restartToUpdate, async () => {
-    const why = queue.running
-      ? "The queue is running: stop it or let it finish, then restart."
-      : consoleGpu
-        ? "The Console is running corridorkey: wait for it, or stop it (Ctrl+C in the Console), then restart."
-        : installAbort
-          ? "A download is running: wait for it, or stop it, then restart."
-          : null;
+    const why = restartRefusal(busyState());
     if (!why) return updater.restart();
     if (mainWindow) await dialog.showMessageBox(mainWindow, { type: "info", message: NOT_WHILE_BUSY, detail: why });
   });

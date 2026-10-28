@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -110,16 +110,40 @@ describe("cache folder", () => {
     expect(tree(from)).toEqual(["media/a.jpg", "media/b.jpg", "tensorrt/rtx-5080__fp16/h1024-1280_w1792-2176_t1-48_f1-4/stage1.engine"]);
     expect(existsSync(to)).toBe(false);
 
-    // a file already in the target (one of our folders): never overwritten; the copies made before it are taken back
+    // a file that can't be read mid-move: the copies made before it are taken back, the target left as it was
     const from2 = filled();
     const ours = fresh();
     put(join(ours, CACHE_MARKER), "");
-    put(join(ours, "media", "b.jpg"), "theirs, older");
+    chmodSync(join(from2, "media", "b.jpg"), 0);
     const r2 = await moveCache(from2, ours, false, true);
+    chmodSync(join(from2, "media", "b.jpg"), 0o644);
     expect(r2.ok).toBe(false);
     expect(tree(from2)).toEqual(["media/a.jpg", "media/b.jpg", "tensorrt/rtx-5080__fp16/h1024-1280_w1792-2176_t1-48_f1-4/stage1.engine"]);
-    expect(tree(ours)).toEqual([CACHE_MARKER, "media/b.jpg"].sort());
-    expect(readFileSync(join(ours, "media", "b.jpg"), "utf8")).toBe("theirs, older");
+    expect(tree(ours)).toEqual([CACHE_MARKER]);
+  });
+
+  it("review 2026-10-28 #4: a move cut short (the app quit mid-copy) never blocks the next move to the same folder", async () => {
+    const moved = ["media/a.jpg", "media/b.jpg", "tensorrt/rtx-5080__fp16/h1024-1280_w1792-2176_t1-48_f1-4/stage1.engine"];
+    // a chosen folder: the marker and a part copy of the first file, as the quit left them
+    const from = filled();
+    const to = join(place(), "corridorkey-desktop");
+    put(join(to, CACHE_MARKER), "");
+    put(join(to, "media", "a.jpg"), "sti");
+    const r = await moveCache(from, to, false, true);
+    expect(r).toMatchObject({ ok: true, message: null, files: 3 });
+    expect(tree(to)).toEqual([CACHE_MARKER, ...moved].sort());
+    expect(readFileSync(join(to, "media", "a.jpg"), "utf8")).toBe("still a");
+    // and back to the system's folder (always ours), which a cut move back left a TensorRT engine in
+    put(join(dirname(from), "sys", "tensorrt", "rtx-5080__fp16", "h1024-1280_w1792-2176_t1-48_f1-4", "stage1.engine"), "engi");
+    const back = await moveCache(to, join(dirname(from), "sys"), true, false);
+    expect(back).toMatchObject({ ok: true, files: 3 });
+    expect(tree(join(dirname(from), "sys"))).toEqual(moved);
+    // someone else's folder is never cleared: refused before anything (targetProblem), and moveCache leaves its parts be
+    const theirs = place();
+    put(join(theirs, "media", "a.jpg"), "theirs");
+    const r3 = await moveCache(filled(), theirs, false, true);
+    expect(r3.ok).toBe(false);
+    expect(readFileSync(join(theirs, "media", "a.jpg"), "utf8")).toBe("theirs");
   });
 
   it("an unplugged drive: the chosen location is never made, only the app's own folder inside one that is there", async () => {
