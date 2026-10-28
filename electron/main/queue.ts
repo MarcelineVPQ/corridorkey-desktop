@@ -169,6 +169,8 @@ export class Queue {
   private staged = new Map<string, { madeOutputDir: boolean }>();
   // a finished job's results being moved into place (promote, async): the next job starts after it
   private settling = false;
+  // the stderr tail of an engine that died while it started: the failed job's log carries it
+  private startTail: string[] = [];
   // a job's output folder being prepared (async)
   private preparing: Promise<unknown> | null = null;
   // the temp folders being removed (async), per job id: a retried job's run waits for its own
@@ -298,6 +300,8 @@ export class Queue {
     try {
       const pong = await proc.start();
       if (this.proc !== proc) return false;
+      // its exit, ignored by exited() while it started, fails the start here
+      if (!proc.running) throw new Error("engine exited right after answering");
       this.engine = {
         status: "ready",
         error: null,
@@ -321,8 +325,11 @@ export class Queue {
     } catch (e) {
       // stopped by the user while it started (stop() killed it and already reset the state): not a failure
       if (this.proc !== proc) return false;
-      // error: SHOWN — the engine card and the waiting jobs say why it didn't start
-      this.engine = { status: "failed", pong: null, error: e instanceof Error ? e.message : String(e) };
+      // error: SHOWN — the engine card and the waiting jobs say why it didn't start, with the engine's last words
+      this.startTail = proc.stderrTail();
+      const last = this.startTail.at(-1);
+      const why = e instanceof Error ? e.message : String(e);
+      this.engine = { status: "failed", pong: null, error: last ? `${why}: ${last}` : why };
       this.running = false;
       this.proc = null;
       this.deps.changed();
@@ -351,7 +358,7 @@ export class Queue {
     if (!(await this.ensureEngine())) {
       if (this.current === job) {
         this.current = null;
-        void this.finish(job, "failed", { code: "engine", message: this.engine.error ?? "engine did not start", stderrTail: [] });
+        void this.finish(job, "failed", { code: "engine", message: this.engine.error ?? "engine did not start", stderrTail: this.startTail });
       }
       return;
     }
@@ -470,6 +477,9 @@ export class Queue {
       return;
     }
     if (this.proc !== proc) return; // a killed engine we already replaced
+    // dead before its pong: ensureEngine's catch fails the job and stops the queue (review 2026-10-28 #2: failing the
+    // job here started a fresh engine for the next one, which died the same way, down the whole queue)
+    if (this.engine.status === "starting") return;
     this.proc = null;
     this.engine = { status: "stopped", pong: this.engine.pong, error: null };
     const job = this.current;

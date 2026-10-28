@@ -16,7 +16,16 @@ afterAll(() => rmSync(OUT, { recursive: true, force: true }));
 const job = (id: string, extra: Partial<Job> = {}): Job => fixtureJob(id, { outputDir: join(OUT, `out_${id}`), ...extra });
 
 function harness(
-  opts: { pongProtocol?: number; failStart?: boolean; slowStart?: boolean; tempRoot?: string; tensorrt?: () => boolean; tensorrtWhyNot?: () => string | null; started?: (j: Job) => void } = {},
+  opts: {
+    pongProtocol?: number;
+    failStart?: boolean;
+    slowStart?: boolean;
+    diesBeforePong?: boolean;
+    tempRoot?: string;
+    tensorrt?: () => boolean;
+    tensorrtWhyNot?: () => string | null;
+    started?: (j: Job) => void;
+  } = {},
 ) {
   const sent: Record<string, unknown>[] = [];
   let reply: (r: EngineReply) => void = () => {};
@@ -36,18 +45,26 @@ function harness(
         running: true,
         pid: 4242,
         start: () =>
-          opts.slowStart
-            ? new Promise((_r, j) => (rejectStart = j))
-            : opts.failStart
-              ? Promise.reject(new Error("no engine"))
-              : Promise.resolve({ type: "pong", protocol: opts.pongProtocol ?? 1, version: "0.1.0", engine: "onnxruntime", device: "cuda" }),
+          opts.diesBeforePong
+            ? // EngineProcess's exit handler: fail() rejects the start (its callbacks a microtask later), then onExit at once
+              new Promise((_r, j) =>
+                setTimeout(() => {
+                  j(new Error("engine exited before answering (code 127)"));
+                  onExit(127, null, ["libonnxruntime.so.1: cannot open shared object file"]);
+                }, 0),
+              )
+            : opts.slowStart
+              ? new Promise((_r, j) => (rejectStart = j))
+              : opts.failStart
+                ? Promise.reject(new Error("no engine"))
+                : Promise.resolve({ type: "pong", protocol: opts.pongProtocol ?? 1, version: "0.1.0", engine: "onnxruntime", device: "cuda" }),
         send: (m) => sent.push(m),
         quit: () => quits++,
         kill: () => {
           killed++;
           rejectStart(new Error("engine exited before answering (SIGKILL)"));
         },
-        stderrTail: () => ["trace line"],
+        stderrTail: () => (opts.diesBeforePong ? ["libonnxruntime.so.1: cannot open shared object file"] : ["trace line"]),
       };
       engines.push(h);
       return h;
@@ -162,6 +179,21 @@ describe("Queue", () => {
     expect(h.q.jobs[0].status).toBe("failed");
     expect(h.q.engine.status).toBe("failed");
     expect(h.q.running).toBe(false);
+  });
+
+  it("review 2026-10-28 #2: an engine that dies before its pong (exit before the start's rejection) fails one job and stops the queue", async () => {
+    const h = harness({ diesBeforePong: true });
+    // loop: NOT-WORTH — a test's 5 jobs
+    for (const id of ["a", "b", "c", "d", "e"]) h.q.add(job(id));
+    await h.q.start();
+    await h.flush();
+    await h.flush();
+    expect(h.engines).toHaveLength(1);
+    expect(h.q.jobs.map((j) => j.status)).toEqual(["failed", "waiting", "waiting", "waiting", "waiting"]);
+    expect(h.q.running).toBe(false);
+    expect(h.q.engine.status).toBe("failed");
+    expect(h.q.engine.error).toMatch(/exited before answering \(code 127\).*cannot open shared object file/);
+    expect(h.q.jobs[0].error?.stderrTail).toEqual(["libonnxruntime.so.1: cannot open shared object file"]);
   });
 
   it("stop while the engine is still starting: the job is cancelled, the engine stopped (not failed)", async () => {
