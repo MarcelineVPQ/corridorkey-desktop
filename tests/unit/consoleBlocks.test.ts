@@ -413,7 +413,7 @@ describe("a program's commands are one row each (review 2026-10-27 S8)", () => {
     expect(childRow(kid({ line: "ls plates", lines: [] }), "/home/m").source).toBeNull();
   });
 
-  it("one that runs, failed or was refused shows whole on its own, with a Collapse button; a top-level block never folds", () => {
+  it("one that runs, failed or was refused shows whole on its own, with a Collapse button; a top-level block never becomes a row", () => {
     // loop: NOT-WORTH — three states
     for (const state of ["running", "failed", "refused"] as const) {
       expect(childOpens(kid({ state }))).toBe(true);
@@ -422,7 +422,10 @@ describe("a program's commands are one row each (review 2026-10-27 S8)", () => {
       expect(h, state).toContain("Copy command");
     }
     expect(childRow(kid({ state: "failed" }), "/home/m").mark).toBe("✗");
-    expect(html(block(1))).not.toMatch(/cb-row|cb-collapse/);
+    // a top-level block folds to its own line (b135f77, N8), never into a row: its button says Fold, not Collapse
+    const top = html(block(1));
+    expect(top).not.toMatch(/cb-row|>Collapse</);
+    expect(top).toMatch(/class="cb-collapse" aria-expanded="true" title="Fold this command to its line"/);
   });
 });
 
