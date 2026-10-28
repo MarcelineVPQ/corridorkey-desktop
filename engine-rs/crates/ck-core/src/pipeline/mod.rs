@@ -294,6 +294,22 @@ impl<L: Loader> Pipeline<L> {
         }
     }
 
+    /// The graphics-memory budget (free plus what this process holds), bytes. Where NVML can't tell this process's
+    /// own memory (Windows WDDM), loaded networks would count as another program's (a smaller window, or low-VRAM
+    /// mode, from the second automatic job on): they are dropped first, so the reading sees their memory as free.
+    pub fn gpu_budget(&mut self) -> Option<u64> {
+        self.budget_from(crate::gpu::budget)
+    }
+
+    fn budget_from(&mut self, read: impl Fn() -> Option<(u64, u64, Option<u64>)>) -> Option<u64> {
+        let (budget, _, own) = read()?;
+        if own.is_some() || self.nets.is_empty() {
+            return Some(budget);
+        }
+        self.unload();
+        read().map(|b| b.0)
+    }
+
     /// Move the loaded networks' counters into `stats` (and zero them).
     fn fold_stats(&mut self) {
         for (p, n) in self.nets.iter_mut() {
@@ -402,12 +418,17 @@ impl<L: Loader> Pipeline<L> {
                 // can't tell the context from the networks already loaded, so only this one reads it)
                 if let Some((_, _, own)) = crate::gpu::budget() {
                     self.overhead_read = true;
-                    self.gpu_overhead = overhead_outside_weights(own, crate::runtime::model_bytes(&file));
-                    match self.gpu_overhead {
-                        Some(o) => eprintln!("  graphics memory outside the arenas (CUDA context, libraries): {:.2} GiB measured", o as f64 / 1073741824.0),
+                    self.gpu_overhead = own.and_then(|own| overhead_outside_weights(own, crate::runtime::model_bytes(&file)));
+                    match (self.gpu_overhead, own) {
+                        (Some(o), _) => {
+                            eprintln!("  graphics memory outside the arenas (CUDA context, libraries): {:.2} GiB measured", o as f64 / 1073741824.0)
+                        }
+                        (None, None) => {
+                            eprintln!("  graphics memory outside the arenas: not measurable (the driver doesn't report this process's memory), 0.5 GiB assumed")
+                        }
                         // C-RADIO's file holds fp32 weights that load as fp16: on the card they take less than the
                         // file, so this sum can't see the context; arena_limit keeps its 0.5 GiB default
-                        None => {
+                        (None, Some(_)) => {
                             eprintln!("  graphics memory outside the arenas: not measurable ({piece} takes less on the card than its file), 0.5 GiB assumed")
                         }
                     }
@@ -789,7 +810,7 @@ impl Pipeline<OrtLoader> {
             // the budget the runtime's apply_auto_vram sees: free memory plus what this process holds
             let (seen, source) = match provider {
                 Provider::Cpu => (crate::gpu::host_available().unwrap_or(0) as f64 / 1073741824.0, "host"),
-                _ => (crate::gpu::budget().map(|b| b.0).unwrap_or(0) as f64 / 1073741824.0, "gpu"),
+                _ => (self.gpu_budget().unwrap_or(0) as f64 / 1073741824.0, "gpu"),
             };
             // the job's budget caps what the card has free; only a limited job reads the TIGHT peaks (vram.rs)
             let (budget, limited) = match job.vram_budget_gb {
@@ -1115,7 +1136,7 @@ impl Pipeline<OrtLoader> {
             return Err(Error::bad_request("trt_build needs the graphics card and ONNX Runtime's TensorRT provider".into()));
         }
         let (sh, sw) = (crate::image::ceil_to_multiple(height, crate::clip::SHAPE_QUANTUM), crate::image::ceil_to_multiple(width, crate::clip::SHAPE_QUANTUM));
-        let seen = crate::gpu::budget().map(|b| b.0).unwrap_or(0) as f64 / 1073741824.0;
+        let seen = self.gpu_budget().unwrap_or(0) as f64 / 1073741824.0;
         let limit = vram_budget_gb.or(self.loader.rt.cfg.vram_budget_gb);
         let budget = limit.map(|cap| seen.min(cap)).unwrap_or(seen);
         // the window a TensorRT job of this size picks (run_job: low-VRAM mode, the same table)

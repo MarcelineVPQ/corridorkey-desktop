@@ -348,3 +348,26 @@ fn a_mixed_precision_set_feeds_each_input_in_its_own_type() {
     assert_eq!(hashes(&mixed, "stage1").len(), hashes(&f16s, "stage1").len());
     assert_eq!(hashes(&mixed, "stage2").len(), 9);
 }
+
+#[test]
+fn an_unknown_own_memory_reading_unloads_the_networks_first() {
+    // review 2026-10-27 MUST: on Windows (WDDM) NVML can't report this process's memory, so from the second automatic
+    // job on its loaded networks counted as another program's (a smaller window)
+    let mut h = Harness::new(FakeCfg::new(SHAPE), 1, options(json!({})));
+    let net = h.loader.load("rvm", Provider::Cuda, std::path::Path::new("/m"), None).unwrap();
+    h.pipe.nets.insert("rvm", net);
+    let (loader, reads) = (h.loader.clone(), std::cell::Cell::new(0));
+    // 2 GiB free while the network is loaded (it holds 4), 6 GiB once it is dropped
+    let read = |own: Option<u64>| {
+        reads.set(reads.get() + 1);
+        let dropped = loader.events().iter().any(|e| matches!(e, Event::Drop("rvm")));
+        let free: u64 = if dropped { 6 << 30 } else { 2 << 30 };
+        Some((free + own.unwrap_or(0), free, own))
+    };
+    // own memory known: one reading, the network stays
+    assert_eq!(h.pipe.budget_from(|| read(Some(4 << 30))), Some(6 << 30));
+    assert_eq!((reads.get(), h.pipe.nets.len()), (1, 1));
+    // unknown: the network is dropped first, and the reading sees its memory free
+    assert_eq!(h.pipe.budget_from(|| read(None)), Some(6 << 30));
+    assert_eq!((reads.get(), h.pipe.nets.len()), (3, 0));
+}

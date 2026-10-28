@@ -159,6 +159,10 @@ models stage 2 took 159 ms per call that way, and without shrinking its ConvTran
 failed `oom`; the onnx.2 ConvTranspose rewrite removed that request). The window table below was measured
 with onnx.1 and every arena shrinking.
 
+Where the driver can't report the engine's own memory (Windows WDDM: NVML lists no per-process use), the engine drops
+its loaded networks before reading the budget (the next job loads them again), so they don't count as another
+program's (test `an_unknown_own_memory_reading_unloads_the_networks_first`).
+
 The automatic window came from the upstream PyTorch table, as ported, until 2026-10-24; since then from this
 engine's measured ONNX Runtime CUDA peaks, an upper bound at every measured point (BACKLOG row 41). With the old table:
 on CUDA fp16 at 1280×1152 a 16-frame window doesn't fit 12 GB, where the table picks 48/24 low-VRAM. So an

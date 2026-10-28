@@ -70,7 +70,9 @@ impl Backend for Ort {
                 Some(CardMemory { total: None, free, budget: free, source: "host", provider: Provider::Cpu.name() })
             }
             p => {
-                let (total, free, budget) = ck_core::gpu::card_memory()?;
+                // first: where the driver can't tell this process's memory, it drops the loaded networks (gpu_budget)
+                let budget = self.pipeline.gpu_budget()?;
+                let (total, free, _) = ck_core::gpu::card_memory()?;
                 Some(CardMemory { total: Some(total), free, budget, source: "gpu", provider: p.name() })
             }
         }

@@ -345,12 +345,13 @@ fn nvml() -> Option<&'static Nvml> {
 }
 
 /// The memory budget the runtime's apply_auto_vram uses: free memory plus what this process already holds
-/// (its loaded models count for it). (budget bytes, free bytes, own bytes).
-pub(crate) fn budget() -> Option<(u64, u64, u64)> {
+/// (its loaded models count for it). (budget bytes, free bytes, own bytes); own is None where NVML can't tell a
+/// process's memory (Windows WDDM): the budget is then the free memory alone (Pipeline::gpu_budget unloads first).
+pub(crate) fn budget() -> Option<(u64, u64, Option<u64>)> {
     let n = nvml()?;
     let info = n.info()?;
-    let own = n.used_by(std::process::id()).unwrap_or(0);
-    Some((info.free + own, info.free, own))
+    let own = n.used_by(std::process::id());
+    Some((info.free + own.unwrap_or(0), info.free, own))
 }
 
 /// The card's memory for the `estimate` command, from the same NVML reading as `budget`: (total, free, budget) bytes.
