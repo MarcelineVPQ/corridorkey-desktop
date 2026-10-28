@@ -126,7 +126,7 @@ describe("update flow", () => {
     const u = flow("0.1.0");
     expect(u.state).toMatchObject({ status: "idle", channel: "stable", automatic: true, current: "0.1.0", feed: `${base}latest.json` });
     await u.check(true);
-    expect(u.state).toMatchObject({ status: "available", latest: "0.2.0", notes: "What's new in 0.2.0", error: null });
+    expect(u.state).toMatchObject({ status: "available", latest: "0.2.0", size: appBytes("0.2.0").length, notes: "What's new in 0.2.0", error: null });
     expect(u.state.checkedAt).toBeTypeOf("number");
     await u.download();
     expect(u.state).toMatchObject({ status: "ready", progress: null, error: null });
@@ -166,7 +166,7 @@ describe("update flow", () => {
     publish("stable", "0.2.0", { signer: generateKeyPairSync("ed25519").privateKey });
     const u = flow("0.1.0");
     await u.check(true);
-    expect(u.state).toMatchObject({ status: "error", error: "Couldn't check for updates: update refused: latest.json is not signed by a trusted key" });
+    expect(u.state).toMatchObject({ status: "error", errorFrom: "check", error: "Couldn't check for updates: update refused: latest.json is not signed by a trusted key" });
   });
 
   it("the test key is trusted only with a loopback feed", async () => {
@@ -180,7 +180,7 @@ describe("update flow", () => {
     const u = flow("0.1.0");
     await u.check(true);
     await u.download();
-    expect(u.state.status).toBe("error");
+    expect(u.state).toMatchObject({ status: "error", errorFrom: "install" });
     expect(u.state.error).toBe("The update didn't install: update refused: the download's SHA-512 doesn't match the signed feed. Your current version is untouched.");
     expect(readdirSync(join(dir, "apps"))).toEqual([appImageName("0.1.0")]);
   });
@@ -267,7 +267,7 @@ describe("update flow", () => {
     rmSync(join(dir, "apps", "CorridorKey-Desktop.AppImage"));
     u.restart();
     expect(relaunched).toEqual([]);
-    expect(u.state).toMatchObject({ status: "error" });
+    expect(u.state).toMatchObject({ status: "error", errorFrom: "install" });
     expect(u.state.error).toMatch(/is gone/);
   });
 

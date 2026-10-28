@@ -126,17 +126,20 @@ export const settings = (over: Partial<Settings> = {}): Settings => ({
   ...over,
 });
 
-const updateState = (): UpdateState => ({
+export const updateState = (over: Partial<UpdateState> = {}): UpdateState => ({
   feed: null,
   channel: "stable",
   automatic: false,
   status: "idle",
   current: "0.1.0-dev.1",
   latest: null,
+  size: null,
   notes: null,
   progress: null,
   error: null,
+  errorFrom: null,
   checkedAt: null,
+  ...over,
 });
 
 /**
@@ -162,6 +165,7 @@ export const appState = (over: Partial<AppState> = {}): AppState => ({
   enginePaths: { binary: null, models: null, ort: null },
   desktopPalette: null,
   update: updateState(),
+  restartWait: null,
   system: { engineBin: "corridorkey-engine", ortLib: "libonnxruntime.so", platform: "linux", home: "/home/user" },
   console: { cwd: "/home/user", elevatedUntil: null, running: null, cliFound: true, servers: [], droppedFolders: [] },
   ...over,

@@ -546,6 +546,7 @@ function state(): AppState {
     card,
     desktopPalette,
     update: updater.state,
+    restartWait: restartRefusal(busyState()),
     system: { engineBin: engineBinName(), ortLib: ortLibrary().display, platform: PLATFORM, home: homedir() },
     console: appConsole.session(),
   };

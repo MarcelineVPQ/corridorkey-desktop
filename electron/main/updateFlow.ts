@@ -90,9 +90,11 @@ export class UpdateFlow {
       status: p.unsupported ? "unsupported" : "idle",
       current: p.version,
       latest: null,
+      size: null,
       notes: null,
       progress: null,
       error: p.unsupported,
+      errorFrom: null,
       checkedAt: null,
     };
     this.state.feed = this.feedUrl(prefs.channel);
@@ -202,7 +204,7 @@ export class UpdateFlow {
     const returning = this.returningToStable;
     const before = this.state;
     const stale = () => seq !== this.checkSeq || channel !== this.state.channel;
-    this.set({ status: "checking", error: null, progress: null });
+    this.set({ status: "checking", error: null, errorFrom: null, progress: null });
     try {
       if (!this.state.feed) throw new Error(lowerFirst(NO_RELEASE_CHANNEL));
       const feed = await this.readFeed(returning ? "stable" : channel, asked);
@@ -210,7 +212,7 @@ export class UpdateFlow {
       this.offer = feed;
       this.offerChannel = channel;
       const offered = offers(feed.version, this.p.version, returning);
-      this.set({ status: offered ? "available" : "current", latest: feed.version, notes: offered ? feed.notes || null : null, checkedAt: this.p.now() });
+      this.set({ status: offered ? "available" : "current", latest: feed.version, size: offered ? feed.size : null, notes: offered ? feed.notes || null : null, checkedAt: this.p.now() });
     } catch (e) {
       if (stale()) return;
       const message = e instanceof Error ? e.message : String(e);
@@ -218,11 +220,11 @@ export class UpdateFlow {
       // An automatic check that fails keeps an offer already on screen (a
       // network blip mustn't take it back); otherwise the reason is shown.
       if (!asked && before.status === "available" && this.offer && this.offerChannel === channel) {
-        this.set({ status: "available", error: null });
+        this.set({ status: "available", error: null, errorFrom: null });
         return;
       }
       // error: SHOWN — status "error", the message verbatim
-      this.set({ status: "error", error: `Couldn't check for updates: ${message}`, checkedAt: this.p.now() });
+      this.set({ status: "error", error: `Couldn't check for updates: ${message}`, errorFrom: "check", checkedAt: this.p.now() });
     }
   }
 
@@ -271,7 +273,7 @@ export class UpdateFlow {
     this.checkSeq++;
     this.offer = null;
     this.offerChannel = null;
-    this.set({ status: "idle", latest: null, notes: null, error: null, progress: null });
+    this.set({ status: "idle", latest: null, size: null, notes: null, error: null, errorFrom: null, progress: null });
     if (autoCheck && this.state.automatic) void this.check(false);
   }
 
@@ -299,7 +301,7 @@ export class UpdateFlow {
     const version = feed.version;
     this.abort = new AbortController();
     this.lastProgress = 0;
-    this.set({ status: "downloading", progress: 0, error: null });
+    this.set({ status: "downloading", progress: 0, error: null, errorFrom: null });
     try {
       if (!downloadAllowed(feed.url, this.p.source)) throw new Error("the download isn't one of this app's GitHub releases; refused");
       const dir = dirname(running);
@@ -333,7 +335,7 @@ export class UpdateFlow {
       const message = e instanceof Error ? e.message : String(e);
       this.p.log(`update install failed: ${message}`);
       // error: SHOWN — status "error": why, and that the running version is untouched
-      this.set({ status: "error", progress: null, error: `The update didn't install: ${message}. Your current version is untouched.` });
+      this.set({ status: "error", progress: null, error: `The update didn't install: ${message}. Your current version is untouched.`, errorFrom: "install" });
     } finally {
       this.abort = null;
     }
@@ -365,7 +367,7 @@ export class UpdateFlow {
     if (!this.p.fs.exists(this.installed)) {
       this.installed = null;
       // error: SHOWN — status "error"; Check for updates downloads it again
-      this.set({ status: "error", error: "The downloaded update is gone (deleted?). Check for updates to download it again. Your current version is untouched." });
+      this.set({ status: "error", error: "The downloaded update is gone (deleted?). Check for updates to download it again. Your current version is untouched.", errorFrom: "install" });
       return;
     }
     this.stop();

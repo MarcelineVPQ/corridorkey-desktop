@@ -370,9 +370,14 @@ export interface UpdateState {
   status: "idle" | "checking" | "current" | "available" | "downloading" | "ready" | "error" | "unsupported";
   current: string;
   latest: string | null;
+  // the offered download's size in bytes (from the signed feed), while one is offered
+  size: number | null;
   notes: string | null;
   progress: number | null;
   error: string | null;
+  // what failed: a check (said in App settings, Updates; a scheduled one stays quiet there only) or the install the user
+  // started (also pinned above the page until dismissed: UpdateBanner.tsx)
+  errorFrom: "check" | "install" | null;
   checkedAt: number | null;
 }
 
@@ -554,6 +559,8 @@ export interface AppState {
   // the desktop's colors (Desktop theme / desktop accent); null = couldn't be read or not asked
   desktopPalette: DesktopPalette | null;
   update: UpdateState;
+  // why the restart into an update must wait now (electron/main/busy.ts restartRefusal), or null: it can go
+  restartWait: string | null;
   // this system's file names, for the Engine page's hints (electron/main/platform.ts)
   // and the home folder, shown as ~ in shortened paths (src/ui/paths.ts)
   system: { engineBin: string; ortLib: string; platform: string; home: string };
