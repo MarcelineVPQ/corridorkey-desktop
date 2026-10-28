@@ -1383,7 +1383,7 @@ describe("Phase 4: history shortcuts", () => {
     for (let i = 0; i <= HISTORY_WINDOW; i++) await deps.history.add(`echo old ${i}`);
     const first = deps.history.entries("echo old 0", 1)[0].n;
     const b = await c.run(`!${first}`);
-    expect([b.state, b.lines[0].text]).toEqual(["refused", `!${first}: no line ${first} in the history (history lists the numbers)`]);
+    expect([b.state, b.lines[0].text]).toEqual(["refused", `!${first}: line ${first} is older than the newest ${HISTORY_WINDOW} lines that ! reaches`]);
     expect(spawned).toHaveLength(0);
     // the newest are still there
     expect((await c.run("!-1")).line).toBe(`echo old ${HISTORY_WINDOW}`);
