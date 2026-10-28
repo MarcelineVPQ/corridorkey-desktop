@@ -176,13 +176,17 @@ impl Inbox {
         }
     }
 
-    /// Whether a `cancel` for `id` is among the lines read but not yet taken.
-    fn cancel_queued(&self, id: &str) -> bool {
-        let g = self.state.lock().unwrap();
-        g.lines.iter().flatten().any(|l| {
-            serde_json::from_str::<Value>(l)
-                .is_ok_and(|v| v.get("cmd").and_then(|c| c.as_str()) == Some("cancel") && str_field(&v, "id").as_deref() == Some(id))
-        })
+    /// Whether a `cancel` for `id` is among the lines read but not yet taken; that line is consumed, so it can't
+    /// later cancel a new `run` reusing the id (final review 2026-10-28 N7: it landed in `pending_cancel` for good).
+    fn take_queued_cancel(&self, id: &str) -> bool {
+        let mut g = self.state.lock().unwrap();
+        let at = g.lines.iter().position(|l| {
+            l.as_ref().is_ok_and(|l| {
+                serde_json::from_str::<Value>(l)
+                    .is_ok_and(|v| v.get("cmd").and_then(|c| c.as_str()) == Some("cancel") && str_field(&v, "id").as_deref() == Some(id))
+            })
+        });
+        at.and_then(|i| g.lines.remove(i)).is_some()
     }
 }
 
@@ -315,7 +319,7 @@ fn dispatch<B: Backend, W: Write>(backend: &mut B, req: &Value, inbox: &Inbox, p
                 return true;
             }
             let jid = jid.unwrap();
-            if pending_cancel.remove(&jid) || inbox.cancel_queued(&jid) {
+            if pending_cancel.remove(&jid) || inbox.take_queued_cancel(&jid) {
                 r.send(json!({"type": "error", "id": jid, "code": "cancelled", "message": "cancelled"}));
                 return true;
             }
