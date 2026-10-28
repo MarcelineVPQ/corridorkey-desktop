@@ -22,6 +22,8 @@ import type { CacheInfo, Job } from "../../src/shared/types";
 
 /** The marker file in a cache folder the app made in a chosen location. */
 export const CACHE_MARKER = ".corridorkey-cache";
+/** Written in the target while a move copies, removed when it ends: still there, a move was cut short (the app quit). */
+export const MOVING_MARKER = ".corridorkey-moving";
 /** The cache's parts that move: the clips' thumbnails and stills, and the TensorRT engines built for this card. */
 export const MEDIA_DIR = "media";
 export const JOBS_DIR = "jobs";
@@ -159,13 +161,16 @@ export async function moveCache(from: string, to: string, owned: boolean, fromOw
   try {
     // loop: NOT-WORTH — two parts, once per move
     for (const part of MOVED_PARTS) plan.push(...(await filesUnder(join(from, part))).map((rel) => ({ part, rel })));
-    // a folder of ours that isn't the cache in use (the system's, or one with the marker): what a move cut short (the app
-    // quit mid-copy) left in its parts goes first, or the first leftover stopped every later move (review 2026-10-28 #4)
-    // loop: NOT-WORTH — one async stat per move
-    if (!made && resolve(from) !== resolve(to) && (owned || (await exists(join(to, CACHE_MARKER)))))
+    // a folder of ours that isn't the cache in use (the system's, or one with the marker) where a move was cut short (the
+    // app quit mid-copy: MOVING_MARKER left): its parts are that move's leftovers and go first, or the first one stopped
+    // every later move (review 2026-10-28 #4). Without the moving marker nothing in the target is removed (N1).
+    // loop: NOT-WORTH — two async stats per move
+    if (!made && resolve(from) !== resolve(to) && (owned || (await exists(join(to, CACHE_MARKER)))) && (await exists(join(to, MOVING_MARKER))))
       // loop: NOT-WORTH — two parts, once per move [bounded: the leftovers of one cut move]
       for (const part of MOVED_PARTS) await rm(join(to, part), { recursive: true, force: true });
     await prepareTarget(to, owned);
+    // loop: NOT-WORTH — one small write per move
+    await writeFile(join(to, MOVING_MARKER), "A cache move into this folder is running, or was cut short.\n");
     // loop: SERIAL-REQUIRED — one file copied and verified at a time, async (a few hundred files, a few GB at most)
     for (const { part, rel } of plan) {
       const src = join(from, part, rel);
@@ -189,6 +194,8 @@ export async function moveCache(from: string, to: string, owned: boolean, fromOw
     // error: SHOWN — App settings says why; only the copies made here are removed, the old cache stays in use
     // loop: NOT-WORTH — one unlink per copy made, once per failed move
     for (const f of copied) await unlink(f).catch(() => {});
+    // loop: NOT-WORTH — one unlink per failed move (the copies are gone: nothing is left over)
+    await unlink(join(to, MOVING_MARKER)).catch(() => {});
     // loop: NOT-WORTH — the parts' empty folders, once per failed move
     for (const part of MOVED_PARTS) await removeEmptyDirs(join(to, part));
     if (made) {
@@ -198,7 +205,10 @@ export async function moveCache(from: string, to: string, owned: boolean, fromOw
     }
     return { ok: false, message: `Nothing was moved: ${(e as Error).message}`, files: 0, bytes: 0 };
   }
-  // every copy verified: the originals go (only the files copied)
+  // every copy verified: the move into `to` is whole
+  // loop: NOT-WORTH — one unlink per move
+  await unlink(join(to, MOVING_MARKER)).catch(() => {});
+  // the originals go (only the files copied)
   let left = 0;
   // loop: NOT-WORTH — one unlink per moved file, once per move
   for (const { part, rel } of plan) await unlink(join(from, part, rel)).catch(() => left++);

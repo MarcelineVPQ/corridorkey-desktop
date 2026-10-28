@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { CACHE_MARKER, cacheDirFor, cacheInfo, cacheUnavailable, clearOldCache, jobTempDir, moveCache, prepareTarget, remapMedia, targetProblem } from "../../electron/main/cacheFolder";
+import { CACHE_MARKER, MOVING_MARKER, cacheDirFor, cacheInfo, cacheUnavailable, clearOldCache, jobTempDir, moveCache, prepareTarget, remapMedia, targetProblem } from "../../electron/main/cacheFolder";
 import { job } from "./fixtures";
 
 // the cache folder's location (backlog row 44): only the app's own folders are ever written or removed
@@ -128,6 +128,7 @@ describe("cache folder", () => {
     const from = filled();
     const to = join(place(), "corridorkey-desktop");
     put(join(to, CACHE_MARKER), "");
+    put(join(to, MOVING_MARKER), "");
     put(join(to, "media", "a.jpg"), "sti");
     const r = await moveCache(from, to, false, true);
     expect(r).toMatchObject({ ok: true, message: null, files: 3 });
@@ -135,9 +136,21 @@ describe("cache folder", () => {
     expect(readFileSync(join(to, "media", "a.jpg"), "utf8")).toBe("still a");
     // and back to the system's folder (always ours), which a cut move back left a TensorRT engine in
     put(join(dirname(from), "sys", "tensorrt", "rtx-5080__fp16", "h1024-1280_w1792-2176_t1-48_f1-4", "stage1.engine"), "engi");
+    put(join(dirname(from), "sys", MOVING_MARKER), "");
     const back = await moveCache(to, join(dirname(from), "sys"), true, false);
     expect(back).toMatchObject({ ok: true, files: 3 });
     expect(tree(join(dirname(from), "sys"))).toEqual(moved);
+    // N1: no move was cut short (no moving marker): nothing already in the target is removed, as the dialog says
+    const sys = join(fresh(), "sys");
+    put(join(sys, "tensorrt", "rtx-5080__fp16", "built-while-the-drive-was-out", "stage1.engine"), "kept");
+    const kept = await moveCache(filled(), sys, true, false);
+    expect(kept).toMatchObject({ ok: true, files: 3 });
+    expect(tree(sys)).toEqual([...moved, "tensorrt/rtx-5080__fp16/built-while-the-drive-was-out/stage1.engine"].sort());
+    const clash = join(fresh(), "sys");
+    put(join(clash, "media", "a.jpg"), "an older still");
+    expect((await moveCache(filled(), clash, true, false)).ok).toBe(false);
+    expect(tree(clash)).toEqual(["media/a.jpg"]);
+    expect(readFileSync(join(clash, "media", "a.jpg"), "utf8")).toBe("an older still");
     // someone else's folder is never cleared: refused before anything (targetProblem), and moveCache leaves its parts be
     const theirs = place();
     put(join(theirs, "media", "a.jpg"), "theirs");
