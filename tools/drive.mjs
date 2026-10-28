@@ -43,7 +43,15 @@ ws.addEventListener("message", (m) => {
   const d = JSON.parse(m.data);
   if (d.id && wait.has(d.id)) (wait.get(d.id)(d), wait.delete(d.id));
 });
-const send = (method, params = {}) => new Promise((r) => (wait.set(++id, r), ws.send(JSON.stringify({ id, method, params }))));
+// every CDP call has a deadline: a page that hangs (or an app that died) fails the step instead of waiting forever
+const send = (method, params = {}, ms = 30_000) =>
+  new Promise((r, j) => {
+    const n = ++id;
+    // loop: SERIAL-REQUIRED — one CDP reply [bounded: ms, 30 s by default; unref'd, so it never holds the process]
+    const t = setTimeout(() => (wait.delete(n), j(new Error(`CDP ${method}: no reply in ${ms / 1000} s`))), ms).unref();
+    wait.set(n, (d) => (clearTimeout(t), r(d)));
+    ws.send(JSON.stringify({ id: n, method, params }));
+  });
 
 // loop: SERIAL-REQUIRED — the steps are an ordered script
 for (let i = 0; i < args.length; i++) {
@@ -58,7 +66,8 @@ for (let i = 0; i < args.length; i++) {
     writeFileSync(f, Buffer.from(r.result.data, "base64"));
     console.log("shot:", f);
   } else if (a === "--close") {
-    send("Runtime.evaluate", { expression: "window.close()" });
+    // error: NOT-WORTH — the window closing ends the page, so its reply may never come
+    send("Runtime.evaluate", { expression: "window.close()" }).catch(() => {});
     await sleep(500);
   }
 }
