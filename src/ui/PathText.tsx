@@ -75,6 +75,8 @@ export function PathText({ path, max = 80 }: { path: string; max?: number }) {
         role="button"
         tabIndex={0}
         className="copy-btn"
+        // each Copy says which path: a panel with several reads "Copy /path…", not a row of the same "Copy" (review N7)
+        aria-label={`Copy ${path}`}
         title={`Copy the full path:\n${path}`}
         onClick={copy}
         onKeyDown={(e) => {
