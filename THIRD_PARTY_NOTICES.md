@@ -136,8 +136,8 @@ TensorRT's libraries themselves are not shipped: they come with the opt-in Tenso
 
 ### The interface (npm packages)
 
-The production dependencies in package-lock.json: bundled by electron-vite into out/ and also copied into
-app.asar by electron-builder. Development tools (devDependencies) are not shipped and not listed.
+The packages the app's code imports and what they need (package-lock.json): bundled by electron-vite into out/;
+app.asar has no node_modules. The build and test tools are not shipped and not listed.
 
 | Package | Version | Licence |
 | --- | --- | --- |

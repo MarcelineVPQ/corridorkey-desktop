@@ -3,7 +3,8 @@
 //   the engine's Rust crates: cargo-about over engine-rs/Cargo.lock, the whole workspace (the engine and the
 //     `corridorkey` command line ship together; engine-rs/about.toml: the three release targets, the release features
 //     of tools/build_engine.sh, build and dev crates left out);
-//   the app's npm packages: package-lock.json's production packages (what electron-builder puts in app.asar) and the
+//   the app's npm packages: those the app's code imports (src/, electron/; electron-vite bundles them into out/, and
+//     app.asar has no node_modules: they are devDependencies) and what they need, by package-lock.json, and the
 //     licence file each one ships in node_modules;
 //   the first-run downloads: the wheels and model sets electron/main/install.ts pins (tools/install_pins.mjs);
 //   OpenColorIO and the C++ libraries its bundled build links into the engine: OCIO_LIBS below (versions from the
@@ -18,7 +19,7 @@
 // The output is deterministic: every list is sorted, nothing depends on time or the machine.
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { modelSets, wheels as pinnedWheels } from "./install_pins.mjs";
 
@@ -74,13 +75,67 @@ function rustCrates() {
   return { crates, texts: groupTexts(texts) };
 }
 
-// --- the npm packages that ship (package-lock.json, not dev) ---
+// --- the npm packages that ship: imported by the app's code, bundled into out/ with what they need ---
+/** The packages src/ and electron/ import (not tests; not node: built-ins or electron, which is listed on its own). */
+function importedPackages() {
+  const names = new Set();
+  const walk = (dir) => {
+    // loop: NOT-WORTH — the source folders' entries, once per run
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if ([".ts", ".tsx"].includes(extname(p)) && !/\.(test|d)\.tsx?$/.test(p))
+        // loop: NOT-WORTH — one file's imports
+        for (const m of readFileSync(p, "utf8").matchAll(/(?:from|import)\s*\(?\s*["']([^"'./][^"']*)["']/g)) {
+          const name = m[1]
+            .split("/")
+            .slice(0, m[1].startsWith("@") ? 2 : 1)
+            .join("/");
+          if (!name.startsWith("node:") && name !== "electron") names.add(name);
+        }
+    }
+  };
+  // loop: NOT-WORTH — two folders
+  ["src", "electron"].forEach((d) => walk(join(APP, d)));
+  return [...names];
+}
+
+/** package-lock.json's entry for `dep` as the package at `from` resolves it (nested node_modules first). */
+function resolveIn(packages, from, dep) {
+  // loop: NOT-WORTH — a package's few nesting levels
+  for (let dir = from; ; dir = dir.replace(/\/?node_modules\/(@[^/]+\/)?[^/]+$/, "")) {
+    const path = `${dir ? `${dir}/` : ""}node_modules/${dep}`;
+    if (packages[path]) return path;
+    if (!dir) return null;
+  }
+}
+
 function npmPackages() {
   const lock = JSON.parse(readFileSync(join(APP, "package-lock.json"), "utf8"));
+  // the imported packages and their dependencies (optional ones when installed), each lock entry once
+  const paths = new Set();
+  // loop: NOT-WORTH — the imported packages
+  const todo = importedPackages().map((name) => ["", name, false]);
+  // loop: NOT-WORTH — ~110 packages, each once [bounded: the lock's packages]
+  while (todo.length) {
+    const [from, dep, optional] = todo.pop();
+    const path = resolveIn(lock.packages, from, dep);
+    if (!path) {
+      if (optional) continue;
+      throw new Error(`gen_notices: ${dep} (needed by ${from || "the app"}) isn't in package-lock.json`);
+    }
+    if (paths.has(path)) continue;
+    paths.add(path);
+    const p = lock.packages[path];
+    // loop: NOT-WORTH — one package's dependencies
+    for (const d of Object.keys(p.dependencies ?? {})) todo.push([path, d, false]);
+    // loop: NOT-WORTH — one package's optional dependencies
+    for (const d of Object.keys(p.optionalDependencies ?? {})) todo.push([path, d, true]);
+  }
   const out = [];
-  // loop: NOT-WORTH — the lock's packages (~350), once per run
-  for (const [path, p] of Object.entries(lock.packages)) {
-    if (!path || p.dev) continue;
+  // loop: NOT-WORTH — ~110 packages, once per run
+  for (const path of paths) {
+    const p = lock.packages[path];
     const name = path.replace(/^.*node_modules\//, "");
     const dir = join(APP, path);
     if (!existsSync(dir)) throw new Error(`gen_notices: ${path} is in the lock but not installed (npm ci first)`);
@@ -286,8 +341,8 @@ function render() {
     "",
     "### The interface (npm packages)",
     "",
-    "The production dependencies in package-lock.json: bundled by electron-vite into out/ and also copied into",
-    "app.asar by electron-builder. Development tools (devDependencies) are not shipped and not listed.",
+    "The packages the app's code imports and what they need (package-lock.json): bundled by electron-vite into out/;",
+    "app.asar has no node_modules. The build and test tools are not shipped and not listed.",
     "",
     "| Package | Version | Licence |",
     "| --- | --- | --- |",

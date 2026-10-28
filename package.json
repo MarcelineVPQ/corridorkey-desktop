@@ -26,13 +26,6 @@
     "check:engine": "cd engine-rs && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test",
     "prepare": "git config core.hooksPath .hooks || echo prepare: not a git checkout, so the pre-commit gates are not installed"
   },
-  "dependencies": {
-    "lucide-react": "0.577.0",
-    "react": "18.3.1",
-    "react-dom": "18.3.1",
-    "react-markdown": "10.1.0",
-    "remark-gfm": "4.0.1"
-  },
   "devDependencies": {
     "@types/node": "22.20.5",
     "@types/react": "18.3.31",
@@ -41,7 +34,12 @@
     "electron": "45.1.0",
     "electron-builder": "26.17.0",
     "electron-vite": "5.0.0",
+    "lucide-react": "0.577.0",
     "prettier": "3.9.9",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1",
     "typescript": "5.9.3",
     "vite": "7.3.6",
     "vitest": "5.0.3"

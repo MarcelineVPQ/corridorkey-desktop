@@ -7,6 +7,8 @@ productName: CorridorKey
 copyright: Copyright © 2026 MarcelineVPQ. CorridorKey © Corridor Digital.
 directories:
   output: release
+# No node_modules in app.asar: every npm package is a devDependency (electron-builder copies only `dependencies`;
+# tests/unit/packaging.test.ts), which electron-vite bundles into out/ wherever the code imports it.
 files:
   - out/**
   - package.json
