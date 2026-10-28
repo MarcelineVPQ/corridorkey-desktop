@@ -135,7 +135,8 @@ base set's LICENSE-* on every derived set).
 
 **On demand:** `.github/workflows/windows.yml` (`gh workflow run windows.yml`) runs the engine's checks (cargo fmt,
 clippy, cargo test) on GitHub's Windows runner, the only place its Windows-only code runs; worth a run before a
-stable release or after a change to that code.
+stable release or after a change to that code. It hasn't passed yet (its one run, 2026-10-27, failed): until it does,
+nothing Windows-only in the engine counts as run on Windows (the CHANGELOG says "not yet run on Windows").
 
 ### macOS (Apple Silicon)
 

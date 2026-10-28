@@ -35,18 +35,19 @@ Corridor Digital's AI green-screen keyer (model by Zachary Harris). Drop clips i
 mode and outputs, and watch real progress: frames written, the temporal window the runtime
 chose from your free graphics memory, and stills of the results.
 
-Status: 1.0 is almost ready. The first development build, 1.0.0-dev.1, keys on Linux and Windows with an NVIDIA
-graphics card. There's no macOS build in it yet: the Mac can't key (macOS, honestly, below).
+Status: 1.0 is almost ready. The development builds (1.0.0-dev.N, on the Development update channel) key on Linux and
+Windows with an NVIDIA graphics card. There's no macOS build yet: the Mac engine keys 1280×1080 and 1920×1080 clips
+on an M6 Mac mini, but no Mac app has shipped (macOS, honestly, below).
 
 ## What's coming
 
 Everything planned lives in one list, [docs/BACKLOG.md](docs/BACKLOG.md), each item with its status. In short
 (row numbers in brackets):
 
-**Working on now: the Mac (Apple Silicon).** The Core ML engine runs every network on an M6 Mac mini, but stage 1
-needs more memory than a 16 GB Mac has at a 4-frame window; shorter windows are next to measure. The setup now
-installs the Core ML models; next Core ML for 1920×1080 HD (built, to try on a Mac) and 4K [60], the real-Mac gate
-against CUDA's mattes [24], and self-update on the Mac [57].
+**Working on now: the Mac (Apple Silicon).** The Core ML engine keys 1280×1080 and 1920×1080 clips on an M6 Mac mini
+(CPU + GPU, 16 GB; mattes within 1/255 of CUDA's, 2026-10-27), and the setup installs the Core ML models. Next: the
+first Mac app build, Core ML for 4K [60], the real-Mac gate against CUDA's mattes [24], and self-update on the Mac
+[57].
 
 **Next, toward 1.0:**
 - Keying on a real Windows PC with an NVIDIA card (only tested in a virtual machine so far)
@@ -106,11 +107,12 @@ your PC" the first time. Click **More info**, then **Run anyway**. It's asked on
 **keying on an NVIDIA card under Windows has not been tested yet**: we don't have a real Windows PC with one. Every
 speed and quality number in this README was measured on Linux. If you try it on Windows, please tell us how it goes.
 
-**macOS, honestly:** a great many VFX artists work on Macs, so macOS is on the way, but **the Mac build can't key
-yet**, so 1.0.0-dev.1 has no macOS build. The app itself builds and runs on Apple Silicon (signed with a Developer ID,
-notarized by Apple, driven page by page on GitHub's Apple Silicon runners), but a job doesn't run.
+**macOS, honestly:** a great many VFX artists work on Macs, so macOS is on the way, but **there's no Mac build
+yet**. The engine keys on Apple Silicon (an M6 Mac mini, 1280×1080 and 1920×1080 clips, below), and the app itself
+builds and runs there (signed with a Developer ID, notarized by Apple, driven page by page on GitHub's Apple Silicon
+runners), but no Mac app with the two together has shipped or keyed on a real Mac yet.
 There's no NVIDIA card on a Mac, so the Mac engine uses ONNX Runtime's Core ML backend (Apple's GPU and Neural Engine)
-instead of CUDA, and that path needs more development before it keys:
+instead of CUDA. Where that stands:
 
 - **Core ML models in setup** (backlog row 59): Core ML compiles for fixed sizes, so the Mac needs its own model set.
   It's published (release `models-2.0.0-onnx.4-coreml`) and setup downloads it on a Mac; the first Mac build brings that setup.

@@ -25,7 +25,8 @@ integrity hash on macOS and Windows; not yet run in a Windows or Mac build). Nod
   all or nothing; each EXR frame is written whole and renamed (the app's jobs too). A killed run never leaves a frame
   at a final name. Frames already there are refused unless `--overwrite` or `--skip-existing`.
 - Exit codes that say whether a retry can help, progress lines for OpenJD, Deadline, plain text or JSON, a JSON
-  report of the run, a clean stop on SIGTERM / SIGINT (also on Windows' console close, log-off and shut-down).
+  report of the run, a clean stop on SIGTERM / SIGINT (Windows' console close, log-off and shut-down are handled
+  too, but not yet run on Windows).
 - Without `--models` / `--ort` it uses the app's own installed models and ONNX Runtime, so the Queue's Copy as
   command line runs in a terminal as it is (tested with a fake install; not yet on a graphics card).
 - Frame folders are read as the app starts them: scene-linear when the first frame is EXR, display-coded otherwise;
@@ -33,7 +34,7 @@ integrity hash on macOS and Windows; not yet run in a Windows or Mac build). Nod
   write an EXR folder's choice both ways (`--no-linear` when the box is off); the OpenJD templates' scene-linear
   parameter and the Flamenco job type's setting gain a "by the first frame" default.
 - `corridorkey __spec --json` describes the whole command line for tools; on Windows it never loads a library from
-  the current folder.
+  the current folder (not yet run on Windows).
 - Fixes from the farm review (2026-10-26) before anything shipped: a stepped `-F` keys to the end of its range,
   `-s` / `-e` past the shot are refused like `-F`'s, an absurd preroll is refused instead of overflowing, the final
   renames are all or nothing, a stop during a TensorRT build ends `prepare` cleanly, run folders are unique per
