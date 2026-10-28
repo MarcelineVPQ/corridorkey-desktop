@@ -28,6 +28,7 @@ import { BlockPusher, PUSH_EVERY_MS } from "../../electron/main/console/push";
 import { readRange } from "../../electron/main/console/files";
 import { consoleLineArg, consoleLinesArg, cursorArg, fromAppPage } from "../../electron/main/validate";
 import { makeRegistry } from "../../src/shared/console/registry";
+import { HISTORY_WINDOW } from "../../src/shared/console/expand";
 import { leavesQuoteOpen } from "../../src/shared/console/script";
 import { blockText, mergeBlocks } from "../../src/ui/console/model";
 import { parseLine } from "../../src/shared/console/script";
@@ -1373,6 +1374,18 @@ describe("Phase 4: history shortcuts", () => {
     // a file name with ! or a frame token is never expanded
     expect((await c.run("dir sh010!")).line).toBe("dir sh010!");
     expect((await c.run("dir !$F4.exr")).line).toBe("dir !$F4.exr");
+  });
+
+  it("whole review S1: a line older than the page's window (HISTORY_WINDOW) is never expanded, as the preview said", async () => {
+    const { c, deps } = make();
+    // loop: NOT-WORTH — a test's HISTORY_WINDOW + 1 lines
+    for (let i = 0; i <= HISTORY_WINDOW; i++) await deps.history.add(`echo old ${i}`);
+    const first = deps.history.entries("echo old 0", 1)[0].n;
+    const b = await c.run(`!${first}`);
+    expect([b.state, b.lines[0].text]).toEqual(["refused", `!${first}: no line ${first} in the history (history lists the numbers)`]);
+    expect(spawned).toHaveLength(0);
+    // the newest are still there
+    expect((await c.run("!-1")).line).toBe(`echo old ${HISTORY_WINDOW}`);
   });
 
   it("a script's lines are never expanded (bash's non-interactive rule)", async () => {

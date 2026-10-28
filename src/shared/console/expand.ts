@@ -11,6 +11,12 @@ export interface HistoryLine {
   line: string;
 }
 
+/**
+ * The history lines a typed line expands over: the newest this many. The page holds the same lines for its preview
+ * (consoleHistory), so the line Enter runs is the one the hint showed; an older line is "not found" in both.
+ */
+export const HISTORY_WINDOW = 200;
+
 export type Expansion = { line: string; changed: boolean } | { error: string };
 
 const SPACE = /[ \t]/;

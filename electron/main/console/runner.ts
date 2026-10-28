@@ -22,7 +22,7 @@ import type { Elevation } from "./elevation";
 import { commandHelp, findLines, manPage, overview } from "./help";
 import type { AuditLog, History } from "./logs";
 import { allowVerdict, answerWithin, checkWrite, expandHome, FS_ANSWER_MS, fsErrorText, nextVersion, resolveReal, serverNotAllowed, systemFolders, uncServer, type PathDeps } from "./paths";
-import { expandHistory, hasExpansion } from "../../../src/shared/console/expand";
+import { expandHistory, hasExpansion, HISTORY_WINDOW } from "../../../src/shared/console/expand";
 import { folderRange, frameToken, groupSequences, isFrameFile, sequenceOf, type Sequence } from "../../../src/shared/console/sequences";
 import { commands, globRegExp, isCompound, leavesQuoteOpen, parseProgram, type CmdNode, type List, pipeStages } from "../../../src/shared/console/script";
 import { tokenize } from "../../../src/shared/console/parse";
@@ -302,8 +302,9 @@ export class Console {
     let typed: string | null = null;
     if (hasExpansion(line, this.opts)) {
       await this.d.history.loaded;
-      // loop: NOT-WORTH — the history's lines (≤ its cap), once per line with a ! or ^ to expand
-      const past = this.d.history.entries("", Number.MAX_SAFE_INTEGER).reverse();
+      // only the lines the page's preview had (HISTORY_WINDOW): what Enter runs is what the hint showed
+      // loop: NOT-WORTH — ≤ HISTORY_WINDOW lines, once per line with a ! or ^ to expand
+      const past = this.d.history.entries("", HISTORY_WINDOW).reverse();
       const x = expandHistory(line, past, this.opts);
       if ("error" in x) return this.finish(this.block(line, null), "refused", x.error);
       typed = line;
@@ -396,7 +397,7 @@ export class Console {
   }
 
   history(query: string): ConsoleHistoryEntry[] {
-    return this.d.history.entries(query);
+    return this.d.history.entries(query, HISTORY_WINDOW);
   }
 
   /** sudo -k, a screen lock, sleep, quit: elevation ends (and the audit log says why). */
