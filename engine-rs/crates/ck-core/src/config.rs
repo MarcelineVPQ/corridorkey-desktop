@@ -9,9 +9,10 @@ use std::time::Duration;
 /// --device / CK_ENGINE_DEVICE.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Device {
-    /// the graphics card (none: jobs fail with `no-gpu`)
+    /// the graphics card (none: jobs fail with `no-gpu`): NVIDIA through the CUDA provider, or an AMD card through
+    /// MIGraphX with ONNX Runtime's MIGraphX build
     Auto,
-    /// the same as auto (the card, through the CUDA provider)
+    /// an NVIDIA card through the CUDA provider only, never MIGraphX (none: jobs fail with `no-gpu`)
     Cuda,
     /// ONNX Runtime's CPU provider (tests; slow)
     Cpu,

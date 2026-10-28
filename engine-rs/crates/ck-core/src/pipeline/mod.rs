@@ -1295,10 +1295,6 @@ impl Pipeline<OrtLoader> {
     }
 }
 
-/// The graphics memory a process holding `own` bytes takes beyond the first network's `weights` (its file's bytes): the
-/// CUDA context and libraries. None when the network takes less on the card than its file (C-RADIO's fp32 weights
-/// load as fp16): not measurable, so arena_limit keeps its 0.5 GiB default rather than counting the context as 0
-/// (senior review 2026-10-27 S3: 0 left a later low-VRAM job's stage-1 arena ~0.33 GiB over its limit).
 /// A clip shorter than its window runs stage 1 on all its frames at once; the Core ML set has fixed windows (`have`, its
 /// stage-1 batches at this size), and copies of the last frame would change the matte, so a clip shorter than every
 /// one is refused in words (whole-code review 2026-10-27: it said "pick a window it was built for", which a 1-3 frame
@@ -1310,6 +1306,10 @@ fn coreml_short_clip(t_all: usize, chunk: usize, have: &[usize]) -> Option<Strin
     })
 }
 
+/// The graphics memory a process holding `own` bytes takes beyond the first network's `weights` (its file's bytes): the
+/// CUDA context and libraries. None when the network takes less on the card than its file (C-RADIO's fp32 weights
+/// load as fp16): not measurable, so arena_limit keeps its 0.5 GiB default rather than counting the context as 0
+/// (senior review 2026-10-27 S3: 0 left a later low-VRAM job's stage-1 arena ~0.33 GiB over its limit).
 fn overhead_outside_weights(own: u64, weights: u64) -> Option<u64> {
     (own >= weights).then(|| own - weights)
 }
