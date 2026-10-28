@@ -96,12 +96,18 @@ S6 run the script's own lines in bash with stand-ins.
 - `corridorkey run`: a dir/echo script exits 0; a `sudo` line that replaces files, and `allow`, are refused in words,
   exit 2 (`sudo` on a read-only command runs as it is, as designed). taskkill /F of the CLI ends the app's runner at
   once (job object: the runner is in a job; gone 4 ms after).
-- **Open: Ctrl+C / Ctrl+Break don't stop `corridorkey run` cleanly on Windows.** The runner (CorridorKey.exe with
+- **Fixed d905e80 (not yet run on Windows): Ctrl+C / Ctrl+Break didn't stop `corridorkey run` cleanly on Windows.** The runner (CorridorKey.exe with
   ELECTRON_RUN_AS_NODE) dies with STATUS_CONTROL_C_EXIT (0xC000013A); the CLI returns that code and nothing says the
   script stopped. A 3-line probe shows Electron 45.1.0 in run-as-node mode on Windows never calls
   `process.on("SIGINT" | "SIGBREAK")`, so headless.ts's handlers can't run there. Needs a fix that doesn't rely on
   Node's console signals (e.g. the CLI starts the runner in its own process group and asks it to stop over a pipe).
-- **Open: Windows Defender quarantined resources\engine\corridorkey.exe** as Trojan:Win32/Bearfoos.A!ml (machine-
+  d905e80: the CLI starts the runner with CREATE_NEW_PROCESS_GROUP, takes the console's events itself and writes a
+  `stop` line on the runner's stdin (CK_HEADLESS_STOP=stdin) → the runner's own cancel, "cancelled", exit 130.
+  Ctrl+Break still reaches every process on the console; when it ends the runner first (0xC000013A) the CLI says the
+  script stopped and exits 143. Needs a Windows check: whether the new group's Ctrl+C-ignore holds in Electron's
+  run-as-node, and Ctrl+Break's path.
+- **Windows Defender quarantined resources\engine\corridorkey.exe** (d65b2ff: Troubleshooting + RELEASING; the
+  submission text for Microsoft is ready, outside the repo) as Trojan:Win32/Bearfoos.A!ml (machine-
   learning heuristic, a false positive) during the Ctrl+C runs; restored for the rest of the run. Signing and a
   submission to Microsoft are the usual remedies.
 - DLL lockdown: with invalid and with marker `turbojpeg.dll` / `nvml.dll` in the current folder, `corridorkey info`
@@ -111,7 +117,7 @@ S6 run the script's own lines in bash with stand-ins.
   C:\Users\Zoë\AppData\Local\…; `corridorkey run` lists and reads files in "C:\Users\Zoë\Plates Zoë"; the app with
   its data folder under C:\Users\Zoë shows the path on the setup page, and its Console's cd (Tab-completed), dir, cat
   and pwd work there.
-- Small findings: the headless runner says `[console] history: ENOENT … console-history-headless.jsonl` for a user who
+- Small findings (all fixed in e4beb09, not yet run on Windows): the headless runner says `[console] history: ENOENT … console-history-headless.jsonl` for a user who
   never started the app (its userData folder doesn't exist yet); `corridorkey info` without an ONNX Runtime names
   `libonnxruntime.so` on Windows (runtime.rs); the headless refusal reads "line that replace files" and offers the
   `-o …_v###/` hint for `allow` too; the Console prompt shows `Zoë/Plates Zoë` with `/` on Windows.
