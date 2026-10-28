@@ -121,6 +121,26 @@ export async function removeAside(dir: string): Promise<void> {
 }
 
 /**
+ * At start: delete the `.<name>.removing` folders a removal cut short left (removeAside: a quit or a crash between the
+ * rename and the delete) in the folders it removes from. Returns how many went.
+ */
+export async function sweepRemoving(parents: readonly string[]): Promise<number> {
+  let n = 0;
+  // loop: NOT-WORTH — the app's data and cache folders, once at start
+  for (const parent of parents) {
+    // error: NOT-WORTH — a folder not there (yet) has nothing to sweep
+    const names = await readdir(parent).catch(() => [] as string[]);
+    // loop: NOT-WORTH — the folder's few entries, once at start
+    for (const name of names.filter((x) => /^\..+\.removing$/.test(x))) {
+      // loop: NOT-WORTH — one leftover folder removed (async)
+      await rm(join(parent, name), { recursive: true, force: true });
+      n++;
+    }
+  }
+  return n;
+}
+
+/**
  * The cache prunes itself at start: files older than CACHE_MAX_AGE_DAYS go, then the oldest until it is under
  * CACHE_MAX_BYTES. Returns how many files were removed.
  */

@@ -7,11 +7,9 @@ import type { EngineHandle } from "../../electron/main/queue";
 import { BUILD_RECORD, Prebuilder, rangesOnDisk, recordBuild, removeSize, trtRangeDirs } from "../../electron/main/trtPrebuild";
 import { tensorrtWhyNot } from "../../electron/main/install";
 import {
-  buildFraction,
   buildSteps,
   builtWindows,
   DEFAULT_TRT_SIZES,
-  MEASURED_4K_BUILD_S,
   ownTrtSize,
   sanitizeTrtSize,
   sanitizeTrtSizes,
@@ -63,13 +61,6 @@ describe("TensorRT ranges as the engine has them", () => {
     expect(buildSteps([{ state: "building", piece: null }])).toEqual({ done: 0, total: 5 });
     // loop: NOT-WORTH — three source files, once
     for (const f of ["setup/SetupParts.tsx", "pages/EnginePage.tsx", "JobView.tsx"]) expect(readFileSync(new URL(`../../src/ui/${f}`, import.meta.url), "utf8")).not.toMatch(/\.fraction\b/);
-  });
-
-  it("weights the 4K progress by the measured build times, other sizes one share per network", () => {
-    expect(buildFraction("cradio", true)).toBe(0);
-    const total = Object.values(MEASURED_4K_BUILD_S).reduce((a, b) => a + b, 0);
-    expect(buildFraction("stage1", true)).toBeCloseTo((31.3 + 27.4 + 24.7) / total, 6);
-    expect(buildFraction("stage1", false)).toBeCloseTo(3 / 5, 6);
   });
 });
 
@@ -141,19 +132,18 @@ describe("the background TensorRT build", () => {
     return { b, sent, sizes, records, reply: (r: EngineReply) => reply(r), kills: () => kills, engine: () => last, allow: (v: boolean) => (allowed = v), queue: (v: boolean) => (queue = v) };
   }
 
-  it("builds 4K then HD until other sizes are chosen, moves its bar by network, and is done after both", async () => {
+  it("builds 4K then HD until other sizes are chosen, reports the network it builds, and is done after both", async () => {
     const r = rig();
     await r.b.start(false);
     expect(r.sent).toEqual([{ cmd: "trt_build", id: K4, width: 4096, height: 2160 }]);
     r.reply({ type: "progress", id: K4, stage: "optimize", piece: "stage1", detail: "stage 1 (4/5)" });
     expect(r.b.state.ranges[0]).toMatchObject({ state: "building", piece: "stage1" });
-    expect(r.b.state.fraction).toBeCloseTo(buildFraction("stage1", true) / 2, 6);
     r.reply({ type: "trt_built", id: K4, range: "h1792-2176_w3584-4096_t1-8_f1-4", fallbacks: {}, built_s: { cradio: 36.8, moge: 33.1, rvm: 35.6, stage1: 139.2, stage2: 57.8 } });
     // all five built in this run: its time is recorded (302.5 s)
     expect(r.records).toEqual([["h1792-2176_w3584-4096_t1-8_f1-4", expect.closeTo(302.5, 6)]]);
     expect(r.sent[1]).toEqual({ cmd: "trt_build", id: KHD, width: 1920, height: 1080 });
     r.reply({ type: "trt_built", id: KHD, range: "h1024-1280_w1792-2176_t1-48_f1-4", fallbacks: { stage1: "no tactic" }, built_s: { stage2: 50 } });
-    expect(r.b.state).toMatchObject({ status: "done", fraction: 1 });
+    expect(r.b.state).toMatchObject({ status: "done" });
     // a part of the networks built (resumed, or reused): no time recorded, it wouldn't be the whole build
     expect(r.records).toHaveLength(1);
     expect(r.b.state.ranges[1].fallbacks).toEqual({ stage1: "no tactic" });

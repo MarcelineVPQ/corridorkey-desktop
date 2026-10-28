@@ -25,10 +25,6 @@ export const PIECE_NAMES: Record<string, string> = { cradio: "C-RADIO", moge: "M
 // the engine's `fallback_reason` for a job whose range isn't built yet (pipeline/mod.rs TRT_NOT_BUILT)
 export const TRT_NOT_BUILT = "TensorRT for this resolution range isn't built yet";
 
-// README, Speed, "TensorRT on onnx.4" (2026-10-25): the one-time build at 4K, seconds per network (RTX 5080, model
-// set onnx.4). Used only to weight the background build's progress bar by network (buildFraction); never shown as a time.
-export const MEASURED_4K_BUILD_S: Record<string, number> = { cradio: 31.3, moge: 27.4, rvm: 24.7, stage1: 145.1, stage2: 59.3 };
-
 // The same measurement, in words: one run each on an RTX 5080, model set onnx.4; other cards and sizes weren't measured.
 export const TRT_SPEED = "Measured on an RTX 5080: a clip takes 0.63× CUDA's time at 1280×1080 and 0.76× at 4K, with about 1.5-2 GB more graphics memory.";
 export const TRT_BUILD_COST = "about 4.4-4.8 minutes and 2.8 GB once (measured at 1280×1080 and 4K on an RTX 5080)";
@@ -93,20 +89,6 @@ export function buildSteps(ranges: readonly { state: string; piece: string | nul
     0,
   );
   return { done, total: ranges.length * n };
-}
-
-/**
- * How far a range's build is when the engine builds `piece` (it builds in TRT_PIECES order and skips what is built):
- * the networks before it, weighted by their measured 4K build times when `measured`, else one share each.
- */
-export function buildFraction(piece: string | null, measured: boolean): number {
-  const i = piece ? TRT_PIECES.indexOf(piece as (typeof TRT_PIECES)[number]) : -1;
-  if (i <= 0) return 0;
-  const weight = (p: string) => (measured ? MEASURED_4K_BUILD_S[p] : 1);
-  // loop: NOT-WORTH — five networks
-  const total = TRT_PIECES.reduce((s, p) => s + weight(p), 0);
-  // loop: NOT-WORTH — as above
-  return TRT_PIECES.slice(0, i).reduce((s, p) => s + weight(p), 0) / total;
 }
 
 // Which sizes TensorRT builds for (backlog row 56). A size the app builds ahead: what it sends to the engine's

@@ -177,15 +177,43 @@ sign() { for f in "$@"; do touch "$f.sig"; done; }`;
   });
 
   it("moves a leftover draft to HEAD with the new notes before uploading (S5)", () => {
+    const start = at(/^flags=\(.*--notes-file release\/notes\.md/);
     const edit = at(/gh release edit "v\$v" --target "\$\(git rev-parse HEAD\)" "\$\{flags\[@\]\}"/);
-    expect(edit).toBeGreaterThan(at(/^flags=\(.*--notes-file release\/notes\.md/));
+    expect(start).toBeGreaterThan(0);
+    expect(edit).toBeGreaterThan(start);
     expect(edit).toBeLessThan(at(/gh release upload "v\$v" "release\/\$file"/));
-    expect(lines[edit]).toContain('if [ "$state" = true ]');
+    // the flags, the dev/stable choice and the edit-or-create lines, run with a stand-in gh in a throwaway repository
+    const block = lines.slice(start, edit + 2).join("\n");
+    const repo = mkdtempSync(join(scratch, "draft-"));
+    // loop: NOT-WORTH — a throwaway repository with one commit, 10 s deadline
+    spawnSync("bash", ["-c", "git init -q && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m x"], { cwd: repo, timeout: 10_000 });
+    const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8", timeout: 10_000 }).stdout.trim();
+    // loop: NOT-WORTH — the script's lines with a stand-in gh, 10 s deadline
+    const run = (state: string, dev: boolean) => {
+      const stub = `set -euo pipefail; v=1.0.0-dev.2 state=${state} dev=${dev}; gh() { echo "$*"; }`;
+      return spawnSync("bash", ["-c", `${stub}\n${block}`], { cwd: repo, encoding: "utf8", timeout: 10_000 });
+    };
+    const notes = "--title CorridorKey 1.0.0-dev.2 --notes-file release/notes.md";
+    // a draft left by a failed run: edited onto this commit with the new notes, never created again
+    const draft = run("true", true);
+    expect(draft.status).toBe(0);
+    expect(draft.stdout.trim()).toBe(`release edit v1.0.0-dev.2 --target ${head} ${notes} --prerelease --latest=false`);
+    // nothing yet: a new draft at this commit
+    expect(run("none", false).stdout.trim()).toBe(`release create v1.0.0-dev.2 --draft --target ${head} ${notes} --latest`);
   });
 
   it("runs the docs-touch gate over the commits since the last v* tag before building (S6)", () => {
-    const docs = at(/^node tools\/check_docs_touch\.mjs "\$\(git describe --tags --abbrev=0 --match 'v\*'\)\.\.HEAD"$/);
+    const docs = at(/^node tools\/check_docs_touch\.mjs /);
     expect(docs).toBeGreaterThan(at(/^if \[ "\$state" != false \]/));
     expect(docs).toBeLessThan(at(/npm run -s dist:linux/));
+    // the line run with a stand-in node in a repository whose newest tag isn't a release tag
+    const repo = mkdtempSync(join(scratch, "docs-"));
+    const commit = "git -c user.name=t -c user.email=t@t commit -q --allow-empty -m x";
+    // loop: NOT-WORTH — a throwaway repository with three commits and two tags, 10 s deadline
+    spawnSync("bash", ["-c", `git init -q && ${commit} && git tag v1.0.0-dev.1 && ${commit} && git tag other && ${commit}`], { cwd: repo, timeout: 10_000 });
+    // loop: NOT-WORTH — one line of the script, 10 s deadline
+    const r = spawnSync("bash", ["-c", `set -euo pipefail; node() { echo "$*"; }\n${lines[docs]}`], { cwd: repo, encoding: "utf8", timeout: 10_000 });
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim()).toBe("tools/check_docs_touch.mjs v1.0.0-dev.1..HEAD");
   });
 });

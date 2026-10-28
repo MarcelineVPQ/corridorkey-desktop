@@ -31,7 +31,7 @@ import {
   useTensorrt,
   type InstallDeps,
 } from "./install";
-import { folderBytes, pruneCache, removeStorage, storageItems, TRT_ENGINES_DIR } from "./storage";
+import { folderBytes, pruneCache, removeStorage, storageItems, sweepRemoving, TRT_ENGINES_DIR } from "./storage";
 import { builtRanges, Prebuilder, rangesOnDisk, recordBuild, removeSize } from "./trtPrebuild";
 import { jobLogText, saveJobLog } from "./jobLog";
 import { readDesktopPalette, watchDesktopPalette } from "./desktopTheme";
@@ -1319,11 +1319,12 @@ app.whenReady().then(() => {
   // one copy runs (single-instance lock) and no engine yet: any job folder is left over from a crash (job temps are
   // always in the system's local cache folder: jobTempDir)
   void clearJobTemps(join(appFolders.cache, JOBS_DIR));
-  // the chosen cache folder is checked, then its stills older than 30 days, or past 500 MB, go (storage.ts); async,
-  // so a cache folder on a share that stopped answering doesn't hold the window
+  // the chosen cache folder is checked, then its stills older than 30 days, or past 500 MB, go (storage.ts), and the
+  // `.<name>.removing` folders a removal cut short left (storage.ts removeAside); async, so a cache folder on a share
+  // that stopped answering doesn't hold the window
   void checkCacheDrive()
-    .then(() => pruneCache(mediaDir))
-    // error: NOT-WORTH — the stills stay until the next start; nothing else depends on the prune
+    .then(() => Promise.all([pruneCache(mediaDir), sweepRemoving([enginePlaces().data, cacheDir])]))
+    // error: NOT-WORTH — the stills and leftovers stay until the next start; nothing else depends on them
     .catch(() => {});
   nativeTheme.themeSource = settings.appearance.theme === "light" ? "light" : settings.appearance.theme === "dark" ? "dark" : "system";
   updatePaletteWatch();

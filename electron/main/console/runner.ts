@@ -25,7 +25,6 @@ import { allowVerdict, answerWithin, checkWrite, expandHome, FS_ANSWER_MS, fsErr
 import { expandHistory, hasExpansion, HISTORY_WINDOW } from "../../../src/shared/console/expand";
 import { folderRange, frameToken, groupSequences, isFrameFile, sequenceOf, type Sequence } from "../../../src/shared/console/sequences";
 import { commands, globRegExp, isCompound, leavesQuoteOpen, parseProgram, type CmdNode, type List, pipeStages } from "../../../src/shared/console/script";
-import { tokenize } from "../../../src/shared/console/parse";
 import { BOOKMARK_NAME, BOOKMARKS_MAX, VARIABLES_MAX, WRITE_FOLDERS_MAX } from "../settings";
 import { expandVars, forWords, READ_ONLY, VALUE_MAX, VAR_NAME } from "../../../src/shared/console/vars";
 import { matches, rankFolders } from "../../../src/shared/console/frecency";

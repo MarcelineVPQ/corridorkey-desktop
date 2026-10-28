@@ -12,11 +12,8 @@ import { join } from "node:path";
 import type { EngineReply } from "./engine";
 import type { EngineHandle } from "./queue";
 import type { PrebuildRange, TrtPrebuild } from "../../src/shared/types";
-import { buildFraction, trtSizeKey, TRT_PIECES, type TrtSize } from "../../src/shared/trt";
+import { trtSizeKey, TRT_PIECES, type TrtSize } from "../../src/shared/trt";
 import { ENGINE_FAILED } from "../../src/shared/texts";
-
-// the 4K range, whose network build times are measured (README, Speed, 0.0.7-dev): its bar moves by them
-const KEY_4K = trtSizeKey(4096, 2160);
 
 const existsAsync = (p: string) =>
   access(p).then(
@@ -151,15 +148,8 @@ const fresh = (built: readonly string[], sizes: readonly TrtSize[]): PrebuildRan
       const key = trtSizeKey(s.width, s.height);
       // loop: NOT-WORTH — a few built ranges
       const done = built.some((k) => k.startsWith(`${key}_t`));
-      return { label: s.label, width: s.width, height: s.height, state: done ? "done" : "todo", piece: null, fraction: done ? 1 : 0, range: null, fallbacks: {}, error: null };
+      return { label: s.label, width: s.width, height: s.height, state: done ? "done" : "todo", piece: null, range: null, fallbacks: {}, error: null };
     });
-
-/** All ranges' fraction done: one share per range, the building one by its own fraction. */
-export function overallFraction(ranges: readonly PrebuildRange[]): number {
-  if (ranges.length === 0) return 0;
-  // loop: NOT-WORTH — the few chosen sizes
-  return ranges.reduce((s, r) => s + (r.state === "done" ? 1 : r.state === "building" ? r.fraction : 0), 0) / ranges.length;
-}
 
 export class Prebuilder {
   state: TrtPrebuild;
@@ -178,7 +168,7 @@ export class Prebuilder {
     this.now = deps.now ?? Date.now;
     const ranges = fresh(deps.built(), deps.sizes());
     // loop: NOT-WORTH — the few chosen sizes
-    this.state = { status: ranges.every((r) => r.state === "done") ? "done" : "idle", ranges, fraction: overallFraction(ranges), startedAt: null, note: null };
+    this.state = { status: ranges.every((r) => r.state === "done") ? "done" : "idle", ranges, startedAt: null, note: null };
   }
 
   get running(): boolean {
@@ -199,14 +189,14 @@ export class Prebuilder {
     if (this.proc) {
       // loop: NOT-WORTH — the few chosen sizes, and the few in the list
       const ranges = next.map((n) => this.state.ranges.find((r) => rangeId(r) === rangeId(n) && r.state !== "todo") ?? n);
-      this.state = { ...this.state, ranges, fraction: overallFraction(ranges) };
+      this.state = { ...this.state, ranges };
       return;
     }
     const ranges = next;
     // loop: NOT-WORTH — the few chosen sizes
     const allDone = ranges.every((r) => r.state === "done");
     const status = allDone ? "done" : this.state.status === "done" ? "idle" : this.state.status;
-    this.state = { ...this.state, status, ranges, fraction: overallFraction(ranges) };
+    this.state = { ...this.state, status, ranges };
   }
 
   /**
@@ -314,8 +304,7 @@ export class Prebuilder {
     this.ending = proc;
     proc.kill();
     // loop: NOT-WORTH — the few chosen sizes
-    for (const r of this.state.ranges) if (r.state === "building") Object.assign(r, { state: "todo", piece: null, fraction: 0 });
-    this.state.fraction = overallFraction(this.state.ranges);
+    for (const r of this.state.ranges) if (r.state === "building") Object.assign(r, { state: "todo", piece: null });
     return true;
   }
 
@@ -333,7 +322,7 @@ export class Prebuilder {
       const note = failed.length ? failed.map((x) => `${x.label}: ${x.error}`).join("; ") : null;
       return this.set({ status: failed.length ? "error" : "done", startedAt: null, note });
     }
-    Object.assign(r, { state: "building", piece: null, fraction: 0, error: null });
+    Object.assign(r, { state: "building", piece: null, error: null });
     this.proc!.send({ cmd: "trt_build", id: rangeId(r), width: r.width, height: r.height });
     this.set({});
   }
@@ -344,15 +333,14 @@ export class Prebuilder {
     const r = this.state.ranges.find((x) => rangeId(x) === m.id);
     if (!r || r.state !== "building") return;
     if (m.type === "progress" && m.stage === "optimize" && typeof m.piece === "string") {
-      // the 4K weights are measured (README, Speed, 0.0.7-dev); other sizes count one share per network
-      Object.assign(r, { piece: m.piece, fraction: buildFraction(m.piece, trtSizeKey(r.width, r.height) === KEY_4K) });
+      Object.assign(r, { piece: m.piece });
       return this.set({});
     }
     if (m.type === "trt_built") {
       const fallbacks: Record<string, string> = {};
       // loop: NOT-WORTH — at most five networks
       for (const [k, why] of Object.entries((m.fallbacks ?? {}) as Record<string, unknown>)) fallbacks[k] = String(why);
-      Object.assign(r, { state: "done", piece: null, fraction: 1, range: typeof m.range === "string" ? m.range : null, fallbacks });
+      Object.assign(r, { state: "done", piece: null, range: typeof m.range === "string" ? m.range : null, fallbacks });
       // what the five networks' builds took here, recorded only when this run built all five (a build resumed after a
       // pause, or one that reused networks, isn't the whole time)
       const built = (m.built_s ?? {}) as Record<string, unknown>;
@@ -366,7 +354,7 @@ export class Prebuilder {
       return this.next();
     }
     if (m.type === "error") {
-      Object.assign(r, { state: "failed", piece: null, fraction: 0, error: String(m.message ?? m.code) });
+      Object.assign(r, { state: "failed", piece: null, error: String(m.message ?? m.code) });
       return this.next();
     }
   }
@@ -375,12 +363,12 @@ export class Prebuilder {
     if (proc !== this.proc) return; // killed by pause / stop, or finished
     this.proc = null;
     // loop: NOT-WORTH — the few chosen sizes
-    for (const r of this.state.ranges) if (r.state === "building") Object.assign(r, { state: "failed", piece: null, fraction: 0, error: "the engine stopped" });
+    for (const r of this.state.ranges) if (r.state === "building") Object.assign(r, { state: "failed", piece: null, error: "the engine stopped" });
     this.set({ status: "error", startedAt: null, note: `The engine stopped while building (${signal ?? `exit ${code}`})` });
   }
 
   private set(p: Partial<TrtPrebuild>): void {
-    this.state = { ...this.state, ...p, ranges: [...this.state.ranges], fraction: overallFraction(this.state.ranges) };
+    this.state = { ...this.state, ...p, ranges: [...this.state.ranges] };
     this.deps.changed();
   }
 }

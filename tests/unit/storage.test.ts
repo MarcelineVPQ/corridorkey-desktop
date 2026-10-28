@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { TrtCatalog } from "../../electron/main/install";
-import { folderBytes, pruneCache, removeAside, removeStorage, storageItems } from "../../electron/main/storage";
+import { folderBytes, pruneCache, removeAside, removeStorage, storageItems, sweepRemoving } from "../../electron/main/storage";
 
 describe("storage", () => {
   const dir = mkdtempSync(join(tmpdir(), "ck-storage-"));
@@ -92,6 +92,18 @@ describe("storage", () => {
     // nothing there: nothing to do
     await removeAside(join(parent, "runtime"));
     expect(readdirSync(parent)).toEqual(["keep.txt"]);
+  });
+
+  it("sweeps the .<name>.removing leftovers of removals cut short at start, nothing else", async () => {
+    const data = join(dir, "sweep-data");
+    const cache = join(dir, "sweep-cache");
+    mkdirSync(join(data, ".models.removing", "x"), { recursive: true });
+    mkdirSync(join(data, "models"), { recursive: true });
+    mkdirSync(join(cache, ".tensorrt.removing"), { recursive: true });
+    writeFileSync(join(cache, "removing"), "x");
+    expect(await sweepRemoving([data, cache, join(dir, "not-there")])).toBe(2);
+    expect(readdirSync(data)).toEqual(["models"]);
+    expect(readdirSync(cache)).toEqual(["removing"]);
   });
 
   it("prunes cached stills older than 30 days, then the oldest until under the cap", async () => {

@@ -450,10 +450,8 @@ export interface PrebuildRange {
   width: number;
   height: number;
   state: "todo" | "building" | "done" | "failed";
-  // the network being built (cradio, moge, rvm, stage1, stage2), and this range's fraction done (by network, weighted
-  // by the measured 4K build times where they exist)
+  // the network being built (cradio, moge, rvm, stage1, stage2)
   piece: string | null;
-  fraction: number;
   // the engine's range key once known, and networks that couldn't be built (they run on CUDA)
   range: string | null;
   fallbacks: Record<string, string>;
@@ -463,8 +461,6 @@ export interface PrebuildRange {
 export interface TrtPrebuild {
   status: PrebuildStatus;
   ranges: PrebuildRange[];
-  // all ranges' fraction done
-  fraction: number;
   // when this run started (the elapsed clock), null when not running
   startedAt: number | null;
   // what it waits for, why it stopped, or the error
