@@ -35,8 +35,8 @@ Jobs run one at a time, in the order they arrive. A `cancel` for a job still
 waiting removes it (reply: error code `cancelled`), wherever it comes in the
 stream: the Rust engine reads requests on their own thread while a job runs,
 so a cancel sent after the job's `run` line still arrives in time (the PyTorch
-engine reads between jobs only: there the cancel must come before the `run`). A cancel removes one waiting `run`
-and is used up by it: a later `run` reusing the id runs. The running job cannot be
+engine reads between jobs only: there the cancel must come before the `run`). A cancel removes one waiting `run`, the
+last one with that id queued before it, and is used up by it: a later `run` reusing the id runs. The running job cannot be
 interrupted inside a window, so **cancelling the running job means the app
 kills the engine** (SIGKILL of its process group: the engine and its ffmpeg writers). Each job
 writes its temporary files into its own `temp_dir`, which the app deletes when

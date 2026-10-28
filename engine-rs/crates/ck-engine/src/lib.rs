@@ -176,16 +176,27 @@ impl Inbox {
         }
     }
 
-    /// Whether a `cancel` for `id` is among the lines read but not yet taken; that line is consumed, so it can't
-    /// later cancel a new `run` reusing the id (final review 2026-10-28 N7: it landed in `pending_cancel` for good).
+    /// Whether a `cancel` for `id` is among the lines read but not yet taken, before the next queued `run` with that id
+    /// (a cancel after a queued retry is that retry's: engine re-review 2026-10-28 #4); that line is consumed, so it
+    /// can't later cancel a new `run` reusing the id (final review 2026-10-28 N7).
     fn take_queued_cancel(&self, id: &str) -> bool {
         let mut g = self.state.lock().unwrap();
-        let at = g.lines.iter().position(|l| {
-            l.as_ref().is_ok_and(|l| {
-                serde_json::from_str::<Value>(l)
-                    .is_ok_and(|v| v.get("cmd").and_then(|c| c.as_str()) == Some("cancel") && str_field(&v, "id").as_deref() == Some(id))
-            })
-        });
+        let mut at = None;
+        // loop: NOT-WORTH — the few lines queued behind the job
+        for (i, l) in g.lines.iter().enumerate() {
+            let Some(v) = l.as_ref().ok().and_then(|l| serde_json::from_str::<Value>(l).ok()) else { continue };
+            if str_field(&v, "id").as_deref() != Some(id) {
+                continue;
+            }
+            match v.get("cmd").and_then(|c| c.as_str()) {
+                Some("cancel") => {
+                    at = Some(i);
+                    break;
+                }
+                Some("run") => break,
+                _ => {}
+            }
+        }
         at.and_then(|i| g.lines.remove(i)).is_some()
     }
 }

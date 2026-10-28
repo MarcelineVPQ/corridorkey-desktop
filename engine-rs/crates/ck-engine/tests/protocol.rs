@@ -366,6 +366,16 @@ fn a_cancel_that_removed_a_waiting_job_doesnt_cancel_a_later_run_with_its_id() {
 }
 
 #[test]
+fn a_cancel_after_a_queued_retry_cancels_the_retry_not_the_run_before_it() {
+    // engine re-review 2026-10-28 #4: with `run j2, run j2, cancel j2` queued, the cancel took the first run
+    let (r, fake) = talk(&[run("j1", "/a.mp4"), run("j2", "/a.mp4"), run("j2", "/a.mp4"), json!({"cmd": "cancel", "id": "j2"})], &[]);
+    assert_eq!(fake.ran, vec!["j1", "j2"]);
+    // loop: NOT-WORTH — a test's few replies
+    let j2: Vec<&str> = r.iter().filter(|m| m["id"] == "j2" && (m["type"] == "error" || m["type"] == "result")).map(|m| m["type"].as_str().unwrap()).collect();
+    assert_eq!(j2, ["result", "error"]);
+}
+
+#[test]
 fn quit_ends_the_loop() {
     let (r, fake) = talk(&[json!({"cmd": "quit"}), run("j1", "/a.mp4"), json!({"cmd": "ping"})], &[]);
     assert!(r.is_empty());
