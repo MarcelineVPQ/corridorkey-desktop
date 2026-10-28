@@ -242,8 +242,9 @@ The `corridorkey` command line ([CLI.md](CLI.md)) runs the same jobs without thi
   engines are built or reused, and every network that fell back to CUDA, with why. In a low-VRAM TensorRT job it
   comes after the first phase's networks load and again whenever a later phase's network falls back (`provider`
   and `fallbacks` then cover the job so far; `pieces` the networks loaded now). `cache_invalidated` lists the
-  TensorRT engine folders of this card it removed because they were built under another driver, TensorRT or ONNX
-  Runtime. A Core ML job's `provider` is `coreml`, with `pieces` and `coreml` (`files`: each network's set file,
+  TensorRT engine folders of this card it removed: those built under another graphics driver, and those built for
+  another TensorRT or ONNX Runtime and unused for 30 days (another installed copy's folders in use are kept; a folder
+  another engine is building in is never removed). A Core ML job's `provider` is `coreml`, with `pieces` and `coreml` (`files`: each network's set file,
   `nodes`, `partitions`, `compute_units`, `model_format`, `cpu_fallback`, `cache`).
 - `optimize` (Rust engine, TensorRT only) is a one-time engine build for the
   clip's shape range, one `progress` per network built (`detail`: "stage 1 (4/5)");

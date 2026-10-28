@@ -227,8 +227,10 @@ In Engine settings, TensorRT:
   anyway."
 - "The background build stopped: `<reason>`", or a size's "couldn't be built: `<reason>`": press **Build now** to try
   again; what was built is kept.
-- The log line "TensorRT: the graphics driver or TensorRT changed; engines built for `<networks>` can't be used and
-  were removed" means they're built again for the new driver.
+- The log line "TensorRT: the graphics driver changed; engines built for `<folders>` can't be used and were removed"
+  means they're built again for the new driver. "TensorRT: engines built for `<folders>` (another TensorRT or ONNX
+  Runtime) weren't used for 30 days and were removed" frees the disk of an older version's engines; a folder another
+  installed copy still uses is kept.
 
 ## The command line
 

@@ -1078,20 +1078,34 @@ impl Pipeline<OrtLoader> {
         other_windows(&r.bucket, &names, |name| self.trt_dir_built(&r.card_dir.join(name)))
     }
 
-    /// Remove the engines built for this card under another driver, TensorRT or ONNX Runtime (they can't be used);
-    /// their folder names, for the `provider` reply's `cache_invalidated`.
+    /// Mark this card folder as used, and remove the card's engine folders that can go (`tensorrt::stale_dirs`: built
+    /// under another driver, or for another TensorRT or ONNX Runtime and unused for 30 days; never one being built
+    /// in); their folder names, for the `provider` reply's `cache_invalidated`.
     fn trt_drop_stale(&self, card_dir: &Path, sink: &mut dyn Sink) -> Vec<String> {
+        use crate::tensorrt::Stale;
         let Some(gpu) = self.loader.rt.gpu.as_ref() else { return Vec::new() };
-        let stale = crate::tensorrt::stale_dirs(&self.loader.rt.cfg.trt_cache, card_dir, &gpu.name);
+        crate::tensorrt::mark_used(card_dir);
+        let stale =
+            crate::tensorrt::stale_dirs(&self.loader.rt.cfg.trt_cache, card_dir, &gpu.name, &gpu.driver, std::time::SystemTime::now(), crate::proc::pid_alive);
+        let name = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned());
         // loop: NOT-WORTH — a few stale cache folders, once per TensorRT job
-        let names: Vec<String> = stale.iter().filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).collect();
-        if !names.is_empty() {
-            sink.log(&format!("  TensorRT: the graphics driver or TensorRT changed; engines built for {} can't be used and were removed", names.join(", ")));
+        let of = |why: Stale| -> Vec<String> { stale.iter().filter(|(_, w)| *w == why).filter_map(|(p, _)| name(p)).collect() };
+        let (driver, unused) = (of(Stale::Driver), of(Stale::Unused));
+        if !driver.is_empty() {
+            sink.log(&format!("  TensorRT: the graphics driver changed; engines built for {} can't be used and were removed", driver.join(", ")));
         }
-        for s in &stale {
+        if !unused.is_empty() {
+            sink.log(&format!(
+                "  TensorRT: engines built for {} (another TensorRT or ONNX Runtime) weren't used for 30 days and were removed",
+                unused.join(", ")
+            ));
+        }
+        // loop: NOT-WORTH — a few stale cache folders
+        for (s, _) in &stale {
             let _ = std::fs::remove_dir_all(s);
         }
-        names
+        // loop: NOT-WORTH — a few folder names
+        driver.into_iter().chain(unused).collect()
     }
 
     /// The networks' key for this job and, for TensorRT, (cache folder, already built). Sends the

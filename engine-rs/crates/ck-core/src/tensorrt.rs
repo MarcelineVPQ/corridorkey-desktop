@@ -8,7 +8,8 @@
 //! the rest FP16, which matches the CUDA FP16 parity; ONNX Runtime's own TensorRT build is weakly typed and
 //! measured 2-4x the error), and cached on disk under a folder named for the card, its driver, TensorRT and
 //! ONNX Runtime. ONNX Runtime runs each engine through an EPContext stub next to it. A driver or TensorRT
-//! change gives a new folder; the stale ones are removed and the engine says so. A clip outside every range
+//! change gives a new folder; folders of another driver are removed, those of another TensorRT or ONNX Runtime
+//! after 30 days unused (another installed copy may use them), and the engine says so. A clip outside every range
 //! runs on the CUDA provider, and the reply says why.
 use std::path::{Path, PathBuf};
 
@@ -308,18 +309,72 @@ pub(crate) fn cache_dir(root: &Path, gpu: &str, driver: &str, trt: &str, ort: &s
     root.join(format!("{}__drv{}__trt{}__ort{}__{}", slug(gpu), driver, trt, ort, precision))
 }
 
-/// Cache folders of the same card that were made for another driver / TensorRT / ORT: they can no longer be
-/// used (TensorRT engines are tied to the versions that built them).
-pub(crate) fn stale_dirs(root: &Path, current: &Path, gpu: &str) -> Vec<PathBuf> {
+/// A card folder not used for this long (no TensorRT job or build of this card and versions) is removed.
+pub(crate) const UNUSED_FOR: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 3600);
+
+/// `<card folder>/last-used`: its modification time is when a TensorRT job or build last used the folder.
+const LAST_USED: &str = "last-used";
+
+/// Note that a job or build uses `card_dir` now (so another install's `stale_dirs` keeps it).
+pub(crate) fn mark_used(card_dir: &Path) {
+    let _ = std::fs::create_dir_all(card_dir);
+    let _ = std::fs::write(card_dir.join(LAST_USED), b"");
+}
+
+/// Why a card folder is removed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Stale {
+    /// built under a graphics driver that is no longer installed: its engines can never load again
+    Driver,
+    /// built for another TensorRT or ONNX Runtime and not used for UNUSED_FOR
+    Unused,
+}
+
+/// Cache folders of the same card that can go: those built under another graphics driver than the installed
+/// `driver` (TensorRT engines are tied to it), and those of the same driver and another TensorRT or ONNX Runtime not
+/// used for UNUSED_FOR. A folder that differs only by TensorRT or ONNX Runtime may belong to another installed copy
+/// (a stable app beside a dev build, a separately installed `corridorkey`), so it costs disk, not a rebuild, while
+/// it is in use (final review 2026-10-28 S2: every job deleted the other copy's engines). A folder with a range
+/// whose `build.lock` names a running process (`alive`) is never removed.
+pub(crate) fn stale_dirs(
+    root: &Path,
+    current: &Path,
+    gpu: &str,
+    driver: &str,
+    now: std::time::SystemTime,
+    alive: impl Fn(u32) -> bool,
+) -> Vec<(PathBuf, Stale)> {
     let prefix = format!("{}__", slug(gpu));
     let Ok(rd) = std::fs::read_dir(root) else { return vec![] };
-    let mut v: Vec<PathBuf> = rd
+    let mut v: Vec<(PathBuf, Stale)> = rd
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.is_dir() && p != current && p.file_name().map(|n| n.to_string_lossy().starts_with(&prefix)).unwrap_or(false))
+        .filter(|p| p.is_dir() && p != current)
+        .filter_map(|p| {
+            let name = p.file_name()?.to_string_lossy().into_owned();
+            let rest = name.strip_prefix(&prefix)?;
+            let its_driver = rest.strip_prefix("drv").and_then(|r| r.split("__trt").next());
+            let why = if its_driver != Some(driver) {
+                Stale::Driver
+            } else {
+                let used = std::fs::metadata(p.join(LAST_USED)).or_else(|_| std::fs::metadata(&p)).and_then(|m| m.modified()).ok()?;
+                if now.duration_since(used).unwrap_or_default() < UNUSED_FOR {
+                    return None;
+                }
+                Stale::Unused
+            };
+            (!building(&p, &alive)).then_some((p, why))
+        })
         .collect();
-    v.sort();
+    v.sort_by(|a, b| a.0.cmp(&b.0));
     v
+}
+
+/// Whether a range folder in `card_dir` holds a `build.lock` whose engine still runs.
+fn building(card_dir: &Path, alive: &impl Fn(u32) -> bool) -> bool {
+    let Ok(rd) = std::fs::read_dir(card_dir) else { return false };
+    // loop: NOT-WORTH — the few range folders of one card folder
+    rd.flatten().any(|e| std::fs::read_to_string(e.path().join("build.lock")).is_ok_and(|t| !lock_holder_gone(&t, alive)))
 }
 
 /// What an engine was built from: size and modification time of the TensorRT-ready export and its weights.
@@ -515,7 +570,8 @@ mod tests {
         for d in [&cur, &old, &other] {
             std::fs::create_dir_all(d).unwrap();
         }
-        assert_eq!(stale_dirs(&root, &cur, "NVIDIA GeForce RTX 5080"), vec![old.clone()]);
+        let now = std::time::SystemTime::now();
+        assert_eq!(stale_dirs(&root, &cur, "NVIDIA GeForce RTX 5080", "615.71", now, |_| false), vec![(old.clone(), Stale::Driver)]);
         assert!(!built(&cur, "rvm", "1:2,-"));
         std::fs::write(engine_path(&cur, "rvm"), b"").unwrap();
         std::fs::write(stub_path(&cur, "rvm"), b"").unwrap();
@@ -526,6 +582,43 @@ mod tests {
         let onnx = cur.join("x.onnx");
         std::fs::write(&onnx, b"abc").unwrap();
         assert!(source_stamp(&onnx).starts_with("3:") && source_stamp(&onnx).ends_with(",-"));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn another_installed_versions_engines_are_kept() {
+        // final review 2026-10-28 S2: a stable app and a dev build (or the CLI) with other ORT / TensorRT versions share
+        // the cache root; each job deleted the other's engines
+        let root = std::env::temp_dir().join(format!("ck-trt-keep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let gpu = "NVIDIA GeForce RTX 5080";
+        let cur = cache_dir(&root, gpu, "615.71", "10.16.0", "1.31.0", "fp16");
+        let other_ort = cache_dir(&root, gpu, "615.71", "10.16.0", "1.30.0", "fp16");
+        let other_trt = cache_dir(&root, gpu, "615.71", "10.15.0", "1.31.0", "fp16");
+        let old_driver = cache_dir(&root, gpu, "610.10", "10.16.0", "1.31.0", "fp16");
+        let building_old_driver = cache_dir(&root, gpu, "600.01", "10.16.0", "1.31.0", "fp16");
+        // loop: NOT-WORTH — five folders
+        for d in [&cur, &other_ort, &other_trt, &old_driver, &building_old_driver] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        mark_used(&other_ort);
+        mark_used(&other_trt);
+        std::fs::create_dir_all(building_old_driver.join("h640-896_w1024-1280_t1-80_f1-4")).unwrap();
+        std::fs::write(building_old_driver.join("h640-896_w1024-1280_t1-80_f1-4").join("build.lock"), "4242\n").unwrap();
+        let now = std::time::SystemTime::now();
+        // used lately: kept; another driver: removed, unless its build lock's engine runs
+        assert_eq!(stale_dirs(&root, &cur, gpu, "615.71", now, |p| p == 4242), vec![(old_driver.clone(), Stale::Driver)]);
+        // that engine gone: removed too
+        assert_eq!(
+            stale_dirs(&root, &cur, gpu, "615.71", now, |_| false),
+            vec![(building_old_driver.clone(), Stale::Driver), (old_driver.clone(), Stale::Driver)]
+        );
+        // unused for UNUSED_FOR: the other versions' folders go as well
+        let later = now + UNUSED_FOR + std::time::Duration::from_secs(60);
+        assert_eq!(
+            stale_dirs(&root, &cur, gpu, "615.71", later, |p| p == 4242),
+            vec![(old_driver.clone(), Stale::Driver), (other_trt.clone(), Stale::Unused), (other_ort.clone(), Stale::Unused)]
+        );
         std::fs::remove_dir_all(&root).unwrap();
     }
 
