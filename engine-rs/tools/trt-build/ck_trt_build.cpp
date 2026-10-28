@@ -12,9 +12,12 @@
 //                     [--workspace-mb N] [--timing-cache FILE] [--level 0-5] [--weak-fp16]
 // SHAPES: ONNX Runtime's TensorRT format, "rgb:1x3x288x480,state:1x541x384".
 // Prints one line: {"ok":true,"seconds":12.3,"bytes":123} or {"ok":false,"error":"..."}; exit 0 / 1.
+// Paths are UTF-8 inside; on Windows the command line is read wide (wmain; MinGW builds with -municode) and every
+// file is opened through its wide name, so a folder outside the ANSI code page (a user name like "Zoë") works.
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -63,6 +66,11 @@ std::string json_escape(const std::string& s) {
     return o;
 }
 
+// A UTF-8 path as the system's own (UTF-16 on Windows; the same bytes elsewhere).
+std::filesystem::path sys_path(const std::string& utf8) {
+    return std::filesystem::u8path(utf8);
+}
+
 int fail(const std::string& why) {
     std::printf("{\"ok\":false,\"error\":\"%s\"}\n", json_escape(why).c_str());
     return 1;
@@ -82,7 +90,7 @@ std::string tmp_name(const std::string& path) {
 // and a rebuilt engine or the timing cache would keep its old file); MoveFileEx with REPLACE_EXISTING does.
 bool replace_file(const std::string& from, const std::string& to) {
 #ifdef _WIN32
-    return MoveFileExA(from.c_str(), to.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+    return MoveFileExW(sys_path(from).c_str(), sys_path(to).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
 #else
     return std::rename(from.c_str(), to.c_str()) == 0;
 #endif
@@ -93,16 +101,18 @@ bool replace_file(const std::string& from, const std::string& to) {
 std::string write_file(const std::string& path, const void* data, size_t size) {
     std::string tmp = tmp_name(path);
     {
-        std::ofstream f(tmp, std::ios::binary);
+        std::ofstream f(sys_path(tmp), std::ios::binary);
         f.write(static_cast<const char*>(data), static_cast<std::streamsize>(size));
         f.close();
         if (!f) {
-            std::remove(tmp.c_str());
+            std::error_code ec;
+            std::filesystem::remove(sys_path(tmp), ec);
             return "write " + tmp;
         }
     }
     if (!replace_file(tmp, path)) {
-        std::remove(tmp.c_str());
+        std::error_code ec;
+        std::filesystem::remove(sys_path(tmp), ec);
         return "replace " + path;
     }
     return "";
@@ -159,7 +169,15 @@ int run(int argc, char** argv) {
     uint32_t flags = weak ? 0U : (1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kSTRONGLY_TYPED));
     std::unique_ptr<nvinfer1::INetworkDefinition> net(builder->createNetworkV2(flags));
     std::unique_ptr<nvonnxparser::IParser> parser(nvonnxparser::createParser(*net, log));
-    if (!parser->parseFromFile(a["onnx"].c_str(), static_cast<int>(nvinfer1::ILogger::Severity::kWARNING))) {
+    std::string onnx = a["onnx"];
+#ifdef _WIN32
+    // the parser opens the file and its external weights (.onnx.data) through narrow (ANSI) names: from the model's
+    // own folder, entered through its wide name, it needs only the file's own name (the model sets' names are ASCII)
+    std::filesystem::path model = sys_path(onnx);
+    if (model.has_parent_path() && !SetCurrentDirectoryW(model.parent_path().c_str())) return fail("open the model's folder: " + onnx);
+    onnx = model.filename().string();
+#endif
+    if (!parser->parseFromFile(onnx.c_str(), static_cast<int>(nvinfer1::ILogger::Severity::kWARNING))) {
         std::string why = parser->getNbErrors() > 0 ? parser->getError(0)->desc() : log.last;
         return fail("parse: " + why);
     }
@@ -181,7 +199,7 @@ int run(int argc, char** argv) {
     // a timing cache shared by the networks of one card speeds up later builds
     std::unique_ptr<nvinfer1::ITimingCache> tc;
     if (a.count("timing-cache")) {
-        std::ifstream f(a["timing-cache"], std::ios::binary);
+        std::ifstream f(sys_path(a["timing-cache"]), std::ios::binary);
         std::vector<char> blob((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
         tc.reset(cfg->createTimingCache(blob.data(), blob.size()));
         if (tc) cfg->setTimingCache(*tc, false);
@@ -203,10 +221,29 @@ int run(int argc, char** argv) {
 
 // Every failure is the one JSON line: a bad number (std::stoll and friends throw) used to end in std::terminate,
 // an abort and a core dump with no answer for the engine (measured: --min "a:1xZ" -> exit 134).
-int main(int argc, char** argv) {
+int run_caught(int argc, char** argv) {
     try {
         return run(argc, argv);
     } catch (const std::exception& e) {
         return fail(std::string("bad argument: ") + e.what());
     }
 }
+
+#ifdef _WIN32
+// The command line as UTF-8 (char** main gets it in the ANSI code page, which can't hold every path). No DLL from the
+// current folder (TensorRT loads its builder resources by name), as the engine (ck_core::proc).
+int wmain(int argc, wchar_t** wargv) {
+    SetDllDirectoryW(L"");
+    std::vector<std::string> args;
+    std::vector<char*> argv;
+    // loop: NOT-WORTH — the command line
+    for (int i = 0; i < argc; i++) args.push_back(std::filesystem::path(wargv[i]).u8string());
+    // loop: NOT-WORTH — as above
+    for (auto& s : args) argv.push_back(s.data());
+    return run_caught(argc, argv.data());
+}
+#else
+int main(int argc, char** argv) {
+    return run_caught(argc, argv);
+}
+#endif
