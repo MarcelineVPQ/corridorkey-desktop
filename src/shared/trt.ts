@@ -81,6 +81,21 @@ export function prebuildStep(ranges: readonly { label: string; state: string; pi
 }
 
 /**
+ * The background build's progress as the engine reports it: the networks finished (built, skipped as built, or
+ * failed: a done or failed range counts all five; the building one, those before the network it reports) of all the
+ * chosen sizes' networks. What the page shows; never a time-weighted estimate.
+ */
+export function buildSteps(ranges: readonly { state: string; piece: string | null }[]): { done: number; total: number } {
+  const n = TRT_PIECES.length;
+  // loop: NOT-WORTH — the few chosen sizes, per render while the build runs
+  const done = ranges.reduce(
+    (s, r) => s + (r.state === "done" || r.state === "failed" ? n : r.state === "building" && r.piece ? Math.max(0, TRT_PIECES.indexOf(r.piece as (typeof TRT_PIECES)[number])) : 0),
+    0,
+  );
+  return { done, total: ranges.length * n };
+}
+
+/**
  * How far a range's build is when the engine builds `piece` (it builds in TRT_PIECES order and skips what is built):
  * the networks before it, weighted by their measured 4K build times when `measured`, else one share each.
  */

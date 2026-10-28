@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { ProgressBar } from "./ProgressBar";
 import { FolderOpen, RotateCcw } from "lucide-react";
 import { LOG_SHOWN, type Job, type TrtPrebuild } from "../shared/types";
-import { prebuildStep, TRT_NOT_BUILT } from "../shared/trt";
+import { buildSteps, prebuildStep, TRT_NOT_BUILT } from "../shared/trt";
 import { duration, ranOnText, STAGE_ORDER, STAGE_TEXT, trtJobText } from "./format";
 import { MainBlock } from "./panel/SplitView";
 import { PathText } from "./PathText";
@@ -28,6 +28,7 @@ export function JobView({ job, prebuild }: { job: Job; prebuild?: TrtPrebuild })
   const tech = job.tech ?? null;
   const ranOn = tech ? ranOnText(tech) : null;
   const trtLine = tech ? trtJobText(tech) : null;
+  const steps = prebuild ? buildSteps(prebuild.ranges) : null;
   const notBuilt = tech?.fallbackReason === TRT_NOT_BUILT;
 
   return (
@@ -68,7 +69,7 @@ export function JobView({ job, prebuild }: { job: Job; prebuild?: TrtPrebuild })
                 : "Engine settings, TensorRT builds it in the background; until then clips of this size run on CUDA."}
             </p>
           )}
-          {notBuilt && prebuild?.status === "running" && <ProgressBar value={Math.round(prebuild.fraction * 1000)} max={1000} />}
+          {notBuilt && prebuild?.status === "running" && steps && <ProgressBar value={steps.done} max={steps.total} />}
         </MainBlock>
       )}
 

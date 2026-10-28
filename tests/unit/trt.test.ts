@@ -8,6 +8,7 @@ import { BUILD_RECORD, Prebuilder, rangesOnDisk, recordBuild, removeSize, trtRan
 import { tensorrtWhyNot } from "../../electron/main/install";
 import {
   buildFraction,
+  buildSteps,
   builtWindows,
   DEFAULT_TRT_SIZES,
   MEASURED_4K_BUILD_S,
@@ -50,6 +51,18 @@ describe("TensorRT ranges as the engine has them", () => {
     expect(trtSizeKey(1920, 1080)).toBe("h1024-1280_w1792-2176");
     expect(trtSizeKey(4096, 3072)).toBeNull(); // open gate: past MAX_AREA, CUDA
     expect(builtWindows("h1792-2176_w3584-4096", ["h1792-2176_w3584-4096_t1-8_f1-4", "h1024-1280_w1792-2176_t1-48_f1-4"])).toEqual([8]);
+  });
+
+  it("whole review S7: the build's progress on screen is the engine's networks, never the time-weighted fraction", () => {
+    const ranges = [
+      { state: "done", piece: null },
+      { state: "building", piece: "stage1" },
+      { state: "todo", piece: null },
+    ];
+    expect(buildSteps(ranges)).toEqual({ done: 5 + 3, total: 15 });
+    expect(buildSteps([{ state: "building", piece: null }])).toEqual({ done: 0, total: 5 });
+    // loop: NOT-WORTH — three source files, once
+    for (const f of ["setup/SetupParts.tsx", "pages/EnginePage.tsx", "JobView.tsx"]) expect(readFileSync(new URL(`../../src/ui/${f}`, import.meta.url), "utf8")).not.toMatch(/\.fraction\b/);
   });
 
   it("weights the 4K progress by the measured build times, other sizes one share per network", () => {

@@ -9,6 +9,7 @@ import { Row } from "../panel/Section";
 import { duration, gbBytes } from "../format";
 import {
   PIECE_NAMES,
+  buildSteps,
   prebuildStep,
   rangeText,
   sizeRangeText,
@@ -173,6 +174,7 @@ function PrebuildBox({ trt }: { trt: TrtState }) {
     return () => clearInterval(t);
   }, [p.status]);
   const step = prebuildStep(p.ranges);
+  const steps = buildSteps(p.ranges);
   const canStart = p.status !== "running" && p.status !== "done";
   return (
     <>
@@ -183,9 +185,9 @@ function PrebuildBox({ trt }: { trt: TrtState }) {
       <TrtSizes trt={trt} />
       {p.status === "running" && (
         <>
-          <ProgressBar value={Math.round(p.fraction * 1000)} max={1000} />
+          <ProgressBar value={steps.done} max={steps.total} />
           <p className="hint-text">
-            {step ?? "Starting the engine"} · {Math.floor(p.fraction * 100)} % of the chosen sizes · {p.startedAt ? `${duration((Date.now() - p.startedAt) / 1000)} elapsed` : ""}
+            {step ?? "Starting the engine"} · {steps.done} of {steps.total} networks done · {p.startedAt ? `${duration((Date.now() - p.startedAt) / 1000)} elapsed` : ""}
           </p>
         </>
       )}

@@ -11,6 +11,7 @@ import { Accordion, Row, Section, type SectionFocus } from "../panel/Section";
 import { MainBlock, SplitView } from "../panel/SplitView";
 import { Stat } from "../JobView";
 import { gib } from "../format";
+import { buildSteps } from "../../shared/trt";
 import { FfmpegBox, InstallBox, installPct, TrtBox } from "../setup/SetupParts";
 import { PathText } from "../PathText";
 
@@ -35,6 +36,7 @@ export function EnginePage(props: {
   const trt = state.tensorrt;
   // loop: NOT-WORTH — the few chosen sizes, per render
   const builtFor = trt.prebuild.ranges.map((r) => r.label).join(", ");
+  const steps = buildSteps(trt.prebuild.ranges);
   const trtStatus = !trt.supported
     ? state.system.platform === "darwin"
       ? "not on Macs"
@@ -46,7 +48,7 @@ export function EnginePage(props: {
         : !trt.ready
           ? "on · not installed yet"
           : trt.prebuild.status === "running"
-            ? `on · building ${Math.floor(trt.prebuild.fraction * 100)} %`
+            ? `on · building: ${steps.done} of ${steps.total} networks done`
             : trt.prebuild.status === "paused"
               ? "on · build paused while keying"
               : trt.prebuild.status === "done"
