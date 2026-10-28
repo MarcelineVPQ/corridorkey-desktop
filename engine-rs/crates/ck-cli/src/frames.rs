@@ -43,7 +43,8 @@ pub fn parse_frames(spec: &str) -> Result<(Vec<u64>, u64), String> {
                 .ok_or_else(|| format!("{piece:?}: the step must be a whole number above 0 (as in 1001-1100x2)"))?,
             None => 1,
         };
-        if (b - a) / step + 1 + out.len() as u64 > MAX_FRAMES {
+        // u128: a range up to u64::MAX (0-18446744073709551615) overflowed the u64 sum and slipped past the cap
+        if ((b - a) / step) as u128 + 1 + out.len() as u128 > MAX_FRAMES as u128 {
             return Err(format!("{piece:?}: more than {MAX_FRAMES} frames"));
         }
         // loop: NOT-WORTH — the frames of one piece (≤ MAX_FRAMES), once per run
@@ -274,6 +275,8 @@ mod tests {
             assert!(parse_frames(bad).is_err(), "{bad:?}");
         }
         assert!(parse_frames("-5").unwrap_err().contains("negative"));
+        // whole-code review 2026-10-27: the count of a range up to u64::MAX overflowed past the cap
+        assert!(parse_frames("0-18446744073709551615").unwrap_err().contains("more than"));
     }
 
     #[test]

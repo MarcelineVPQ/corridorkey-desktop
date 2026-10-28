@@ -507,6 +507,14 @@ impl ExrWriter {
     }
 }
 
+impl ExrWriter {
+    /// Why the writing thread stopped: the error it stored (it stores one before it ends; a write that failed between
+    /// write_many's check and its send would otherwise read as a bare "stopped" engine error, not a full disk's `output`).
+    fn stopped(&self) -> Error {
+        self.err.lock().unwrap().clone().unwrap_or_else(|| Error::engine(format!("EXR writer stopped: {}", self.dir.display())))
+    }
+}
+
 impl Writer for ExrWriter {
     fn path(&self) -> &Path {
         &self.dir
@@ -519,7 +527,7 @@ impl Writer for ExrWriter {
         if v.len() != n * self.frame_len {
             return Err(Error::engine(format!("expected {n} frames of {} channels", self.channels)));
         }
-        self.tx.as_ref().unwrap().send((self.frames, n, v)).map_err(|_| Error::engine(format!("EXR writer stopped: {}", self.dir.display())))?;
+        self.tx.as_ref().unwrap().send((self.frames, n, v)).map_err(|_| self.stopped())?;
         self.frames += n;
         Ok(())
     }
@@ -576,6 +584,20 @@ mod tests {
         assert!(odd_size_for("yuv422p", 320, 199).is_none() && odd_size_for("yuv422p", 321, 200).is_some());
         assert!(odd_size_for("yuv444p10le", 321, 199).is_none() && odd_size_for("gray", 321, 199).is_none());
         assert!(odd_size_for("nv12", 320, 200).is_none() && odd_size_for("nv12", 320, 199).is_some());
+    }
+
+    /// whole-code review 2026-10-27: a send that failed because the writing thread had just stopped said "EXR writer
+    /// stopped" (an engine error) instead of the thread's own error (a full disk's `output`)
+    #[test]
+    fn a_stopped_exr_writer_reports_its_threads_error() {
+        let (tx, rx) = sync_channel(2);
+        drop(rx);
+        let full = Error { code: crate::ErrorCode::Output, message: "EXR write failed: no space left".into() };
+        let w = ExrWriter { dir: PathBuf::from("/o"), channels: 1, frame_len: 1, tx: Some(tx), thread: None, err: Arc::new(Mutex::new(None)), frames: 0 };
+        // the thread stores its error and ends between write_many's check and its send
+        let sent = w.tx.as_ref().unwrap().send((0, 1, vec![0.0]));
+        *w.err.lock().unwrap() = Some(full.clone());
+        assert!(sent.map_err(|_| w.stopped()).is_err_and(|e| e.code == full.code && e.message == full.message));
     }
 
     #[test]

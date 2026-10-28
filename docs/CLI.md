@@ -37,7 +37,7 @@ corridorkey verify -i plates/sh010.####.exr -o key/sh010_key.####.exr --outputs 
 |---|---|
 | `corridorkey render` | key a clip: EXR sequences (the default) or videos of `alpha`, `fg`, `cutout`, `checker` |
 | `corridorkey verify` | check that every requested frame is there and reads as a whole EXR (exit 0, or 9) |
-| `corridorkey prepare` | check the models, ONNX Runtime, the card, its free memory and ffmpeg before a farm's tasks start; `--tensorrt-size WxH` builds TensorRT's engines for that size (a one-time build of minutes, so no task waits on it) |
+| `corridorkey prepare` | check the models, ONNX Runtime, the card, its free memory, ffmpeg and ffprobe before a farm's tasks start; `--tensorrt-size WxH` builds TensorRT's engines for that size (a one-time build of minutes, so no task waits on it) |
 | `corridorkey info` | version, model set, ONNX Runtime, provider, card, OpenColorIO, decoders (`--json`) |
 | `corridorkey run [--keep-going] FILE.ckcmd` | a Console script without the app's window (cron, a farm's pre-job): ck-cli's `headless.rs` starts the app's own executable as Node (`ELECTRON_RUN_AS_NODE=1`) on `resources/app.asar/out/main/headless.js` (`CK_APP` / `CK_APP_ENTRY` name a development build's), passing itself as `CK_HEADLESS_CLI`; the app's Console runner runs it with the app's settings (write folders, bookmarks, kept variables), its audit log and a history of its own (`console-history-headless.jsonl`); anything that needs a confirmation (`sudo` lines, `allow`) is refused in words; exit 7 when the app isn't next to it, else the script's status (backlog row 151). On Linux and macOS it execs the app (the same process: a farm's SIGTERM reaches the runner, and a death by signal shows as that signal); on Windows it waits, the app gets Ctrl+C / Ctrl+Break on the shared console, and the app ends with it |
 | `corridorkey help [COMMAND]` | the help; `corridorkey COMMAND -h` too, with examples. `corridorkey --version` (and `corridorkey render --version`, any command's `-V`): the app release it ships in (package.json's version, e.g. `1.0.0-dev.1`; the engine's pong says the same) |
@@ -167,7 +167,7 @@ would find the key frames beside the plates.
 | `--cutout-linear` | `cutout_linear` | a video cutout in linear light |
 | `--linear` | `frame_dir_linear` | read a frame folder scene-linear |
 | `--no-linear` | `frame_dir_linear: false` | read a frame folder display-coded, clipped to 0-1 (not with `--linear`) |
-| `--fps FPS` | `frame_dir_fps` | a frame folder's rate for video outputs (24) |
+| `--fps FPS` | `frame_dir_fps` | a frame folder's rate for video outputs (24; above 0, at most 1000) |
 | `--model-scale S` | `model_scale` | the networks at S times the plate's size (above 0, up to 2) |
 | `--brightness G`, `--contrast C`, `--contrast-pivot P` | `linear_brightness`, `linear_contrast`, `linear_contrast_pivot` | linear adjust before keying (video inputs) |
 | `--input-bit-depth 8\|16` | `input_bit_depth` | 8 reads as CorridorKey 2.0 does; 16 keeps a deep source's bits |

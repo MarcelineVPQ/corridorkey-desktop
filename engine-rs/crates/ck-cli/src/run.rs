@@ -597,6 +597,10 @@ fn prepare(m: &ArgMatches, sink: &mut CliSink) -> Result<(), Fail> {
     let ffmpeg =
         ck_core::decode::tool_version("ffmpeg").map_err(|_| fail(exit::ASSETS, "ffmpeg binary not found: install ffmpeg (it reads and writes the videos)"))?;
     println!("ffmpeg: {ffmpeg}");
+    // every clip is probed with ffprobe (clip.rs): a worker with ffmpeg alone passed here and failed every task
+    let ffprobe = ck_core::decode::tool_version("ffprobe")
+        .map_err(|_| fail(exit::ASSETS, "ffprobe binary not found: install ffmpeg's ffprobe (it reads the clips' size and frames)"))?;
+    println!("ffprobe: {ffprobe}");
     match (&rt.gpu, provider) {
         (_, ck_core::runtime::Provider::Cpu) => {
             println!("memory: {:.1} GB free on the host (CPU provider)", ck_core::gpu::host_available().unwrap_or(0) as f64 / 1073741824.0)
