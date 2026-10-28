@@ -10,6 +10,10 @@
 #   C-RADIO stays as in onnx.3: fp16 autocast with fp32 weights (export.py --autocast16).
 # CK_REUSE_FROM=<set folder>: copy the files whose recipe this script didn't change since onnx.3 (every fp32
 #   file, C-RADIO fp16) from that set instead of exporting them again; never a hard link.
+# 2.0.0-onnx.5: CK_ONNX_VERSION=2.0.0-onnx.5 CK_PATCH=--onnx5 CK_NEW_PIECES="stage1 stage2 cradio:fp16"
+#   CK_FOLD_CRADIO=1 CK_REUSE_FROM=<onnx.4 set with its fp32 files>: stage 1 and stage 2 exported with onnx5_patches
+#   (both precisions); C-RADIO fp16 exported as before and its weight casts folded (fold_casts.py: fp16 weights on
+#   disk, BACKLOG row 152); every other file copied from the onnx.4 set. CK_NEW_PIECES takes PIECE or PIECE:PREC.
 # Output: $CK_MODELS_DIR (default <scratch>/models-<version>)/ck2-<piece>-<fp32|fp16>.onnx(+.data) + manifest.json
 # Never point it at an existing set: build into a new folder.
 # Each step runs under a memory cap (run.sh): CK_MEM_<STEP>_<piece> (STEP: EXPORT, FOLD, MHA, SPEED; e.g.
@@ -27,7 +31,9 @@ for p in cradio moge rvm stage1 stage2; do
   # loop: SERIAL-REQUIRED — fp32 then fp16 of one network, one memory-capped step at a time
   for prec in fp32 fp16; do
     tag=prod_${prec}
-    if [ -n "${CK_REUSE_FROM:-}" ] && { [ $prec = fp32 ] || [ $p = cradio ]; }; then
+    if [ -n "${CK_NEW_PIECES:-}" ]; then [[ " $CK_NEW_PIECES " == *" $p "* || " $CK_NEW_PIECES " == *" $p:$prec "* ]] && reuse=0 || reuse=1
+    else { [ $prec = fp32 ] || [ $p = cradio ]; } && reuse=1 || reuse=0; fi
+    if [ -n "${CK_REUSE_FROM:-}" ] && [ $reuse = 1 ]; then
       echo "=== reuse $p $prec from $CK_REUSE_FROM"
       cp --reflink=auto "$CK_REUSE_FROM/ck2-${p}-${prec}.onnx" "$CK_REUSE_FROM/ck2-${p}-${prec}.onnx.data" "$OUT/"
       continue
@@ -38,9 +44,9 @@ for p in cradio moge rvm stage1 stage2; do
     avail=$(free -g | awk '/Mem:/{print $7}')
     [ "$avail" -lt 8 ] && { echo "host available ${avail}G < 8G, stop"; exit 1; }
     echo "=== export $p $prec $(date +%T)"
-    "$RUN" $(cap EXPORT $p) export.py $p --opset 23 --patch $flag --tag $tag | grep -E "^EXPORT_RESULT" | cut -c1-200
+    "$RUN" $(cap EXPORT $p) export.py $p --opset 23 ${CK_PATCH:---patch} $flag --tag $tag | grep -E "^EXPORT_RESULT" | cut -c1-200
     grep -q "\"file\": \"$S/onnx/${p}_${tag}.onnx\".*\"ok\": true" <(tail -1 $S/onnx/export_log.jsonl) || { echo "export failed"; exit 1; }
-    if [ "$flag" = --amp ]; then
+    if [ "$flag" = --amp ] || { [ "$flag" = --autocast16 ] && [ "${CK_FOLD_CRADIO:-0}" = 1 ]; }; then
       "$RUN" $(cap FOLD $p) fold_casts.py $S/onnx/${p}_${tag}.onnx $S/onnx/${p}_${tag}_fold.onnx
       tag=${tag}_fold
     fi

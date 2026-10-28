@@ -451,6 +451,137 @@ The app's setup on macOS downloads it (electron/main/install.ts `COREML`, pinned
 `.partial-2.0.0-onnx.4-coreml`, then moves the files into the model set's folder, `coreml.json` last; a set
 installed without it gets it the next time the setup runs.
 
+## onnx.5: one masked attention (candidate `2.0.0-onnx.5`, built and measured 2026-10-27)
+
+Why: AMD's MIGraphX can't load stage 1 or stage 2 of onnx.4 (docs/AMD.md on branch `amd`): ONNX `RMSNormalization`
+is unknown to it, and onnx_patches v2 splits every Swin block into four region groups whose sizes follow the input
+size, so at every size some group is empty (MIGraphX reads a 0 in a Reshape target as "copy"). Apple's Neural Engine
+compiler overflows its stack scheduling stage 2's attention branches (four per Swin block in v2). `onnx5_patches.py`
+replaces three things at export time, on top of v2; Corridor's code and weights are unchanged.
+
+- **Stage 2: one masked attention per Swin block.** The standard Swin form: windows of the padded, rolled grid, one
+  attention over all of them with an additive mask (0 where query and key share a region, -inf elsewhere). The
+  labels are upstream's (`_shifted_region_ids_2d`: slices (0, -w), (-w, -s), (-s, None) of the padded pre-shift grid,
+  padding its own region, whose queries are cropped after). The mask is (B·windows, 1, 256, 256): 5.2 MB per frame at
+  HD (40 windows), 17.7 MB at 4K (135), one per block shape and shift, shared by the blocks that have it. Attention
+  nodes 30 → 12. A mask turns CUDA flash attention off: MHA then uses memory-efficient attention (speed: test request).
+- **Stage 1: mask-free regions, gathered.** Stage 1 attends over 256·T tokens per window, T up to 80 in the engine;
+  a mask would be (windows, N, N) with N = 256·T, e.g. 40 × 20480² values at 1920×1152, T=80, so the single masked
+  form isn't possible there. Stage 1 keeps v2's exact regions (full windows, halves, quarters), but takes them
+  straight from the token grid with **one Gather per q / k / v** (the index includes the window partition and the
+  region split), with **one zero region appended to every group**, so no tensor is ever empty at any size, runs four
+  plain attentions and puts the result back with **one Gather**. Inside a region the tokens are frame-major
+  (t, y, x), v2's order, so attention sums in onnx.4's order (the first build gathered (y, x, t); see the floor
+  below). The indices are built from broadcast ranges and compares (no division), once per block shape and shift (four ScatterElements in the whole network).
+- **RMSNorm in plain ops.** torch's own `rms_norm` composite (fp32 inside, back to the input type, times the weight)
+  written as Pow / ReduceMean / Add / Sqrt / Div / Cast / Mul, the pattern ONNX Runtime fuses back into one
+  SimplifiedLayerNormalization at load; `LayerNorm2d` reduces over the channel axis in place (no permute pair).
+- **`to_mha.py`** turns a masked `Attention` into MHA with the mask as `attention_bias`, and drops Transpose pairs
+  that undo each other (128 pairs in stage 1, 27 in C-RADIO). `to_trt.py`'s plain form adds the mask before the
+  softmax and accepts MHA inputs whose pair was dropped.
+- **C-RADIO fp16 with fp16 weights (BACKLOG row 152).** Exported as before (fp16 autocast), then `fold_casts.py`
+  turns its 109 weight casts into fp16 initializers: 1,724,414,688 → 900,504,288 bytes; fp16 initializers
+  0.768 GiB, fp32 0.071 GiB (norms, position grid). Same inputs, outputs and op types; ONNX Runtime's optimised
+  graph (Core ML probe below) has 933 nodes for both files. ORT folded those casts at load before, so the card holds
+  the same fp16 weights. The TensorRT set's C-RADIO keeps starting from onnx.4's file (`CK_TRT_CRADIO_FROM`): its
+  fp32 islands need the fp32 weights.
+
+Inputs, outputs, names, dtypes and dynamic axes are unchanged (checked on all four stage files), so the engine needs
+no change. Set download (the five fp16 files): 3,302,681,217 → 2,478,578,104 bytes.
+
+**Region maps, checked (index arithmetic only, no model):** for 280 grid / shift / batch cases (1-5 windows per
+axis, with and without the 8-token padding) every real token's attention set from the gather maps and from the
+stage-2 mask equals upstream's region labels; the back map inverts the forward map; every group holds ≥ 1 region.
+A mutated shift fails the check.
+
+**Static comparison** (`2.0.0-onnx.4` → `2.0.0-onnx.5`; layout = Reshape, Transpose, Slice, Concat, Pad, Expand,
+Tile, Squeeze, Unsqueeze, Gather, Split, Flatten, DepthToSpace):
+
+| file | nodes | layout ops | Reshape | Transpose | Slice | Concat | attention | RMSNormalization |
+|---|---|---|---|---|---|---|---|---|
+| stage 1 fp16 | 4322 → 4505 | 2911 → **2197** | 925 → 727 | 608 → 310 | 541 → 361 | 403 → 247 | 48 → 48 | 111 → 0 |
+| stage 1 fp32 | 4100 → 4137 | 2772 → **2071** | 912 → 727 | 482 → 184 | 541 → 361 | 403 → 247 | 48 → 48 | 111 → 0 |
+| stage 2 fp16 | 2377 → 2039 | 1686 → **1024** | 531 → 247 | 366 → 202 | 341 → 205 | 226 → 121 | 30 → 12 | 50 → 0 |
+| stage 2 fp32 | 2268 → 1862 | 1655 → **963** | 530 → 247 | 305 → 141 | 341 → 205 | 257 → 121 | 30 → 12 | 50 → 0 |
+
+The node count of stage 1 grows by the norms written out (111 × 5 ops, fused again by ORT at load). Stage 1's
+remaining layout ops are outside the windowed attention (CSwin / full blocks, the rolls, the DepthwiseSwiGLU
+convolutions): not touched here.
+
+**MIGraphX 2.18 parser** (`tools/migraphx_ops.py`, parsing only, at 384×256, 1280×1152, 1920×1152 and 3840×2176,
+4 frames): the TensorRT-form files (plain attention; what `migraphx_patch.py` starts from) parse for **all five
+networks at all four sizes**, without the RMSNorm patch (onnx.4: stage 1 and 2 refused). In the plain fp16 set
+stage 1 parses at all sizes; stage 2 doesn't: MIGraphX's MultiHeadAttention parser wants `attention_bias` with one
+row per head (ours broadcasts one mask over the heads), so AMD keeps using the TensorRT-form files.
+
+**ORT Core ML partitioner** (`coreml/ep_probe.py`, the Linux ORT 1.31 build with the Core ML EP, ML Program, session
+creation only, the dynamic files with their sizes fixed to 1152×1280, T=4; no `fold.py`, so these are not the Core
+ML set's numbers, only old against new on equal terms). Core ML partitions / nodes left on the CPU:
+
+| file | onnx.4 | onnx.5 |
+|---|---|---|
+| stage 1 fp16 | 210 / 1163 | 113 / 590 |
+| stage 1 TensorRT form | 190 / 919 | 93 / 346 |
+| stage 2 fp16 | 101 / 726 | 49 / 164 |
+| stage 2 TensorRT form | 91 / 576 | 39 / 100 |
+| C-RADIO fp16 | 29 / 138 | 29 / 138 |
+
+**Measured 2026-10-27, first build** (`onnx5_parity.sh`, Marcy's OK; RTX 5080, ORT 1.31, the engine at main c3864a1).
+These runs used the first build, whose stage-1 regions were (y, x, t) inside; the set was rebuilt the same day with
+v2's frame-major order (static checks repeated: region maps, MIGraphX, Core ML partitions 113 / 93 unchanged) and
+awaits the same runs:
+
+- `torch` (PyTorch fp32, CPU, onnx5_patches against Corridor's unpatched code; 256×384, 384×640, 512×896 T=2,
+  768×1280 T=4): stage 1 baton max 1.7e-6 to 2.1e-6 (values up to 3.6), aux ≤ 8.3e-7; stage 2 ≤ 1.0e-6. v2's level.
+- `net`, ORT CPU, onnx.4 against onnx.5, same seeded inputs (256×384 T=2, 384×640 T=4, 768×1280 T=4): fp32 stage 1
+  baton ≤ 2.4e-6, stage 2 ≤ 4.5e-7; fp16 stage 1 baton ≤ 2.1e-3 (values up to 3.9; fp16's step there is 2e-3), aux
+  ≤ 4.9e-4, stage-2 matte ≤ 0.001/255; C-RADIO fp16 bit-identical. No non-finite values.
+- `cuda`, the same on ORT CUDA fp16 at 1152×1920 T=8 and 2176×3840 T=4: stage 1 baton ≤ 6.4e-3 (values up to 4.8),
+  aux ≤ 9.8e-4, stage-2 matte ≤ 0.016/255 (mean 0.002/255); C-RADIO bit-identical. 3 min, peak 6.7 GB on the card.
+- `engine` (the Rust engine on CUDA, automatic window, float EXR, onnx.4 then onnx.5 per clip; 64 min):
+
+| clip | size, frames | window | total s (4 → 5) | steady fps | peak VRAM GB | peak RSS GB | alpha max ×255 | alpha MAE | % px > 1/255 | sizzle (edge, 4 / 5) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| godiva_close | 960×720, 349 | 80/40 | 38.7 → 37.5 | 12.08 → 12.28 | 9.84 → 9.51 | 6.40 → 6.31 | 0.37 | 3.4e-5 | 0 | 0.01084 / 0.01084 |
+| locked_backdrop | 1280×1080, 80 | 48/24 low | 17.5 → 16.6 | 16.91 → 17.23 | 8.98 → 9.04 | 6.35 → 6.42 | 0.37 | 1.4e-5 | 0 | 0.02054 / 0.02054 |
+| metal_glasses | 1280×1080, 139 | 48/24 low | 26.7 → 25.9 | 16.77 → 17.10 | 9.04 → 9.05 | 6.52 → 6.57 | 0.50 | 1.7e-5 | 0 | 0.00926 / 0.00926 |
+| smoke | 1280×1080, 250 | 48/24 low | 47.5 → 45.9 | 16.69 → 16.99 | 9.04 → 9.04 | 6.59 → 6.63 | **1.12** | 2.4e-5 | 3e-7 | 0.01276 / 0.01276 |
+| walking_sitting | 1280×1080, 314 | 48/24 low | 59.4 → 58.2 | 16.60 → 16.89 | 9.04 → 9.04 | 6.59 → 6.58 | **3.24** | 9.4e-6 | 5e-4 | 0.03659 / 0.03658 |
+| with_motion_blur | 1280×1080, 50 | 48/24 low | 13.0 → 12.1 | 17.13 → 17.30 | 9.04 → 9.04 | 6.07 → 6.07 | 0.37 | 9.7e-6 | 0 | 0.03752 / 0.03750 |
+| 04_2c | 4096×2160, 120 | 8/4 | 171.6 → 168.0 | 0.78 → 0.79 | 10.82 → 10.82 | 7.46 → 7.21 | 0.50 | 1.2e-5 | 0 | 0.02049 / 0.02049 |
+| 04_5d | 4096×2160, 120 | 8/4 | 172.0 → 168.3 | 0.78 → 0.79 | 10.82 → 10.82 | 7.42 → 7.10 | **3.98** | 8.4e-6 | 7e-4 | 0.02521 / 0.02520 |
+| 04_5h | 4096×2160, 120 | 8/4 | 169.2 → 168.1 | 0.78 → 0.79 | 10.82 → 10.82 | 7.44 → 7.18 | 0.75 | 1.0e-5 | 0 | 0.01812 / 0.01812 |
+| 08_3a | 4096×2160, 120 | 8/4 | 172.9 → 167.9 | 0.77 → 0.79 | 10.82 → 10.82 | 7.40 → 7.23 | 0.62 | 6.9e-6 | 0 | 0.02149 / 0.02149 |
+
+  Sizzle (tools/temporal_stability.py, the static hair-edge band's mean frame-to-frame change) is equal or lower on
+  every clip; speed 1-7 % faster, graphics memory the same, host memory up to 0.3 GB lower at 4K. **The max bar
+  (≤ 1/255 against onnx.4) fails on 3 of 10 clips** (1.12, 3.24 and 3.98 /255), on a few hair-edge pixels: at most
+  0.0007 % of pixels over 1/255 (04_5d: about 60 pixels a frame), MAE ≤ 3.4e-5.
+- Floor (same day, Marcy's OK; onnx.4 twice at test 4's settings, and `tools/vs_original.sh --steps quality`: the
+  original twice and onnx.4 once). Alpha max ×255 / MAE / % of pixels over 1/255:
+
+| clip (window) | onnx.4 vs onnx.4 | original vs original | onnx.4 vs original | onnx.5 vs onnx.4 |
+|---|---|---|---|---|
+| smoke (48/24) | 0 / 0 / 0 | 3.98 / 1.4e-4 / 0.011 | 38.6 / 7.5e-4 / 6.0 | 1.12 / 2.4e-5 / 3e-7 |
+| walking_sitting (48/24) | 0 / 0 / 0 | 12.95 / 4.0e-5 / 0.016 | 93.5 / 1.8e-4 / 0.83 | 3.24 / 9.4e-6 / 5e-4 |
+| 04_5d (8/4) | 0 / 0 / 0 | 7.97 / 1.5e-4 / 0.042 | 40.5 / 2.8e-4 / 0.98 | 3.98 / 8.4e-6 / 7e-4 |
+
+  onnx.4 is bit-reproducible on CUDA, so onnx.5's differences come from its graph (stage 1's token order inside a
+  region, the masked stage-2 kernel, the written-out RMSNorm), not from run-to-run noise. They are below the
+  original's own run-to-run spread on every clip (3.98 vs 3.98, 3.24 vs 12.95, 3.98 vs 7.97 /255 at the max; 6-17×
+  lower MAE) and 10-30× below onnx.4's distance to the original. (`vs_original.sh` keys our side at a 12 GB budget:
+  04_5d then runs at 4/2 against the original's 8/4; the 04_5d onnx.4 vs original row above is onnx.4 at 8/4.)
+
+Not measured: TensorRT and CPU engine runs, whether Apple's Neural Engine now compiles stage 2, a MIGraphX run on an
+AMD card.
+
+```
+cd engine-rs/export
+CK_ONNX_VERSION=2.0.0-onnx.5 CK_PATCH=--onnx5 CK_NEW_PIECES="stage1 stage2 cradio:fp16" CK_FOLD_CRADIO=1 \
+  CK_REUSE_FROM=<onnx.4 files incl. fp32> CK_MODELS_DIR=OUT ./build_models.sh       # ~6 min CPU, peak 7 GB
+./onnx5_parity.sh torch|net|cuda|engine|cpu ONNX4_SET ONNX5_SET OUT                 # the test requests (not run)
+```
+
 ## Test clips
 
 Procedural (`make_clip.py`), so they carry no rights and come with a ground-truth alpha. Each has
@@ -505,7 +636,7 @@ The ORT 1.31 GPU wheel targets CUDA 13 and needs a driver that supports it (this
 4. Per-session arenas: the five sessions don't share GPU memory, so peaks may add up. The engine
    can run them one after another as upstream does.
 5. Torch-free host pipeline: resize kernels, asinh/sRGB and Hann blending need their own parity test.
-6. Native fp16 C-RADIO (fp32 weights today, 1.72 GB).
+6. Native fp16 C-RADIO (fp32 weights today, 1.72 GB): fp16 weights in the onnx.5 candidate (0.90 GB), not measured.
 7. TensorRT: the TensorRT set above (MHA has no TensorRT plugin; the set uses plain attention). Some maxima
    under TensorRT are above CUDA fp16's (MoGe 0.086 vs 0.047, C-RADIO 0.146 vs 0.092); the means are below.
 8. A side of 128 px: stage 1's reflect/replicate branch (`blocks.py`) is fixed to reflect by the export, so the

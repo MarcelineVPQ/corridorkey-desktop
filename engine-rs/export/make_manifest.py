@@ -50,6 +50,8 @@ def main():
     portrait = version not in ("2.0.0-onnx.1", "2.0.0-onnx.2")  # C-RADIO with a non-square position grid
     # MoGe, RVM, stage 1, stage 2 fp16 under the original's precision policy (export.py --amp), onnx.4 on
     amp = version not in ("2.0.0-onnx.1", "2.0.0-onnx.2", "2.0.0-onnx.3")
+    # onnx5_patches (stage 1 / 2) and C-RADIO fp16 with fp16 weights (docs/ONNX_EXPORT.md "onnx.5")
+    onnx5 = version not in ("2.0.0-onnx.1", "2.0.0-onnx.2", "2.0.0-onnx.3", "2.0.0-onnx.4")
     entries = []
     # loop: SERIAL-REQUIRED — five networks, one model load and hash at a time (memory)
     for piece in PIECES:
@@ -62,7 +64,9 @@ def main():
                           if n.op_type in ("Attention", "MultiHeadAttention")})
             entries.append({
                 "name": f.name, "piece": piece, "precision": prec,
-                "precision_note": ("mixed: fp32 weights, fp16 compute (exported under fp16 autocast)"
+                "precision_note": ("mixed: fp16 weights (fold_casts.py), fp16 compute (exported under fp16 autocast)"
+                                   if piece == "cradio" and prec == "fp16" and onnx5 else
+                                   "mixed: fp32 weights, fp16 compute (exported under fp16 autocast)"
                                    if piece == "cradio" and prec == "fp16" else
                                    "mixed, the original's autocast policy: fp16 conv/matmul/attention and fp16 "
                                    "weights for them, fp32 where CUDA autocast keeps fp32 (export.py --amp, fold_casts.py)"
@@ -88,7 +92,8 @@ def main():
         "source_checkpoint": {"file": ckpt.name, "sha256": sha256(ckpt)},
         "onnxruntime_min": "1.31.0",
         "exporter": "torch.onnx.export(dynamo=True) torch 2.9.1, onnxscript 0.7.2; "
-                    "engine-rs/export/build_models.sh (onnx_patches v2 + to_mha.py"
+                    "engine-rs/export/build_models.sh (onnx_patches v2"
+                    + (" + onnx5_patches on stage 1 / stage 2" if onnx5 else "") + " + to_mha.py"
                     + (" + fold_casts.py on the --amp fp16 exports" if version not in ("2.0.0-onnx.1", "2.0.0-onnx.2", "2.0.0-onnx.3") else "")
                     + (" + speed_patches.py on stage 1 / stage 2)" if sped else ")"),
         "contract": "docs/ONNX_EXPORT.md section 'Production model set' (host-side steps, shapes, session options)",

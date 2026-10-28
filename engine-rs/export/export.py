@@ -1,7 +1,7 @@
 """Export one CorridorKey v2 piece to ONNX (fp32), CPU only.
 
 usage: python export.py PIECE [--exporter dynamo|ts] [--H 768 --W 1280] [--T 4]
-         [--static] [--opset 18] [--patch]
+         [--static] [--opset 18] [--patch | --onnx5]
 
 PIECE: cradio | moge | rvm | stage1 | stage2
 
@@ -80,6 +80,8 @@ def main():
     ap.add_argument("--opset", type=int, default=18)
     ap.add_argument("--patch", action="store_true",
                     help="apply onnx_patches (export-friendly shifted-window attention)")
+    ap.add_argument("--onnx5", action="store_true",
+                    help="onnx_patches plus onnx5_patches (set 2.0.0-onnx.5: no empty tensors, RMSNorm in plain ops)")
     ap.add_argument("--tag", default="")
     ap.add_argument("--autocast16", action="store_true",
                     help="fp32 weights, export traced under fp16 autocast (mixed precision graph)")
@@ -91,7 +93,10 @@ def main():
     a = ap.parse_args()
 
     model = load_cpu_model()
-    if a.patch:
+    if a.onnx5:
+        import onnx5_patches
+        onnx5_patches.apply()
+    elif a.patch:
         import onnx_patches
         onnx_patches.apply()
     mod, args, names_in, names_out, dyn = build(a.piece, model, a.H, a.W, a.T)
@@ -120,7 +125,7 @@ def main():
     tag = a.tag or ("fp16" if (a.half or a.autocast16 or a.amp) else f"{a.exporter}{'_static' if a.static else ''}")
     out = ONNX_DIR / f"{a.piece}_{tag}.onnx"
     rec = {"piece": a.piece, "exporter": a.exporter, "static": a.static,
-           "opset": a.opset, "patch": a.patch, "half": a.half, "amp": a.amp, "shape": [a.T, a.H, a.W], "file": str(out)}
+           "opset": a.opset, "patch": a.patch, "onnx5": a.onnx5, "half": a.half, "amp": a.amp, "shape": [a.T, a.H, a.W], "file": str(out)}
     t0 = time.time()
     try:
         with torch.no_grad():

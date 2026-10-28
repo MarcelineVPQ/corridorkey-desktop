@@ -9,6 +9,8 @@
 # to_mha.py and speed_patches.py (the 2.0.0-onnx.2 rewrites). to_trt.py keeps fp32 ops fp32 in these mixed files
 # (islands only move fp16 ops). CPU only; every step under run.sh: CK_MEM_<STEP>_<piece> (STEP: TRT, EXPORT, FOLD,
 # MHA, SPEED, CTX; e.g. CK_MEM_EXPORT_stage1=7G), default 16G (CTX 4G); set them at 1.5x a measured peak.
+# 2.0.0-onnx.5: CK_PATCH=--onnx5 (stage 1 / 2 as in build_models.sh) and CK_TRT_CRADIO_FROM=<the onnx.4 set>: onnx.5's
+# C-RADIO fp16 file stores fp16 weights, and the fp32 islands here must start from the fp32 weights of onnx.4's file.
 set -e
 PROD=$1; OUT=$2
 S=${CK_ONNX_SCRATCH:-$HOME/.cache/claude-scratch/corridorkey-onnx}
@@ -20,11 +22,12 @@ mkdir -p "$OUT"
 # loop: SERIAL-REQUIRED — three networks, one memory-capped to_trt.py at a time
 for p in cradio moge rvm; do
   ops="--fp32-ops=Conv,ConvTranspose,MatMul"; [ $p = moge ] || ops="$ops --weights-only"
-  "$RUN" $(cap TRT $p) to_trt.py "$PROD/ck2-$p-fp16.onnx" "$OUT/ck2-$p-trt-fp16.onnx" $ops
+  src=$PROD; [ $p = cradio ] && src=${CK_TRT_CRADIO_FROM:-$PROD}
+  "$RUN" $(cap TRT $p) to_trt.py "$src/ck2-$p-fp16.onnx" "$OUT/ck2-$p-trt-fp16.onnx" $ops
 done
 # loop: SERIAL-REQUIRED — stage 1 then stage 2, one memory-capped step at a time
 for p in stage1 stage2; do
-  "$RUN" $(cap EXPORT $p) export.py $p --opset 23 --patch --amp --tag trt_fp16 | grep -E "^EXPORT_RESULT" | cut -c1-200
+  "$RUN" $(cap EXPORT $p) export.py $p --opset 23 ${CK_PATCH:---patch} --amp --tag trt_fp16 | grep -E "^EXPORT_RESULT" | cut -c1-200
   grep -q "\"file\": \"$S/onnx/${p}_trt_fp16.onnx\".*\"ok\": true" <(tail -1 $S/onnx/export_log.jsonl) || { echo "export failed"; exit 1; }
   "$RUN" $(cap FOLD $p) fold_casts.py $S/onnx/${p}_trt_fp16.onnx $S/onnx/${p}_trt_fp16_fold.onnx
   "$RUN" $(cap MHA $p) to_mha.py $S/onnx/${p}_trt_fp16_fold.onnx $S/onnx/${p}_trt_fp16_mha.onnx $p

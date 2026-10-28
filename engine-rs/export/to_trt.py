@@ -7,7 +7,7 @@ The production set is built for ONNX Runtime's CUDA provider. TensorRT's parser 
 1. `com.microsoft::MultiHeadAttention` (to_mha.py's rewrite of every attention): no TensorRT plugin
    ("Plugin not found"). Each MHA, with the Transpose/Reshape pairs to_mha.py put around it, goes back to
    the original 4D form as plain ops:
-       Q (B,h,S,d) * 1/sqrt(d) -> MatMul(K^T) -> Softmax(-1) -> MatMul(V) -> out (B,h,S,d)
+       Q (B,h,S,d) * 1/sqrt(d) -> MatMul(K^T) [-> Add(attention_bias)] -> Softmax(-1) -> MatMul(V) -> out (B,h,S,d)
    This is the pattern TensorRT fuses into its own attention kernels. (The opset-23 `Attention` op needs a
    strongly typed network in TensorRT 10.16, which ORT's TensorRT provider doesn't make.) The scale goes on
    Q before the product, as MHA does.
@@ -52,34 +52,51 @@ def mha_to_plain(model, fp16):
             continue
         # loop: NOT-WORTH — one node's few attributes
         heads = [a.i for a in n.attribute if a.name == "num_heads"][0]
-        src = []
+        p = f"{n.name}_plain"
+        src, pre, q_orig = [], [], None
         # loop: NOT-WORTH — one MultiHeadAttention node's q, k, v
-        for r in n.input[:3]:
+        for j, r in enumerate(n.input[:3]):
             rn = prod[r]
-            tn = prod[rn.input[0]]
-            assert rn.op_type == "Reshape" and tn.op_type == "Transpose", n.name
-            src.append(tn.input[0])
-            drop.update([rn.name, tn.name])
+            assert rn.op_type == "Reshape", n.name
+            q_orig = q_orig or rn.input[0]
+            tn = prod.get(rn.input[0])
+            if tn is not None and tn.op_type == "Transpose":
+                src.append(tn.input[0])
+                drop.update([rn.name, tn.name])
+            else:  # to_mha.py cancelled the pair: rn's input is already (B,S,h,d)
+                pre.append(helper.make_node("Transpose", [rn.input[0]], [f"{p}_in{j}"], perm=[0, 2, 1, 3],
+                                            name=f"{p}_in{j}"))
+                src.append(f"{p}_in{j}")
+                drop.add(rn.name)
         (o3,) = n.output
         (ro,) = cons[o3]
-        (to,) = cons[ro.output[0]]
-        assert ro.op_type == "Reshape" and to.op_type == "Transpose", n.name
+        assert ro.op_type == "Reshape", n.name
         shape = numpy_helper.to_array(inits[ro.input[1]])
         assert shape[2] == heads, (n.name, shape)
         d = int(shape[3])
-        drop.update([n.name, ro.name, to.name])
-        p = f"{n.name}_plain"
+        to = cons.get(ro.output[0], [None])[0]
+        if to is not None and to.op_type == "Transpose" and len(cons[ro.output[0]]) == 1:
+            out, post = to.output[0], []
+            drop.update([n.name, ro.name, to.name])
+        else:  # cancelled pair: the consumers read (B,S,h,d) from ro
+            out = f"{p}_bhsd"
+            post = [helper.make_node("Transpose", [out], [ro.output[0]], perm=[0, 2, 1, 3], name=f"{p}_out")]
+            drop.update([n.name, ro.name])
         q, k, v = src
         # the scale in Q's type (mixed files: attention runs in fp16 whatever the file's input type)
-        dt = np.float16 if types.get(q, TensorProto.FLOAT16 if fp16 else TensorProto.FLOAT) == TensorProto.FLOAT16 else np.float32
+        qt = types.get(q, types.get(q_orig, TensorProto.FLOAT16 if fp16 else TensorProto.FLOAT))
+        dt = np.float16 if qt == TensorProto.FLOAT16 else np.float32
         scale = _init(g, f"{p}_scale", np.array(1.0 / np.sqrt(d), dtype=dt))
-        nodes = [
+        bias = n.input[5] if len(n.input) > 5 and n.input[5] else None  # attention_bias (onnx.5 stage 2)
+        s = f"{p}_sb" if bias else f"{p}_s"
+        nodes = pre + [
             helper.make_node("Mul", [q, scale], [f"{p}_qs"], name=f"{p}_qs"),
             helper.make_node("Transpose", [k], [f"{p}_kt"], perm=[0, 1, 3, 2], name=f"{p}_kt"),
             helper.make_node("MatMul", [f"{p}_qs", f"{p}_kt"], [f"{p}_s"], name=f"{p}_s"),
-            helper.make_node("Softmax", [f"{p}_s"], [f"{p}_p"], axis=-1, name=f"{p}_p"),
-            helper.make_node("MatMul", [f"{p}_p", v], [to.output[0]], name=f"{p}_o"),
-        ]
+        ] + ([helper.make_node("Add", [f"{p}_s", bias], [s], name=s)] if bias else []) + [
+            helper.make_node("Softmax", [s], [f"{p}_p"], axis=-1, name=f"{p}_p"),
+            helper.make_node("MatMul", [f"{p}_p", v], [out], name=f"{p}_o"),
+        ] + post
         add[n.name] = nodes
         count += 1
     new = []
