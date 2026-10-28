@@ -10,8 +10,8 @@
 // and a rail press (opens the page at the first waiting section) all read it.
 // Tasks are derived from the app state, so they clear themselves when the
 // state is fixed. Nothing else draws a dot or badge (the .task look).
-import type { AppState, CheckoutCheck, FfmpegState, InstallState, Job } from "./types";
-import { CANT_READ_CLIP, ENGINE_FAILED, INSTALL_STEP } from "./texts";
+import type { AppState, CheckoutCheck, FfmpegState, InstallState, Job, UpdateState } from "./types";
+import { CANT_READ_CLIP, ENGINE_FAILED, INSTALL_STEP, updateAvailableText, updateReadyText } from "./texts";
 
 /** The runtime or the models are missing from the data folder (what the install box offers to download). */
 export function installMissing(install: InstallState): boolean {
@@ -66,6 +66,25 @@ export function startBlocked(state: AppState): string | null {
   return null;
 }
 
+/**
+ * The pinned update notice's key (UpdateBanner.tsx): its step and the version, e.g. "ready:1.0.0-dev.2". A dismissal
+ * holds for that key only, so the next step or a newer version shows again. null: no step with a notice to dismiss.
+ */
+export function updateNoticeKey(u: UpdateState): string | null {
+  if (!u.latest || (u.status !== "available" && u.status !== "downloading" && u.status !== "ready")) return null;
+  return `${u.status}:${u.latest}`;
+}
+
+/** The app update as a task on App settings → Updates: offered, installed and waiting for a restart, or its install failed. */
+function updateTask(u: UpdateState): Task | null {
+  const at = { id: "update", page: "settings", section: "updates" } as const;
+  if (u.status === "available" && u.latest) return { ...at, level: "task", text: updateAvailableText(u.latest, u.size) };
+  if (u.status === "ready" && u.latest) return { ...at, level: "task", text: updateReadyText(u.latest) };
+  // a failed check stays in its section (a scheduled one says nothing more); a failed install is said verbatim
+  if (u.status === "error" && u.errorFrom === "install" && u.error) return { ...at, level: "error", text: u.error };
+  return null;
+}
+
 export function tasksOf(state: AppState): Task[] {
   const tasks: Task[] = [];
   // the first-run install is what's missing (the engine's own setup task would only repeat it)
@@ -97,6 +116,8 @@ export function tasksOf(state: AppState): Task[] {
   if (state.engine.status === "failed") tasks.push({ id: "engine", page: "engine", section: "", level: "error", text: `${ENGINE_FAILED}: ${state.engine.error ?? "unknown error"}` });
   // the chosen cache folder's drive isn't there: the cache is in the system's folder for now (App settings, Storage)
   if (state.cacheMissing) tasks.push({ id: "cache-missing", page: "settings", section: "storage", level: "task", text: `Drive not available for the cache folder: ${state.cacheMissing}` });
+  const update = updateTask(state.update);
+  if (update) tasks.push(update);
   // loop: NOT-WORTH — a queue of tens of clips, on each state change (≤ 10/s while running)
   for (const job of state.jobs) {
     // a clip the app can't read (bug hunt 2026-10 A9): its reason is on the row; the user removes or replaces it

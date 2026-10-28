@@ -7,7 +7,7 @@ import { Download, FolderInput, FolderOpen, FolderOutput, HardDrive, MemoryStick
 import type { Appearance, AppState, CacheInfo, UpdateState } from "../../shared/types";
 import { gibBytes, mbOrGbBytes } from "../../shared/units";
 import { VramLimitRow } from "../JobSettings";
-import { NOT_WHILE_BUSY } from "../../shared/texts";
+import { NOT_WHILE_BUSY, versionText } from "../../shared/texts";
 import { Accordion, Row, Section, Segmented, type SectionFocus } from "../panel/Section";
 import { MainBlock, SplitView } from "../panel/SplitView";
 import { Stat } from "../JobView";
@@ -23,7 +23,7 @@ const NEXT_TO_CLIP = "Next to each clip";
 const THEME_TEXT = { system: "System", light: "Light", dark: "Dark", desktop: "Desktop" } as const;
 const capitalized = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
-export function SettingsPage(props: { state: AppState; panelShown: boolean; narrow: boolean; glass: boolean; focus: SectionFocus; hidePanel: () => void }) {
+export function SettingsPage(props: { state: AppState; panelShown: boolean; narrow: boolean; glass: boolean; focus: SectionFocus; hidePanel: () => void; sectionTasks: Record<string, string> }) {
   const { state } = props;
   const a = state.settings.appearance;
   const setA = (patch: Partial<Appearance>) => void window.ck.setAppearance({ ...a, ...patch });
@@ -163,7 +163,7 @@ export function SettingsPage(props: { state: AppState; panelShown: boolean; narr
         </Section>
       )}
 
-      <Section id="updates" icon={Download} title="Updates" status={updateStatus(u)}>
+      <Section id="updates" icon={Download} title="Updates" status={updateStatus(u)} task={props.sectionTasks["settings/updates"] ?? null}>
         {() => <Updates u={u} queueRunning={state.queueRunning} />}
       </Section>
       <Section id="storage" icon={HardDrive} title="Storage" status={storageTotal === null ? "measuring…" : `${gbBytes(storageTotal)} on this PC`}>
@@ -215,11 +215,6 @@ export function SettingsPage(props: { state: AppState; panelShown: boolean; narr
       onEscape={props.hidePanel}
     />
   );
-}
-
-export function versionText(v: string): string {
-  const m = /^(\d+\.\d+\.\d+)-dev\.(\d+)$/.exec(v);
-  return m ? `${m[1]} Dev ${m[2]}` : v;
 }
 
 function updateStatus(u: UpdateState): string {

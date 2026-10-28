@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { dots, jobToSelect, missingInput, pageOr, startBlocked, tasksOf } from "../../src/shared/tasks";
+import { dots, jobToSelect, missingInput, pageOr, startBlocked, tasksOf, updateNoticeKey } from "../../src/shared/tasks";
 import { DEFAULT_OPTIONS, type InstallStatus } from "../../src/shared/types";
-import { appState as state, clipInfo, ffmpegState, installState, job, trtState } from "./fixtures";
+import { appState as state, clipInfo, ffmpegState, installState, job, trtState, updateState } from "./fixtures";
 
 // the runtime and models missing (2 + 3 bytes), the install idle, running or stopped with an error
 const installing = (status: InstallStatus, error: string | null = null) => installState({ needRuntime: true, needModels: true, bytes: 5, runtimeBytes: 2, modelsBytes: 3, status, error });
@@ -19,6 +19,35 @@ describe("TensorRT task", () => {
     expect(tasksOf(state({ tensorrt: trt({ status: "error", error: "no space" }) }))[0]).toMatchObject({ level: "error", text: "The TensorRT download stopped: no space" });
     // the runtime and models come first: their task, not TensorRT's
     expect(tasksOf(state({ rustEngine: noEngine, install: installing("idle"), tensorrt: trt({}) })).map((t) => t.id)).toEqual(["install"]);
+  });
+});
+
+describe("app update task (App settings → Updates)", () => {
+  const upd = (over: Parameters<typeof updateState>[0]) => state({ update: updateState(over) });
+  it("an offered update: its version and download size, on App settings → Updates; the rail press opens that section", () => {
+    const t = tasksOf(upd({ status: "available", latest: "1.0.0-dev.2", size: 45_300_000 }));
+    expect(t).toEqual([{ id: "update", page: "settings", section: "updates", level: "task", text: "1.0.0 Dev 2 is available, 45.3 MB" }]);
+    expect(dots(t)).toMatchObject({ pages: { settings: "1.0.0 Dev 2 is available, 45.3 MB" }, targets: { settings: "updates" } });
+  });
+  it("installed and waiting: restart to use it", () => {
+    expect(tasksOf(upd({ status: "ready", latest: "1.0.0-dev.2" }))).toEqual([expect.objectContaining({ id: "update", level: "task", text: "1.0.0 Dev 2 is ready: restart to use it" })]);
+  });
+  it("a failed install is an error, said verbatim; a failed check isn't a task (its section says it)", () => {
+    const error = "The update didn't install: no space left on device. Your current version is untouched.";
+    expect(tasksOf(upd({ status: "error", errorFrom: "install", error, latest: "1.0.0-dev.2" }))).toEqual([expect.objectContaining({ id: "update", level: "error", text: error })]);
+    expect(tasksOf(upd({ status: "error", errorFrom: "check", error: "Couldn't check for updates: offline" }))).toEqual([]);
+  });
+  it("nothing to do while idle, checking, downloading, up to date or unsupported", () => {
+    // loop: NOT-WORTH — five states in a test
+    for (const status of ["idle", "checking", "downloading", "current", "unsupported"] as const) expect(tasksOf(upd({ status, latest: "1.0.0-dev.2" }))).toEqual([]);
+  });
+  it("the notice key is per step and version: dismissing one leaves the next step and a newer version shown", () => {
+    expect(updateNoticeKey(updateState({ status: "available", latest: "1.0.0-dev.2" }))).toBe("available:1.0.0-dev.2");
+    expect(updateNoticeKey(updateState({ status: "downloading", latest: "1.0.0-dev.2" }))).toBe("downloading:1.0.0-dev.2");
+    expect(updateNoticeKey(updateState({ status: "ready", latest: "1.0.0-dev.2" }))).toBe("ready:1.0.0-dev.2");
+    expect(updateNoticeKey(updateState({ status: "available", latest: "1.0.0-dev.3" }))).toBe("available:1.0.0-dev.3");
+    expect(updateNoticeKey(updateState({ status: "error", errorFrom: "install", error: "x", latest: "1.0.0-dev.2" }))).toBeNull();
+    expect(updateNoticeKey(updateState({ status: "current", latest: "1.0.0-dev.2" }))).toBeNull();
   });
 });
 

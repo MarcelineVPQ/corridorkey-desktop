@@ -12,7 +12,7 @@ import notices from "../../../THIRD_PARTY_NOTICES.md?raw";
 import { Accordion, Section, type SectionFocus } from "../panel/Section";
 import { SplitView } from "../panel/SplitView";
 import { usePref } from "../prefs";
-import { versionText } from "./SettingsPage";
+import { versionText } from "../../shared/texts";
 
 const DOCS = {
   guide: { title: "Guide", icon: BookOpen, text: guide },

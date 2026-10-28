@@ -122,7 +122,7 @@ export function App() {
           {page === "queue" && <QueuePage state={state} selected={selected} onSelect={setSelected} panelShown={panelShown("queue")} sectionTasks={d.sections} {...common} />}
           {page === "engine" && <EnginePage state={state} panelShown={panelShown("engine")} sectionTasks={d.sections} openSetup={() => setPage("setup")} {...common} />}
           {page === "console" && <ConsolePage state={state} blocks={consoleBlocks} setBlocks={setConsoleBlocks} panelShown={panelShown("console")} {...common} />}
-          {page === "settings" && <SettingsPage state={state} panelShown={panelShown("settings")} {...common} />}
+          {page === "settings" && <SettingsPage state={state} panelShown={panelShown("settings")} sectionTasks={d.sections} {...common} />}
           {page === "about" && <AboutPage version={state.version} panelShown={panelShown("about")} {...common} />}
           {page === "setup" && <SetupPage state={state} openQueue={() => setPage("queue")} openGuide={() => setPage("about")} />}
         </main>

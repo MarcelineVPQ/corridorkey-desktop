@@ -259,7 +259,7 @@ describe("readouts", () => {
       settings: settings({ appearance: { theme: "desktop", accent: "builtin", glass: false } }),
       desktopPalette: { source: "accent", isDark: true, accent: [61, 174, 233] },
     });
-    render(<SettingsPage state={state} panelShown={true} narrow={false} glass={false} focus={null} hidePanel={() => {}} />);
+    render(<SettingsPage state={state} panelShown={true} narrow={false} glass={false} focus={null} sectionTasks={{}} hidePanel={() => {}} />);
     expect(screen.getByText("Desktop accent")).toBeTruthy();
     expect(screen.queryByText("CorridorKey green")).toBeNull();
   });

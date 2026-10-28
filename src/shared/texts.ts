@@ -1,6 +1,7 @@
 // Sentences shown in more than one place, one definition each (shared by the main process and the pages), so
 // the setup, the Engine page, the rail and the tasks never drift apart. Written as they read on their own;
 // lowerFirst() for where one continues a line (an error after "stopped: ").
+import { mbOrGbBytes } from "./units";
 
 /** The sentence with its first letter in lower case, for use inside a line. */
 export function lowerFirst(s: string): string {
@@ -23,5 +24,14 @@ export const CANT_READ_CLIP = "Can't read this clip";
 export const AS_USED = "As used for this run";
 /** Storage can't be removed while something uses it (the button's tooltip, the main process's refusal). */
 export const NOT_WHILE_BUSY = "Not while the queue or the download runs";
+/** A version as people read it: "1.0.0-dev.2" is "1.0.0 Dev 2" (App settings, About, the update notice and its task). */
+export function versionText(v: string): string {
+  const m = /^(\d+\.\d+\.\d+)-dev\.(\d+)$/.exec(v);
+  return m ? `${m[1]} Dev ${m[2]}` : v;
+}
+/** An update offered, with its download's size (the pinned update notice and its App settings task). */
+export const updateAvailableText = (version: string, bytes: number | null) => `${versionText(version)} is available${bytes ? `, ${mbOrGbBytes(bytes)}` : ""}`;
+/** An update installed beside this copy (the pinned update notice and its App settings task). */
+export const updateReadyText = (version: string) => `${versionText(version)} is ready: restart to use it`;
 /** A build without a release channel (App settings, Updates; and the check's refusal). */
 export const NO_RELEASE_CHANNEL = "No release channel is set up in this build";
