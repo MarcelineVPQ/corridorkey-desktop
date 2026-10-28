@@ -457,6 +457,12 @@ pub(crate) fn write_exr(path: &Path, w: usize, h: usize, channels: usize, nhwc: 
         exr::error::Error::Io(io) => crate::Error::write("an EXR frame", path, &io),
         other => crate::Error::engine(format!("{}: {other}", path.display())),
     });
+    // on disk before the rename (final review 2026-10-28 N10): after a power loss or host crash the frame's name then
+    // holds the whole frame or the old one, never a zero-length file that `--skip-existing` would trust. Write access:
+    // Windows' FlushFileBuffers needs it
+    let res = res.and_then(|()| {
+        std::fs::OpenOptions::new().write(true).open(&part).and_then(|f| f.sync_all()).map_err(|e| crate::Error::write("an EXR frame", path, &e))
+    });
     let res = res.and_then(|()| std::fs::rename(&part, path).map_err(|e| crate::Error::write("an EXR frame", path, &e)));
     if res.is_err() {
         let _ = std::fs::remove_file(&part);

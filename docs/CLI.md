@@ -125,8 +125,8 @@ would find the key frames beside the plates.
   was before the run. Only if the undo fails as well is the hidden folder kept, and the message names it (the new
   frames, and the old ones in its `.replaced`). A SIGKILL in the milliseconds of the renames can leave old frames in
   `.replaced` too.
-- Each EXR frame is written to a hidden `.<name>.partial` and renamed into place (ck-core, the app's jobs too): a
-  writer killed mid-frame never leaves a cut EXR at the frame's name.
+- Each EXR frame is written to a hidden `.<name>.partial`, flushed to disk (fsync) and renamed into place (ck-core,
+  the app's jobs too): a writer killed mid-frame, or a power loss, never leaves a cut or empty EXR at the frame's name.
 - Temporary files (the RVM features and states, GBs on long shots) go in a folder of the run's own under `--temp DIR`,
   else `OPENJD_SESSION_WORKING_DIR` (OpenJD's session folder), else the job file's `temp_dir`, else `TMPDIR`.
 - Both folders are removed when the run ends, however it ends. A SIGKILL leaves them (hidden `.corridorkey-*` and

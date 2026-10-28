@@ -4,7 +4,7 @@
   "version": "1.0.0-dev.1",
   "type": "module",
   "description": "Free desktop app for CorridorKey 2.0, Corridor Digital's AI green-screen keyer (Rust + ONNX Runtime).",
-  "main": "out/main/index.js",
+  "main": "out/main/boot.js",
   "desktopName": "corridorkey-desktop.desktop",
   "scripts": {
     "dev": "electron-vite dev -- --no-sandbox",
