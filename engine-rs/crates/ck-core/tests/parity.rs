@@ -384,8 +384,10 @@ fn stills_as_cv2_reads_them() {
     let want: Vec<f32> = (0..3 * n).map(|i| data[(i % n) * 3 + i / n] as f32 / 65535.0).collect();
     diff("still_rgb16_png full depth", &full, &want, 0.0);
     diff("still_rgb16_png full depth vs cv2's 8 bits", &full, &load("still_rgb16_png").1, 1.0 / 255.0);
-    // JPEG through libjpeg-turbo, as cv2 (the test machine has libturbojpeg.so.0)
-    diff("still_q90_jpg", &read_image_rgb(&s("q90.jpg"), false).unwrap().data, &load("still_q90_jpg").1, 0.0);
+    // JPEG through libjpeg-turbo, as cv2, exactly; where it isn't installed (Windows CI) the image crate's decoder,
+    // which the pong and _settings.txt name, within a few levels (measured: 4/255 at the most)
+    let jpeg_tol = if ck_core::decode::jpeg_decoder().starts_with("libjpeg-turbo") { 0.0 } else { 4.0 / 255.0 + 1e-6 };
+    diff("still_q90_jpg", &read_image_rgb(&s("q90.jpg"), false).unwrap().data, &load("still_q90_jpg").1, jpeg_tol);
     let h = ck_core::decode::read_still(&s("hint16.png")).unwrap();
     let Still::U16 { data, .. } = h else { panic!("16-bit hint not read as 16-bit") };
     let got: Vec<f32> = data.iter().map(|&v| v as f32 / 65535.0).collect();

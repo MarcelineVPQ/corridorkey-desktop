@@ -169,7 +169,7 @@ fn verify_finds_missing_and_cut_frames() {
     exr(&d.0.join("key/key.0002.exr"));
     let o = verify();
     assert_eq!(o.status.code(), Some(9), "{}", text(&o.stderr));
-    assert!(text(&o.stdout).contains(&format!("missing or incomplete: {}", s(&d.0.join("key/key.0003.exr")))), "{}", text(&o.stdout));
+    assert!(text(&o.stdout).contains(&format!("missing or incomplete: {}", s(&d.0.join("key").join("key.0003.exr")))), "{}", text(&o.stdout));
     // the frames as ranges, ready for a requeue (SME review N6)
     assert!(text(&o.stdout).contains("missing frames: 3 (re-render them: -F 3)"), "{}", text(&o.stdout));
     assert!(text(&o.stderr).contains("1 of 3 file(s) missing or incomplete (frames 3)"), "{}", text(&o.stderr));
@@ -334,8 +334,11 @@ fn falls_back_to_the_apps_models_and_runtime_and_says_so() {
     let err = text(&o.stderr);
     if !cfg!(target_os = "macos") {
         // macOS keeps Application Support under HOME: the same rule, checked in appinstall.rs's tests
-        assert!(err.contains(&format!("no --models given: using the app's model set {}", app.join("models/2.0.0-onnx.5").display())), "{err}");
-        assert!(err.contains(&format!("no --ort given: using the app's ONNX Runtime {}", capi.join(lib).display())), "{err}");
+        // either separator: Windows prints the folders with \, the test builds them with /
+        let said = err.replace('\\', "/");
+        let path = |p: &std::path::Path| p.display().to_string().replace('\\', "/");
+        assert!(said.contains(&format!("no --models given: using the app's model set {}", path(&app.join("models/2.0.0-onnx.5")))), "{err}");
+        assert!(said.contains(&format!("no --ort given: using the app's ONNX Runtime {}", path(&capi.join(lib)))), "{err}");
     }
     assert_eq!(o.status.code(), Some(3), "{err}");
     // given, nothing is said
