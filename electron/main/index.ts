@@ -4,7 +4,6 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net,
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
-import { access, constants as fsConstants, lstat, mkdir, readdir, readFile, stat, statfs } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { EngineProcess, rustEngineEnv, type EngineReply } from "./engine";
@@ -64,8 +63,8 @@ import { Console, LINE_MAX, type ElevationRequest, type ScriptElevationRequest }
 import { dropOnLockAndSleep, Elevation, ELEVATION_CAP_MS, ELEVATION_TTL_MS, LinuxLockWatch, parseLockedHint } from "./console/elevation";
 import { AuditLog, History } from "./console/logs";
 import { BlockPusher } from "./console/push";
-import { readRange } from "./console/files";
-import { realPathDeps, replaceFile } from "./console/paths";
+import { consoleFs } from "./console/files";
+import { realPathDeps } from "./console/paths";
 import { makeRegistry } from "../../src/shared/console/registry";
 import { cacheDirFor, cacheInfo, cacheUnavailable, CACHE_MARKER, clearOldCache, exists, JOBS_DIR, jobTempDir, MEDIA_DIR, moveCache, prepareTarget, remapMedia, targetProblem } from "./cacheFolder";
 import { gbBytes, mbOrGbBytes } from "../../src/shared/units";
@@ -73,6 +72,8 @@ import { sanitizeTrtSize, sizeRangeText, sizeText, trtSizeKey } from "../../src/
 
 const here = dirname(fileURLToPath(import.meta.url));
 const devServerUrl = process.env.ELECTRON_RENDERER_URL;
+// the page the window loads (below, createWindow); IPC answers only a top frame showing it (validate.ts fromAppPage)
+const APP_PAGE_URL = devServerUrl ?? pathToFileURL(join(here, "../renderer/index.html")).href;
 const MEDIA_SCHEME = "ck-media";
 
 // Must run before app ready. Linux: Wayland only, because the app must show
@@ -264,7 +265,7 @@ const queue = new Queue({
   saveLog: (job) => saveJobLog(job, app.getVersion()),
 });
 // the manual window picker's graphics-memory estimate (backlog row 41): a short-lived Rust engine, only while no queue runs
-const estimator = new Estimator({ makeEngine: rustEngineProcess });
+const estimator = new Estimator({ makeEngine: rustEngineProcess, busy: () => queue.running || consoleGpu });
 // the TensorRT ranges built for this card (read from the cache after a build, a job, a move or a removal; not per push)
 let trtBuilt: string[] = [];
 // each built range's size on disk and recorded build time (Engine settings, TensorRT's size list; read with trtBuilt)
@@ -401,40 +402,7 @@ async function confirmAllow(folder: string, home: boolean): Promise<boolean> {
 const appConsole = new Console({
   registry: makeRegistry(),
   paths: realPathDeps(homedir()),
-  fs: {
-    // loop: NOT-WORTH — one async readdir per dir / Tab / sudo count
-    readdir: (p) => readdir(p, { withFileTypes: true }),
-    // loop: NOT-WORTH — one async stat per listed entry
-    stat: (p) => stat(p),
-    // loop: NOT-WORTH — one async lstat per farm export file
-    lstat: (p) => lstat(p),
-    readFile: async (p, max) => {
-      // loop: NOT-WORTH — one async stat per script or job file read
-      const s = await stat(p);
-      if (!s.isFile()) throw new Error("not a file");
-      if (s.size > max) throw new Error(`larger than ${max} bytes`);
-      // loop: NOT-WORTH — one async read of a small file
-      return readFile(p, "utf8");
-    },
-    readRange,
-    mkdir: async (p) => {
-      // loop: NOT-WORTH — one async mkdir per render
-      await mkdir(p, { recursive: true });
-    },
-    writeFile: replaceFile,
-    // loop: NOT-WORTH — one async access check per doctor folder
-    writable: (p) =>
-      access(p, fsConstants.W_OK).then(
-        () => true,
-        // error: SHOWN — doctor says the folder isn't writable
-        () => false,
-      ),
-    // loop: NOT-WORTH — one async statfs per doctor folder
-    freeBytes: async (p) => {
-      const s = await statfs(p);
-      return s.bavail * s.bsize;
-    },
-  },
+  fs: consoleFs,
   startDir: settings.outputRoot ?? homedir(),
   cli: () => findCli(enginePaths().binary, app.isPackaged ? null : resolve(app.getAppPath(), "engine-rs", "target", "dist")),
   cliEnv: () => {
@@ -670,8 +638,16 @@ async function makeStills(job: Job): Promise<void> {
 
 async function addPaths(paths: string[]): Promise<void> {
   await checkCacheDrive();
+  let clips: Awaited<ReturnType<typeof expandPaths>>;
+  try {
+    clips = await expandPaths(paths);
+  } catch (e) {
+    // error: SHOWN — which dropped path couldn't be read, and why (a network share that doesn't answer)
+    if (mainWindow) await dialog.showMessageBox(mainWindow, { type: "info", message: "The dropped items couldn't be read", detail: (e as Error).message });
+    return;
+  }
   // loop: SERIAL-REQUIRED — ffprobe/ffmpeg per clip, one at a time so a big drop doesn't fork dozens
-  for (const { path, kind } of expandPaths(paths)) {
+  for (const { path, kind } of clips) {
     // loop: NOT-WORTH — the queue's jobs per dropped clip (a drop of N clips is N × jobs comparisons)
     if (queue.jobs.some((j) => j.clip.path === path && j.status === "waiting")) continue;
     const clip = await probeClip(path, kind, mediaDir, mediaUrl);
@@ -680,7 +656,7 @@ async function addPaths(paths: string[]): Promise<void> {
     if (clip.companionHintVideo) Object.assign(options, { hintMode: "video", hintVideo: clip.companionHintVideo });
     else if (clip.companionFirstFrame) Object.assign(options, { hintMode: "first-frame", hintFirstFrame: clip.companionFirstFrame });
     // an EXR folder starts scene-linear, other frames display-coded (a change to the box is that folder's alone)
-    if (kind === "frames") options.frameDirLinear = frameDirLinearFor(path);
+    if (kind === "frames") options.frameDirLinear = !clip.probeError && (await frameDirLinearFor(path));
     const parent = kind === "frames" && basename(path).toLowerCase() === "input" ? dirname(dirname(path)) : dirname(path);
     queue.add({
       id: randomUUID(),
@@ -862,7 +838,7 @@ function persist(): void {
 function registerIpc(): void {
   // Every channel answers only the app's own page (its window's top frame): fromAppPageOnly (validate.ts), on top of the
   // sandbox; gate tools/check_ipc_sender.mjs
-  const appPage = () => mainWindow?.webContents;
+  const appPage = () => (mainWindow ? { contents: mainWindow.webContents, url: APP_PAGE_URL } : null);
   const handle = (channel: string, fn: (e: Electron.IpcMainInvokeEvent, ...args: unknown[]) => unknown) => ipcMain.handle(channel, fromAppPageOnly(appPage, fn));
   const listen = (channel: string, fn: (e: Electron.IpcMainEvent, ...args: unknown[]) => void) => ipcMain.on(channel, fromAppPageOnly(appPage, fn));
   handle(IPC.getState, () => state());
@@ -1000,9 +976,9 @@ function registerIpc(): void {
     // loop: NOT-WORTH — the few built ranges, once per click
     const onDisk = trtOnDisk.filter((r) => r.range.startsWith(`${key}_t`));
     if (onDisk.length > 0) {
-      // a job may be running on these engines
-      if (queue.running) {
-        await dialog.showMessageBox(mainWindow, { type: "info", message: "Not while the queue runs", detail: "Stop it first, then remove." });
+      // a job (the queue's, or the Console's corridorkey) may be running on these engines
+      if (queue.running || consoleGpu) {
+        await dialog.showMessageBox(mainWindow, { type: "info", message: NOT_WHILE_BUSY, detail: "Stop it first, then remove." });
         return;
       }
       // loop: NOT-WORTH — as above
@@ -1020,11 +996,14 @@ function registerIpc(): void {
     // the background build writes into these folders: it ends first, and goes on with the other sizes after (also one
     // that was waiting for the queue or for the card)
     const resume = prebuild.suspend();
-    settings = { ...settings, trtSizes: others };
-    persist();
-    await removeSize(root, key);
-    await refreshTrtBuilt();
-    resume();
+    try {
+      settings = { ...settings, trtSizes: others };
+      persist();
+      await removeSize(root, key);
+      await refreshTrtBuilt();
+    } finally {
+      resume();
+    }
     scheduleSend();
   });
   handle(IPC.stopInstall, () => installAbort?.abort());
@@ -1055,10 +1034,10 @@ function registerIpc(): void {
     // loop: NOT-WORTH — three items, once per click
     const item = (await storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort)).find((i) => i.id === idIn);
     if (!item || !mainWindow || cacheMoving) return;
-    if (queue.running || installAbort) {
-      await dialog.showMessageBox(mainWindow, { type: "info", message: NOT_WHILE_BUSY, detail: "Stop it first, then remove." });
-      return;
-    }
+    // the queue, a download or the Console's corridorkey use these files
+    const busy = () => queue.running || installAbort !== null || consoleGpu;
+    const refuse = () => dialog.showMessageBox(mainWindow!, { type: "info", message: NOT_WHILE_BUSY, detail: "Stop it first, then remove." });
+    if (busy()) return void (await refuse());
     const again =
       item.id === "cache"
         ? "It is rebuilt as needed."
@@ -1078,15 +1057,23 @@ function registerIpc(): void {
       detail: `This deletes ${what} (${(item.bytes / 1e9).toFixed(2)} GB). ${again}`,
     });
     if (r.response !== 0) return;
-    // the background TensorRT build writes into the cache folder: it ends first (and goes on after while it still can)
+    // asked again after the dialog: the queue or the Console may have started meanwhile
+    if (busy()) return void (await refuse());
+    if (cacheMoving) return;
+    // an estimate's engine reads the runtime and the models: it ends first; the background TensorRT build writes into
+    // the cache folder: it ends first too (and goes on after while it still can)
+    estimator.stop();
     const resumeBuild = prebuild.suspend();
-    await removeStorage(item, enginePlaces().data, cacheDir);
-    await measureStorage();
-    install = installIdle();
-    trt = trtIdle();
-    await refreshTrtBuilt();
-    recheckEngines();
-    resumeBuild();
+    try {
+      await removeStorage(item, enginePlaces().data, cacheDir);
+      await measureStorage();
+      install = installIdle();
+      trt = trtIdle();
+      await refreshTrtBuilt();
+      recheckEngines();
+    } finally {
+      resumeBuild();
+    }
     scheduleSend();
   });
   handle(IPC.installFfmpeg, async () => {
@@ -1201,9 +1188,17 @@ function registerIpc(): void {
   handle(IPC.setUpdateChannel, (_e, c: unknown) => updater.setChannel(c === "dev" ? "dev" : "stable"));
   handle(IPC.setAutoUpdate, (_e, on: unknown) => updater.setAutomatic(on === true));
   handle(IPC.installUpdate, () => updater.download());
-  // Never restart into an update while the queue runs (it would kill a job).
-  handle(IPC.restartToUpdate, () => {
-    if (!queue.running) updater.restart();
+  // Never restart into an update while the queue, the Console's corridorkey or a download runs (it would kill them).
+  handle(IPC.restartToUpdate, async () => {
+    const why = queue.running
+      ? "The queue is running: stop it or let it finish, then restart."
+      : consoleGpu
+        ? "The Console is running corridorkey: wait for it, or stop it (Ctrl+C in the Console), then restart."
+        : installAbort
+          ? "A download is running: wait for it, or stop it, then restart."
+          : null;
+    if (!why) return updater.restart();
+    if (mainWindow) await dialog.showMessageBox(mainWindow, { type: "info", message: NOT_WHILE_BUSY, detail: why });
   });
   handle(IPC.backToStable, () => updater.backToStable());
   listen(IPC.setVisible, (_e, visible: unknown) => setShown(visible === true));
@@ -1323,7 +1318,7 @@ app.whenReady().then(() => {
   });
   // one copy runs (single-instance lock) and no engine yet: any job folder is left over from a crash (job temps are
   // always in the system's local cache folder: jobTempDir)
-  clearJobTemps(join(appFolders.cache, JOBS_DIR));
+  void clearJobTemps(join(appFolders.cache, JOBS_DIR));
   // the chosen cache folder is checked, then its stills older than 30 days, or past 500 MB, go (storage.ts); async,
   // so a cache folder on a share that stopped answering doesn't hold the window
   void checkCacheDrive()

@@ -19,9 +19,10 @@ describe("the application menu", () => {
     expect(appMenu(true, "win32")).toBeNull();
   });
 
-  it("a shipped copy on macOS keeps the app and Edit menus (quit, copy, paste), nothing that reloads, closes or opens the developer tools", () => {
+  it("a shipped copy on macOS keeps the app, Edit and Window menus (quit, copy, paste, minimize), nothing that reloads, closes or opens the developer tools", () => {
     const m = appMenu(true, "darwin");
-    expect(roles(m)).toEqual(["appMenu", "editMenu"]);
+    // the Window menu (review 2026-10-27): minimize, zoom, bring all to front and the window list, not Close
+    expect(roles(m)).toEqual(["appMenu", "editMenu", "window", "minimize", "zoom", "front"]);
     // loop: NOT-WORTH — the default menu's developer roles
     for (const r of ["toggleDevTools", "reload", "forceReload", "close", "viewMenu", "windowMenu", "fileMenu"]) expect(roles(m)).not.toContain(r);
   });

@@ -158,13 +158,26 @@ describe("staleFiles", () => {
       "CorridorKey-Desktop.AppImage",
       "notes.txt",
     ];
-    expect(staleFiles(names, "CorridorKey-Desktop-0.3.0.AppImage", "0.3.0").sort()).toEqual([
+    // loop: NOT-WORTH — a few names in a test
+    const all = names.map((n) => n.replace(/\.part$/, ""));
+    expect(staleFiles(names, "CorridorKey-Desktop-0.3.0.AppImage", "0.3.0", all).sort()).toEqual([
       "CorridorKey-Desktop-0.1.0.AppImage",
       "CorridorKey-Desktop-0.2.0.AppImage",
       "CorridorKey-Desktop-0.4.0.AppImage.part",
     ]);
   });
+  it("only files the updater installed: a copy the user downloaded or a browser's .part stays (review 2026-10-27)", () => {
+    const names = [
+      "CorridorKey-Desktop-0.3.0.AppImage",
+      "CorridorKey-Desktop-0.2.1-dev.1.AppImage",
+      "CorridorKey-Desktop-0.2.0.AppImage",
+      "CorridorKey-Desktop-0.1.0.AppImage",
+      "CorridorKey-Desktop-0.4.0.AppImage.part",
+    ];
+    expect(staleFiles(names, "CorridorKey-Desktop-0.3.0.AppImage", "0.3.0", [])).toEqual([]);
+    expect(staleFiles(names, "CorridorKey-Desktop-0.3.0.AppImage", "0.3.0", ["CorridorKey-Desktop-0.1.0.AppImage"])).toEqual(["CorridorKey-Desktop-0.1.0.AppImage"]);
+  });
   it("never the running file", () => {
-    expect(staleFiles(["CorridorKey-Desktop-0.1.0.AppImage"], "CorridorKey-Desktop-0.1.0.AppImage", "0.3.0")).toEqual([]);
+    expect(staleFiles(["CorridorKey-Desktop-0.1.0.AppImage"], "CorridorKey-Desktop-0.1.0.AppImage", "0.3.0", ["CorridorKey-Desktop-0.1.0.AppImage"])).toEqual([]);
   });
 });

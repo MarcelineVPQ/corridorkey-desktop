@@ -84,12 +84,15 @@ App settings → Appearance: **System**, **Light**, **Dark** or **Desktop** (you
 
 App settings → **Updates** (the Linux AppImage; other copies say why they can't update themselves): the **Channel**,
 **Stable** or **Development** (new features first; may have rough edges), **Check automatically** (at start and every
-few hours), **Check now**, then **Download** the new version and **Restart now** (not while the queue runs). On the
-Stable channel a development build offers **Back to stable**, which installs the newest stable release over it.
+few hours), **Check now**, then **Download** the new version and **Restart now** (not while the queue, the Console's
+corridorkey or a download runs: it says which). On the Stable channel a development build offers **Back to stable**,
+which installs the newest stable release over it. The update goes in beside the running AppImage; the previous version stays there for rollback, and at start the app
+removes only older AppImages (and cut-short downloads) that its updater installed itself. A copy you downloaded or put
+in that folder yourself is never removed.
 
 ## Storage
 
-App settings → Storage lists what the app keeps on this PC, each with its size, **Open** (shows the folder in your file manager) and **Remove…**. The **cache folder** holds clip thumbnails, result stills and the TensorRT engines built for your card; each job's working files, which a low-memory job reads every frame, stay in the system's cache folder on this PC wherever the cache folder is. Under it, the sizes per clip in the queue (with its job's working files while it runs), the stills of clips no longer in the queue (pruned at start: older than 30 days or past 500 MB), and the TensorRT engines per resolution range. **Change…** picks another location: the app makes its own `corridorkey-desktop` folder there (never writing into the folder you picked itself) and asks whether to **move the files** (each file is copied, checked against the original by size and SHA-256, and only then removed from the old folder; on any error nothing is removed and the cache stays where it was) or **start fresh** (the old cache files are deleted; thumbnails and stills are made again, TensorRT engines are built again on the next TensorRT job). **Default** goes back to the system's cache folder the same way. Not while the queue or a download runs.
+App settings → Storage lists what the app keeps on this PC, each with its size, **Open** (shows the folder in your file manager) and **Remove…** (not while the queue, the Console's corridorkey or a download runs). The **cache folder** holds clip thumbnails, result stills and the TensorRT engines built for your card; each job's working files, which a low-memory job reads every frame, stay in the system's cache folder on this PC wherever the cache folder is. Under it, the sizes per clip in the queue (with its job's working files while it runs), the stills of clips no longer in the queue (pruned at start: older than 30 days or past 500 MB), and the TensorRT engines per resolution range. **Change…** picks another location: the app makes its own `corridorkey-desktop` folder there (never writing into the folder you picked itself) and asks whether to **move the files** (each file is copied, checked against the original by size and SHA-256, and only then removed from the old folder; on any error nothing is removed and the cache stays where it was) or **start fresh** (the old cache files are deleted; thumbnails and stills are made again, TensorRT engines are built again on the next TensorRT job). **Default** goes back to the system's cache folder the same way. Not while the queue or a download runs.
 
 ## Engine
 

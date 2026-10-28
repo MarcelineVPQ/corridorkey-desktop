@@ -1,8 +1,11 @@
 // The Console's read-only file built-ins' pure parts (Phase 4 step 7): text from bytes (a binary file is refused, a
 // cut first or last line dropped), wc's counts across chunks, du's sizes, tree's drawing. Reading is runner.ts's
-// (ConsoleFs.readRange: never more than TEXT_MAX of a file at once; index.ts gives it readRange below).
+// (ConsoleFs.readRange: never more than TEXT_MAX of a file at once: readRange below), and the file system both Consoles
+// use (the window's, index.ts, and the headless one, headless.ts: consoleFs below).
 import { constants } from "node:fs";
-import { open } from "node:fs/promises";
+import { access, lstat, mkdir, open, readdir, readFile, stat, statfs } from "node:fs/promises";
+import { replaceFile } from "./paths";
+import type { ConsoleFs } from "./runner";
 
 /** The most of a file cat, head and tail read (from its start or its end). */
 export const TEXT_MAX = 1024 * 1024;
@@ -34,6 +37,42 @@ export async function readRange(p: string, start: number, length: number): Promi
     await fh.close();
   }
 }
+
+/** The Console's file system (runner.ts ConsoleFs): the window's and the headless one's. */
+export const consoleFs: ConsoleFs = {
+  // loop: NOT-WORTH — one async readdir per dir / Tab / sudo count
+  readdir: (p) => readdir(p, { withFileTypes: true }),
+  // loop: NOT-WORTH — one async stat per listed entry
+  stat: (p) => stat(p),
+  // loop: NOT-WORTH — one async lstat per farm export file
+  lstat: (p) => lstat(p),
+  readFile: async (p, max) => {
+    // loop: NOT-WORTH — one async stat per script or job file read
+    const s = await stat(p);
+    if (!s.isFile()) throw new Error("not a file");
+    if (s.size > max) throw new Error(`larger than ${max} bytes`);
+    // loop: NOT-WORTH — one async read of a small file
+    return readFile(p, "utf8");
+  },
+  readRange,
+  mkdir: async (p) => {
+    // loop: NOT-WORTH — one async mkdir per render
+    await mkdir(p, { recursive: true });
+  },
+  writeFile: replaceFile,
+  // loop: NOT-WORTH — one async access check per doctor folder
+  writable: (p) =>
+    access(p, constants.W_OK).then(
+      () => true,
+      // error: SHOWN — doctor says the folder isn't writable
+      () => false,
+    ),
+  // loop: NOT-WORTH — one async statfs per doctor folder
+  freeBytes: async (p) => {
+    const s = await statfs(p);
+    return s.bavail * s.bsize;
+  },
+};
 
 /** How much of a file cat, head and tail read: a size of 0 may be a special file (/proc): read up to TEXT_MAX then. */
 export const readLength = (size: number): number => (size === 0 ? TEXT_MAX : Math.min(size, TEXT_MAX));

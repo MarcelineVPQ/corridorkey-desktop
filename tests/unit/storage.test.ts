@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { TrtCatalog } from "../../electron/main/install";
-import { folderBytes, pruneCache, removeStorage, storageItems } from "../../electron/main/storage";
+import { folderBytes, pruneCache, removeAside, removeStorage, storageItems } from "../../electron/main/storage";
 
 describe("storage", () => {
   const dir = mkdtempSync(join(tmpdir(), "ck-storage-"));
@@ -78,6 +78,20 @@ describe("storage", () => {
     expect(JSON.parse(readFileSync(join(m1, "models.json"), "utf8"))).toEqual({ fp16: { rvm: "a.onnx" } });
     // no TensorRT item off Linux: there is no switch to bring it back there
     expect((await storageItems(data, dir, "x", "darwin")).map((i) => i.id)).toEqual(["runtime", "models", "cache"]);
+  });
+
+  it("removes a folder by renaming it aside first, with an earlier removal's leftover (review 2026-10-27)", async () => {
+    const parent = join(dir, "aside");
+    mkdirSync(join(parent, "runtime", "lib"), { recursive: true });
+    writeFileSync(join(parent, "runtime", "lib", "a.so"), "x");
+    mkdirSync(join(parent, ".runtime.removing"), { recursive: true });
+    writeFileSync(join(parent, ".runtime.removing", "old.so"), "x");
+    writeFileSync(join(parent, "keep.txt"), "x");
+    await removeAside(join(parent, "runtime"));
+    expect(readdirSync(parent)).toEqual(["keep.txt"]);
+    // nothing there: nothing to do
+    await removeAside(join(parent, "runtime"));
+    expect(readdirSync(parent)).toEqual(["keep.txt"]);
   });
 
   it("prunes cached stills older than 30 days, then the oldest until under the cap", async () => {

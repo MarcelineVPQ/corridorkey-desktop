@@ -19,7 +19,8 @@
 //   (as CorridorKey-Desktop-X.AppImage, never over the running file: it is
 //   FUSE-mounted, SIGBUS) and starts on the next start or on restart().
 //   CorridorKey-Desktop.AppImage, a symlink, is repointed at it. The previous
-//   version stays beside it for rollback; older ones are pruned at start.
+//   version stays beside it for rollback; older ones the updater installed
+//   (recorded in the prefs file) are pruned at start, never a copy the user put there.
 // - Check automatically off = nothing online on its own: no timer, no check
 //   at start, none on a channel switch; only check(true) goes online.
 import { basename, dirname, join } from "node:path";
@@ -70,6 +71,8 @@ export class UpdateFlow {
   private checkSeq = 0;
   private inflight: Promise<void> | null = null;
   private installed: string | null = null;
+  // the AppImages this updater installed (full paths, kept in the prefs file): the only ones prune() removes
+  private installedFiles: string[];
   private firstTimer: ReturnType<typeof setTimeout> | null = null;
   private everyTimer: ReturnType<typeof setInterval> | null = null;
   private abort: AbortController | null = null;
@@ -93,6 +96,7 @@ export class UpdateFlow {
       checkedAt: null,
     };
     this.state.feed = this.feedUrl(prefs.channel);
+    this.installedFiles = prefs.installed;
   }
 
   private feedUrl(channel: UpdateChannel): string | null {
@@ -106,7 +110,7 @@ export class UpdateFlow {
 
   private persist(): void {
     try {
-      saveUpdatePrefs(this.p.prefsFile, { channel: this.state.channel, automatic: this.state.automatic });
+      saveUpdatePrefs(this.p.prefsFile, { channel: this.state.channel, automatic: this.state.automatic, installed: this.installedFiles });
     } catch (e) {
       // error: LOGGED-OK — the choice holds for this run; logged with the reason it couldn't be kept
       this.p.log(`update settings could not be saved: ${e instanceof Error ? e.message : String(e)}`);
@@ -145,15 +149,17 @@ export class UpdateFlow {
     this.everyTimer = null;
   }
 
-  // Leftovers beside the running AppImage: cut-short downloads and versions
-  // older than the previous one (local files only, no network).
+  // Leftovers of this updater beside the running AppImage: cut-short downloads
+  // and versions older than the previous one (local files only, no network).
   private prune(): void {
     const running = this.p.appImage;
     if (!running) return;
     try {
       const dir = dirname(running);
+      // loop: NOT-WORTH — a few recorded AppImages, once at start
+      const ours = this.installedFiles.filter((f) => dirname(f) === dir).map((f) => basename(f));
       // loop: NOT-WORTH — a few stale files, once at start
-      for (const name of staleFiles(this.p.fs.readdir(dir), basename(running), this.p.version)) {
+      for (const name of staleFiles(this.p.fs.readdir(dir), basename(running), this.p.version, ours)) {
         try {
           this.p.fs.rm(join(dir, name));
         } catch {
@@ -162,6 +168,13 @@ export class UpdateFlow {
       }
     } catch {
       // error: NOT-WORTH — folder unreadable: nothing pruned; updates still work
+    }
+    // the record keeps what is still there (a download cut short keeps its name while its .part is left)
+    // loop: NOT-WORTH — a few recorded AppImages, once at start
+    const kept = this.installedFiles.filter((f) => this.p.fs.exists(f) || this.p.fs.exists(`${f}.part`));
+    if (kept.length !== this.installedFiles.length) {
+      this.installedFiles = kept;
+      this.persist();
     }
   }
 
@@ -294,6 +307,11 @@ export class UpdateFlow {
       // never write over the AppImage this process runs from (FUSE-mounted: SIGBUS)
       if (target === running) throw new Error("the update has the running file's name; refusing to overwrite it");
       const part = `${target}.part`;
+      // recorded before the download, so prune() may remove its .part if this is cut short
+      if (!this.installedFiles.includes(target)) {
+        this.installedFiles = [...this.installedFiles, target];
+        this.persist();
+      }
       await downloadVerified(
         this.p.fetch,
         feed,

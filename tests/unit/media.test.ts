@@ -21,30 +21,38 @@ function dir(files: string[]): string {
 }
 
 describe("companion hints (run_interactive.py naming)", () => {
-  it("prefers <clip>FrameHint over the older _alphahint image", () => {
+  it("prefers <clip>FrameHint over the older _alphahint image", async () => {
     const d = dir(["shot01.mov", "shot01_alphahint.png", "shot01FrameHint.png"]);
-    expect(findFirstFrameHint(join(d, "shot01.mov"))).toBe(join(d, "shot01FrameHint.png"));
+    expect(await findFirstFrameHint(join(d, "shot01.mov"))).toBe(join(d, "shot01FrameHint.png"));
   });
-  it("finds <clip>_AlphaHint.mp4 as the hint video, case-insensitively", () => {
+  it("finds <clip>_AlphaHint.mp4 as the hint video, case-insensitively", async () => {
     const d = dir(["shot01.mov", "SHOT01_AlphaHint.mp4"]);
-    expect(findHintVideo(join(d, "shot01.mov"), "video")).toBe(join(d, "SHOT01_AlphaHint.mp4"));
+    expect(await findHintVideo(join(d, "shot01.mov"), "video")).toBe(join(d, "SHOT01_AlphaHint.mp4"));
   });
-  it("a <shot>/Input folder takes <shot>/AlphaHint", () => {
+  it("a <shot>/Input folder takes <shot>/AlphaHint", async () => {
     const d = dir(["shotA/Input/f_0001.png", "shotA/AlphaHint/f_0001.png"]);
-    expect(findHintVideo(join(d, "shotA", "Input"), "frames")).toBe(join(d, "shotA", "AlphaHint"));
+    expect(await findHintVideo(join(d, "shotA", "Input"), "frames")).toBe(join(d, "shotA", "AlphaHint"));
     expect(clipName(join(d, "shotA", "Input"))).toBe("shotA");
   });
 });
 
 describe("expandPaths", () => {
-  it("expands a batch folder to its clips and skips hint videos", () => {
+  it("expands a batch folder to its clips and skips hint videos", async () => {
     const d = dir(["a.mp4", "a_AlphaHint.mp4", "b.mov", "notes.txt"]);
-    expect(expandPaths([d]).map((c) => c.path)).toEqual([join(d, "a.mp4"), join(d, "b.mov")]);
+    expect((await expandPaths([d])).map((c) => c.path)).toEqual([join(d, "a.mp4"), join(d, "b.mov")]);
     expect(isCompanionHint(join(d, "a_AlphaHint.mp4"))).toBe(true);
   });
-  it("a folder of frames is one clip", () => {
+  it("a folder of frames is one clip", async () => {
     const d = dir(["f_0001.exr", "f_0002.exr"]);
-    expect(expandPaths([d])).toEqual([{ path: d, kind: "frames" }]);
+    expect(await expandPaths([d])).toEqual([{ path: d, kind: "frames" }]);
+  });
+  it("reads without blocking the main process; a path that is gone is skipped, one that can't be read is named (review 2026-10-27)", async () => {
+    const d = dir(["a.mp4"]);
+    const pending = expandPaths([join(d, "gone.mp4"), d]);
+    expect(pending).toBeInstanceOf(Promise);
+    expect(await pending).toEqual([{ path: join(d, "a.mp4"), kind: "video" }]);
+    // a file where a folder is expected in the path: not "gone", unreadable (ENOTDIR; Windows says ENOENT)
+    if (process.platform !== "win32") await expect(expandPaths([join(d, "a.mp4", "x")])).rejects.toThrow(`${join(d, "a.mp4", "x")}: `);
   });
 });
 
@@ -54,11 +62,11 @@ describe("frame order (CorridorKey2.0 PR #4: natural order, any extension case)"
     expect(naturalCompare("frame_0009", "frame_0010")).toBeLessThan(0);
     expect(naturalCompare("a9", "a09")).toBeGreaterThan(0);
   });
-  it("finds .EXR / .Png frames and leaves other files out", () => {
+  it("finds .EXR / .Png frames and leaves other files out", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ck-frames-"));
     // loop: NOT-WORTH — a test's few files
     for (const n of ["f_1.png", "f_10.PNG", "f_2.Png", "notes.txt"]) writeFileSync(join(dir, n), "");
-    expect(frameFiles(dir).map((p) => basename(p))).toEqual(["f_1.png", "f_2.Png", "f_10.PNG"]);
+    expect((await frameFiles(dir)).map((p) => basename(p))).toEqual(["f_1.png", "f_2.Png", "f_10.PNG"]);
     rmSync(dir, { recursive: true, force: true });
   });
 });
@@ -66,13 +74,13 @@ describe("frame order (CorridorKey2.0 PR #4: natural order, any extension case)"
 // Marcy 2026-10-27: an EXR plate folder (scene-linear by convention, e.g. Tears of Steel's F65 plates) started as
 // "display-coded", clipping everything above 1, unless the user noticed the box
 describe("a frame folder's scene-linear default", () => {
-  it("is on for EXR frames and off for the others", () => {
+  it("is on for EXR frames and off for the others", async () => {
     const exr = dir(["f.0002.exr", "f.0001.EXR"]);
     const png = dir(["f.0001.png", "f.0002.png"]);
     const jpg = dir(["f.0001.jpg"]);
-    expect(frameDirLinearFor(exr)).toBe(true);
-    expect(frameDirLinearFor(png)).toBe(false);
-    expect(frameDirLinearFor(jpg)).toBe(false);
+    expect(await frameDirLinearFor(exr)).toBe(true);
+    expect(await frameDirLinearFor(png)).toBe(false);
+    expect(await frameDirLinearFor(jpg)).toBe(false);
   });
 });
 

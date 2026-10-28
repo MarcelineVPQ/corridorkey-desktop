@@ -201,15 +201,17 @@ describe("Queue", () => {
     }
   });
 
-  it("clears job temp folders left by an earlier run (a crash, a killed engine)", () => {
+  it("clears job temp folders left by an earlier run (a crash, a killed engine), without blocking (review 2026-10-27)", async () => {
     const root = mkdtempSync(join(tmpdir(), "ck-jobs-"));
     try {
       mkdirSync(join(root, "old-job"));
       writeFileSync(join(root, "old-job", "baton.f16"), "x");
-      clearJobTemps(root);
+      const pending = clearJobTemps(root);
+      expect(pending).toBeInstanceOf(Promise);
+      await pending;
       expect(existsSync(root)).toBe(true);
       expect(readdirSync(root)).toEqual([]);
-      clearJobTemps(join(root, "missing")); // nothing there: no error
+      await clearJobTemps(join(root, "missing")); // nothing there: no error
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -361,6 +363,23 @@ describe("the queue's engine after the queue", () => {
     expect(s.q.engineEnding).toBe(true);
     s.exit(null, "SIGKILL");
     expect(s.q.engineEnding).toBe(false);
+  });
+
+  it("Stop while a finished job's results are moved into place quits the engine (review 2026-10-27: it was left running)", async () => {
+    const h = harness();
+    h.q.add(job("a"));
+    h.q.add(job("b"));
+    await h.q.start();
+    await h.flush();
+    h.reply({ type: "result", id: "a", outputs: [] });
+    h.q.stop();
+    await h.flush();
+    expect(h.q.jobs[0].status).toBe("done");
+    expect(h.q.jobs[1].status).toBe("waiting");
+    expect(h.quits()).toBe(1);
+    expect(h.q.engineEnding).toBe(true);
+    expect(h.q.enginePid).toBeUndefined();
+    expect(h.sent.map((m) => m.id)).toEqual(["a"]);
   });
 });
 

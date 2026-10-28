@@ -8,8 +8,8 @@
 // Settings (userData/settings.json) are a few KB and stay; job temp folders are cleared at start (queue.ts).
 // Every read and removal here is async (fs/promises): the cache folder can be on another drive or a network share
 // (backlog row 44), and a share that stops answering must not freeze the window (loop pass 2026-10-26, finding 2).
-import { readdir, rm, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { readdir, rename, rm, stat } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import type { StorageItem } from "../../src/shared/types";
 import { MODELS_DIR, PLATFORM, RUNTIME_DIR } from "./platform";
 import { removeTensorrt, TENSORRT, TRT_DIST_INFO, TRT_MODELS_LIST, trtPaths, type TrtCatalog } from "./install";
@@ -92,12 +92,32 @@ export async function storageItems(data: string, cacheDir: string, runtimeLabel:
 export async function removeStorage(item: StorageItem, data: string, cacheDir: string, c?: TrtCatalog): Promise<void> {
   if (item.id === "tensorrt") {
     removeTensorrt(data, c);
-    // loop: NOT-WORTH — removes the built engines (a few files per resolution), async, per user click
-    await rm(join(cacheDir, TRT_ENGINES_DIR), { recursive: true, force: true });
+    await removeAside(join(cacheDir, TRT_ENGINES_DIR));
     return;
   }
+  await removeAside(item.path);
+}
+
+/**
+ * Remove a folder by renaming it aside first (`.<name>.removing` beside it), so it is gone at once for everything that
+ * looks for it (an engine start, a measure), then deleting that. A leftover of an earlier removal cut short goes first.
+ */
+export async function removeAside(dir: string): Promise<void> {
+  const aside = join(dirname(dir), `.${basename(dir)}.removing`);
   // loop: NOT-WORTH — one folder removed (async) per user click (a confirm dialog first)
-  await rm(item.path, { recursive: true, force: true });
+  await rm(aside, { recursive: true, force: true });
+  try {
+    // loop: NOT-WORTH — one rename per user click
+    await rename(dir, aside);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return;
+    // error: NOT-WORTH — not renamable (a file in use on Windows): removed in place below
+    // loop: NOT-WORTH — as above
+    await rm(dir, { recursive: true, force: true });
+    return;
+  }
+  // loop: NOT-WORTH — as above
+  await rm(aside, { recursive: true, force: true });
 }
 
 /**

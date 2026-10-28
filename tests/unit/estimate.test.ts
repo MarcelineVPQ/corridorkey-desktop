@@ -22,7 +22,7 @@ function reply(req: Record<string, unknown>): EngineReply {
   return { type: "estimate", id: String(req.id), width: 1920, height: 1080, shape_w: 1920, shape_h: 1152, frames: 240, total_bytes: 16 * GIB, free_bytes: 13 * GIB, budget_bytes: 13 * GIB, windows };
 }
 
-function harness(answer: (req: Record<string, unknown>) => EngineReply | null = reply) {
+function harness(answer: (req: Record<string, unknown>) => EngineReply | null = reply, busy?: () => boolean) {
   let clock = 1000;
   const engines: { sent: Record<string, unknown>[]; quits: number; kills: number }[] = [];
   const est = new Estimator({
@@ -43,6 +43,7 @@ function harness(answer: (req: Record<string, unknown>) => EngineReply | null = 
       };
       return h;
     },
+    busy,
     now: () => clock,
   });
   return { est, engines, tick: (ms: number) => (clock += ms) };
@@ -141,6 +142,20 @@ describe("memory estimate (backlog row 41)", () => {
   it("is held off while the Console's corridorkey has the card too (index.ts wiring; review 2026-10-26 S3)", () => {
     const index = readFileSync(new URL("../../electron/main/index.ts", import.meta.url), "utf8");
     expect(index).toMatch(/estimator\.ask\(job\.clip\.path, queue\.running \|\| consoleGpu,/);
+  });
+
+  it("an ask waiting its turn starts no engine once the queue or the Console has taken the card (review 2026-10-27)", async () => {
+    let busy = false;
+    // the queue starts while the first estimate runs
+    const h = harness(
+      (m) => ((busy = true), reply(m)),
+      () => busy,
+    );
+    const first = h.est.ask("/a.mov", false);
+    const second = h.est.ask("/b.mov", false);
+    expect((await first).ok).toBe(true);
+    expect(await second).toEqual({ ok: false, reason: expect.stringMatching(/nothing is keying/) });
+    expect(h.engines).toHaveLength(1);
   });
 
   it("one engine at a time: two clips asked together run one after the other", async () => {

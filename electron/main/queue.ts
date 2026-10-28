@@ -1,8 +1,7 @@
 // The job queue: owns the jobs and the one engine process, turns engine
 // replies into job state. Every number a job shows comes from an engine reply
 // (rule 1); nothing here estimates progress on its own.
-import { readdirSync, rmSync } from "node:fs";
-import { rm } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { EngineReply } from "./engine";
 import { LOG_KEPT, type EngineState, type Job, type JobOptions, type JobTech, type OutputName, type Stage } from "../../src/shared/types";
@@ -247,6 +246,12 @@ export class Queue {
       this.proc = null;
       this.engine = { status: "stopped", pong: null, error: null };
       void this.finish(job, "cancelled", null);
+    } else if (this.proc) {
+      // between jobs (a finished job's results being moved into place): next() won't run again, so its engine quits here
+      this.ending = this.proc;
+      this.proc.quit();
+      this.proc = null;
+      this.engine = { status: "stopped", pong: this.engine.pong, error: null };
     }
     this.deps.changed();
   }
@@ -521,18 +526,19 @@ export class Queue {
 }
 
 /** Remove every job folder under `root` (the app's jobs cache): called at start, when no engine runs, for what a
- * crash or a killed engine left (a low-VRAM job's temp files are GBs). */
-export function clearJobTemps(root: string): void {
+ * crash or a killed engine left (a low-VRAM job's temp files are GBs). Async: GBs of files don't hold the window. A
+ * job started meanwhile keeps its folder (only the names read here go). */
+export async function clearJobTemps(root: string): Promise<void> {
   let names: string[] = [];
   try {
     // loop: NOT-WORTH — the jobs folder's entries, once per app start
-    names = readdirSync(root);
+    names = await readdir(root);
   } catch {
     // error: NOT-WORTH — no jobs folder yet: nothing to clear
     return;
   }
   // loop: NOT-WORTH — leftover job folders (usually none), once per app start
-  for (const n of names) rmSync(join(root, n), { recursive: true, force: true });
+  await Promise.all(names.map((n) => rm(join(root, n), { recursive: true, force: true })));
 }
 
 export function outputStem(name: OutputName, despill: number): string {

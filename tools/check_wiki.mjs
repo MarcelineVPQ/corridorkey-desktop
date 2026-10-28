@@ -301,6 +301,7 @@ export const SETTINGS = {
   consoleVariables: { label: "set -p", page: "Console" },
   channel: { label: "Channel", page: "Updates-and-Channels" },
   automatic: { label: "Check automatically", page: "Updates-and-Channels" },
+  installed: { internal: "the AppImages the updater installed, the only ones it prunes (Updates-and-Channels says so)" },
 };
 
 /** The engine's run options: `(o, "key"` and `o.get("key")` / `o.contains_key("key")` in ck-core job.rs, tests left out. */

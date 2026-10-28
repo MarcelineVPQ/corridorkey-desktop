@@ -10,6 +10,7 @@ import type { Dirent, Stats } from "node:fs";
 import { createInterface } from "node:readline";
 import { posix, win32 } from "node:path";
 import { naturalCompare } from "../media";
+import { taskkillPath } from "../platform";
 import { enumValue, parse, quoteArg, type Parsed, type ParseOptions } from "../../../src/shared/console/parse";
 import { isBinary, LINES_MAX, readLength, TEXT_MAX, TextCount, textLines, treeLines, WC_MAX, type TreeNode } from "./files";
 import { EXIT_MEANINGS, fullName, own, type ConsoleArg, type Registry } from "../../../src/shared/console/registry";
@@ -2546,9 +2547,8 @@ export class Console {
       // Windows has no process groups (a negative pid does nothing there): taskkill ends the tree, as engine.ts does;
       // by its full path (a bare name would be looked for in the current folder first)
       const child = this.job?.child;
-      const taskkill = win32.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe");
       // loop: NOT-WORTH — one taskkill per cancel [bounded: taskkill ends by itself]
-      this.spawnFn(taskkill, ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true, shell: false }).on("error", () => child?.kill());
+      this.spawnFn(taskkillPath(), ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true, shell: false }).on("error", () => child?.kill());
       return;
     }
     try {

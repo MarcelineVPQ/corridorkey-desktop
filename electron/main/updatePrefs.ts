@@ -9,13 +9,15 @@ import { isDevVersion } from "./updateFeed";
 export interface UpdatePrefs {
   channel: UpdateChannel;
   automatic: boolean;
+  // the AppImages the updater installed (full paths): the only ones it prunes (updateFlow.ts prune)
+  installed: string[];
 }
 
 // No file yet: a development build starts on the Development channel (it would
 // otherwise wait for the next stable release), a release on Stable; automatic
 // checks on (as in Sonata and the DS5 app).
 export function loadUpdatePrefs(file: string, version: string): UpdatePrefs {
-  const fallback: UpdatePrefs = { channel: isDevVersion(version) ? "dev" : "stable", automatic: true };
+  const fallback: UpdatePrefs = { channel: isDevVersion(version) ? "dev" : "stable", automatic: true, installed: [] };
   let saved: Partial<UpdatePrefs> = {};
   try {
     // loop: NOT-WORTH — reads the update prefs (a few bytes) once at start
@@ -27,6 +29,8 @@ export function loadUpdatePrefs(file: string, version: string): UpdatePrefs {
   return {
     channel: saved.channel === "dev" || saved.channel === "stable" ? saved.channel : fallback.channel,
     automatic: typeof saved.automatic === "boolean" ? saved.automatic : fallback.automatic,
+    // loop: NOT-WORTH — a few recorded AppImages, once at start
+    installed: Array.isArray(saved.installed) ? saved.installed.filter((p): p is string => typeof p === "string") : [],
   };
 }
 

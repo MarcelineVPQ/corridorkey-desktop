@@ -309,18 +309,40 @@ describe("update flow", () => {
     const u = flow("0.1.0");
     u.setChannel("dev");
     u.setAutomatic(false);
-    expect(JSON.parse(readFileSync(join(dir, "userData", "updates.json"), "utf8"))).toEqual({ channel: "dev", automatic: false });
+    expect(JSON.parse(readFileSync(join(dir, "userData", "updates.json"), "utf8"))).toEqual({ channel: "dev", automatic: false, installed: [] });
     expect(existsSync(join(dir, "userData", "updates.json.tmp"))).toBe(false);
     const again = flow("0.1.0");
     expect(again.state).toMatchObject({ channel: "dev", automatic: false });
   });
 
-  it("start() prunes old versions and cut-short downloads, keeping the previous version", () => {
+  it("start() prunes old versions and cut-short downloads the updater installed, keeping the previous version", () => {
+    for (const n of [appImageName("0.0.8"), appImageName("0.0.9"), `${appImageName("0.2.0")}.part`]) writeFileSync(join(dir, "apps", n), "x");
+    // loop: NOT-WORTH — three names in a test
+    const installed = [appImageName("0.0.8"), appImageName("0.0.9"), appImageName("0.2.0")].map((n) => join(dir, "apps", n));
+    writeFileSync(join(dir, "userData", "updates.json"), JSON.stringify({ channel: "stable", automatic: false, installed }));
+    const u = flow("0.1.0");
+    u.start();
+    expect(readdirSync(join(dir, "apps")).sort()).toEqual([appImageName("0.0.9"), appImageName("0.1.0")]);
+    // the record drops what is gone
+    expect(JSON.parse(readFileSync(join(dir, "userData", "updates.json"), "utf8")).installed).toEqual([installed[1]]);
+    u.stop();
+  });
+
+  it("start() never removes AppImages the updater didn't install (review 2026-10-27: every start deleted the user's older copies)", () => {
     for (const n of [appImageName("0.0.8"), appImageName("0.0.9"), `${appImageName("0.2.0")}.part`]) writeFileSync(join(dir, "apps", n), "x");
     const u = flow("0.1.0");
     u.setAutomatic(false);
     u.start();
-    expect(readdirSync(join(dir, "apps")).sort()).toEqual([appImageName("0.0.9"), appImageName("0.1.0")]);
+    expect(readdirSync(join(dir, "apps")).sort()).toEqual([appImageName("0.0.8"), appImageName("0.0.9"), appImageName("0.1.0"), `${appImageName("0.2.0")}.part`]);
+    u.stop();
+  });
+
+  it("records the AppImage it installs, so a later start may prune it", async () => {
+    publish("stable", "0.2.0");
+    const u = flow("0.1.0");
+    await u.check(true);
+    await u.download();
+    expect(JSON.parse(readFileSync(join(dir, "userData", "updates.json"), "utf8")).installed).toEqual([join(dir, "apps", appImageName("0.2.0"))]);
     u.stop();
   });
 });

@@ -7,7 +7,7 @@
 // rule 11, share the machine), killed for a cancel or on app quit. A running
 // job can't be interrupted inside the model, so cancel = kill the process group
 // (the engine and its ffmpeg writers) and delete the job's temp folder.
-import { addToPathList, isMac, isWin, PLATFORM } from "./platform";
+import { addToPathList, isMac, isWin, PLATFORM, taskkillPath } from "./platform";
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { createInterface } from "node:readline";
 import { existsSync, readdirSync } from "node:fs";
@@ -127,6 +127,8 @@ export class EngineProcess {
       this.tail(line);
     });
     child.on("error", (err) => this.fail(new Error(`engine could not start: ${err.message}`)));
+    // error: NOT-WORTH — a write to an engine that just died (EPIPE); its exit handler reports the death
+    child.stdin?.on("error", () => {});
     child.on("exit", (code, signal) => {
       this.exited = true;
       this.child = null;
@@ -186,7 +188,7 @@ export class EngineProcess {
     if (!pid || this.exited) return;
     if (isWin()) {
       // loop: NOT-WORTH — one taskkill per cancel [bounded: taskkill ends by itself]
-      nodeSpawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true }).on("error", () => this.child?.kill());
+      this.spawnFn(taskkillPath(), ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true, shell: false }).on("error", () => this.child?.kill());
       return;
     }
     try {
@@ -198,11 +200,14 @@ export class EngineProcess {
   }
 
   private line(line: string): void {
-    let reply: EngineReply;
+    let reply: EngineReply | null = null;
     try {
       reply = JSON.parse(line) as EngineReply;
     } catch {
-      // error: SHOWN — a non-protocol line on stdout goes to the stderr tail the error report shows
+      // error: SHOWN — below
+    }
+    // a non-protocol line on stdout (not JSON, or JSON that isn't an object: `null`) goes to the stderr tail the error report shows
+    if (typeof reply !== "object" || reply === null) {
       this.tail(`[stdout] ${line}`);
       return;
     }

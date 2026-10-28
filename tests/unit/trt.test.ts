@@ -156,6 +156,16 @@ describe("the background TensorRT build", () => {
     expect(r.b.engineEnding).toBe(false);
   });
 
+  it("says so too while the engine the build's end quit hasn't exited (review 2026-10-27)", async () => {
+    const r = rig({ built: ["h1792-2176_w3584-4096_t1-8_f1-4"] });
+    await r.b.start(false);
+    r.reply({ type: "trt_built", id: KHD, range: "h1024-1280_w1792-2176_t1-48_f1-4", fallbacks: {} });
+    expect(r.b.state.status).toBe("done");
+    expect(r.b.engineEnding).toBe(true);
+    r.engine()!.running = false;
+    expect(r.b.engineEnding).toBe(false);
+  });
+
   it("gives way to the queue and goes on after it; never starts by itself while another program uses the card", async () => {
     const r = rig({ built: ["h1792-2176_w3584-4096_t1-8_f1-4"] });
     // 4K already built: only HD is built

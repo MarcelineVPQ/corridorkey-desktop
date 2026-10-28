@@ -19,8 +19,12 @@ const CACHE_MAX = 32;
 
 export interface EstimatorDeps {
   makeEngine(onReply: (r: EngineReply) => void, onExit: (code: number | null, signal: NodeJS.Signals | null, stderrTail: string[]) => void): EngineHandle;
+  // the queue or the Console's corridorkey has the card now: asked again when a waiting ask's turn comes
+  busy?: () => boolean;
   now?: () => number;
 }
+
+const BUSY_REASON = "Shown when nothing is keying on the graphics card (the queue or the Console is).";
 
 /**
  * The `estimate` request: every manual window, in normal and in low-memory mode. `limitGb`: the clip's graphics
@@ -100,8 +104,7 @@ export class Estimator {
   ask(input: string, engineBusy: boolean, limitGb: number | null = null, modelScale = 1): Promise<MemoryEstimateResult> {
     const key = cacheKey(input, limitGb, modelScale);
     const cached = this.cache.get(key);
-    if (engineBusy)
-      return Promise.resolve(cached ? { ok: true, estimate: cached, stale: true } : { ok: false, reason: "Shown when nothing is keying on the graphics card (the queue or the Console is)." });
+    if (engineBusy) return Promise.resolve(cached ? { ok: true, estimate: cached, stale: true } : { ok: false, reason: BUSY_REASON });
     if (cached && this.now() - cached.at < ESTIMATE_FRESH_MS) return Promise.resolve({ ok: true, estimate: cached, stale: false });
     const next = this.chain.then(() => this.read(input, limitGb, modelScale));
     // error: NOT-WORTH — read() resolves with its failure; the chain only orders the asks
@@ -126,6 +129,8 @@ export class Estimator {
     // a fresh reading may have come in while this ask waited its turn
     const cached = this.cache.get(key);
     if (cached && this.now() - cached.at < ESTIMATE_FRESH_MS) return { ok: true, estimate: cached, stale: false };
+    // the queue or the Console took the card while this ask waited its turn: no engine now
+    if (this.deps.busy?.()) return cached ? { ok: true, estimate: cached, stale: true } : { ok: false, reason: BUSY_REASON };
     const id = `estimate-${++this.seq}`;
     let settle: (r: EngineReply | Error) => void = () => {};
     const answered = new Promise<EngineReply | Error>((res) => (settle = res));

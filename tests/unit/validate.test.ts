@@ -120,13 +120,28 @@ describe("IPC and settings validation", () => {
     expect(uniqueOutputDir("/c/out_shot", "/e/shot.mp4", more)).toBe("/c/out_shot-3");
   });
 
+  it("folder names differing only in case are one folder on Windows and macOS, two on Linux (review 2026-10-27)", () => {
+    const jobs = [{ outputDir: "/c/out_Plate", clip: { path: "/c/Plate.mov" } }] as Parameters<typeof uniqueOutputDir>[2];
+    expect(uniqueOutputDir("/c/out_plate", "/c/plate.mp4", jobs, "win32")).toBe("/c/out_plate-2");
+    expect(uniqueOutputDir("/c/out_plate", "/c/plate.mp4", jobs, "darwin")).toBe("/c/out_plate-2");
+    expect(uniqueOutputDir("/c/out_plate", "/c/plate.mp4", jobs, "linux")).toBe("/c/out_plate");
+    // the same clip again (case aside) keeps its folder
+    expect(uniqueOutputDir("/c/out_Plate", "/c/PLATE.mov", jobs, "win32")).toBe("/c/out_Plate");
+  });
+
   it("runs an IPC handler only for the app page's top frame (fromAppPageOnly)", () => {
-    const mainFrame = {};
+    const mainFrame = { url: "file:///opt/CorridorKey/resources/app.asar/out/renderer/index.html#/queue" };
     const wc = { mainFrame };
     let contents: typeof wc | null = wc;
     const fn = vi.fn((_e: unknown, a: unknown, b: unknown) => [a, b]);
-    const h = fromAppPageOnly(() => contents, fn);
+    const h = fromAppPageOnly(() => contents && { contents, url: "file:///opt/CorridorKey/resources/app.asar/out/renderer/index.html" }, fn);
     expect(h({ sender: wc, senderFrame: mainFrame }, 1, 2)).toEqual([1, 2]);
+    // the top frame showing another page (review 2026-10-27)
+    mainFrame.url = "https://example.com/index.html";
+    expect(h({ sender: wc, senderFrame: mainFrame }, 1, 2)).toBeUndefined();
+    mainFrame.url = "file:///tmp/index.html";
+    expect(h({ sender: wc, senderFrame: mainFrame }, 1, 2)).toBeUndefined();
+    mainFrame.url = "file:///opt/CorridorKey/resources/app.asar/out/renderer/index.html";
     expect(h({ sender: wc, senderFrame: {} }, 1, 2)).toBeUndefined(); // an embedded frame
     expect(h({ sender: {}, senderFrame: mainFrame }, 1, 2)).toBeUndefined(); // another window
     expect(h({ sender: wc, senderFrame: null }, 1, 2)).toBeUndefined();

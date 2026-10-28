@@ -7,8 +7,6 @@
 //
 // lifetime: one process per `corridorkey run`, ended by the script's end (SIGINT / SIGTERM stop it as Ctrl+C does).
 import { readFileSync } from "node:fs";
-import { access, lstat, mkdir, open, readdir, readFile, stat, statfs } from "node:fs/promises";
-import { constants as fsConstants } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,7 +20,8 @@ import { blockTable } from "../../../src/ui/console/model";
 import { Console, statusOf } from "./runner";
 import { Elevation } from "./elevation";
 import { AuditLog, History } from "./logs";
-import { realPathDeps, replaceFile } from "./paths";
+import { consoleFs } from "./files";
+import { realPathDeps } from "./paths";
 
 /** Electron's userData folder for an app named `name` (app.getPath("userData")): where the settings and logs are. */
 export function userDataDir(name: string, env: NodeJS.ProcessEnv, home: string, platform: NodeJS.Platform): string {
@@ -103,50 +102,7 @@ async function main(argv: string[]): Promise<number> {
   const c = new Console({
     registry: makeRegistry(),
     paths: realPathDeps(home),
-    fs: {
-      // loop: NOT-WORTH — one async readdir per dir / sudo count
-      readdir: (p) => readdir(p, { withFileTypes: true }),
-      // loop: NOT-WORTH — one async stat per entry
-      stat: (p) => stat(p),
-      // loop: NOT-WORTH — one async lstat per farm export file
-      lstat: (p) => lstat(p),
-      readFile: async (p, max) => {
-        // loop: NOT-WORTH — one async stat per script or job file read
-        const s = await stat(p);
-        if (!s.isFile()) throw new Error("not a file");
-        if (s.size > max) throw new Error(`larger than ${max} bytes`);
-        // loop: NOT-WORTH — one async read of a small file
-        return readFile(p, "utf8");
-      },
-      readRange: async (p, start, length) => {
-        // loop: NOT-WORTH — one open + read + close per cat, head, tail, wc chunk or exrheader [bounded: TEXT_MAX bytes]
-        const fh = await open(p, "r");
-        try {
-          const buf = Buffer.alloc(length);
-          const { bytesRead } = await fh.read(buf, 0, length, start);
-          return buf.subarray(0, bytesRead);
-        } finally {
-          await fh.close();
-        }
-      },
-      mkdir: async (p) => {
-        // loop: NOT-WORTH — one async mkdir per render
-        await mkdir(p, { recursive: true });
-      },
-      writeFile: replaceFile,
-      // loop: NOT-WORTH — one async access check per doctor folder
-      writable: (p) =>
-        access(p, fsConstants.W_OK).then(
-          () => true,
-          // error: SHOWN — doctor says the folder isn't writable
-          () => false,
-        ),
-      // loop: NOT-WORTH — one async statfs per doctor folder
-      freeBytes: async (p) => {
-        const s = await statfs(p);
-        return s.bavail * s.bsize;
-      },
-    },
+    fs: consoleFs,
     startDir: process.cwd(),
     cli: () => cli,
     cliEnv: () => env,

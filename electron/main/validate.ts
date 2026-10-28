@@ -4,6 +4,7 @@
 // with options it would refuse (an unknown output name, a stride past the window) and the settings file can
 // never stop the app from starting.
 import { isAbsolute } from "node:path";
+import { PLATFORM } from "./platform";
 import {
   DEFAULT_APPEARANCE,
   DEFAULT_OPTIONS,
@@ -44,12 +45,34 @@ export const consoleLinesArg = (v: unknown, max: number): string[] | null =>
 /** A cursor position within `line`, or null. */
 export const cursorArg = (v: unknown, line: string): number | null => (typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= line.length ? v : null);
 
+/** A URL's document (no query, no fragment), or null when it isn't a URL. */
+function documentOf(url: unknown): string | null {
+  if (typeof url !== "string") return null;
+  try {
+    const u = new URL(url);
+    // a file: URL's origin is "null": its path names the page
+    return `${u.protocol}//${u.host}${u.pathname}`;
+  } catch {
+    // error: NOT-WORTH — not a URL: not the app's page
+    return null;
+  }
+}
+
+/** The app's window: its contents and the URL of the page it loads (the built index.html, or the dev server's). */
+export interface AppPage {
+  contents: { mainFrame: unknown };
+  url: string;
+}
+
 /**
- * The message comes from the app's own page: its window's top frame, never an embedded frame or another window. The
- * Console's channels run commands, so they check this on top of the sandbox.
+ * The message comes from the app's own page: its window's top frame, never an embedded frame or another window, and
+ * that frame still shows the app's page (its URL, review 2026-10-27). The Console's channels run commands, so they
+ * check this on top of the sandbox.
  */
-export function fromAppPage(e: { sender: unknown; senderFrame?: unknown }, appContents: { mainFrame: unknown } | null | undefined): boolean {
-  return !!appContents && e.sender === appContents && !!e.senderFrame && e.senderFrame === appContents.mainFrame;
+export function fromAppPage(e: { sender: unknown; senderFrame?: unknown }, app: AppPage | null | undefined): boolean {
+  if (!app || e.sender !== app.contents || !e.senderFrame || e.senderFrame !== app.contents.mainFrame) return false;
+  const here = documentOf((e.senderFrame as { url?: unknown }).url);
+  return here !== null && here === documentOf(app.url);
 }
 
 /**
@@ -57,10 +80,10 @@ export function fromAppPage(e: { sender: unknown; senderFrame?: unknown }, appCo
  * Every ipcMain handler is registered through this (tools/check_ipc_sender.mjs).
  */
 export function fromAppPageOnly<E extends { sender: unknown; senderFrame?: unknown }, A extends unknown[], R>(
-  appContents: () => { mainFrame: unknown } | null | undefined,
+  appPage: () => AppPage | null | undefined,
   fn: (e: E, ...args: A) => R,
 ): (e: E, ...args: A) => R | undefined {
-  return (e, ...args) => (fromAppPage(e, appContents()) ? fn(e, ...args) : undefined);
+  return (e, ...args) => (fromAppPage(e, appPage()) ? fn(e, ...args) : undefined);
 }
 
 /** Dropped paths: the strings of an array (anything else: none). */
@@ -127,11 +150,13 @@ export function sanitizeAppearance(v: unknown): Appearance {
  * the same name: shot.mp4 and shot.mov side by side, or same-named clips from different folders when every
  * result goes into one folder). Their files have the same names too (<clip>_alpha.mp4), so the second job
  * overwrote the first one's results. Then `wanted-2`, `wanted-3`… The same clip added again keeps its folder.
+ * Windows and macOS file systems ignore case (Plate.mov and plate.mov write into one folder): compared case-folded there.
  */
-export function uniqueOutputDir(wanted: string, clipPath: string, jobs: readonly { outputDir: string; clip: { path: string } }[]): string {
+export function uniqueOutputDir(wanted: string, clipPath: string, jobs: readonly { outputDir: string; clip: { path: string } }[], platform: NodeJS.Platform = PLATFORM): string {
+  const fold = platform === "linux" ? (p: string) => p : (p: string) => p.toLowerCase();
   const taken = (dir: string) =>
     // loop: NOT-WORTH — the queue's jobs, once per candidate folder of an added clip
-    jobs.some((j) => j.outputDir === dir && j.clip.path !== clipPath);
+    jobs.some((j) => fold(j.outputDir) === fold(dir) && fold(j.clip.path) !== fold(clipPath));
   let dir = wanted;
   // loop: NOT-WORTH — one step per same-named clip already queued [bounded: the queue's length]
   for (let n = 2; taken(dir); n++) dir = `${wanted}-${n}`;

@@ -246,19 +246,21 @@ export function downloadAllowed(url: string, source: FeedSource): boolean {
 // Files beside the running AppImage to remove at start: downloads a crash or a
 // quit cut short (.part), and versioned AppImages older than the running one,
 // except the newest of those, kept for rollback (if the new version misbehaves,
-// the previous one is still there to start). Never the running file.
-export function staleFiles(names: string[], running: string, currentVersion: string): string[] {
+// the previous one is still there to start). Only files the updater installed
+// (`ours`: their names; a copy the user downloaded or kept is never touched).
+// Never the running file.
+export function staleFiles(names: string[], running: string, currentVersion: string, ours: readonly string[]): string[] {
   const out: string[] = [];
   const older: { name: string; version: string }[] = [];
   // loop: NOT-WORTH — the AppImage folder's entries, once at start
   for (const name of names) {
     if (name === running) continue;
-    if (/^CorridorKey-Desktop-\d+\.\d+\.\d+(?:-dev\.\d+)?\.AppImage\.part$/.test(name)) out.push(name);
+    if (name.endsWith(".part") && ours.includes(name.slice(0, -".part".length))) out.push(name);
     const m = APPIMAGE_RE.exec(name);
     if (m && isNewerVersion(currentVersion, m[1])) older.push({ name, version: m[1] });
   }
   // loop: NOT-WORTH — a few old AppImages, once per cleanup
   older.sort((a, b) => (isNewerVersion(a.version, b.version) ? -1 : isNewerVersion(b.version, a.version) ? 1 : 0));
   // loop: NOT-WORTH — a few old AppImages, once per cleanup
-  return [...out, ...older.slice(1).map((o) => o.name)];
+  return [...out, ...older.slice(1).flatMap((o) => (ours.includes(o.name) ? [o.name] : []))];
 }

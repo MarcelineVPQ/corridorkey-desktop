@@ -3,6 +3,7 @@ import { PassThrough } from "node:stream";
 import type { ChildProcess } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { EngineProcess, launchCommand, rustEngineEnv } from "../../electron/main/engine";
+import { taskkillPath } from "../../electron/main/platform";
 
 function fakeChild(onLine: (line: string, out: PassThrough) => void): ChildProcess {
   const child = new EventEmitter() as ChildProcess;
@@ -57,9 +58,40 @@ describe("EngineProcess", () => {
     );
     await expect(p.start()).rejects.toThrow(/couldn't answer the ping: internal error: boom/);
   });
+
+  it("keeps a JSON line that isn't an object (`null`) in the stderr tail instead of throwing (review 2026-10-27)", async () => {
+    const replies: unknown[] = [];
+    const p = new EngineProcess(
+      launch,
+      (r) => replies.push(r),
+      () => {},
+      () => fakeChild((_l, out) => out.write('null\n7\n{"type":"pong","protocol":1,"version":"0.1.0"}\n')),
+    );
+    expect((await p.start()).version).toBe("0.1.0");
+    expect(p.stderrTail()).toEqual(["[stdout] null", "[stdout] 7"]);
+    expect(replies).toEqual([]);
+  });
+
+  it("a write to an engine that died (EPIPE on stdin) is no uncaught exception (review 2026-10-27)", async () => {
+    let child: ChildProcess | null = null;
+    const p = new EngineProcess(
+      launch,
+      () => {},
+      () => {},
+      () => (child = fakeChild((_l, out) => out.write('{"type":"pong","protocol":1}\n'))),
+    );
+    await p.start();
+    // an 'error' event with no listener throws
+    expect(() => child!.stdin!.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" }))).not.toThrow();
+  });
 });
 
 describe("engine launch", () => {
+  it("names Windows' taskkill by its full path, never a bare name (review 2026-10-27)", () => {
+    expect(taskkillPath({ SystemRoot: "D:\\Win" })).toBe("D:\\Win\\System32\\taskkill.exe");
+    expect(taskkillPath({})).toBe("C:\\Windows\\System32\\taskkill.exe");
+  });
+
   it("runs the Rust engine with its models (and ONNX Runtime's library)", () => {
     const c = launchCommand({ binary: "/e/corridorkey-engine", models: "/m", ort: null, env: { HOME: "/h", LD_PRELOAD: "/bad.so" } });
     expect([c.cmd, ...c.args]).toEqual(["/e/corridorkey-engine", "--models", "/m"]);

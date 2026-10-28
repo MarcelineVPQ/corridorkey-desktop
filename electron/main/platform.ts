@@ -3,11 +3,16 @@
 // broke the macOS install). Pure functions take the platform as an argument (tests fake one); the app passes
 // PLATFORM. GPU vendors (NVIDIA today, Apple's Core ML next, AMD maybe) are not decided here: install.ts
 // systemSupport says what this system can run.
-import { delimiter as pathDelimiter, join } from "node:path";
+import { delimiter as pathDelimiter, join, win32 } from "node:path";
 
 export const PLATFORM: NodeJS.Platform = process.platform;
 export const isWin = (p: NodeJS.Platform = PLATFORM) => p === "win32";
 export const isMac = (p: NodeJS.Platform = PLATFORM) => p === "darwin";
+
+/** Windows' taskkill by its full path (a bare name is looked for in the current folder first). */
+export function taskkillPath(env: NodeJS.ProcessEnv = process.env): string {
+  return win32.join(env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe");
+}
 
 /** The app's folder name under each system's data and cache roots. */
 export const APP_DIR = "corridorkey-desktop";

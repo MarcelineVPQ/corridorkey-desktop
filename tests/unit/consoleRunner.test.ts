@@ -850,12 +850,13 @@ describe("block pushes and IPC checks", () => {
   });
 
   it("accepts only the app page's top frame, and checked arguments", () => {
-    const mainFrame = {};
+    const mainFrame = { url: "file:///app/index.html" };
     const wc = { mainFrame };
-    expect(fromAppPage({ sender: wc, senderFrame: mainFrame }, wc)).toBe(true);
-    expect(fromAppPage({ sender: wc, senderFrame: {} }, wc)).toBe(false);
-    expect(fromAppPage({ sender: {}, senderFrame: mainFrame }, wc)).toBe(false);
-    expect(fromAppPage({ sender: wc, senderFrame: null }, wc)).toBe(false);
+    const app = { contents: wc, url: "file:///app/index.html" };
+    expect(fromAppPage({ sender: wc, senderFrame: mainFrame }, app)).toBe(true);
+    expect(fromAppPage({ sender: wc, senderFrame: {} }, app)).toBe(false);
+    expect(fromAppPage({ sender: {}, senderFrame: mainFrame }, app)).toBe(false);
+    expect(fromAppPage({ sender: wc, senderFrame: null }, app)).toBe(false);
     expect(fromAppPage({ sender: wc, senderFrame: mainFrame }, null)).toBe(false);
     expect([consoleLineArg("pwd", 10), consoleLineArg("x".repeat(11), 10), consoleLineArg("a\0b", 10), consoleLineArg(5, 10)]).toEqual(["pwd", null, null, null]);
     expect([cursorArg(3, "pwd"), cursorArg(4, "pwd"), cursorArg(-1, "pwd"), cursorArg(1.5, "pwd")]).toEqual([3, null, null, null]);

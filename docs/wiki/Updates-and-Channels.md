@@ -20,7 +20,8 @@ Everything is in **App settings → Updates**:
 - **Channel:** Stable or Development.
 - **Check automatically:** at start and every few hours. Off, the app only goes online for updates when you ask.
 - **Check now**, then **Download** when a new version is available, then **Restart now** when it's ready (disabled
-  while the queue runs: "After the queue finishes").
+  while the queue runs: "After the queue finishes"; while the Console's corridorkey or a download runs it says so and
+  waits).
 
 How it works, so nothing surprises you:
 
@@ -29,7 +30,8 @@ How it works, so nothing surprises you:
 - The new version is downloaded **next to the AppImage you're running**, as `CorridorKey-Desktop-<version>.AppImage`,
   and a `CorridorKey-Desktop.AppImage` link next to it is pointed at the newest one (so a launcher or shortcut aimed
   at that link always starts the newest version). The running file is never touched. The previous version is kept for
-  going back; older ones are cleaned up at the next start.
+  going back; older ones the updater downloaded are cleaned up at the next start. An AppImage you downloaded or put
+  there yourself is never removed.
 - It **never downgrades**: only newer versions are offered. Switching from Development to Stable installs nothing
   until a Stable release is newer than the build you have.
 
