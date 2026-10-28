@@ -1,21 +1,25 @@
 // Drive an isolated copy (tools/isolated.sh) over CDP: run page-side steps,
 // save screenshots, close the window (the app quits through its own path).
-//   node tools/drive.mjs --port P --out DIR [--eval JS --wait MS --shot NAME]... [--close]
-// Steps run in order. Node 22's built-in WebSocket only.
+//   node tools/drive.mjs (--port P | --state DIR) --out DIR [--eval JS --wait MS --shot NAME]... [--close]
+// --state: the isolated copy's state folder, whose `port` file tools/isolated.sh wrote. Steps run in order. Only a page
+// titled CorridorKey is driven: another app on the port (Marcy's DS5 app holds 9333) is refused, never attached to.
+// Node 22's built-in WebSocket only.
 /* global WebSocket */
-import { writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 const args = process.argv.slice(2);
 const opt = (k) => args[args.indexOf(k) + 1];
-const port = Number(opt("--port"));
+const port = Number(args.includes("--state") ? readFileSync(join(opt("--state"), "port"), "utf8").trim() : opt("--port"));
 const out = opt("--out");
 mkdirSync(out, { recursive: true });
 
+// the app's page: index.html's and the window's title start with CorridorKey (another Electron app's page doesn't)
+const ours = (t) => t.type === "page" && t.title.startsWith("CorridorKey");
 let targets = [];
 // loop: SERIAL-REQUIRED — waits for the app's page to appear (≤ 30 s)
-for (let i = 0; i < 60 && !targets.some((t) => t.type === "page"); i++) {
+for (let i = 0; i < 60 && !targets.some(ours); i++) {
   try {
     // loop: SERIAL-REQUIRED — asks the test copy's DevTools port for its pages, 2 s timeout per ask (this pass: had none)
     targets = await (await fetch(`http://127.0.0.1:${port}/json`, { signal: AbortSignal.timeout(2000) })).json();
@@ -25,8 +29,12 @@ for (let i = 0; i < 60 && !targets.some((t) => t.type === "page"); i++) {
   await sleep(500);
 }
 // loop: NOT-WORTH — a few DevTools targets
-const page = targets.find((t) => t.type === "page");
-if (!page) throw new Error("no page target");
+const page = targets.find(ours);
+if (!page) {
+  // loop: NOT-WORTH — a few DevTools targets
+  const other = targets.find((t) => t.type === "page");
+  throw new Error(other ? `port ${port} serves another app's page ("${other.title}", ${other.url}), not CorridorKey's: refused` : "no page target");
+}
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((r, j) => (ws.addEventListener("open", r), ws.addEventListener("error", j)));
 let id = 0;

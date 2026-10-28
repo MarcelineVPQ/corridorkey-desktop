@@ -2,13 +2,15 @@
 # Run one isolated copy of the built app for checks and screenshots (rule 12):
 # never your screen, your D-Bus, your keyring or your settings.
 #
-#   tools/isolated.sh --state DIR --port P [--size 1400x900] [--env K=V]... [--packaged DIR]
+#   tools/isolated.sh --state DIR [--port P] [--size 1400x900] [--env K=V]... [--packaged DIR]
 #
 # --packaged DIR runs a packaged build (electron-builder's linux-unpacked folder) instead of the dev
 # build in out/, so what ships inside the app (resources/engine/…) is what runs.
 #
 # Runs in the foreground until the app quits (close its window over CDP:
-# tools/drive.mjs does); KWin exits with it. P = the page's DevTools port.
+# tools/drive.mjs does); KWin exits with it. P = the page's DevTools port: without --port a free one is picked; either
+# way it is written to DIR/port (tools/drive.mjs --state DIR reads it). A port another program already listens on is
+# refused: Marcy's DS5 app holds 127.0.0.1:9333, and a test copy on it was driven as the wrong app (2026-10-28).
 #   - env -i: a clean environment; no WAYLAND_DISPLAY/DISPLAY/DBUS/XDG_RUNTIME_DIR from your session.
 #   - its own HOME (DIR/home) and XDG dirs, so settings and cache are private.
 #   - a fresh XDG_RUNTIME_DIR (mode 700) and a private D-Bus session bus with
@@ -33,8 +35,16 @@ while [ $# -gt 0 ]; do
     *) echo "isolated.sh: unknown argument $1" >&2; exit 2 ;;
   esac
 done
-[ -n "$STATE" ] && [ -n "$PORT" ] || { echo "usage: isolated.sh --state DIR --port P" >&2; exit 2; }
+[ -n "$STATE" ] || { echo "usage: isolated.sh --state DIR [--port P]" >&2; exit 2; }
+# the DevTools port: P only while nothing listens on it (Chromium's own bind would fail silently and drive.mjs reach
+# whatever holds it), else a free one the system gives; a window remains between this check and Electron's bind
+# loop: NOT-WORTH — one bind on 127.0.0.1, once per run [bounded: a local listen]
+ASKED="$PORT"
+PORT="$(node -e 'const s=require("net").createServer();s.once("error",()=>process.exit(1));s.listen(Number(process.argv[1]),"127.0.0.1",()=>{console.log(s.address().port);s.close()})' "${ASKED:-0}")" ||
+  { echo "isolated.sh: port $ASKED is in use by another program (another app's DevTools?); give another --port, or none for a free one" >&2; exit 2; }
 mkdir -p "$STATE/home" "$STATE/iso/no-services"
+echo "$PORT" > "$STATE/port"
+echo "isolated.sh: DevTools port $PORT (in $STATE/port)" >&2
 RUN="$(mktemp -d /tmp/ck-iso-XXXXXX)"   # a socket path must fit 108 bytes; tiny, removed at exit
 chmod 700 "$RUN"
 # the scope (KWin, D-Bus, the app) by name, so a stop of this script (Ctrl+C, kill, a caller's timeout) ends all of it:
