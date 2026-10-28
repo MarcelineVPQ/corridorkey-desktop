@@ -570,9 +570,8 @@ both sets on every clip, so both are measured over the same regions):
 
 Every pixel of every frame within half a 1/255 step of onnx.4's, and the same sizzle to within 0.1 % on every clip.
 
-**TensorRT on onnx.5: being measured.** dev.2's TensorRT set (`2.0.0-onnx.5-trt`: stage 1 and stage 2 from onnx.5's
-export, C-RADIO, MoGe and RVM byte for byte onnx.4's) hasn't been timed or compared yet; until it is, the TensorRT
-numbers in this README are onnx.4's (0.0.8-dev).
+**TensorRT stays on onnx.4.** dev.2's TensorRT jobs use dev.1's TensorRT set (`2.0.0-onnx.4-trt`), so the TensorRT
+numbers in this README are onnx.4's (0.0.8-dev). onnx.5's own TensorRT set is still being measured.
 
 ### Apple Silicon (Core ML)
 

@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0-dev.2 (draft, unreleased)
+## 1.0.0-dev.2
 
 The second development build of 1.0: the `corridorkey` command line for render farms and power users, example
 submitters for the common farm schedulers, the Console, a command line inside the app, and model set 2.0.0-onnx.5
@@ -89,10 +89,10 @@ on its own rail icon. Not a system shell: its own commands only, each parsed and
 - macOS moves to onnx.5 too, with its own Core ML set 2.0.0-onnx.5-coreml (1280×1080 and 1920×1080, every node on
   Core ML): the setup is 4.76 GB, was 5.51. Gated on the Mac mini (M6, 16 GB) against CUDA on both sizes: alpha MAE
   2.1-2.5e-5, 0.002 % of pixels over 1/255 at 1280×1080 and none at 1920×1080 (README, Speed, "Apple Silicon (Core ML)").
-- TensorRT (Linux, opt-in) gets onnx.5's TensorRT set, 2.0.0-onnx.5-trt: stage 1 and stage 2 from onnx.5's export,
-  C-RADIO, MoGe and RVM byte for byte onnx.4's. Its C-RADIO weights (fp32) are no longer in the normal set, so they
-  are copied from an installed onnx.4 folder when there is one (5.53 GB in all, as before) and downloaded otherwise
-  (7.26 GB). TensorRT's speed and mattes on onnx.5 aren't measured yet.
+- TensorRT (Linux, opt-in) keeps dev.1's TensorRT set, 2.0.0-onnx.4-trt (onnx.5's own TensorRT set isn't measured
+  yet; choosing the model set comes in dev.3). Its C-RADIO weights (fp32) are no longer in the normal set, so they are
+  copied from an installed onnx.4 folder when there is one (5.53 GB in all, as before) and downloaded otherwise
+  (7.26 GB).
 - **AMD graphics cards, engine only, untested on real hardware:** the engine can run on an AMD card on Linux through
   AMD's MIGraphX provider (`--device migraphx`, ROCm 10.1; docs/AMD.md). It has never run on an AMD card, and the app
   doesn't download an AMD runtime, so the app still needs an NVIDIA card on Linux and Windows. Without AMD's provider

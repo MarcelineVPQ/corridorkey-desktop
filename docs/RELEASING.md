@@ -203,9 +203,9 @@ are in `~/.config/corridorkey-release/apple/` and Marcy's vault; the certificate
 
 The Core ML model set the Mac setup downloads (`models-2.0.0-onnx.5-coreml` from dev.2, docs/ONNX_EXPORT.md "Core ML set") is
 published once, before the first Mac build that pins it: `tools/upload_model_set.sh DIR 2.0.0-onnx.5-coreml` (the
-same script publishes the TensorRT set, `2.0.0-onnx.5-trt`), with Marcy's OK.
+same script publishes TensorRT sets, e.g. `2.0.0-onnx.5-trt`), with Marcy's OK.
 
-From 1.0.0-dev.2 every system pins `2.0.0-onnx.5` (install.ts `MODEL_SET`), TensorRT `2.0.0-onnx.5-trt` and the Mac
+From 1.0.0-dev.2 every system pins `2.0.0-onnx.5` (install.ts `MODEL_SET`), TensorRT dev.1's `2.0.0-onnx.4-trt` and the Mac
 `2.0.0-onnx.5-coreml`. `models-2.0.0-onnx.5` (at least the files
 install.ts pins, and LICENSE, NOTICE and ATTRIBUTION.md, which the model-set gate asks of a base set) is published before the
 build that pins it; `upload_model_set.sh` publishes only `-trt` and `-coreml` sets, so the base set goes up by hand
