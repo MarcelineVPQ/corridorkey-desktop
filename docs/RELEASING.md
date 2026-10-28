@@ -89,24 +89,44 @@ spent 29 minutes waiting on a package mirror).
 2. `tools/release.sh`. It checks the version shape (`X.Y.Z` = Stable, `X.Y.Z-dev.N` = Development), that it isn't
    released yet (no tag, no published release: run before step 1 it refuses), the lock, a
    clean `main` in step with GitHub, the CHANGELOG section (the top one; its header must not say draft or unreleased) and the
-   signing key; runs the docs-touch gate over the commits since the last `v*` tag, `npm run check`, `npm run check:engine` and `tools/check_targets.sh` (the engine's macOS and
+   signing key; runs the docs-touch gate over the commits since the last `v*` tag, `npm run check:engine` (its
+   `cargo test` builds `engine-rs/target/debug/corridorkey`), `npm run check` with `CK_CLI_BIN` set to that binary
+   (so the Console's CLI-spec drift check runs, never skips) and `tools/check_targets.sh` (the engine's macOS and
    Windows lint), then `npm run dist:linux` (memory-capped; the engine is linked for glibc 2.28 with cargo-zigbuild, Zig in
    `~/.local/share/corridorkey-release/zig/venv`; then `tools/build_trt_builder.sh` builds TensorRT's engine builder
    `ck-trt-build` with Zig's C++ for glibc 2.28 and the AppImage ships it next to the engine. It links against
    libnvinfer / libnvonnxparser from NVIDIA's pinned `tensorrt-cu13-libs` 10.16.1.11 wheel, the one the app's
    TensorRT download uses, cached and SHA-256-checked in `~/.local/share/corridorkey-release/tensorrt` (3.7 GB,
    downloaded once; only the two libraries are unpacked)) and `npm run dist:win` (the Windows engine cross-built with
-   MinGW-w64, the NSIS installer through Wine); writes `SHA256SUMS` / `SHA512SUMS` of the AppImage and the
-   `-Setup.exe`, uploads both; the update feeds name the AppImage only (Windows updates from the releases page);
+   MinGW-w64, the NSIS installer through Wine); stops if the builds changed a tracked file (they rewrite
+   `src/shared/console/cliSpec.json` from the engine they built: what ships must be the commit that gets tagged);
+   writes `SHA256SUMS` / `SHA512SUMS` of the AppImage and the `-Setup.exe`, each signed with the feed key
+   (`SHA256SUMS.sig`, below), uploads them; the update feeds name the AppImage only (Windows updates from the releases page);
    pushes `main`; creates the
    release as a draft on that commit, uploads, and publishes it, which makes the `vX.Y.Z…` tag (Development as a
    **prerelease**, never *Latest*; Stable as *Latest*); then `tools/build-feed.mjs` picks the release per channel
    from GitHub's release list (retried until the released channel names the new version), downloads and hashes
    the AppImage and writes the feed, `tools/sign-feed.mjs` signs it, `tools/verify-feed.mjs` checks it exactly as
    the app does, and the changed feeds are committed to `main` and pushed.
-3. It ends with `node tools/verify-feed.mjs` on the live feeds, which must say OK for the channel you released.
+3. It ends with `node tools/verify-feed.mjs --channel <the released channel> --version <it>` (read through GitHub's
+   contents API, so no CDN copy lags behind the push; a few tries): only the released channel, since the other may
+   not exist yet (no Stable feed before 1.0).
 4. If it fails partway, run it again: a draft release is picked up, moved to the current commit with the current
    notes, and finished; once the release is published, `tools/release.sh --feeds` redoes only the feeds.
+
+**Checking a download** (the SUMS are signed with the feed key, whose public half is in `TRUSTED_KEYS`):
+
+```bash
+printf -- '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAuUIsZgGZQ7RSvVoCGijbgkuw/TsHnSxRLke55eRhbnk=\n-----END PUBLIC KEY-----\n' > ck-release.pub
+base64 -d SHA256SUMS.sig > SHA256SUMS.sig.bin
+openssl pkeyutl -verify -pubin -inkey ck-release.pub -rawin -in SHA256SUMS -sigfile SHA256SUMS.sig.bin
+sha256sum --ignore-missing -c SHA256SUMS
+```
+
+**GitHub's "Latest" badge** sits on a model set's release (`models-2.0.0-onnx.4`) until the first Stable release:
+GitHub gives it to the newest release that isn't a prerelease, and every Development build is one. The first Stable
+release takes it (`--latest`); a new model set is created with `--latest=false` (`tools/upload_model_set.sh` does).
+Links point at the releases page, never `releases/latest`.
 
 **Release-only gates** (online, so not in `npm run gates`; `tools/release.sh` runs them in step 1):
 `tools/check_model_sets.mjs` checks every model set `install.ts` pins against its GitHub release `models-<set>`:
@@ -120,11 +140,21 @@ stable release or after a change to that code.
 ### macOS (Apple Silicon)
 
 There is no Mac here and no cross-build from Linux without Apple's SDK, so the macOS disk image is built on
-GitHub's macOS runner: `gh workflow run macos.yml --ref main` (on demand only, never on every push). It runs the
+GitHub's macOS runner (on demand only, never on every push). For a release, build it from the release's tag, once
+`tools/release.sh` has published it: `gh workflow run macos.yml --ref vX.Y.Z…` (the workflow refuses a tag that
+isn't package.json's version); any other run, `--ref main`, is a check, not a release file. It runs the
 app's and the engine's checks on macOS, builds the engine for `aarch64-apple-darwin` and the arm64 `.dmg`
 (`npm run dist:mac`), installs it as a user does (a quarantined download into /Applications, Gatekeeper's answers
-recorded), starts it and screenshots every page. The image and the screenshots are the run's artifacts; download
-the image with `gh run download` and upload it to the release with the others. The runner is a virtual Mac without
+recorded), starts it and screenshots every page. The image and the screenshots are the run's artifacts. Add the image
+to the release:
+
+```bash
+gh run download <run id> -n corridorkey-desktop-macos-arm64 -D release/mac
+tools/release.sh --mac release/mac/CorridorKey-Desktop-X.Y.Z…-arm64.dmg
+```
+
+which refuses an image named for another version, adds its lines to the release's `SHA256SUMS` / `SHA512SUMS`,
+signs them again and uploads the image with them. The runner is a virtual Mac without
 the GPU or the Neural Engine: it proves the build and the app, not keying speed.
 
 Signing (since 2026-10-24): the image is signed with Marcy's Developer ID Application certificate (team

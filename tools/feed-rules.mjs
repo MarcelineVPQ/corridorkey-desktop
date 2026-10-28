@@ -8,4 +8,4 @@ import { fileURLToPath } from "node:url";
 const entry = fileURLToPath(new URL("../electron/main/updateFeed.ts", import.meta.url));
 const { outputFiles } = buildSync({ entryPoints: [entry], bundle: true, format: "esm", platform: "node", target: "node22", write: false, logLevel: "error" });
 const rules = await import(`data:text/javascript;base64,${Buffer.from(outputFiles[0].text).toString("base64")}`);
-export const { FEED_URLS, REPO, TRUSTED_KEYS, feedSignedBy, feedText, parseFeed, selectRelease } = rules;
+export const { FEED_BRANCH, FEED_URLS, REPO, TRUSTED_KEYS, feedSignedBy, feedText, parseFeed, selectRelease } = rules;

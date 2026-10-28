@@ -4,7 +4,8 @@ name: macOS
 # GitHub's macOS runner is an Apple Silicon Mac with a logged-in desktop, but a virtual one without the GPU or
 # the Neural Engine: it proves the build, the install and the app, not keying speed. Linux and Windows are built
 # on Marcy's PC (tools/release.sh); CI is only for macOS (and Windows checks), so this runs on demand
-# (gh workflow run macos.yml, or Actions -> macOS -> Run workflow), never on every push.
+# (gh workflow run macos.yml, or Actions -> macOS -> Run workflow), never on every push; a release's image from its tag
+# (--ref vX.Y.Z…; docs/RELEASING.md "macOS").
 #   1. the app's checks and the engine's checks on macOS
 #   2. the engine for aarch64-apple-darwin and the arm64 disk image, signed (Developer ID), notarized and stapled
 #   3. installed as a user does (a quarantined download, moved to /Applications); what Gatekeeper says is recorded
@@ -35,6 +36,14 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
+
+      # A release's image is built from its tag (gh workflow run macos.yml --ref vX.Y.Z…, docs/RELEASING.md): the tag
+      # must be package.json's version, so the image is that release's code; tools/release.sh --mac adds it.
+      - name: The tag is package.json's version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          v="$(node -p 'require("./package.json").version')"
+          [ "$GITHUB_REF_NAME" = "v$v" ] || { echo "::error::tag $GITHUB_REF_NAME, package.json $v"; exit 1; }
 
       # npm 9/10's own peer resolution crashes on this tree; .npmrc sets legacy-peer-deps.
       - run: npx -y npm@10.9.2 ci
