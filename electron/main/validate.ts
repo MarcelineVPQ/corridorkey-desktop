@@ -26,12 +26,10 @@ const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object"
 const oneOf = <T extends string>(v: unknown, allowed: readonly T[], fallback: T): T => (typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : fallback);
 const bool = (v: unknown, fallback: boolean): boolean => (typeof v === "boolean" ? v : fallback);
 const num = (v: unknown, lo: number, hi: number, fallback: number): number => (typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : fallback);
-const pathOrNull = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
-
 /** A string id, or null. */
 export const idArg = (v: unknown): string | null => (typeof v === "string" && v.length > 0 && v.length <= 200 ? v : null);
 
-/** An absolute path, or null. */
+/** An absolute path, or null: never relative, never one that reads as a flag (review 2026-10-28 #6). */
 export const pathArg = (v: unknown): string | null => (typeof v === "string" && v.length > 0 && isAbsolute(v) ? v : null);
 
 /** A Console line: a string of at most `max` characters without NUL (anything else: null, refused). */
@@ -86,9 +84,9 @@ export function fromAppPageOnly<E extends { sender: unknown; senderFrame?: unkno
   return (e, ...args) => (fromAppPage(e, appPage()) ? fn(e, ...args) : undefined);
 }
 
-/** Dropped paths: the strings of an array (anything else: none). */
+/** Dropped paths: the array's absolute paths (anything else: none; review 2026-10-28 #6). */
 // loop: NOT-WORTH — the dropped paths, once per drop
-export const pathsArg = (v: unknown): string[] => (Array.isArray(v) ? v.filter((p): p is string => typeof p === "string" && p.length > 0) : []);
+export const pathsArg = (v: unknown): string[] => (Array.isArray(v) ? v.filter((p): p is string => pathArg(p) !== null) : []);
 
 function memory(v: unknown): MemoryChoice {
   const m = obj(v);
@@ -112,8 +110,8 @@ export function sanitizeOptions(v: unknown, platform: string = process.platform)
   const outputs = Array.isArray(o.outputs) ? OUTPUT_NAMES.filter((n) => (o.outputs as unknown[]).includes(n)) : [];
   return withCutoutAlpha({
     hintMode: oneOf(o.hintMode, ["none", "first-frame", "video"] as const, DEFAULT_OPTIONS.hintMode),
-    hintFirstFrame: pathOrNull(o.hintFirstFrame),
-    hintVideo: pathOrNull(o.hintVideo),
+    hintFirstFrame: pathArg(o.hintFirstFrame),
+    hintVideo: pathArg(o.hintVideo),
     hintQuality: num(o.hintQuality, 0, 1, DEFAULT_OPTIONS.hintQuality),
     carryHint: bool(o.carryHint, DEFAULT_OPTIONS.carryHint),
     memory: memory(o.memory),

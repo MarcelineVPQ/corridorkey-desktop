@@ -77,6 +77,12 @@ describe("IPC and settings validation", () => {
     expect([pathArg("/o/x.mp4"), pathArg("x.mp4"), pathArg({})]).toEqual(["/o/x.mp4", null, null]);
     expect(pathsArg(["/a", 4, null, "/b"])).toEqual(["/a", "/b"]);
     expect(pathsArg("/a")).toEqual([]);
+    // review 2026-10-28 #6: relative paths and flags never reach ffprobe or the engine
+    expect(pathsArg(["/a", "b.mov", "-i", "--help", "../x.mov", ""])).toEqual(["/a"]);
+    const o = sanitizeOptions({ hintMode: "video", hintFirstFrame: "hint.png", hintVideo: "-filter_complex" });
+    expect([o.hintFirstFrame, o.hintVideo]).toEqual([null, null]);
+    const ok = sanitizeOptions({ hintMode: "video", hintFirstFrame: "/h/hint.png", hintVideo: "/h/hint.mov" });
+    expect([ok.hintFirstFrame, ok.hintVideo]).toEqual(["/h/hint.png", "/h/hint.mov"]);
   });
 
   it("a settings file from an older or hand-edited version loads as valid settings", () => {
