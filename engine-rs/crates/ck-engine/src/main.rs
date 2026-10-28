@@ -104,7 +104,7 @@ fn main() {
     ck_core::proc::end_with_parent(ck_core::proc::parent_pid_from(std::env::var("CK_ENGINE_PARENT_PID").ok().as_deref()));
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        eprintln!("usage: corridorkey-engine --models DIR [--ort libonnxruntime.so] [--device auto|cuda|cpu]");
+        eprintln!("usage: corridorkey-engine --models DIR [--ort libonnxruntime.so] [--device auto|cuda|cpu|coreml|migraphx]");
         return;
     }
     if args.iter().any(|a| a == "--version") {

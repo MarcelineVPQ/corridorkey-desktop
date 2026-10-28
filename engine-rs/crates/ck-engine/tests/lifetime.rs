@@ -45,3 +45,11 @@ fn the_engine_ends_when_its_parent_does() {
     let _ = std::fs::remove_dir_all(&models);
     assert!(!still, "the engine outlived its parent");
 }
+
+#[test]
+fn the_usage_lists_every_device() {
+    // final review 2026-10-28 N1: it said auto|cuda|cpu; the engine also takes coreml and migraphx
+    let out = Command::new(env!("CARGO_BIN_EXE_corridorkey-engine")).arg("--help").output().unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success() && err.contains("--device auto|cuda|cpu|coreml|migraphx"), "{err}");
+}
