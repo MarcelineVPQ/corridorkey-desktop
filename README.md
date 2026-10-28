@@ -37,8 +37,8 @@ mode and outputs, and watch real progress: frames written, the temporal window t
 chose from your free graphics memory, and stills of the results.
 
 Status: 1.0 is almost ready. The development builds (1.0.0-dev.N, on the Development update channel) key on Linux and
-Windows with an NVIDIA graphics card. There's no macOS build yet: the Mac engine keys 1280×1080 and 1920×1080 clips
-on an M6 Mac mini, but no Mac app has shipped (macOS, honestly, below).
+Windows with an NVIDIA graphics card, and from 1.0.0-dev.2 on Apple Silicon Macs through Core ML, for 1280×1080 and
+1920×1080 clips (macOS, honestly, below).
 
 ## Highlights
 
@@ -49,7 +49,7 @@ on an M6 Mac mini, but no Mac app has shipped (macOS, honestly, below).
 3. **Installs itself, no Python.** One file to download; the app fetches the rest (4.03 GB on Linux, 3.81 GB on
    Windows, 4.76 GB on macOS), every file SHA-256 checked, less than half the original's install (Install size).
 4. **One engine, every platform.** Rust on ONNX Runtime: NVIDIA (CUDA) on Linux and Windows, TensorRT on Linux, Core ML
-   on Apple Silicon (the Mac engine keys on an M6 Mac mini; the Mac app is next).
+   on Apple Silicon (from dev.2, 1280×1080 and 1920×1080 clips; 4K next).
 5. **Budget cards welcome.** The memory planner picks the largest temporal window your card holds; measured down to an
    8 GB RTX 2070 SUPER on a 2011 Core i7 (Requirements; Speed, test machines).
 6. **Studio outputs.** EXR named the studio way with the matte in alpha, lossless 10-bit H.264 or DNxHR 444, and 10-
@@ -67,10 +67,9 @@ on an M6 Mac mini, but no Mac app has shipped (macOS, honestly, below).
 Everything planned lives in one list, [docs/BACKLOG.md](docs/BACKLOG.md), each item with its status. In short
 (row numbers in brackets):
 
-**Working on now: the Mac (Apple Silicon).** The Core ML engine keys 1280×1080 and 1920×1080 clips on an M6 Mac mini
+**Working on now: the Mac (Apple Silicon), after its first build in dev.2.** The Core ML engine keys 1280×1080 and 1920×1080 clips on an M6 Mac mini
 (CPU + GPU, 16 GB; model set onnx.5-coreml: alpha MAE 2.1-2.5e-5 against CUDA's mattes, 0.002 % of pixels over
-1/255 or none, 2026-10-28), and the setup installs the Core ML models. Next: the
-first Mac app build, Core ML for 4K [60], the real-Mac gate against CUDA's mattes [24], and self-update on the Mac
+1/255 or none, 2026-10-28), and the setup installs the Core ML models. Next: Core ML for 4K [60], the real-Mac gate against CUDA's mattes [24], and self-update on the Mac
 [57].
 
 **Next, toward 1.0:**
@@ -109,7 +108,7 @@ none of them changes what a user sees today.
   supported, and without an NVIDIA card nothing falls back to the CPU: a job stops with "CorridorKey needs an NVIDIA
   graphics card with CUDA." (The engine has a MIGraphX path for AMD cards on Linux, `--device migraphx`: untested on
   real hardware, and the app doesn't offer it; docs/AMD.md.)
-- macOS 14 or newer on Apple Silicon (M1 or newer; the disk image, once a Mac build ships: there is none yet). Intel
+- macOS 14 or newer on Apple Silicon (M1 or newer; the disk image, from 1.0.0-dev.2; 1280×1080 and 1920×1080 clips). Intel
   Macs aren't supported.
 - Nothing else to set up: the engine comes with the app, and on first start the setup downloads the GPU runtime and
   the CorridorKey models (a 4.03 GB download on Linux, 3.81 GB on Windows, 4.76 GB on macOS, once). If `ffmpeg` is
@@ -137,16 +136,15 @@ your PC" the first time. Click **More info**, then **Run anyway**. It's asked on
 **keying on an NVIDIA card under Windows has not been tested yet**: we don't have a real Windows PC with one. Every
 speed and quality number in this README was measured on Linux. If you try it on Windows, please tell us how it goes.
 
-**macOS, honestly:** a great many VFX artists work on Macs, so macOS is on the way, but **there's no Mac build
-yet**. The engine keys on Apple Silicon (an M6 Mac mini, 1280×1080 and 1920×1080 clips, below), and the app itself
-builds and runs there (signed with a Developer ID, notarized by Apple, driven page by page on GitHub's Apple Silicon
-runners), but no Mac app with the two together has shipped or keyed on a real Mac yet.
+**macOS, honestly:** a great many VFX artists work on Macs, and **1.0.0-dev.2 is the first Mac build**: the app
+(signed with a Developer ID, notarized by Apple) with its Core ML engine, keying 1280×1080 and 1920×1080 clips on
+Apple Silicon (measured on an M6 Mac mini, below). 4K and other frame sizes aren't there yet.
 There's no NVIDIA card on a Mac, so the Mac engine uses ONNX Runtime's Core ML backend (Apple's GPU and Neural Engine)
 instead of CUDA. Where that stands:
 
 - **Core ML models in setup** (backlog row 59): Core ML compiles for fixed sizes, so the Mac needs its own model set.
-  It's published (release `models-2.0.0-onnx.5-coreml` from dev.2) and setup downloads it on a Mac; the first Mac build brings that setup.
-- **The app asks for Core ML** (row 58): built, not yet tried on a real Mac.
+  It's published (release `models-2.0.0-onnx.5-coreml`) and the setup downloads it on a Mac, from dev.2.
+- **The app asks for Core ML** (row 58): in dev.2, checked on the M6 Mac mini before release.
 - **1280×1080 and 1920×1080 clips only** (row 60): Core ML compiles for fixed frame sizes, so the set has files for
   1280×1080 clips (padded to 1152×1280) and standard 1920×1080 HD (padded to 1152×1920). dev.2's set,
   `onnx.5-coreml`, on the Mac mini M6 16 GB (2026-10-28, CPU + GPU, window 4/2): 1280×1080, 120 frames, 111.0 s,

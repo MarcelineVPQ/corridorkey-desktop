@@ -23,7 +23,7 @@ It ships next to the engine in every package:
 | --- | --- |
 | Linux (AppImage) | `resources/engine/corridorkey` inside the AppImage (`./CorridorKey-Desktop-<version>.AppImage --appimage-extract` unpacks it into `squashfs-root/`) |
 | Windows | `resources\engine\corridorkey.exe` in the install folder (the installer's default: `%LOCALAPPDATA%\Programs\CorridorKey`) |
-| macOS | `CorridorKey.app/Contents/Resources/engine/corridorkey` (no macOS build yet: [Home](Home#platforms)) |
+| macOS | `CorridorKey.app/Contents/Resources/engine/corridorkey` (from 1.0.0-dev.2: [Home](Home#platforms)) |
 
 A standalone farm archive per system is planned with the release packaging; until then, copy it from an install.
 

@@ -4,7 +4,8 @@
 
 The second development build of 1.0: the `corridorkey` command line for render farms and power users, example
 submitters for the common farm schedulers, the Console, a command line inside the app, and model set 2.0.0-onnx.5
-(a smaller download). Linux and Windows, as dev.1; still no macOS build.
+(a smaller download). Linux and Windows on NVIDIA as dev.1, and the first macOS build: Apple Silicon through Core ML,
+1280×1080 and 1920×1080 clips (4K comes later).
 
 **The Electron security fix.** dev.1 runs on Electron 45.0.0-beta.3, whose Node (24.21.0) carries CVE-2026-111497,
 fixed in Node 24.22.1 (dev.1's release page says so). This build runs on Electron 45.1.0 (released 2026-10-27, Node
