@@ -8,7 +8,9 @@ dev.1; still no macOS build.
 
 **The Electron security fix.** dev.1 runs on Electron 45.0.0-beta.3, whose Node (24.21.0) carries CVE-2026-111497,
 fixed in Node 24.22.1 (dev.1's release page says so). This build runs on Electron 45.1.0 (released 2026-10-27, Node
-24.22.1, Chromium 156.0.8078.49), the first stable Electron with the fix.
+24.22.1, Chromium 156.0.8078.49), the first stable Electron with the fix. The packaged app's Electron fuses are now
+set: it ignores `NODE_OPTIONS` and `--inspect`, and loads the app only from its `app.asar` (checked against its
+integrity hash on macOS and Windows; not yet run in a Windows or Mac build). Node mode stays on, for `corridorkey run`.
 
 **The command line, `corridorkey`** (docs/CLI.md; the wiki's Command line page):
 

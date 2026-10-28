@@ -11,6 +11,7 @@ import { afterAll, describe, expect, it } from "vitest";
 const repo = fileURLToPath(new URL("../..", import.meta.url));
 const gate = join(repo, ".hooks/check_electron_security.sh");
 const config = readFileSync(join(repo, "electron.vite.config.ts"), "utf8");
+const builder = readFileSync(join(repo, "electron-builder.yml"), "utf8");
 const scratch = mkdtempSync(join(tmpdir(), "ck-security-gate-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
@@ -24,8 +25,8 @@ const WINDOW = [
 
 let n = 0;
 /**
- * A fixture tree: the real electron.vite.config.ts (or `viteConfig`), electron/main/window.ts = WINDOW, plus `files`
- * (which can replace window.ts); the gate's exit code and output.
+ * A fixture tree: the real electron.vite.config.ts (or `viteConfig`) and electron-builder.yml, electron/main/window.ts =
+ * WINDOW, plus `files` (which can replace window.ts or electron-builder.yml); the gate's exit code and output.
  */
 function runGate(files: Record<string, string>, viteConfig = config): { code: number | null; out: string } {
   const root = join(scratch, String(n++));
@@ -33,6 +34,7 @@ function runGate(files: Record<string, string>, viteConfig = config): { code: nu
   mkdirSync(join(root, "src"), { recursive: true });
   writeFileSync(join(root, "electron.vite.config.ts"), viteConfig);
   writeFileSync(join(root, "electron/main/window.ts"), WINDOW);
+  writeFileSync(join(root, "electron-builder.yml"), builder);
   // loop: NOT-WORTH — one or two fixture files
   for (const [p, text] of Object.entries(files)) {
     mkdirSync(dirname(join(root, p)), { recursive: true });
@@ -137,5 +139,27 @@ describe("Electron security gate", () => {
     const loose = [WINDOW.replace("(e) => e.preventDefault()", "() => {}"), WINDOW.replace('action: "deny"', 'action: "allow"')];
     // loop: NOT-WORTH — two fixtures
     for (const w of loose) expect(runGate({ "electron/main/window.ts": w }).code, w).toBe(1);
+  });
+
+  it("fails on a missing or loosened Electron fuse in electron-builder.yml; runAsNode only with its marker", () => {
+    const fuses = ["enableNodeOptionsEnvironmentVariable: false", "enableNodeCliInspectArguments: false", "enableEmbeddedAsarIntegrityValidation: true", "onlyLoadAppFromAsar: true"];
+    // loop: NOT-WORTH — four fuses, two fixtures each
+    for (const f of fuses) {
+      expect(builder).toContain(f);
+      const flipped = f.endsWith("true") ? f.replace("true", "false") : f.replace("false", "true");
+      // loop: NOT-WORTH — two fixtures
+      for (const yml of [builder.replace(f, flipped), builder.replace(`  ${f}\n`, "")]) {
+        const r = runGate({ "electron-builder.yml": yml });
+        expect(r.code, f).toBe(1);
+        expect(r.out).toContain("fuses");
+      }
+    }
+    expect(runGate({ "electron-builder.yml": builder.replace("electronFuses:", "fuses:") }).code).toBe(1);
+    // runAsNode on without the marker, or left out (Electron's default is on)
+    const unmarked = builder.replace(/^.*gate: run-as-node-ok.*\n/m, "");
+    expect(unmarked).not.toBe(builder);
+    expect(runGate({ "electron-builder.yml": unmarked }).code).toBe(1);
+    expect(runGate({ "electron-builder.yml": builder.replace(/^.*runAsNode:.*\n/m, "") }).code).toBe(1);
+    expect(runGate({ "electron-builder.yml": unmarked.replace("runAsNode: true", "runAsNode: false") }).code).toBe(0);
   });
 });

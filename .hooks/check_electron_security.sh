@@ -27,6 +27,10 @@
 # by default), a will-navigate handler that calls preventDefault on its line, and a window-open handler; never
 # `action: "allow"` for a new window.
 #
+# Requires Electron's fuses in electron-builder.yml (electronFuses): enableNodeOptionsEnvironmentVariable: false,
+# enableNodeCliInspectArguments: false, enableEmbeddedAsarIntegrityValidation: true, onlyLoadAppFromAsar: true, and
+# runAsNode: false unless the line above it says `gate: run-as-node-ok — why` (whole-code review 2026-10-27).
+#
 # From the DS5 app (same baseline). Optional argument: the tree to check (tests use fixtures); default the repo.
 set -uo pipefail
 cd "${1:-$(git rev-parse --show-toplevel)}"
@@ -87,6 +91,23 @@ allow=$(src "action[[:space:]]*:[[:space:]]*[\"'\`]allow")
 if [ -n "$missing" ] || [ -n "$allow" ]; then
   echo "Electron security gate: permissions / navigation:${missing:+ missing$missing}${allow:+ a new window allowed:
 $allow}"
+  exit 1
+fi
+
+# Electron's fuses (electron-builder.yml): each one set as required, under electronFuses
+yml=electron-builder.yml
+missing=""
+grep -q '^electronFuses:' "$yml" 2>/dev/null || missing=" electronFuses:"
+for f in "enableNodeOptionsEnvironmentVariable: false" "enableNodeCliInspectArguments: false" "enableEmbeddedAsarIntegrityValidation: true" "onlyLoadAppFromAsar: true"; do # loop: NOT-WORTH — four fixed fuses
+  grep -qE "^[[:space:]]+$f[[:space:]]*(#.*)?$" "$yml" 2>/dev/null || missing="$missing $f"
+done
+n=$(grep -nE '^[[:space:]]+runAsNode:' "$yml" 2>/dev/null | head -1 | cut -d: -f1)
+if [ -z "$n" ]; then missing="$missing runAsNode (on unless set)"
+elif ! sed -n "${n}p" "$yml" | grep -qE 'runAsNode:[[:space:]]*false' && ! sed -n "$((n > 1 ? n - 1 : 1))p" "$yml" | grep -q "gate: run-as-node-ok"; then
+  missing="$missing runAsNode: false (or 'gate: run-as-node-ok — why' on the line above)"
+fi
+if [ -n "$missing" ]; then
+  echo "Electron security gate: the fuses in $yml are missing or loosened:$missing"
   exit 1
 fi
 exit 0
