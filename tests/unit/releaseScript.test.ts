@@ -335,7 +335,8 @@ sign() { for f in "$@"; do touch "$f.sig"; done; }`;
   });
 
   // release re-review 2026-10-28 #3: the packaged --ck-headless start had never run
-  it("runs the packaged corridorkey run on a two-line script, isolated, and needs both lines and exit 0", () => {
+  // release.sh builds and starts the Linux package (release/linux-unpacked) on Linux only
+  it.skipIf(process.platform !== "linux")("runs the packaged corridorkey run on a two-line script, isolated, and needs both lines and exit 0", () => {
     const start = at(/^printf 'version\\necho ck-run-check\\n' > "\$smoke\/check\.ckcmd"$/);
     const end = lines.findIndex((l, i) => i > start && l === "fi");
     expect(start).toBeGreaterThan(at(/node tools\/drive\.mjs --state "\$smoke"/));

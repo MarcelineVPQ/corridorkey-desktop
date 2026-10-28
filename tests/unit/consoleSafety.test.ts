@@ -1,6 +1,6 @@
 // The Console's safety pieces (docs/CONSOLE.md): the file scope, the elevation, the append-only audit log, the history.
 import { EventEmitter } from "node:events";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -22,7 +22,8 @@ import { dropOnLockAndSleep, Elevation, ELEVATION_CAP_MS, ELEVATION_TTL_MS } fro
 import { AuditLog, History } from "../../electron/main/console/logs";
 
 // a temp folder of its own: never / or $HOME
-const tmp = mkdtempSync(join(tmpdir(), "ck-console-test-"));
+// its real path: on macOS the temp folder /var/… is /private/var/…, and the policy compares real paths
+const tmp = realpathSync(mkdtempSync(join(tmpdir(), "ck-console-test-")));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 const real = realPathDeps("/home/u");
 

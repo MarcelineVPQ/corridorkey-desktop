@@ -118,7 +118,8 @@ describe("engine launch", () => {
     const c = launchCommand({ binary: "/e/corridorkey-engine", models: "/m", ort: null, env: { HOME: "/h", LD_PRELOAD: "/bad.so" } });
     expect([c.cmd, ...c.args]).toEqual(["/e/corridorkey-engine", "--models", "/m"]);
     // the engine ends with this app (proc.rs end_with_parent): it gets the app's pid
-    expect(c.env).toEqual({ HOME: "/h", CK_ENGINE_PARENT_PID: String(process.pid) });
+    // (on macOS the app asks for Core ML: CK_ENGINE_DEVICE)
+    expect(c.env).toEqual({ HOME: "/h", CK_ENGINE_PARENT_PID: String(process.pid), ...(process.platform === "darwin" ? { CK_ENGINE_DEVICE: "coreml" } : {}) });
     const g = launchCommand({ binary: "/e/corridorkey-engine", models: "/m", ort: "/o/libonnxruntime.so", env: {} });
     expect(g.args).toEqual(["--models", "/m", "--ort", "/o/libonnxruntime.so"]);
   });

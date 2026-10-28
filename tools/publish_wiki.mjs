@@ -51,18 +51,19 @@ for (const n of readdirSync(dir).filter((n) => n.endsWith(".md") && !src.include
 for (const n of src) copyFileSync(join(WIKI, n), join(dir, n));
 git(dir, "add", "-A");
 const stat = git(dir, "diff", "--cached", "--stat");
+// no process.exit on the way out: on macOS stdout to a pipe is asynchronous, and an exit cut the diff and this line off
 if (!stat.trim()) {
   console.log("publish_wiki: the wiki is already docs/wiki/; nothing to publish");
-  process.exit(0);
+} else {
+  console.log(git(dir, "diff", "--cached"));
+  console.log(stat);
+  if (!push) {
+    console.log(`publish_wiki: staged in ${dir}, not published. Read it, then run again with --push (or: git -C ${dir} reset -q --hard)`);
+  } else {
+    const head = git(APP, "rev-parse", "--short", "HEAD").trim();
+    // her public identity, never the machine's git email (GitHub refuses a private address on push)
+    git(dir, "-c", "user.name=MarcelineVPQ", "-c", "user.email=25850221+MarcelineVPQ@users.noreply.github.com", "commit", "-q", "-m", `The wiki from corridorkey-desktop ${head} (docs/wiki/)`);
+    git(dir, "push", "-q", "origin", "HEAD");
+    console.log(`publish_wiki: published (corridorkey-desktop ${head})`);
+  }
 }
-console.log(git(dir, "diff", "--cached"));
-console.log(stat);
-if (!push) {
-  console.log(`publish_wiki: staged in ${dir}, not published. Read it, then run again with --push (or: git -C ${dir} reset -q --hard)`);
-  process.exit(0);
-}
-const head = git(APP, "rev-parse", "--short", "HEAD").trim();
-// her public identity, never the machine's git email (GitHub refuses a private address on push)
-git(dir, "-c", "user.name=MarcelineVPQ", "-c", "user.email=25850221+MarcelineVPQ@users.noreply.github.com", "commit", "-q", "-m", `The wiki from corridorkey-desktop ${head} (docs/wiki/)`);
-git(dir, "push", "-q", "origin", "HEAD");
-console.log(`publish_wiki: published (corridorkey-desktop ${head})`);
