@@ -17,7 +17,10 @@
 //       (src/ui/JobSettings.tsx: a Section's title, a Row's label) is on no page;
 //   (h) an app setting (src/shared/types.ts Settings and Appearance, electron/main/updatePrefs.ts UpdatePrefs) has no
 //       row in SETTINGS below, or its label isn't on screen any more, or isn't on the wiki page the row names;
-//   (i) a rail page (src/ui/rail/railModel.ts ITEMS) has no wiki page or section (a heading with its name).
+//   (i) a rail page (src/ui/rail/railModel.ts ITEMS) has no wiki page or section (a heading with its name);
+//   (j) a page calls package.json's own version the next development build ("next development build, 1.0.0-dev.2"):
+//       the wiki goes live with that version, so it is out (release review 2026-10-28: dev.2's wiki said dev.2's
+//       features weren't out yet).
 // Its own sources only: it never reads the command line's parity manifest (tools/check_cli_parity.mjs, a gate of
 // its own; Marcy 2026-10-27).
 //
@@ -400,6 +403,15 @@ export function checkRail(pages, labels) {
   return labels.filter((l) => !headings.includes(l.toLowerCase())).map((l) => `the rail page "${l}" (src/ui/rail/railModel.ts) has no wiki page or section (a heading "${l}")`);
 }
 
+/** (j): no page calls `version` (package.json's, the one being released) the next development build. */
+export function checkNotNext(pages, version) {
+  const re = new RegExp(`next development build[\\s,:;*()]*${esc(version)}(?!\\d)`, "i");
+  // loop: NOT-WORTH — the wiki's pages
+  return Object.entries(pages)
+    .filter(([, t]) => re.test(t))
+    .map(([n]) => `${n}.md: calls ${version} (package.json) "the next development build", but the wiki ships with it: say it's in ${version}`);
+}
+
 /** Everything, on this repository. */
 export function checkAll(app = APP) {
   const pages = readPages(join(app, "docs", "wiki"));
@@ -425,6 +437,7 @@ export function checkAll(app = APP) {
     ),
     ...checkSettings(pages, settingKeys(app), uiText(app)),
     ...checkRail(pages, railLabels(read("src", "ui", "rail", "railModel.ts"))),
+    ...checkNotNext(pages, JSON.parse(read("package.json")).version),
   ];
 }
 

@@ -152,7 +152,7 @@ smaller windows by itself before giving up, if the memory ran out before any fra
 | input not found: `<path>` | The clip or hint was moved, renamed or is on a drive that isn't connected. |
 | Could not open video: `<file>` (`<what ffprobe said>`) | ffprobe couldn't read the file: usually a damaged file, or a codec your ffmpeg can't decode. |
 | No hint frame found at `<path>` | The first-frame matte isn't at that path, or the folder has no image in it. Choose the hint again. |
-| Portrait clips (taller than wide, here `<w>x<h>`) need the 2.0.0-onnx.3 models or newer: this models folder's C-RADIO only takes landscape or square frames. | An older model set was chosen by hand on the Engine page. Set the models back to **Automatic** (the app's set is `2.0.0-onnx.4`). |
+| Portrait clips (taller than wide, here `<w>x<h>`) need the 2.0.0-onnx.3 models or newer: this models folder's C-RADIO only takes landscape or square frames. | An older model set was chosen by hand on the Engine page. Set the models back to **Automatic** (the set this version of the app downloads). |
 
 ### DNxHR 444 needs a frame of at least 256x120; this clip is `<w>x<h>` (H.264 takes any size)
 
@@ -232,7 +232,7 @@ In Engine settings, TensorRT:
 
 ## The command line
 
-The `corridorkey` command line (in the next development build, 1.0.0-dev.2) prints the same engine messages as
+The `corridorkey` command line (from 1.0.0-dev.2) prints the same engine messages as
 the app, and ends with an exit code that says what kind of problem it was and whether a retry can help: see
 [Command line, exit codes](Command-Line#exit-codes). In the app's [Console](Console), `doctor` checks the whole setup
 in one go and says how to fix each problem.

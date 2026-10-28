@@ -1,7 +1,7 @@
 # Render farm
 
-> **In the next development build, 1.0.0-dev.2.** The [command line](Command-Line) and these submitters aren't in
-> 1.0.0-dev.1. The submitters are in the repository's
+> **New in 1.0.0-dev.2.** The [command line](Command-Line) and these submitters aren't in 1.0.0-dev.1. The
+> submitters are in the repository's
 > [farm/](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/farm/README.md) folder.
 
 CorridorKey keys on a farm through its command line, `corridorkey`. The repository has a submitter for each common

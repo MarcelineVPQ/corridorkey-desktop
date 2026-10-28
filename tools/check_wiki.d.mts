@@ -31,3 +31,4 @@ export function railLabels(railTs: string): string[];
 export function checkRunOptions(pages: Record<string, string>, options: string[], flags: Map<string, string[]>, labels: string[], exceptions?: Record<string, string>): string[];
 export function checkSettings(pages: Record<string, string>, keys: string[], ui: string, table?: Record<string, SettingRow>): string[];
 export function checkRail(pages: Record<string, string>, labels: string[]): string[];
+export function checkNotNext(pages: Record<string, string>, version: string): string[];

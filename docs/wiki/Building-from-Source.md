@@ -76,7 +76,7 @@ it is needed to use or build the app.
 ## The command line
 
 `tools/build_engine.sh` builds the command line, `corridorkey` (crate `ck-cli`), next to the engine, the same way; it
-ships beside the engine in every package (from the next development build, 1.0.0-dev.2). Its tests run without a
+ships beside the engine in every package (from 1.0.0-dev.2). Its tests run without a
 model set or a graphics card: `cd engine-rs && cargo test -p ck-cli`. How to use it: [Command line](Command-Line).
 
 The wiki itself lives in the repository, in `docs/wiki/`: change a page there, in the same pull request as the change

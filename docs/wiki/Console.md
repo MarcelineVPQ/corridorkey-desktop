@@ -1,6 +1,6 @@
 # Console
 
-> **In the next development build, 1.0.0-dev.2.** 1.0.0-dev.1 doesn't have the Console.
+> **New in 1.0.0-dev.2.** 1.0.0-dev.1 doesn't have the Console.
 
 The **Console** (its own icon on the rail) is a command line inside the app for people who live in one. It runs the
 [command line](Command-Line)'s `render`, `verify`, `prepare` and `info` with the same flags, output and exit codes as

@@ -9,6 +9,7 @@ import {
   checkCommandLine,
   checkConsole,
   checkLinks,
+  checkNotNext,
   checkRail,
   checkRunOptions,
   checkSettings,
@@ -186,6 +187,16 @@ describe("the wiki gate", () => {
     expect(checkRail({ Home: "# Queue\n```\n# App settings\n```\nOpen App settings." }, railLabels(rail))).toEqual([
       'the rail page "App settings" (src/ui/rail/railModel.ts) has no wiki page or section (a heading "App settings")',
     ]);
+  });
+
+  it("(j) a page calling package.json's version the next development build fails; another version or wording passes", () => {
+    const v = "1.0.0-dev.2";
+    expect(checkNotNext({ A: "> **In the next development build, 1.0.0-dev.2.** Not in dev.1." }, v)).toEqual([
+      'A.md: calls 1.0.0-dev.2 (package.json) "the next development build", but the wiki ships with it: say it\'s in 1.0.0-dev.2',
+    ]);
+    expect(checkNotNext({ B: "In the next development build, **1.0.0-dev.2**: the CLI." }, v)).toHaveLength(1);
+    expect(checkNotNext({ C: "(in the Next Development Build: 1.0.0-dev.2)" }, v)).toHaveLength(1);
+    expect(checkNotNext({ D: "In the next development build, 1.0.0-dev.3: more.", E: "New in 1.0.0-dev.2.", F: "next development build, 1.0.0-dev.21" }, v)).toEqual([]);
   });
 
   it("--published: a page changed, added or removed is a difference; line ends aren't", () => {

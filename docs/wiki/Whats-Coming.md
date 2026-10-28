@@ -1,8 +1,7 @@
 # What's coming
 
-In the next development build, **1.0.0-dev.2**: the [command line](Command-Line) for render farms and power users,
-[submitters for the common farm schedulers](Render-Farm), and the app's [Console](Console). It ships once Electron
-publishes a stable release with a security fix the app is waiting for.
+**1.0.0-dev.2** brought the [command line](Command-Line) for render farms and power users,
+[submitters for the common farm schedulers](Render-Farm), and the app's [Console](Console).
 
 Next up are the Mac (Apple Silicon), keying tested on a real Windows PC with an NVIDIA card, and the rest of the
 road to 1.0. After that come pipeline features for studios.

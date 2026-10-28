@@ -201,8 +201,9 @@ up to date — make that a gate", "especially important for the command line").
   of a command that takes it uses it; an exit code (ck-cli's `exit.rs`) has no row there; a progress format is
   missing there; a Console built-in (`registry.ts`) is missing from `Console.md`; one of the engine's messages
   written for people (ck-core's errors that start with a capital letter, and the no-GPU reason) is missing from
-  `Troubleshooting.md`; or a wiki link, an anchor, or a link into this repository (`…/blob/main/<file>#anchor`)
-  doesn't resolve. Tests: `tests/unit/checkWiki.test.ts` (a fixture failing each rule).
+  `Troubleshooting.md`; a wiki link, an anchor, or a link into this repository (`…/blob/main/<file>#anchor`)
+  doesn't resolve; or a page calls package.json's version "the next development build" (the wiki goes live with
+  it). Tests: `tests/unit/checkWiki.test.ts` (a fixture failing each rule).
 - **Publishing is Marcy's step** (public words get her OK first). `node tools/publish_wiki.mjs <wiki clone>` runs the
   gate, pulls the clone, copies `docs/wiki/` into it (a page removed here is removed there), stages it and prints the
   diff: nothing is committed or pushed. Read it, then `node tools/publish_wiki.mjs <wiki clone> --push` commits

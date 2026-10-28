@@ -1,7 +1,6 @@
 # Command line
 
-> **In the next development build, 1.0.0-dev.2.** 1.0.0-dev.1 doesn't have the command line. This page describes
-> it as it will ship; until then it's in the repository's source.
+> **New in 1.0.0-dev.2.** 1.0.0-dev.1 doesn't have the command line.
 
 `corridorkey` keys clips without the app's window: on a render farm (Deadline, AWS Deadline Cloud / Open Job
 Description, OpenCue, Flamenco), from a shell loop, or from a compositor's terminal. It is the same engine as the app,

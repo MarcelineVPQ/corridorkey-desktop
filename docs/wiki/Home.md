@@ -24,11 +24,11 @@ checker preview, as EXR sequences for compositing or as 10-bit video for the edi
 
 ## Platforms
 
-| System | Status in 1.0.0-dev.1 |
+| System | Status in 1.0.0-dev.2 |
 | --- | --- |
 | Linux (AppImage, x64) | Keys with an NVIDIA graphics card. Optional TensorRT mode. |
 | Windows 10/11 (installer, x64) | Installs, sets itself up and runs its pages. **Keying on a real Windows PC with an NVIDIA card hasn't been tested yet**: please tell us how it goes. |
-| macOS (Apple Silicon) | No build yet: the Mac engine can't key yet. It's being worked on. |
+| macOS (Apple Silicon) | No build yet. The Mac engine keys 1280×1080 and 1920×1080 clips on an M6 Mac mini, but no Mac app has shipped. |
 
 On Linux and Windows an **NVIDIA graphics card is required** (RTX 20-series or newer, 8 GB or more). AMD and Intel
 graphics cards aren't supported, and nothing falls back to the processor. The details are in the README's
@@ -47,7 +47,7 @@ graphics cards aren't supported, and nothing falls back to the processor. The de
 - [Troubleshooting](Troubleshooting): every message the app shows, what it means and what to do
 - [Uninstall](Uninstall): removing the app and everything it downloaded
 
-For power users and studios (in the next development build, 1.0.0-dev.2):
+For power users and studios (from 1.0.0-dev.2):
 
 - [Command line](Command-Line): `corridorkey`, every command and flag, exit codes, progress lines, the report
 - [Render farm](Render-Farm): Deadline, AWS Deadline Cloud / OpenJD, OpenCue, Flamenco, or a shell loop
