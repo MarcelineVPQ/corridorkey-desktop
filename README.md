@@ -40,6 +40,28 @@ Status: 1.0 is almost ready. The development builds (1.0.0-dev.N, on the Develop
 Windows with an NVIDIA graphics card. There's no macOS build yet: the Mac engine keys 1280×1080 and 1920×1080 clips
 on an M6 Mac mini, but no Mac app has shipped (macOS, honestly, below).
 
+## Highlights
+
+1. **Faster on the card you have.** On an RTX 5080: 4K about 1.8-1.9× the original's speed, HD 1.5-1.9×; on Linux the
+   optional TensorRT mode about 2.3-2.4× at 4K and 1.9-2.2× at HD (Speed).
+2. **The same mattes.** Measured against the original on every test clip; dev.2's model set onnx.5 stays within
+   0.25-0.50/255 of onnx.4 on all ten, with no more hair sizzle (Quality; Speed, 0.0.9-dev).
+3. **Installs itself, no Python.** One file to download; the app fetches the rest (4.03 GB on Linux, 3.81 GB on
+   Windows, 4.76 GB on macOS), every file SHA-256 checked, less than half the original's install (Install size).
+4. **One engine, every platform.** Rust on ONNX Runtime: NVIDIA (CUDA) on Linux and Windows, TensorRT on Linux, Core ML
+   on Apple Silicon (the Mac engine keys on an M6 Mac mini; the Mac app is next).
+5. **Budget cards welcome.** The memory planner picks the largest temporal window your card holds; measured down to an
+   8 GB RTX 2070 SUPER on a 2011 Core i7 (Requirements; Speed, test machines).
+6. **Studio outputs.** EXR named the studio way with the matte in alpha, lossless 10-bit H.264 or DNxHR 444, and 10-
+   and 12-bit plates read in full (Quality).
+7. **Colour management.** OpenColorIO 2.5 built in: ACES, the camera log spaces, or your studio's own config.
+8. **A Console, not a shell.** Its own command set with Tab completion, history, pipes into its own filters, `watch`
+   and scripts; anything that replaces files asks first, `sudo`-style ([wiki: Console](https://github.com/MarcelineVPQ/corridorkey-desktop/wiki/Console)).
+9. **Farm-ready.** The `corridorkey` command line, job export for Deadline, OpenCue, Flamenco and OpenJD, and Console
+   scripts from cron ([wiki: Render farm](https://github.com/MarcelineVPQ/corridorkey-desktop/wiki/Render-Farm)).
+10. **Free, open, measured.** Signed updates, every speed and quality claim measured with its method, including what
+    we got wrong (Quality, "What we got wrong").
+
 ## What's coming
 
 Everything planned lives in one list, [docs/BACKLOG.md](docs/BACKLOG.md), each item with its status. In short
