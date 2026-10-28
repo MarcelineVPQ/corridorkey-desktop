@@ -257,21 +257,20 @@ pub fn parse(req: &Value) -> Result<JobConfig, Error> {
         return Err(Error::input(format!("unsupported outputs: {bad:?}")));
     }
     let manual = o.contains_key("hann_chunk") || o.contains_key("hann_stride") || boolean(o, "low_vram", false);
-    let chunk = match int(o, "hann_chunk")? {
+    // whole numbers (2.5 was truncated to 2); 0 = the default; out of range: a bad request, as `estimate` says
+    // (final review 2026-10-28 N5)
+    let chunk = match whole(o, "hann_chunk")? {
         Some(c) if c != 0 => c,
         _ => 80,
     };
-    let stride = match int(o, "hann_stride")? {
+    let stride = match whole(o, "hann_stride")? {
         Some(s) if s != 0 => s,
         _ => (chunk / 2).max(1),
     };
-    if chunk < 1 || stride < 1 {
-        return Err(Error::input(format!("hann_chunk and hann_stride must be at least 1 (got {chunk}, {stride})")));
-    }
     // a stride past the window leaves frames no window covers: measured (CPU, 8 frames at 2/4), normal mode wrote
     // 6 of 8 frames and reported success; low-VRAM rendered the uncovered frames from never-written (zero) states
     if stride > chunk {
-        return Err(Error::input(format!(
+        return Err(Error::bad_request(format!(
             "hann_stride ({stride}) must not be larger than hann_chunk ({chunk}): frames between the windows would get no matte"
         )));
     }
@@ -352,7 +351,7 @@ pub fn parse(req: &Value) -> Result<JobConfig, Error> {
         tensorrt_build: boolean(o, "tensorrt_build", true),
         vram_budget_gb: match num(o, "vram_budget_gb")? {
             Some(v) if v > 0.0 => Some(v),
-            Some(v) => return Err(Error::input(format!("vram_budget_gb must be above 0, got {v}"))),
+            Some(v) => return Err(Error::bad_request(format!("vram_budget_gb must be above 0, got {v}"))),
             // the engine-wide default (CK_ENGINE_VRAM_BUDGET_GB) is the pipeline's to apply: parsing reads no environment
             None => None,
         },
@@ -442,8 +441,20 @@ mod tests {
         assert_eq!(parse(&req(json!({"hann_chunk": "x"}))).unwrap_err().code.as_str(), "input");
         assert_eq!(parse(&req(json!({"output_format": "gif"}))).unwrap_err().code.as_str(), "input");
         assert_eq!(parse(&req(json!({"exr_dtype": "int"}))).unwrap_err().code.as_str(), "input");
-        assert_eq!(parse(&req(json!({"vram_budget_gb": 0}))).unwrap_err().code.as_str(), "input");
-        assert_eq!(parse(&req(json!({"hann_chunk": 2, "hann_stride": 4}))).unwrap_err().code.as_str(), "input");
+        // out of range: bad-request, as `estimate` answers the same values (final review 2026-10-28 N5)
+        // loop: NOT-WORTH — a test's few options
+        for o in [
+            json!({"vram_budget_gb": 0}),
+            json!({"vram_budget_gb": -1}),
+            json!({"hann_chunk": 2, "hann_stride": 4}),
+            json!({"hann_chunk": -8}),
+            json!({"hann_chunk": 8, "hann_stride": -1}),
+            json!({"hann_chunk": 2.5}),
+            json!({"hann_chunk": 8, "hann_stride": "4.5"}),
+        ] {
+            assert_eq!(parse(&req(o.clone())).unwrap_err().code.as_str(), "bad-request", "{o}");
+        }
+        assert_eq!(parse(&req(json!({"hann_chunk": 8.0, "hann_stride": "4"}))).unwrap().hann_stride, 4);
         assert_eq!(parse(&req(json!({"hann_chunk": 4, "hann_stride": 4}))).unwrap().hann_stride, 4);
         assert_eq!(parse(&req(json!({"vram_budget_gb": 12}))).unwrap().vram_budget_gb, Some(12.0));
         let c = parse(&req(json!({"outputs": ["fg", "checker", "alpha"], "tensorrt": true}))).unwrap();

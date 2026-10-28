@@ -105,9 +105,9 @@ The `corridorkey` command line ([CLI.md](CLI.md)) runs the same jobs without thi
 | `hint_quality` | 0–1 | trust in the explicit hint (0.95) |
 | `carry_hint` | bool | Hann carry (true) |
 | `carry_hint_quality` | 0–1 | 0.95 |
-| `hann_chunk`, `hann_stride` | int | a manual window; neither set and no `low_vram` = automatic from free graphics memory |
+| `hann_chunk`, `hann_stride` | int | a manual window; neither set and no `low_vram` = automatic from free graphics memory. 0 = the default (80, and half the window); a negative or fractional value, or a stride larger than the window, is a `bad-request` |
 | `low_vram` | bool | staged low-memory mode |
-| `vram_budget_gb` | number | cap on the graphics memory this job may use (the automatic window is chosen within it; the engine refuses to go past it). Absent = the free memory |
+| `vram_budget_gb` | number | cap on the graphics memory this job may use (the automatic window is chosen within it; the engine refuses to go past it). Absent = the free memory; 0 or below is a `bad-request` |
 | `tensorrt` | bool | Rust engine: run on TensorRT (opt-in, false). Engines are built once per resolution range and cached; a network TensorRT can't build runs on CUDA, and the `provider` reply says so |
 | `tensorrt_build` | bool | Rust engine (additive, 2026-10-25): with `tensorrt`, whether the job may build its range's engines (true, absent). false: a range not built yet runs exactly as a job without TensorRT (CUDA's own automatic window too), with `fallback_reason` "TensorRT for this resolution range isn't built yet" and a `log` line; the app sends false and builds ranges with `trt_build` |
 | `outputs` | list | any of `alpha fg checker cutout` (`alpha fg`) |
