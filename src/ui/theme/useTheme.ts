@@ -1,7 +1,8 @@
 // Applies App settings → Appearance to the page. Light/dark comes from
 // prefers-color-scheme (main sets nativeTheme.themeSource); the Desktop theme
 // and the desktop accent write their tokens on :root (palette.ts) and remove
-// them again when switched off. Runs only when those inputs change.
+// them again when switched off. Runs only when those inputs change: the palette by value (every state push brings
+// a new copy of the same palette).
 import { useEffect } from "react";
 import type { Appearance } from "../../shared/types";
 import { accentVars, paletteToCssVars, type DesktopPalette, type Rgb } from "./palette";
@@ -10,6 +11,7 @@ import { accentVars, paletteToCssVars, type DesktopPalette, type Rgb } from "./p
 let applied: string[] = [];
 
 export function useTheme(appearance: Appearance, palette: DesktopPalette | null): void {
+  const paletteKey = palette ? JSON.stringify(palette) : null;
   useEffect(() => {
     const root = document.documentElement;
     // loop: NOT-WORTH — ≤ 20 tokens, on an appearance or desktop color change only
@@ -36,5 +38,6 @@ export function useTheme(appearance: Appearance, palette: DesktopPalette | null)
     for (const [k, v] of Object.entries(vars)) root.style.setProperty(k, v);
     applied = Object.keys(vars);
     root.dataset.glass = appearance.glass ? "on" : "off";
-  }, [appearance.theme, appearance.accent, appearance.glass, palette]);
+    // palette: read from this render, which paletteKey says is a new value
+  }, [appearance.theme, appearance.accent, appearance.glass, paletteKey]);
 }
