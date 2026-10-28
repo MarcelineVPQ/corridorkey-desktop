@@ -55,7 +55,7 @@ import {
   type TrtState,
 } from "../../src/shared/types";
 import { NOT_WHILE_BUSY } from "../../src/shared/texts";
-import { restartRefusal, type BusyState } from "./busy";
+import { QUIT_ANYWAY, quitQuestion, restartRefusal, runningWork, type BusyState } from "./busy";
 import type { DesktopPalette } from "../../src/ui/theme/palette";
 import { IPC } from "./ipc";
 import { appMenu } from "./appMenu";
@@ -1276,6 +1276,10 @@ function createWindow(): void {
   mainWindow.on("minimize", shown(false));
   // the Console's elevation: only on Linux without a readable screen lock (elevation.ts LinuxLockWatch)
   mainWindow.on("blur", () => lockWatch?.blur());
+  // closing the window quits the app (window-all-closed): while work runs, it asks first (mayQuit)
+  mainWindow.on("close", (e) => {
+    if (!mayQuit()) e.preventDefault();
+  });
   mainWindow.on("closed", () => {
     mainWindow = null;
     setShown(false);
@@ -1350,12 +1354,38 @@ app.whenReady().then(() => {
   updater.start();
 });
 
+// Closing the window or quitting (Ctrl+Q, Cmd+Q, the red button) while the queue, the Console's corridorkey, a download
+// or a cache move runs asks first, Keep running the default (review 2026-10-28 #5: it cancelled them silently). The
+// restart into an update never gets here busy: it waits for the same work (restartRefusal).
+let quitConfirmed = false;
+let quitAsking = false;
+/** Whether the quit may go on now; else the question is shown (once at a time), and its Quit anyway quits. */
+function mayQuit(): boolean {
+  if (quitConfirmed) return true;
+  const work = runningWork(busyState());
+  if (!work.length || !mainWindow) return true;
+  if (!quitAsking) {
+    quitAsking = true;
+    // loop: NOT-WORTH — one question per quit asked [bounded: the user's answer]
+    void dialog.showMessageBox(mainWindow, { type: "warning", ...quitQuestion(work) }).then((r) => {
+      quitAsking = false;
+      if (r.response !== QUIT_ANYWAY) return;
+      quitConfirmed = true;
+      app.quit();
+    });
+  }
+  return false;
+}
+
 // The quit waits for a running job's started files to be deleted (bug hunt 2026-10-26 Q1; async now, partial.ts), at
 // most this long: an output share that stopped answering can't hold the quit (under updater.ts's 10 s exit after an update).
 const QUIT_CLEANUP_MS = 8_000;
 let quitCleaned = false;
 app.on("before-quit", (e) => {
   if (quitCleaned) return;
+  if (!mayQuit()) return e.preventDefault();
+  // decided: the window's close that follows doesn't ask again
+  quitConfirmed = true;
   quitCleaned = true;
   flushPersist();
   e.preventDefault();
