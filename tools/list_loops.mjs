@@ -21,7 +21,9 @@
 //   spin        a poll loop with no sleep / block in it    alloc      allocates inside the loop / chain
 //   nested      inside another loop / chain / timer        pixel      nested, and both run over w/h/rows/pixels
 //   main-blocking  blocks the Electron main process
-// A row flagged no-timeout, retry or spin must say what bounds it: `[bounded: ...]` in its reason.
+// A row flagged no-timeout, retry or spin must say what bounds it: `[bounded: ...]` in its reason. A bound that names
+// a constant (`[bounded: FEED_TIMEOUT_MS]`) fails the gate once no listed file has that name outside the verdicts
+// (renamed or removed: the bound no longer says what ends the wait).
 //
 // Rust (engine-rs/crates, .rs) needs a verdict only where one carries information (senior review 2026-10,
 // finding 16): a wait, thread, timer (sleep) or blocking call; a plain `while` / `loop` statement (it can spin or
@@ -302,8 +304,25 @@ export function listAll(root = ".") {
   return listFiles(root).flatMap((f) => scan(readFileSync(join(root, f), "utf8"), f));
 }
 
-/** Gate problems: required rows without a verdict, or flagged ones that don't say what bounds them. */
-export function problems(rows) {
+/** The listed files' text without the verdict lines: where a bound's constant must still be. */
+export function codeText(root = ".") {
+  // loop: NOT-WORTH — ~100 files, once per gate run
+  return listFiles(root)
+    .map((f) =>
+      readFileSync(join(root, f), "utf8")
+        .split("\n")
+        // loop: NOT-WORTH — one file's lines, once per gate run
+        .filter((l) => !/\bloop: /.test(l))
+        .join("\n"),
+    )
+    .join("\n");
+}
+
+/**
+ * Gate problems: required rows without a verdict, flagged ones that don't say what bounds them, and (given `code`,
+ * codeText()) bounds naming a constant that `code` doesn't have.
+ */
+export function problems(rows, code) {
   const out = [];
   // loop: NOT-WORTH — once per gate run over the rows (its "retry" is the flag's name) [bounded: the rows]
   for (const r of rows) {
@@ -311,6 +330,12 @@ export function problems(rows) {
     // loop: NOT-WORTH — three flags per row
     else if (r.verdict && r.flags.some((f) => ["no-timeout", "retry", "spin"].includes(f)) && !/\[bounded: [^\]]+\]/.test(r.reason))
       out.push(`${r.file}:${r.line}: ${r.flags.join(",")} needs [bounded: what ends it] in its reason: ${r.head}`);
+    else if (code !== undefined) {
+      const bound = /\[bounded: ([^\]]+)\]/.exec(r.reason)?.[1] ?? "";
+      // loop: NOT-WORTH — a bound's few names
+      const gone = [...bound.matchAll(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g)].map((m) => m[0]).filter((c) => !new RegExp(`\\b${c}\\b`).test(code));
+      if (gone.length) out.push(`${r.file}:${r.line}: its bound names ${gone.join(", ")}, which no listed file has (renamed or removed?): ${r.head}`);
+    }
   }
   return out;
 }
@@ -365,7 +390,7 @@ export function markdown(rows) {
 if (process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname)) {
   const rows = listAll();
   if (process.argv.includes("--check")) {
-    const bad = problems(rows);
+    const bad = problems(rows, codeText());
     if (bad.length) {
       console.log(`Loop gate: ${bad.length} row(s) without a valid verdict:`);
       // loop: NOT-WORTH — the gate's problems

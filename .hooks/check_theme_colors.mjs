@@ -4,7 +4,8 @@
 // Every color in app CSS and components comes from the theme tokens in
 // src/styles/tokens.css (--bg-*, --text-*, --border-*, --accent, --status-*),
 // so light/dark and any later theme restyle everything. This blocks a
-// literal color (#hex, rgb()/rgba(), named) anywhere except:
+// literal color (#hex; rgb()/rgba(), hsl()/hsla(), hwb(), lab(), lch(), oklab(), oklch(), color(); a named one)
+// anywhere except:
 //   - a token definition (a line that sets a --custom-property);
 //   - a neutral shadow: pure black with alpha in a box-/text-shadow or filter;
 //   - a line marked `theme-exempt: <reason>`; listed by `--list`;
@@ -23,7 +24,8 @@ const TOKEN_SOURCES = new Map([
   ["src/ui/theme/palette.ts", "builds the Desktop theme's tokens from the desktop's colors"],
   ["src/ui/glass/liquidGlass.ts", "the glass filter's displacement map (channel values, not colors)"],
 ]);
-const COLOR = /#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(|(?<![\w-])(white|black|red|green|blue|orange|yellow|purple|gray|grey)(?![\w-])/;
+const COLOR =
+  /#[0-9a-fA-F]{3,8}\b|\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(|(?<![\w-])(white|black|red|green|blue|orange|yellow|purple|gray|grey|pink|brown|cyan|magenta|teal|navy|silver|gold|lime|maroon|olive|aqua|fuchsia|indigo|violet)(?![\w-])/;
 const SHADOW_BLACK = /\brgba?\(\s*0[ ,]+0[ ,]+0\s*(\/|,)/g;
 
 const files = [];
@@ -88,7 +90,9 @@ for (const file of files) {
     // loop: NOT-WORTH — one file's lines, once per gate run
     source.split("\n").forEach((line, i) => {
       const code = line.replace(/\/\/.*$/, "");
-      if (!/(style=|color|background|fill|stroke|Color|#[0-9a-fA-F]{6}")/.test(code)) return;
+      // the lines that can carry a color: a style, a color / background / fill / stroke / border / outline / shadow
+      // property, or any #hex (3 to 8 digits)
+      if (!/(style=|color|background|fill|stroke|border|outline|shadow|Color|Shadow|#[0-9a-fA-F]{3,8}\b)/.test(code)) return;
       if (/^\s*(import|export type|\*)/.test(code)) return;
       check(file, i + 1, code, line);
     });

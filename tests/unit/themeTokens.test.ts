@@ -43,4 +43,22 @@ describe("the theme gate's tokens", () => {
     expect(r.stdout).toBe("");
     expect(r.status).toBe(0);
   });
+
+  it("catches the other color forms and a short #hex in a component (whole-code review 2026-10-27)", () => {
+    const base = { "src/styles/tokens.css": ":root {\n  --accent: #00b140;\n}\n", "src/styles/app.css": ".b {\n  color: var(--accent);\n}\n" };
+    const literals = [
+      ["src/styles/x.css", ".x {\n  color: oklch(70% 0.1 150);\n}\n"],
+      ["src/styles/x.css", ".x {\n  background: hwb(120 10% 20%);\n}\n"],
+      ["src/styles/x.css", ".x {\n  border-color: color(display-p3 0 1 0);\n}\n"],
+      ["src/styles/x.css", ".x {\n  outline: 1px solid teal;\n}\n"],
+      ["src/ui/X.tsx", 'export const s = { border: "1px solid #333" };\n'],
+      ["src/ui/X.tsx", 'export const s = { boxShadow: "0 0 4px lab(50% 40 59)" };\n'],
+    ];
+    // loop: NOT-WORTH — six fixtures
+    for (const [path, text] of literals) {
+      const r = run({ ...base, [path]: text });
+      expect(r.status, text).toBe(1);
+      expect(r.stdout).toContain("literal color");
+    }
+  });
 });

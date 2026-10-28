@@ -19,5 +19,6 @@ export function requiresVerdict(r: Pick<Row, "kind" | "flags" | "head">, lang: s
 export function scan(text: string, file: string): Row[];
 export function listFiles(root?: string): string[];
 export function listAll(root?: string): Row[];
-export function problems(rows: Row[]): string[];
+export function codeText(root?: string): string;
+export function problems(rows: Row[], code?: string): string[];
 export function markdown(rows: Row[]): string;

@@ -51,6 +51,15 @@ describe("loop pass lister", () => {
     expect(timed[0].flags).not.toContain("no-timeout");
   });
 
+  it("fails a bound that names a constant the code no longer has (whole-code review 2026-10-27: any text passed)", () => {
+    const rows = scan("// loop: SERIAL-REQUIRED — one read [bounded: FEED_TIMEOUT_MS]\nconst r = await fetch(u);", "tools/x.mjs");
+    expect(rows).toHaveLength(1);
+    expect(problems(rows, "const FEED_TIMEOUT_MS = 30_000;")).toEqual([]);
+    expect(problems(rows, "const API_TIMEOUT_MS = 30_000;")).toEqual([expect.stringContaining("names FEED_TIMEOUT_MS")]);
+    // the verdict's own mention isn't the constant (codeText leaves the verdict lines out)
+    expect(problems(rows, "")).toHaveLength(1);
+  });
+
   it("exempts plain Rust loops and chains, not waits, pixel loops or while", () => {
     const rs = "engine-rs/crates/ck-core/src/x.rs";
     const exempt = scan(["fn f(v: &[u8]) -> bool {", "    let a = v.iter().any(|&b| b == 0);", "    for b in v {", "        let _ = b;", "    }", "    a", "}"].join("\n"), rs);
