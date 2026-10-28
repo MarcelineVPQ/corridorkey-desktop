@@ -35,6 +35,13 @@ impl Backend for Fake {
                 self.half_made = true;
                 panic!("boom")
             }
+            // a job long enough that the reader thread has queued every later line before it ends (the tests that cancel
+            // a waiting job: an instant job let the next run start before the cancel was read, Windows CI 2026-10-28)
+            "/slow.mp4" => {
+                // loop: SERIAL-REQUIRED — holds the job while the reader queues the rest [bounded: 300 ms]
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                Ok(JobResult { outputs: vec![], settings_file: "/o/a_settings.txt".into() })
+            }
             _ => {
                 sink.send(json!({"type": "progress", "stage": "probe"}));
                 sink.send(json!({"type": "clip", "width": 320, "height": 200, "fps": 24.0, "frames": 2}));
@@ -347,7 +354,7 @@ fn cancel_removes_a_waiting_job() {
 #[test]
 fn cancel_sent_after_the_run_line_removes_the_waiting_job() {
     // the app (or any client) queued j2 behind j1, then cancelled it while j1 ran
-    let (r, fake) = talk(&[run("j1", "/a.mp4"), run("j2", "/a.mp4"), json!({"cmd": "cancel", "id": "j2"}), run("j3", "/a.mp4")], &[]);
+    let (r, fake) = talk(&[run("j1", "/slow.mp4"), run("j2", "/a.mp4"), json!({"cmd": "cancel", "id": "j2"}), run("j3", "/a.mp4")], &[]);
     assert_eq!(fake.ran, vec!["j1", "j3"]);
     // loop: NOT-WORTH — a test's few replies
     let j2: Vec<&Value> = r.iter().filter(|m| m["id"] == "j2").collect();
@@ -358,7 +365,7 @@ fn cancel_sent_after_the_run_line_removes_the_waiting_job() {
 #[test]
 fn a_cancel_that_removed_a_waiting_job_doesnt_cancel_a_later_run_with_its_id() {
     // final review 2026-10-28 N7: the cancel line stayed queued, landed in pending_cancel and cancelled the retry
-    let (r, fake) = talk(&[run("j1", "/a.mp4"), run("j2", "/a.mp4"), json!({"cmd": "cancel", "id": "j2"}), run("j2", "/a.mp4")], &[]);
+    let (r, fake) = talk(&[run("j1", "/slow.mp4"), run("j2", "/a.mp4"), json!({"cmd": "cancel", "id": "j2"}), run("j2", "/a.mp4")], &[]);
     assert_eq!(fake.ran, vec!["j1", "j2"]);
     // loop: NOT-WORTH — a test's few replies
     let j2: Vec<&str> = r.iter().filter(|m| m["id"] == "j2" && (m["type"] == "error" || m["type"] == "result")).map(|m| m["type"].as_str().unwrap()).collect();
@@ -368,7 +375,7 @@ fn a_cancel_that_removed_a_waiting_job_doesnt_cancel_a_later_run_with_its_id() {
 #[test]
 fn a_cancel_after_a_queued_retry_cancels_the_retry_not_the_run_before_it() {
     // engine re-review 2026-10-28 #4: with `run j2, run j2, cancel j2` queued, the cancel took the first run
-    let (r, fake) = talk(&[run("j1", "/a.mp4"), run("j2", "/a.mp4"), run("j2", "/a.mp4"), json!({"cmd": "cancel", "id": "j2"})], &[]);
+    let (r, fake) = talk(&[run("j1", "/slow.mp4"), run("j2", "/a.mp4"), run("j2", "/a.mp4"), json!({"cmd": "cancel", "id": "j2"})], &[]);
     assert_eq!(fake.ran, vec!["j1", "j2"]);
     // loop: NOT-WORTH — a test's few replies
     let j2: Vec<&str> = r.iter().filter(|m| m["id"] == "j2" && (m["type"] == "error" || m["type"] == "result")).map(|m| m["type"].as_str().unwrap()).collect();
