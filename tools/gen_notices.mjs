@@ -188,10 +188,10 @@ const WHEEL_LICENCES = [
     "Microsoft proprietary licence (PyPI: Proprietary): Microsoft's redistributable Visual C++ runtime, [its licence terms](https://visualstudio.microsoft.com/license-terms/vs2022-cruntime/)",
   ],
 ];
-// what each model set is for, by its constant in install.ts (macOS keeps 2.0.0-onnx.4 until onnx.5's Core ML set exists)
+// what each model set is for, by its constant in install.ts
 const SET_KINDS = {
-  MODEL_SET: "Linux, Windows",
-  MAC_MODEL_SET: "macOS",
+  MODEL_SET: "Linux, Windows, macOS",
+  OLD_MODEL_SET: "Linux: TensorRT copies its C-RADIO weights from an installed copy",
   COREML_SET: "macOS: Core ML",
   TRT_MODEL_SET: "Linux: the opt-in TensorRT jobs",
 };

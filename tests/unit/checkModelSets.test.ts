@@ -14,11 +14,11 @@ const LICENCES = [
 describe("the model-set gate (online at release; these checks are offline)", () => {
   it("reads this repository's pinned sets and what each derives from", () => {
     const sets = pinnedSets(readFileSync(join(APP, "electron/main/install.ts"), "utf8"));
-    // macOS (and its Core ML set) stays on onnx.4 until onnx.5's Core ML set is built
+    // onnx.4 stays pinned: an installed copy gives the TensorRT set its C-RADIO weights
     expect(sets.map((s) => [s.set, s.base])).toEqual([
       ["2.0.0-onnx.5", null],
       ["2.0.0-onnx.4", null],
-      ["2.0.0-onnx.4-coreml", "2.0.0-onnx.4"],
+      ["2.0.0-onnx.5-coreml", "2.0.0-onnx.5"],
       ["2.0.0-onnx.5-trt", "2.0.0-onnx.5"],
     ]);
     expect(sets.every((s) => s.files.length > 0)).toBe(true);

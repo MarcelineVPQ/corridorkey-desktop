@@ -17,9 +17,9 @@ const wheel = (file: string) => `  wheels: [{ file: "${file}", url: "", size: 1,
 const INSTALL = [
   'const MODEL_SET = "2.0.0-onnx.5";',
   "const model = inRelease(MODEL_SET);",
-  'const MAC_MODEL_SET = "2.0.0-onnx.4";',
-  "const macModel = inRelease(MAC_MODEL_SET);",
-  "const COREML_SET = `${MAC_MODEL_SET}-coreml`;",
+  'const OLD_MODEL_SET = "2.0.0-onnx.4";',
+  "const oldModel = inRelease(OLD_MODEL_SET);",
+  "const COREML_SET = `${MODEL_SET}-coreml`;",
   "const coremlModel = inRelease(COREML_SET);",
   "export const RUNTIME = {",
   wheel("onnxruntime_gpu-1.23.2-cp312-cp312-manylinux_2_27_x86_64.whl"),
@@ -40,9 +40,9 @@ const NOTICES = [
   "| onnxruntime | 1.23.2 | macOS | MIT |",
   "| onnxruntime-gpu | 1.23.2 | Linux, Windows | MIT |",
   "| tensorrt-cu13-libs | 10.16.1.11 | Linux, opt-in TensorRT | NVIDIA |",
-  "- `2.0.0-onnx.5` (Linux, Windows)",
-  "- `2.0.0-onnx.4` (macOS)",
-  "- `2.0.0-onnx.4-coreml` (macOS: Core ML)",
+  "- `2.0.0-onnx.5` (Linux, Windows, macOS)",
+  "- `2.0.0-onnx.4` (Linux: TensorRT copies its C-RADIO weights from an installed copy)",
+  "- `2.0.0-onnx.5-coreml` (macOS: Core ML)",
   "- `2.0.0-onnx.5-trt` (Linux: the opt-in TensorRT jobs)",
 ].join("\n");
 
@@ -72,10 +72,10 @@ describe("notices gate (first-run downloads)", () => {
   });
 
   it("fails on a model set the notices don't name, the derived Core ML one and the Mac's own set too", () => {
-    const r = runGate(INSTALL, NOTICES.replace("- `2.0.0-onnx.4-coreml` (macOS: Core ML)\n", ""));
+    const r = runGate(INSTALL, NOTICES.replace("- `2.0.0-onnx.5-coreml` (macOS: Core ML)\n", ""));
     expect(r.code).toBe(1);
-    expect(r.out).toContain("model set 2.0.0-onnx.4-coreml");
-    expect(runGate(INSTALL, NOTICES.replace("- `2.0.0-onnx.4` (macOS)\n", "")).out).toContain("model set 2.0.0-onnx.4\n");
+    expect(r.out).toContain("model set 2.0.0-onnx.5-coreml");
+    expect(runGate(INSTALL, NOTICES.replace("- `2.0.0-onnx.4` (Linux: TensorRT copies its C-RADIO weights from an installed copy)\n", "")).out).toContain("model set 2.0.0-onnx.4\n");
     expect(runGate(INSTALL, NOTICES.replace("`2.0.0-onnx.5-trt`", "2.0.0-onnx.5-trt")).code).toBe(1);
   });
 

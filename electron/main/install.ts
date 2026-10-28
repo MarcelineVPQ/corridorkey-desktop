@@ -242,7 +242,7 @@ const inRelease =
   (set: string) =>
   (file: string, size: number, sha256: string): Download => ({ file, url: `${release(set)}/${file}`, size, sha256 });
 const model = inRelease(MODEL_SET);
-/** Linux and Windows: the fp16 set (BACKLOG row 165). */
+/** The fp16 set (BACKLOG row 165), on every system. */
 export const MODELS_CUDA = {
   name: MODEL_SET,
   files: [
@@ -261,57 +261,55 @@ export const MODELS_CUDA = {
   ],
 };
 
-// macOS stays on 2.0.0-onnx.4 until onnx.5's Core ML set is converted on the Mac: the Core ML files below read their
-// weights from this set's own .onnx.data files (C-RADIO's with fp32 weights, stage 1's of the onnx.4 graph), which
-// onnx.5's files of the same names are not
-const MAC_MODEL_SET = "2.0.0-onnx.4";
-const macModel = inRelease(MAC_MODEL_SET);
-/** macOS: the set the Core ML set is built from. */
-export const MODELS_MAC = {
-  name: MAC_MODEL_SET,
+// 2.0.0-onnx.4, dev.1's set: not downloaded any more; an installed copy gives the TensorRT set its C-RADIO weights
+// (TRT_CATALOG.older below)
+const OLD_MODEL_SET = "2.0.0-onnx.4";
+const oldModel = inRelease(OLD_MODEL_SET);
+/** 2.0.0-onnx.4's files, to recognise an installed copy. */
+export const MODELS_ONNX4 = {
+  name: OLD_MODEL_SET,
   files: [
-    macModel("ck2-cradio-fp16.onnx", 789360, "25e8656dffc2c639f1557b092ea5d2738d7c4002b495195f93ba41a3610b0334"),
-    macModel("ck2-cradio-fp16.onnx.data", 1724414688, "8f76c92ddf779b70745fc985820e7e312f7eb07ec82b4e20119062798f952b9f"),
-    macModel("ck2-moge-fp16.onnx", 425920, "b035a6904fc72f91abae20f31de342cbb6bffc65ed75d33cc4d88d7008de8712"),
-    macModel("ck2-moge-fp16.onnx.data", 177747456, "fefb7ec179377603b5011202244c92176db42782d9281eef9f1ce2eee5294c45"),
-    macModel("ck2-rvm-fp16.onnx", 657354, "cfb8aa3c20ec5a63421cfe480d1792950adde598edcb12b33810827de871a809"),
-    macModel("ck2-rvm-fp16.onnx.data", 66827776, "988b0b97752df9c13c9e78ec7c844faecac35d7ae9eaede6a2c13609c79b9617"),
-    macModel("ck2-stage1-fp16.onnx", 2471932, "3c19272c263ec952bc16a02333c6fc3ee8acf71d75fd62fbebcc4e0280ccd10d"),
-    macModel("ck2-stage1-fp16.onnx.data", 924102400, "d354507432f0635409ea08ec2abdd10fb04539070ce8eac7b815f58ff5e32431"),
-    macModel("ck2-stage2-fp16.onnx", 1330091, "1c6a5ae09a752b738b9c75bee448b5ec4e82bd1b430192d72d167e5e5166bbfe"),
-    macModel("ck2-stage2-fp16.onnx.data", 403914240, "1e537c9b14bdf905d931338c5e2e8c83cfd03d5eb29bfeebdd73de51b3236530"),
-    macModel("manifest.json", 16779, "56d63e810ed798bbce5060bda555667abafbbdd4b6822ebb77ba94e509e7e7e9"),
-    macModel("models.json", 395, "01f0d8e592d10a9459f72ce23ebfaded0b56168b6d838799a0dad8172fe9ebff"),
+    oldModel("ck2-cradio-fp16.onnx", 789360, "25e8656dffc2c639f1557b092ea5d2738d7c4002b495195f93ba41a3610b0334"),
+    oldModel("ck2-cradio-fp16.onnx.data", 1724414688, "8f76c92ddf779b70745fc985820e7e312f7eb07ec82b4e20119062798f952b9f"),
+    oldModel("ck2-moge-fp16.onnx", 425920, "b035a6904fc72f91abae20f31de342cbb6bffc65ed75d33cc4d88d7008de8712"),
+    oldModel("ck2-moge-fp16.onnx.data", 177747456, "fefb7ec179377603b5011202244c92176db42782d9281eef9f1ce2eee5294c45"),
+    oldModel("ck2-rvm-fp16.onnx", 657354, "cfb8aa3c20ec5a63421cfe480d1792950adde598edcb12b33810827de871a809"),
+    oldModel("ck2-rvm-fp16.onnx.data", 66827776, "988b0b97752df9c13c9e78ec7c844faecac35d7ae9eaede6a2c13609c79b9617"),
+    oldModel("ck2-stage1-fp16.onnx", 2471932, "3c19272c263ec952bc16a02333c6fc3ee8acf71d75fd62fbebcc4e0280ccd10d"),
+    oldModel("ck2-stage1-fp16.onnx.data", 924102400, "d354507432f0635409ea08ec2abdd10fb04539070ce8eac7b815f58ff5e32431"),
+    oldModel("ck2-stage2-fp16.onnx", 1330091, "1c6a5ae09a752b738b9c75bee448b5ec4e82bd1b430192d72d167e5e5166bbfe"),
+    oldModel("ck2-stage2-fp16.onnx.data", 403914240, "1e537c9b14bdf905d931338c5e2e8c83cfd03d5eb29bfeebdd73de51b3236530"),
+    oldModel("manifest.json", 16779, "56d63e810ed798bbce5060bda555667abafbbdd4b6822ebb77ba94e509e7e7e9"),
+    oldModel("models.json", 395, "01f0d8e592d10a9459f72ce23ebfaded0b56168b6d838799a0dad8172fe9ebff"),
   ],
 };
-/** The model set this system downloads. */
-export const modelsFor = (platform: NodeJS.Platform) => (platform === "darwin" ? MODELS_MAC : MODELS_CUDA);
-export const MODELS = modelsFor(PLATFORM);
+/** The model set every system downloads (macOS adds its Core ML set). */
+export const MODELS = MODELS_CUDA;
 
 // macOS: the Core ML set (BACKLOG rows 59, 60), fixed-shape copies of the five networks for ONNX Runtime's Core ML provider
 // (engine-rs/export/coreml), one file per network and frame size (1280×1080 and 1920×1080 clips, padded 1152×1280 and
 // 1152×1920), from release models-<set>-coreml. They keep their weights in the model set's own
 // .onnx.data files, so they go into the model set's folder (ONNX Runtime reads external weights only from the model's
 // own folder: a symlink fails); the engine finds them through coreml.json, which goes last.
-const COREML_SET = `${MAC_MODEL_SET}-coreml`;
+const COREML_SET = `${MODEL_SET}-coreml`;
 const coremlModel = inRelease(COREML_SET);
 export const COREML = {
   name: COREML_SET,
   files: [
-    coremlModel("ck2-cradio-fp16-coreml-1152x1280-t4.onnx", 289815741, "2c5a42844993c9c9bd9f97e3191ffc32f6bb45171ae25f039c7cf0987443fc39"),
+    coremlModel("ck2-cradio-fp16-coreml-1152x1280-t4.onnx", 289765413, "af243db4a174056b0f906a622e6c48853d8bc4bba8ec22b7f74caeb56da76b39"),
     coremlModel("ck2-moge-fp16-coreml-1152x1280-t4.onnx", 172035616, "e04b8594da157a56fe2b9c52e0e47077e2773d0e4f7a30bc60ed848d3dc76666"),
     coremlModel("ck2-rvm-fp16-coreml-1152x1280-t1.onnx", 66811967, "c0cedf0b9d11eff3ea156153b6df22834412946f38f0a2a2f5f1a3d9304b1d08"),
-    coremlModel("ck2-stage1-fp16-coreml-1152x1280-t4.onnx", 135921658, "c802c2b81198c4bc9715b7181f8bf2ce8e69da502b2a557546104853a27d6d8f"),
-    coremlModel("ck2-stage1-fp16-coreml-1152x1280-t8.onnx", 138242044, "0c247b6a4d8eba8513320d1cbcb791417d69110b11e895b06f1901112f280f1a"),
-    coremlModel("ck2-stage2-fp16-coreml-1152x1280-t1.onnx", 286986834, "a48a93e87b394a14d43039782f87b327e26cac01be62e7411aca93e8c0ea0e81"),
-    coremlModel("ck2-cradio-fp16-coreml-1152x1920-t4.onnx", 289815741, "9edbb4b1fbfe79094e407aeebad168cee1f984dab2b292d883c567f68191cea1"),
+    coremlModel("ck2-stage1-fp16-coreml-1152x1280-t4.onnx", 138992655, "a3b37d4342eaa8746bd2f47c841c47b4f95f2589d8448121a4393000980bf91b"),
+    coremlModel("ck2-stage1-fp16-coreml-1152x1280-t8.onnx", 144335891, "e4d0e2910f4684a2a82fbb9748d366104fa2e4b94f5cdf54dee23356a3e40d64"),
+    coremlModel("ck2-stage2-fp16-coreml-1152x1280-t1.onnx", 305375549, "06467b130bd997fa0e145c49bf4f2ad4c4200bb9d2639ac76ab721b7c885ad29"),
+    coremlModel("ck2-cradio-fp16-coreml-1152x1920-t4.onnx", 289765413, "e099acda2cb243e97f380a025f704552b8a5b226f4aeef43f915c4c8d7396870"),
     coremlModel("ck2-moge-fp16-coreml-1152x1920-t4.onnx", 172980576, "8ccdf7f6bcdd33bde510f93e809196b75735d338c12d74f31cfba671592b3d6f"),
     coremlModel("ck2-rvm-fp16-coreml-1152x1920-t1.onnx", 67088447, "76b39dea389e31dd4238cf9db8e186982ba1f008c37a91d8c172d2cfdace7d27"),
-    coremlModel("ck2-stage1-fp16-coreml-1152x1920-t4.onnx", 136515226, "9370a5288f6c7d42e3d306ee02f6800af8666679922133e2e2c5edf52ff808ce"),
-    coremlModel("ck2-stage1-fp16-coreml-1152x1920-t8.onnx", 138994332, "6dc3d12d5e03e0f9a16d4abde0cdce45404cd50482652bdc9f504d70d970e1fe"),
-    coremlModel("ck2-stage2-fp16-coreml-1152x1920-t1.onnx", 287504291, "017289db992cd93a15f09b88250599fcdc37a30acbb22566d57ba9221c6081bd"),
+    coremlModel("ck2-stage1-fp16-coreml-1152x1920-t4.onnx", 142469139, "4398803f02824e835f895876ce40d2d6ad3d74349c286efe4fe488cb13a77050"),
+    coremlModel("ck2-stage1-fp16-coreml-1152x1920-t8.onnx", 150920211, "0bad604eeaaa2426c7322fd4bb3aa8ea5c09bea0be7ff796a88f951acc00c547"),
+    coremlModel("ck2-stage2-fp16-coreml-1152x1920-t1.onnx", 317639229, "ae6bdc9c0afcfaa9029f7d30bea9ad7533c3e20f185bfe8de2b5d47d6807777e"),
     // last: the engine finds the set by it, and the install counts it as done once it is there
-    coremlModel("coreml.json", 851, "d0c889b760317ff8b0b3b9a96ccd04b698b791b9aeca0a131ad27e0fb5aa13c9"),
+    coremlModel("coreml.json", 851, "57a2383e5ce54f6b1f730c2aa6abbcdf33cba87e0b864ee86d5a37026e3d9f89"),
   ],
 };
 /** The Core ML set this system downloads with the models (macOS only). */
@@ -551,7 +549,7 @@ export interface TrtCatalog extends Catalog {
   older?: { name: string; files: Download[] }[];
 }
 // 2.0.0-onnx.4 (dev.1's set on Linux): its ck2-cradio-fp16.onnx.data is the TensorRT C-RADIO's weights, 1.72 GB
-const TRT_CATALOG: TrtCatalog = { ...CATALOG, libs: TENSORRT.libs, trtModels: TENSORRT.models, older: [MODELS_MAC] };
+const TRT_CATALOG: TrtCatalog = { ...CATALOG, libs: TENSORRT.libs, trtModels: TENSORRT.models, older: [MODELS_ONNX4] };
 
 /** Where the TensorRT parts go: into the installed runtime and model set. */
 export function trtPaths(data: string, c: Catalog = TRT_CATALOG) {

@@ -13,8 +13,7 @@ import {
   keepFromWheel,
   keepTensorrt,
   MODELS_CUDA,
-  MODELS_MAC,
-  modelsFor,
+  MODELS_ONNX4,
   removeTensorrt,
   RUNTIME,
   RUNTIME_MAC,
@@ -173,11 +172,11 @@ describe("first-run install", () => {
   // BACKLOG row 59: on a Mac the Core ML set belongs to the models; a set installed without it still needs it
   it("on macOS, needs the Core ML set until its coreml.json is in the model set's folder", () => {
     const has = (p: string[]) => (x: string) => p.includes(x);
-    const mac: Catalog = { runtime: RUNTIME_MAC, models: MODELS_MAC, coreml: COREML };
-    const set = `/d/models/${MODELS_MAC.name}`;
+    const mac: Catalog = { runtime: RUNTIME_MAC, models: MODELS_CUDA, coreml: COREML };
+    const set = `/d/models/${MODELS_CUDA.name}`;
     const cmBytes = COREML.files.reduce((n, f) => n + f.size, 0);
     expect(installNeeds("/d", has([`/d/runtime/${RUNTIME_MAC.name}`, set]), mac)).toEqual({ runtime: false, models: false, coreml: true, bytes: cmBytes });
-    expect(installNeeds("/d", has([`/d/runtime/${RUNTIME_MAC.name}`]), mac).bytes).toBe(MODELS_MAC.files.reduce((n, f) => n + f.size, 0) + cmBytes);
+    expect(installNeeds("/d", has([`/d/runtime/${RUNTIME_MAC.name}`]), mac).bytes).toBe(MODELS_CUDA.files.reduce((n, f) => n + f.size, 0) + cmBytes);
     expect(installNeeds("/d", has([`/d/runtime/${RUNTIME_MAC.name}`, set, `${set}/coreml.json`]), mac)).toEqual({ runtime: false, models: false, coreml: false, bytes: 0 });
   });
 });
@@ -557,7 +556,7 @@ describe("TensorRT catalogue and rules", () => {
     // C-RADIO's TensorRT weights are onnx.4's fp32 bytes: onnx.5's normal set stores fp16 ones, so a fresh install
     // downloads them (7.26 GB); one that still has onnx.4's folder copies them from it (5.53 GB, as with onnx.4)
     const cradio = TENSORRT.models.files.find((f) => f.file === "ck2-cradio-trt-fp16.onnx.data")!;
-    expect(MODELS_MAC.files.find((f) => f.file === "ck2-cradio-fp16.onnx.data")).toMatchObject({ size: cradio.size, sha256: cradio.sha256 });
+    expect(MODELS_ONNX4.files.find((f) => f.file === "ck2-cradio-fp16.onnx.data")).toMatchObject({ size: cradio.size, sha256: cradio.sha256 });
     // loop: NOT-WORTH — sixteen files against a dozen
     expect(TENSORRT.models.files.some((t) => MODELS_CUDA.files.some((f) => f.sha256 === t.sha256))).toBe(false);
     // loop: NOT-WORTH — sixteen sizes
@@ -594,10 +593,10 @@ describe("TensorRT catalogue and rules", () => {
   it("states each system's setup download as the sum of its pinned files", () => {
     // loop: NOT-WORTH — a dozen sizes per system
     const sum = (d: { size: number }[]) => d.reduce((n, x) => n + x.size, 0);
-    // macOS has its own model set and adds the Core ML set
+    // macOS adds the Core ML set
     const gb = (r: { wheels: { size: number }[] }, models: { size: number }[]) => ((sum(r.wheels) + sum(models)) / 1e9).toFixed(2);
-    const text = `${gb(RUNTIME, MODELS_CUDA.files)} GB download on Linux, ${gb(RUNTIME_WIN, MODELS_CUDA.files)} GB on Windows, ${gb(RUNTIME_MAC, [...MODELS_MAC.files, ...COREML.files])} GB on macOS, once`;
-    expect(text).toBe("4.03 GB download on Linux, 3.81 GB on Windows, 5.51 GB on macOS, once");
+    const text = `${gb(RUNTIME, MODELS_CUDA.files)} GB download on Linux, ${gb(RUNTIME_WIN, MODELS_CUDA.files)} GB on Windows, ${gb(RUNTIME_MAC, [...MODELS_CUDA.files, ...COREML.files])} GB on macOS, once`;
+    expect(text).toBe("4.03 GB download on Linux, 3.81 GB on Windows, 4.76 GB on macOS, once");
     // loop: NOT-WORTH — two documents
     for (const doc of ["../../README.md", "../../docs/GUIDE.md"]) expect(readFileSync(new URL(doc, import.meta.url), "utf8")).toContain(text);
   });
@@ -645,11 +644,10 @@ describe("TensorRT catalogue and rules", () => {
 });
 
 describe("Core ML catalogue", () => {
-  it("pins the Core ML set's release by URL, size and SHA-256, built from the Mac's model set, macOS only", () => {
-    // the Mac stays on onnx.4 (its Core ML files read onnx.4's weights) until onnx.5's Core ML set exists
-    expect(COREML.name).toBe(`${MODELS_MAC.name}-coreml`);
-    expect([modelsFor("darwin"), modelsFor("linux"), modelsFor("win32")]).toEqual([MODELS_MAC, MODELS_CUDA, MODELS_CUDA]);
-    expect([MODELS_CUDA.name, MODELS_MAC.name]).toEqual(["2.0.0-onnx.5", "2.0.0-onnx.4"]);
+  it("pins the Core ML set's release by URL, size and SHA-256, built from the model set, macOS only", () => {
+    // the Core ML files read their weights from the model set's own .onnx.data files
+    expect(COREML.name).toBe(`${MODELS_CUDA.name}-coreml`);
+    expect([MODELS_CUDA.name, MODELS_ONNX4.name]).toEqual(["2.0.0-onnx.5", "2.0.0-onnx.4"]);
     for (const f of COREML.files) {
       expect(f.url).toBe(`https://github.com/MarcelineVPQ/corridorkey-desktop/releases/download/models-${COREML.name}/${f.file}`);
       expect(f.sha256).toMatch(/^[0-9a-f]{64}$/);

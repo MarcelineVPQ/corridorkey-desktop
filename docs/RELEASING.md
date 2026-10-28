@@ -173,16 +173,16 @@ fails unless codesign, stapler and Gatekeeper accept the app as a notarized Deve
 are in `~/.config/corridorkey-release/apple/` and Marcy's vault; the certificate is renewed before it expires
 (a new .p12 into `MAC_CSC_LINK`). Without the variables (a local `npm run dist:mac`) the image is unsigned.
 
-The Core ML model set the Mac setup downloads (`models-2.0.0-onnx.4-coreml`, docs/ONNX_EXPORT.md "Core ML set") is
-published once, before the first Mac build that pins it: `tools/upload_model_set.sh DIR 2.0.0-onnx.4-coreml` (the
-same script publishes the TensorRT set, `2.0.0-onnx.4-trt`), with Marcy's OK.
+The Core ML model set the Mac setup downloads (`models-2.0.0-onnx.5-coreml` from dev.2, docs/ONNX_EXPORT.md "Core ML set") is
+published once, before the first Mac build that pins it: `tools/upload_model_set.sh DIR 2.0.0-onnx.5-coreml` (the
+same script publishes the TensorRT set, `2.0.0-onnx.5-trt`), with Marcy's OK.
 
-From 1.0.0-dev.2 Linux and Windows pin `2.0.0-onnx.5` (install.ts `MODEL_SET`), and TensorRT `2.0.0-onnx.5-trt`,
-while macOS stays on `2.0.0-onnx.4` and its Core ML set (`MAC_MODEL_SET`). `models-2.0.0-onnx.5` (at least the files
+From 1.0.0-dev.2 every system pins `2.0.0-onnx.5` (install.ts `MODEL_SET`), TensorRT `2.0.0-onnx.5-trt` and the Mac
+`2.0.0-onnx.5-coreml`. `models-2.0.0-onnx.5` (at least the files
 install.ts pins, and LICENSE, NOTICE and ATTRIBUTION.md, which the model-set gate asks of a base set) is published before the
 build that pins it; `upload_model_set.sh` publishes only `-trt` and `-coreml` sets, so the base set goes up by hand
 (`gh release create models-2.0.0-onnx.5 --latest=false`), then `tools/upload_model_set.sh DIR 2.0.0-onnx.5-trt`
-(it takes the licence files from the base release), and `tools/check_model_sets.mjs` checks both.
+(it takes the licence files from the base release), and the same for `2.0.0-onnx.5-coreml`; `tools/check_model_sets.mjs` checks them all.
 
 Development builds ship one feature at a time on the Development channel; a stable release goes out when its
 planned set is done and Marcy has done her QC (the DS5 rhythm).

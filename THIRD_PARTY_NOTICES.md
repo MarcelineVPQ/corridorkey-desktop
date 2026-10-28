@@ -287,9 +287,9 @@ publishers' licences; the wheels' own licence files are kept next to the librari
 - The model sets: CorridorKey 2.0's five networks converted to ONNX from Corridor Digital's checkpoint, downloaded
   from this app's GitHub releases. CorridorKey 2.0 is © Corridor Digital, under the CorridorKey licence
   (https://github.com/nikopueringer/CorridorKey2.0).
-  - `2.0.0-onnx.5` (Linux, Windows): https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.5
-  - `2.0.0-onnx.4` (macOS): https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.4
-  - `2.0.0-onnx.4-coreml` (macOS: Core ML): https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.4-coreml
+  - `2.0.0-onnx.5` (Linux, Windows, macOS): https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.5
+  - `2.0.0-onnx.4` (Linux: TensorRT copies its C-RADIO weights from an installed copy): https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.4
+  - `2.0.0-onnx.5-coreml` (macOS: Core ML): https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.5-coreml
   - `2.0.0-onnx.5-trt` (Linux: the opt-in TensorRT jobs): https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.5-trt
 - **Modified:** every network is converted from the original PyTorch checkpoint to ONNX, with exact graph rewrites
   for speed and portrait input (listed in the set's manifest.json); the fp16 files follow CorridorKey 2.0's own
