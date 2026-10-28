@@ -163,8 +163,8 @@ sign() { for f in "$@"; do touch "$f.sig"; done; }`;
   });
 
   it("refuses a version already released unless --feeds, and --feeds unless published (N13)", () => {
-    const refuse = lines.filter((l) => /^\[ "\$state" (=|!=) (false|none) \]/.test(l));
-    expect(refuse).toHaveLength(3);
+    const refuse = lines.filter((l) => /^\[ "\$state" (=|!=) (false|none) \]|^\[ "\$mode" = --publish \]/.test(l));
+    expect(refuse).toHaveLength(4);
     expect(at(/^state="/)).toBeLessThan(at(/^\[ "\$state" = false \]/));
     expect(at(/^\[ "\$state" = none \]/)).toBeLessThan(at(/npm run -s check$/));
     // loop: NOT-WORTH — three lines in a throwaway repository, 10 s deadline
@@ -187,6 +187,10 @@ sign() { for f in "$@"; do touch "$f.sig"; done; }`;
     expect(run("none", "", true).status).toBe(1);
     expect(run("none").stdout).toContain("passed");
     expect(run("true").stdout).toContain("passed");
+    // --publish: only a draft (release re-review 2026-10-28 #2)
+    expect(run("true", "--publish").stdout).toContain("passed");
+    expect(run("none", "--publish").stderr).toContain("no draft to publish");
+    expect(run("false", "--publish").status).toBe(1);
   });
 
   it("moves a leftover draft to HEAD with the new notes before uploading (S5)", () => {
@@ -217,7 +221,7 @@ sign() { for f in "$@"; do touch "$f.sig"; done; }`;
 
   it("runs the docs-touch gate over the commits since the last v* tag before building (S6)", () => {
     const docs = at(/^node tools\/check_docs_touch\.mjs /);
-    expect(docs).toBeGreaterThan(at(/^if \[ "\$state" != false \]/));
+    expect(docs).toBeGreaterThan(at(/^elif \[ "\$state" != false \]/));
     expect(docs).toBeLessThan(at(/npm run -s dist:linux/));
     // the line run with a stand-in node in a repository whose newest tag isn't a release tag
     const repo = mkdtempSync(join(scratch, "docs-"));
@@ -236,7 +240,7 @@ sign() { for f in "$@"; do touch "$f.sig"; done; }`;
     const build = at(/npm run -s dist:linux/);
     expect(nm).toBeGreaterThan(at(/^if \[ "\$mode" = --mac \]; then$/));
     expect(nm).toBeLessThan(build);
-    expect(win).toBeGreaterThan(at(/^if \[ "\$state" != false \]/));
+    expect(win).toBeGreaterThan(at(/^elif \[ "\$state" != false \]/));
     expect(win).toBeLessThan(at(/npm run -s check:engine$/));
     // the gate's lines with a stand-in gh, in a throwaway repository
     const block = lines.slice(win - 1, win + 4).join("\n");
@@ -265,10 +269,13 @@ sign() { for f in "$@"; do touch "$f.sig"; done; }`;
   });
 
   it("refuses to publish when GitHub's digest of an upload isn't the signed SHA256SUMS' (#11)", () => {
-    const view = at(/gh release view "v\$v" --json assets/);
-    expect(view).toBeGreaterThan(at(/gh release upload "v\$v" "release\/\$file"/));
-    expect(view).toBeLessThan(at(/gh release edit "v\$v" --draft=false/));
-    const block = lines.slice(view, view + 2).join("\n");
+    const fn = at(/^digests_match\(\) \{$/);
+    const block = lines.slice(fn, lines.indexOf("}", fn) + 1).join("\n") + "\ndigests_match";
+    // checked after the upload, and again just before --publish publishes
+    const calls = lines.flatMap((l, i) => (l === "digests_match" ? [i] : []));
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toBeLessThan(at(/gh release edit "v\$v" --draft=false/));
+    expect(calls[1]).toBeGreaterThan(at(/gh release upload "v\$v" "release\/\$file"/));
     const dir = mkdtempSync(join(scratch, "digest-"));
     // loop: NOT-WORTH — two lines with a stand-in gh, 10 s deadline
     const run = (served: string) => {
@@ -280,5 +287,61 @@ sign() { for f in "$@"; do touch "$f.sig"; done; }`;
     expect(bad.status).toBe(1);
     expect(bad.stderr).toContain("bbb  B-Setup.exe");
     expect(run("none  A.AppImage\\nnone  B-Setup.exe\\n").status).toBe(1);
+  });
+
+  // release re-review 2026-10-28 #2: the Windows installer starts in the VM before anything is public
+  it("leaves the release a draft after uploading; only --publish, on this commit's draft, publishes it", () => {
+    const publish = at(/gh release edit "v\$v" --draft=false/);
+    const branch = at(/^if \[ "\$mode" = --publish \]; then$/);
+    const build = at(/^elif \[ "\$state" != false \]/);
+    // the only --draft=false is in the --publish branch, before the build branch
+    expect(script.match(/--draft=false/g)).toHaveLength(1);
+    expect(publish).toBeGreaterThan(branch);
+    expect(publish).toBeLessThan(build);
+    // the build branch ends with the draft left and exit 0, after the upload
+    const upload = at(/gh release upload "v\$v" "release\/\$file"/);
+    const stop = lines.findIndex((l, i) => i > upload && l === "exit 0");
+    expect(stop).toBeGreaterThan(upload);
+    expect(stop).toBeLessThan(lines.findIndex((l, i) => i > build && l === "else"));
+    expect(lines.slice(upload, stop).join("\n")).toContain("tools/release.sh --publish");
+    // --publish refuses a draft on another commit (the first run's, before a new commit)
+    const block = lines.slice(branch + 3, branch + 5).join("\n");
+    const repo = mkdtempSync(join(scratch, "publish-"));
+    // loop: NOT-WORTH — a throwaway repository with one commit, 10 s deadline
+    spawnSync("bash", ["-c", "git init -q && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m x"], { cwd: repo, timeout: 10_000 });
+    const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8", timeout: 10_000 }).stdout.trim();
+    // loop: NOT-WORTH — two lines with a stand-in gh, 10 s deadline
+    const run = (target: string) => spawnSync("bash", ["-c", `set -euo pipefail; v=1; gh() { echo ${target}; }\n${block}\necho passed`], { cwd: repo, encoding: "utf8", timeout: 10_000 });
+    expect(run(head).stdout).toContain("passed");
+    expect(run("0000000").stderr).toContain("isn't on this commit");
+  });
+
+  // release re-review 2026-10-28 #3: the packaged --ck-headless start had never run
+  it("runs the packaged corridorkey run on a two-line script, isolated, and needs both lines and exit 0", () => {
+    const start = at(/^printf 'version\\necho ck-run-check\\n' > "\$smoke\/check\.ckcmd"$/);
+    const end = lines.findIndex((l, i) => i > start && l === "fi");
+    expect(start).toBeGreaterThan(at(/node tools\/drive\.mjs --state "\$smoke"/));
+    expect(end).toBeLessThan(at(/^git push origin main$/));
+    const block = lines.slice(start, end + 1).join("\n");
+    expect(block).toContain('env -i HOME="$smoke/home"');
+    // loop: NOT-WORTH — one run of the block with a stand-in corridorkey, 10 s deadline
+    const run = (out: string, status: number) => {
+      const dir = mkdtempSync(join(scratch, "run-"));
+      const bin = join(dir, "release/linux-unpacked/resources/engine");
+      spawnSync("bash", ["-c", `mkdir -p "${bin}" "${dir}/smoke/home"`], { timeout: 10_000 });
+      writeFileSync(join(bin, "corridorkey"), `#!/bin/sh\n[ "$1" = run ] && [ -f "$2" ] && [ -z "$DISPLAY$WAYLAND_DISPLAY" ] || exit 3\nprintf '${out}'\nexit ${status}\n`);
+      spawnSync("chmod", ["+x", join(bin, "corridorkey")], { timeout: 10_000 });
+      return spawnSync("bash", ["-c", `set -euo pipefail; v=1.0.0-dev.2; smoke="$PWD/smoke"; CAP=(); USER=t\n${block}\necho passed`], {
+        cwd: dir,
+        encoding: "utf8",
+        timeout: 10_000,
+        env: { ...process.env, DISPLAY: ":0" },
+      });
+    };
+    const both = "CorridorKey 1.0.0-dev.2 (the app and its corridorkey command line: one version)\\nck-run-check\\n";
+    expect(run(both, 0).stdout).toContain("passed");
+    expect(run(both, 1).stderr).toContain("didn't run its script");
+    expect(run("CorridorKey 1.0.0-dev.2 (x)\\n", 0).status).toBe(1);
+    expect(run("CorridorKey 1.0.0-dev.1 (x)\\nck-run-check\\n", 0).status).toBe(1);
   });
 });

@@ -107,21 +107,27 @@ spent 29 minutes waiting on a package mirror).
    `src/shared/console/cliSpec.json` from the engine they built: what ships must be the commit that gets tagged);
    starts the packaged Linux build (`release/linux-unpacked`) in an isolated copy (`tools/isolated.sh --packaged`:
    own HOME, private D-Bus, headless KWin, never the desktop) and stops unless `tools/drive.mjs` finds its first page
-   rendered (the folder, with `app.log` and a screenshot, is kept on a failure);
+   rendered, then runs its `resources/engine/corridorkey run` on a two-line script (`version`, `echo ck-run-check`)
+   under the same HOME with no display or D-Bus of this session, and stops unless it prints both and exits 0 (the
+   folder, with `app.log`, `run.out` / `run.err` and a screenshot, is kept on a failure). On Linux this proves only that
+   the package starts: Electron checks `app.asar` against its integrity hash on Windows and macOS only;
    writes `SHA256SUMS` / `SHA512SUMS` of the AppImage and the `-Setup.exe`, each signed with the feed key
    (`SHA256SUMS.sig`, below), uploads them; the update feeds name the AppImage only (Windows updates from the releases page);
    pushes `main`; creates the
    release as a draft on that commit, uploads, checks GitHub's sha256 digest of every upload against the signed
-   `SHA256SUMS` (nothing is published on a difference), and publishes it, which makes the `vX.Y.Z…` tag (Development as a
+   `SHA256SUMS` (nothing is published on a difference), and **stops with the release a draft**: nothing is public yet.
+3. Start the Windows installer in the VM (The Windows installer, below). Only when it passes:
+   `tools/release.sh --publish`, which checks the draft is on this commit and the digests again, then publishes it,
+   which makes the `vX.Y.Z…` tag (Development as a
    **prerelease**, never *Latest*; Stable as *Latest*); then `tools/build-feed.mjs` picks the release per channel
    from GitHub's release list (retried until the released channel names the new version), downloads and hashes
    the AppImage and writes the feed, `tools/sign-feed.mjs` signs it, `tools/verify-feed.mjs` checks it exactly as
    the app does, and the changed feeds are committed to `main` and pushed.
-3. It ends with `node tools/verify-feed.mjs --channel <the released channel> --version <it>` (read through GitHub's
+4. It ends with `node tools/verify-feed.mjs --channel <the released channel> --version <it>` (read through GitHub's
    contents API, so no CDN copy lags behind the push; a few tries): only the released channel, since the other may
    not exist yet (no Stable feed before 1.0).
-4. If it fails partway, run it again: a draft release is picked up, moved to the current commit with the current
-   notes, and finished; once the release is published, `tools/release.sh --feeds` redoes only the feeds.
+5. If it fails partway, run it again: a draft release is picked up, moved to the current commit with the current
+   notes, and uploaded again (then the VM start and `--publish` as above); once the release is published, `tools/release.sh --feeds` redoes only the feeds.
 
 **Checking a download** (the SUMS are signed with the feed key, whose public half is in `TRUSTED_KEYS`):
 
@@ -148,13 +154,16 @@ It is started by hand (never on every push) on the release commit, and `tools/re
 without a green run (step 1). Until a run passes, nothing Windows-only in the engine counts as run on Windows (the
 CHANGELOG says "not yet run on Windows").
 
-**The Windows installer, once per release, by hand:** `tools/release.sh` starts only the Linux build (the Windows
-one is built through Wine and can't start here). After it, install `release/CorridorKey-Desktop-<version>-Setup.exe`
+**The Windows installer, once per release, by hand, before `--publish`:** `tools/release.sh` starts only the Linux
+build (the Windows one is built through Wine and can't start here), and leaves the release a draft until this passes
+(release re-review 2026-10-28 #2). Install `release/CorridorKey-Desktop-<version>-Setup.exe`
 in the `win11-test` VM (libvirt, test-only) and start it once: it must reach its first page (the packaged app's
 Electron fuses check `app.asar` against its integrity hash at start on Windows). Then, in a terminal there,
-`resources\engine\corridorkey.exe run` a two-line script (`pwd`, `dir`): it must print both and exit 0, and Ctrl+C
+`resources\engine\corridorkey.exe run` the same two-line script as on Linux (`version`, `echo ck-run-check`): it must
+print the version and `ck-run-check` and exit 0, and Ctrl+C
 during a long line must stop it with exit 130 (the app's `--ck-headless` start, since the `runAsNode` fuse is off:
-review 2026-10-28 #3). A build that doesn't start gets a fix and a new version, never an edited release.
+review 2026-10-28 #3). A build that fails gets a fix and a new version: the draft is never published, then deleted
+(`gh release delete vX.Y.Z… --yes`, nothing public was made).
 
 **Windows Defender** (until the Windows builds are signed): its machine-learning heuristic quarantined the unsigned
 `resources\engine\corridorkey.exe` as `Trojan:Win32/Bearfoos.A!ml` in the 2026-10-27 VM run, a false positive. After

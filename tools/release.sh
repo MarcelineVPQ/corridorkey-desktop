@@ -2,6 +2,8 @@
 # Cut a release from this PC (Marcy 2026-10-24: build here, upload the release; GitHub doesn't build).
 #
 #   tools/release.sh            the version in package.json: X.Y.Z (Stable) or X.Y.Z-dev.N (Development)
+#   tools/release.sh --publish  publishes the draft the first run left, once the Windows installer started in the
+#                               win11-test VM (docs/RELEASING.md "The Windows installer"), then the feeds
 #   tools/release.sh --feeds    only the feeds of that version, published already (step 5 failed)
 #   tools/release.sh --mac RUN  adds the macOS disk image of the macos.yml run RUN (which must have built the tag's
 #                               commit: docs/RELEASING.md "macOS") to that published version, with the SUMS extended
@@ -20,18 +22,21 @@
 #    npm run dist:linux (the engine for glibc 2.28, then the AppImage) and npm run dist:win (the Windows engine
 #    cross-built here, then the NSIS installer through Wine), memory-capped; a build that changed a tracked file
 #    (the CLI spec) stops here, so what ships is the commit that gets tagged; the packaged Linux build
-#    (release/linux-unpacked) must start and show its first page in an isolated copy (tools/isolated.sh + drive.mjs)
+#    (release/linux-unpacked) must start and show its first page in an isolated copy (tools/isolated.sh + drive.mjs),
+#    and its resources/engine/corridorkey run a two-line script (the --ck-headless start) there
 # 3. SHA256SUMS / SHA512SUMS of both files, signed with the feed key (.sig beside each), and the notes (the CHANGELOG
 #    section)
 # 4. pushes main, creates the GitHub release as a draft on that commit (no tag yet; a draft left by a failed run is
-#    moved to this commit with these notes), uploads, checks GitHub's sha256 of every upload against SHA256SUMS,
-#    then publishes it, which makes the tag (Development = prerelease, never Latest). A failure anywhere here can
-#    simply be rerun.
+#    moved to this commit with these notes), uploads, checks GitHub's sha256 of every upload against SHA256SUMS, and
+#    stops with the draft unpublished: the Windows installer is started in the win11-test VM first (Electron checks
+#    the asar integrity only on Windows and macOS, so the Linux start can't). Then tools/release.sh --publish checks
+#    the draft is this commit's and the digests again, and publishes it, which makes the tag (Development =
+#    prerelease, never Latest). A failure anywhere here can simply be rerun.
 # 5. the feeds: tools/build-feed.mjs from the published release, signed here with the key in
 #    ~/.config/corridorkey-release/feed-signing.pem (read into the environment, never printed),
 #    tools/verify-feed.mjs checks them exactly as the app does, then they are committed to main and pushed
 # 6. tools/verify-feed.mjs on the released channel's live feed, which must name this version (a few tries)
-# Stops at the first failure; nothing is published before step 4. Rerunning after a failure finishes the job:
+# Stops at the first failure; nothing is published before --publish. Rerunning after a failure finishes the job:
 # a draft release is picked up again; once v$VERSION is published, --feeds redoes only the feeds.
 # docs/RELEASING.md.
 set -euo pipefail
@@ -40,7 +45,7 @@ KEY="$HOME/.config/corridorkey-release/feed-signing.pem"
 CAP=(systemd-run --user --scope --quiet --collect ${CK_SLICE:+--slice=$CK_SLICE} -p MemoryMax=8G -p MemorySwapMax=0 --)
 
 mode="${1:-}"
-case "$mode" in "" | --feeds | --mac) ;; *) echo "release: unknown option $mode (--feeds, --mac RUN)" >&2; exit 2 ;; esac
+case "$mode" in "" | --publish | --feeds | --mac) ;; *) echo "release: unknown option $mode (--publish, --feeds, --mac RUN)" >&2; exit 2 ;; esac
 v="$(node -p 'require("./package.json").version')"
 if [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then dev=false
 elif [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+-dev\.[0-9]+$ ]]; then dev=true
@@ -55,11 +60,17 @@ state="$(gh release view "v$v" --json isDraft -q .isDraft 2>/dev/null || echo no
 # a released version is refused (senior review 2026-10-27 N13: run before the bump, it re-signed the last release's
 # feeds); --feeds is only for a published one
 [ "$state" = false ] && [ -z "$mode" ] && { echo "release: v$v is released already: bump the version first (docs/RELEASING.md step 1), or tools/release.sh --feeds to redo its feeds" >&2; exit 1; }
-[ "$state" != false ] && [ -n "$mode" ] && { echo "release: $mode: v$v isn't published" >&2; exit 1; }
+[ "$state" != false ] && [ -n "$mode" ] && [ "$mode" != --publish ] && { echo "release: $mode: v$v isn't published" >&2; exit 1; }
+[ "$mode" = --publish ] && [ "$state" != true ] && { echo "release: --publish: v$v has no draft to publish (run tools/release.sh first; --feeds once published)" >&2; exit 1; }
 [ "$state" = none ] && git rev-parse -q --verify "refs/tags/v$v" >/dev/null && { echo "release: tag v$v exists without a release: bump the version first" >&2; exit 1; }
 [ -r "$KEY" ] || { echo "release: no signing key at $KEY" >&2; exit 1; }
 # signs files with the feed key: <file>.sig beside each (tools/sign-feed.mjs; the key never printed)
 sign() { CK_FEED_KEY="$(cat "$KEY")" bash -c 'for f in "$@"; do node tools/sign-feed.mjs "$f"; done' _ "$@"; }
+# GitHub's own sha256 of each upload is the signed SHA256SUMS' line, before anything is public (review 2026-10-28 #11)
+digests_match() {
+  gh release view "v$v" --json assets -q '.assets[] | "\(.digest // "none" | sub("^sha256:"; ""))  \(.name)"' > release/uploaded.sums
+  if grep -vxFf release/uploaded.sums release/SHA256SUMS >&2; then echo "release: GitHub's digests differ from SHA256SUMS on the lines above: nothing published, rerun" >&2; return 1; fi
+}
 
 # --mac RUN: the published release's SUMS gain the disk image's line (any earlier one replaced), signed again
 if [ "$mode" = --mac ]; then
@@ -101,7 +112,16 @@ GITHUB_TOKEN="$(gh auth token)" node tools/check_model_sets.mjs
 # node_modules is the lock (release review 2026-10-28 #4): the build bundles node_modules, the notices read the lock
 node tools/check_node_modules.mjs || { echo "release: node_modules isn't package-lock.json: npx -y npm@10.9.2 ci, then rerun" >&2; exit 1; }
 
-if [ "$state" != false ]; then
+if [ "$mode" = --publish ]; then
+# the second phase: the draft the first run left (this commit's, its uploads as signed), once the Windows installer
+# started in the VM (release re-review 2026-10-28 #2)
+[ "$(gh release view "v$v" --json targetCommitish -q .targetCommitish)" = "$(git rev-parse HEAD)" ] ||
+  { echo "release: --publish: the draft v$v isn't on this commit: run tools/release.sh again" >&2; exit 1; }
+[ -s release/SHA256SUMS ] || { echo "release: --publish: no release/SHA256SUMS from the first run here: run tools/release.sh again" >&2; exit 1; }
+digests_match
+gh release edit "v$v" --draft=false
+git fetch -q origin "refs/tags/v$v:refs/tags/v$v"
+elif [ "$state" != false ]; then
 # a green Windows CI run of this very commit before it's tagged (release review 2026-10-28 #6): the engine's
 # Windows-only code runs nowhere else. Only read here: the run is started by hand once the commit is on GitHub
 head="$(git rev-parse HEAD)"
@@ -123,8 +143,9 @@ NODE_OPTIONS=--max-old-space-size=4096 "${CAP[@]}" npm run -s dist:win
 # what ships (senior review 2026-10-27)
 [ -z "$(git status --porcelain)" ] || { echo "release: the build changed tracked files; commit them and rerun:" >&2; git status --short >&2; exit 1; }
 # the packaged build starts and shows its first page (release review 2026-10-28 #5: the first build with Electron's
-# fuses; a broken asar check exits at start), in an isolated copy (own HOME, D-Bus and headless KWin; never this
-# screen), driven over CDP. The folder is kept on a failure, with the app's log.
+# fuses), in an isolated copy (own HOME, D-Bus and headless KWin; never this screen), driven over CDP. On Linux this
+# proves only that the package starts and its page loads: Electron checks the asar integrity on Windows and macOS
+# only, which the Windows VM start before --publish covers (docs/RELEASING.md). The folder is kept on a failure.
 smoke="$(mktemp -d)"
 timeout 180 tools/isolated.sh --state "$smoke" --packaged release/linux-unpacked & iso=$!
 # loop: SERIAL-REQUIRED — waits for isolated.sh to write the port it picked [bounded: 20 tries, 0.5 s apart]
@@ -138,6 +159,17 @@ if ! timeout 90 node tools/drive.mjs --state "$smoke" --out "$smoke/shots" --wai
 fi
 # loop: SERIAL-REQUIRED — waits for the closed copy to end [bounded: timeout 180 on isolated.sh]
 wait "$iso" || true
+# and the packaged `corridorkey run` (release re-review 2026-10-28 #3: its --ck-headless start never ran from a
+# package): a two-line script under the same HOME, with no display, D-Bus or keyring of this session
+printf 'version\necho ck-run-check\n' > "$smoke/check.ckcmd"
+mkdir -p -m 700 "$smoke/xdg"
+if ! timeout 120 "${CAP[@]}" env -i HOME="$smoke/home" USER="$USER" PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 XDG_RUNTIME_DIR="$smoke/xdg" \
+  XDG_CONFIG_HOME="$smoke/home/.config" XDG_CACHE_HOME="$smoke/home/.cache" XDG_DATA_HOME="$smoke/home/.local/share" \
+  release/linux-unpacked/resources/engine/corridorkey run "$smoke/check.ckcmd" > "$smoke/run.out" 2> "$smoke/run.err" ||
+  ! grep -qF "CorridorKey $v " "$smoke/run.out" || ! grep -qx 'ck-run-check' "$smoke/run.out"; then
+  echo "release: the packaged corridorkey run didn't run its script: $smoke (run.out, run.err)" >&2
+  exit 1
+fi
 rm -rf "$smoke"
 
 file="CorridorKey-Desktop-$v.AppImage"
@@ -160,11 +192,11 @@ if [ "$dev" = true ]; then flags+=(--prerelease --latest=false); else flags+=(--
 if [ "$state" = true ]; then gh release edit "v$v" --target "$(git rev-parse HEAD)" "${flags[@]}"
 else gh release create "v$v" --draft --target "$(git rev-parse HEAD)" "${flags[@]}"; fi
 gh release upload "v$v" "release/$file" "release/$winfile" release/SHA256SUMS release/SHA512SUMS release/SHA256SUMS.sig release/SHA512SUMS.sig --clobber
-# GitHub's own sha256 of each upload is the signed SHA256SUMS' line, before anything is public (review 2026-10-28 #11)
-gh release view "v$v" --json assets -q '.assets[] | "\(.digest // "none" | sub("^sha256:"; ""))  \(.name)"' > release/uploaded.sums
-if grep -vxFf release/uploaded.sums release/SHA256SUMS >&2; then echo "release: GitHub's digests differ from SHA256SUMS on the lines above: nothing published, rerun" >&2; exit 1; fi
-gh release edit "v$v" --draft=false
-git fetch -q origin "refs/tags/v$v:refs/tags/v$v"
+digests_match
+# kept a draft until the Windows installer starts (release re-review 2026-10-28 #2): nothing is public yet
+echo "release: v$v is uploaded as a draft, not published. Start release/$winfile in the win11-test VM and run its" >&2
+echo "  corridorkey run there (docs/RELEASING.md \"The Windows installer\"); then tools/release.sh --publish" >&2
+exit 0
 else
   echo "release: v$v is published already: redoing the feeds"
 fi
