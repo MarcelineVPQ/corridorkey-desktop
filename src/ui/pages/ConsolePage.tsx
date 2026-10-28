@@ -16,7 +16,7 @@ import { usePref } from "../prefs";
 import { LineEditor, type LineEditorHandle } from "../console/LineEditor";
 import { OutputBlock } from "../console/OutputBlock";
 import { uniqueHistory, type SuggestMode } from "../console/editor";
-import { announcement, clearScreen, filterBlocks, inputTakesFocus, mergeBlocks, nextBlock, promptFolder, visibleBlocks, type BlockList } from "../console/model";
+import { announcement, clearScreen, filterBlocks, historyRevision, inputTakesFocus, mergeBlocks, nextBlock, promptFolder, visibleBlocks, type BlockList } from "../console/model";
 
 const registry = makeRegistry();
 
@@ -307,7 +307,7 @@ export function ConsolePage(props: {
         )}
       </Section>
       <Section id="history" icon={History} title="History" status={history.length ? `${history.length} recent lines` : "nothing yet"}>
-        {() => <HistoryBox onPick={reinsert} />}
+        {() => <HistoryBox onPick={reinsert} revision={historyRevision(past, blocks.blocks)} />}
       </Section>
       <Section id="keys" icon={Keyboard} title="Keys" status="Tab, →, Ctrl+R and the readline keys">
         {() => (
@@ -388,8 +388,9 @@ export function ConsolePage(props: {
 }
 
 /** History: the lines typed before, newest first, filtered as you type (the line or its folder), each with its number
- * and how it ended (✓ / ✗ and the exit code); a click puts one in the input. */
-function HistoryBox({ onPick }: { onPick: (line: string) => void }) {
+ * and how it ended (✓ / ✗ and the exit code); a click puts one in the input. Read again on each `revision` (a line kept
+ * or ended), so the list stays current while open. */
+function HistoryBox({ onPick, revision }: { onPick: (line: string) => void; revision: string }) {
   const [query, setQuery] = useState("");
   const [entries, setEntries] = useState<ConsoleHistoryEntry[]>([]);
   useEffect(() => {
@@ -398,7 +399,7 @@ function HistoryBox({ onPick }: { onPick: (line: string) => void }) {
     return () => {
       live = false;
     };
-  }, [query]);
+  }, [query, revision]);
   return (
     <>
       <input type="search" className="console-search" placeholder="Search the history" aria-label="Search the history" value={query} onChange={(e) => setQuery(e.target.value)} />

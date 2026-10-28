@@ -24,6 +24,7 @@ import {
   filterBlocks,
   lineWords,
   nextBlock,
+  historyRevision,
   promptFolder,
   nukeRead,
   rateText,
@@ -532,5 +533,18 @@ describe("SME review 2026-10-26 N9 (row 126): a shot-aware prompt", () => {
     expect(promptFolder("/home/m", "/home/m", marks)).toBe("~");
     expect(promptFolder("/", "/home/m", {})).toBe("/");
     expect(promptFolder("D:\\shows\\sh010\\key", "C:\\Users\\m", { sh010: "D:\\shows\\sh010" })).toBe("@sh010/key");
+  });
+});
+
+describe("whole review S11: the History list follows the history while open", () => {
+  it("reads again when a line is kept or one ends, not on every output push", () => {
+    const past = [{ n: 7, line: "pwd" }];
+    const running = historyRevision(past, [block(1), block(2, { state: "running" })]);
+    // more output from the same running block: same revision
+    expect(historyRevision(past, [block(1), block(2, { state: "running", lines: [{ kind: "out", text: "x" }] })])).toBe(running);
+    // it ended
+    expect(historyRevision(past, [block(1), block(2)])).not.toBe(running);
+    // a new line kept
+    expect(historyRevision([...past, { n: 8, line: "ls" }], [block(1), block(2, { state: "running" })])).not.toBe(running);
   });
 });

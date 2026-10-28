@@ -156,6 +156,16 @@ export function nextBlock(ids: readonly number[], current: number | null, by: -1
   return ids[Math.max(0, j)];
 }
 
+/**
+ * When the History section reads the history again: a line was kept (the newest number) or one ended (the running
+ * blocks changed: its ✓ / ✗ is known). Not on every output push.
+ */
+export function historyRevision(past: readonly HistoryLine[], blocks: readonly ConsoleBlock[]): string {
+  // loop: HOT-PATH-OK — ≤ BLOCKS_KEPT blocks, per block push (≤ 10/s while a command prints)
+  const running = blocks.filter((b) => b.state === "running").map((b) => b.id);
+  return `${past[past.length - 1]?.n ?? 0}:${running.join(",")}`;
+}
+
 export type Tone = "running" | "ok" | "error" | "stopped";
 
 /** The block's status: a word, its tone, the exit code, and what a non-zero code means (docs/CLI.md). */
