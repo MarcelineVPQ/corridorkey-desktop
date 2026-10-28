@@ -731,7 +731,7 @@ impl Pipeline<OrtLoader> {
                     && color.as_ref().is_none_or(|c| c.input_space.is_none())
                     && p.first().is_some_and(|f| f.to_string_lossy().to_lowercase().ends_with(".exr"))
                 {
-                    sink.log("  [WARNING] EXR input frames are being treated as display-coded and clipped to [0, 1]. For scene-linear HDR EXR plates, pass --frame_dir_linear.");
+                    sink.log(&format!("  [WARNING] EXR input frames are being treated as display-coded and clipped to [0, 1]. {EXR_LINEAR_HINT}"));
                 }
             }
         } else {
@@ -1294,6 +1294,11 @@ impl Pipeline<OrtLoader> {
         Ok(())
     }
 }
+
+/// The EXR warning's advice, named per surface (final review 2026-10-28 N8: it said "pass --frame_dir_linear", a flag
+/// neither the app nor the CLI has); the CLI swaps it for its own words (ck-cli progress.rs).
+pub const EXR_LINEAR_HINT: &str =
+    "For scene-linear HDR EXR plates, turn on frame_dir_linear (the app: Frame folder, \"Frames are scene-linear\"; the command line: --linear).";
 
 /// A clip shorter than its window runs stage 1 on all its frames at once; the Core ML set has fixed windows (`have`, its
 /// stage-1 batches at this size), and copies of the last frame would change the matte, so a clip shorter than every

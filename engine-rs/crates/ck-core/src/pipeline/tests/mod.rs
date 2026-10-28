@@ -382,3 +382,10 @@ fn a_clip_shorter_than_every_core_ml_window_is_refused_in_words() {
     assert_eq!(coreml_short_clip(8, 8, &[8]), None);
     assert_eq!(coreml_short_clip(2, 8, &[]), None);
 }
+
+#[test]
+fn the_exr_warning_names_real_settings() {
+    // final review 2026-10-28 N8: it said "pass --frame_dir_linear", a flag neither the app nor the CLI has
+    assert!(!EXR_LINEAR_HINT.contains("--frame_dir_linear"), "{EXR_LINEAR_HINT}");
+    assert!(EXR_LINEAR_HINT.contains("Frames are scene-linear") && EXR_LINEAR_HINT.contains("--linear"), "{EXR_LINEAR_HINT}");
+}

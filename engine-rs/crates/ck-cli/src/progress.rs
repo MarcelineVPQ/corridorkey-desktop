@@ -195,9 +195,9 @@ impl Sink for CliSink<'_> {
     }
 
     fn log(&mut self, text: &str) {
-        // the engine's EXR warning names the original's flag; here it is --linear (it comes only after a choice: the
-        // CLI reads EXR plates scene-linear by default)
-        self.note(&text.replace("pass --frame_dir_linear", "pass --linear"));
+        // the engine's EXR warning names every surface; here it is --linear (it comes only after a choice: the CLI reads
+        // EXR plates scene-linear by default)
+        self.note(&text.replace(ck_core::pipeline::EXR_LINEAR_HINT, "For scene-linear HDR EXR plates, pass --linear."));
     }
 
     fn stop_requested(&mut self) -> bool {
@@ -247,9 +247,7 @@ mod tests {
         s.send(json!({"type": "frames", "done": 1, "total": 4}));
         s.send(json!({"type": "frames", "done": 4, "total": 4}));
         s.log("  probed 4 frames");
-        s.log(
-            "  [WARNING] EXR input frames are being treated as display-coded and clipped to [0, 1]. For scene-linear HDR EXR plates, pass --frame_dir_linear.",
-        );
+        s.log(&format!("  [WARNING] EXR input frames are being treated as display-coded and clipped to [0, 1]. {}", ck_core::pipeline::EXR_LINEAR_HINT));
         let seen = s.seen.clone();
         drop(s);
         let out = String::from_utf8(out).unwrap();
