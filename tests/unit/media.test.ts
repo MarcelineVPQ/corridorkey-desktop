@@ -102,4 +102,22 @@ describe("a still of the engine's video", () => {
     expect(pixels.length).toBe(640 * 360 * 3);
     expect(pixels.some((v) => v !== 0)).toBe(false);
   });
+
+  // Marcy 2026-10-28: the foreground still was black where the subject isn't; a compositor shows a key over a checker
+  it.skipIf(!hasFfmpeg)("shows the foreground over the checker where its alpha is 0, never black", async () => {
+    const d = dir([]);
+    const make = (name: string, color: string) => {
+      const f = join(d, name);
+      execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", `color=${color}:s=1280x720:r=24:d=0.125`, "-c:v", "libx264", "-pix_fmt", "yuv444p", "-qp", "0", f]);
+      return f;
+    };
+    const fg = make("shot_fg.mp4", "black");
+    const alpha = make("shot_alpha.mp4", "black");
+    const file = await still(join(d, "cache"), fg, 0, 640, { alpha, premultiplied: false, square: 32 });
+    const pixels = execFileSync("ffmpeg", ["-v", "error", "-i", file, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], { maxBuffer: 1 << 24 });
+    const at = (x: number, y: number) => pixels[(y * 640 + x) * 3];
+    // the first square light (191), the next one dark (128), within JPEG rounding
+    expect(Math.abs(at(8, 8) - 191)).toBeLessThan(8);
+    expect(Math.abs(at(40, 8) - 128)).toBeLessThan(8);
+  });
 });

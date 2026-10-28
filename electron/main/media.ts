@@ -227,21 +227,42 @@ async function probeImage(path: string): Promise<{ width: number; height: number
  * near-black chroma to green, faint green lines in black areas (Marcy 2026-10-27). "rgb" in the cache key: the green
  * stills made before are not reused.
  */
-export async function still(cacheDir: string, source: string, seconds: number, width: number): Promise<string> {
+export async function still(cacheDir: string, source: string, seconds: number, width: number, over?: { alpha: string; premultiplied: boolean; square: number }): Promise<string> {
   // loop: NOT-WORTH — one mkdir (exists after the first) per still [bounded: FS_MS]
   await answerWithin(mkdir(cacheDir, { recursive: true }), FS_MS);
   const key = createHash("sha1")
     // one stat per still (the cache key)
-    .update(`${source}|${(await statOf(source)).mtimeMs}|${seconds}|${width}|rgb`)
+    .update(`${source}|${(await statOf(source)).mtimeMs}|${seconds}|${width}|rgb${over ? `|over|${over.square}|${over.alpha}|${(await statOf(over.alpha)).mtimeMs}` : ""}`)
     .digest("hex")
     .slice(0, 20);
   const out = join(cacheDir, `${key}.jpg`);
   // one stat per still (cache hit check)
   if (await statOrNull(out)) return out;
   const seek = seconds > 0 ? ["-ss", seconds.toFixed(3)] : [];
+  const args = over
+    ? // the colour over the engine's own checker (64 px squares, 0.75 / 0.5 grey, render.rs make_checker) through the
+      // alpha output, as a compositor shows a key: never on black (Marcy 2026-10-28)
+      [...seek, "-i", source, ...seek, "-i", over.alpha, "-frames:v", "1", "-filter_complex", overChecker(width, over.square, over.premultiplied)]
+    : [...seek, "-i", source, "-frames:v", "1", "-vf", `scale=${width}:-2,format=rgb24`];
   // loop: SERIAL-REQUIRED — one ffmpeg still at a time, STILL_TIMEOUT_MS (this pass: had none)
-  await run("ffmpeg", ["-v", "error", "-y", ...seek, "-i", source, "-frames:v", "1", "-vf", `scale=${width}:-2,format=rgb24`, "-q:v", "4", out], { timeout: STILL_TIMEOUT_MS });
+  await run("ffmpeg", ["-v", "error", "-y", ...args, "-q:v", "4", out], { timeout: STILL_TIMEOUT_MS });
   return out;
+}
+
+/**
+ * The filter graph for a colour output (input 0) over the checker through its alpha output (input 1), at `width`:
+ * both scaled first, the checker's squares `square` px (the engine's 64 px squares at the still's scale).
+ */
+export function overChecker(width: number, square: number, premultiplied: boolean): string {
+  const grey = `if(mod(floor(X/${square})+floor(Y/${square}),2),128,191)`;
+  return [
+    `[0:v]scale=${width}:-2,format=rgb24,split[c0][c1]`,
+    `[c0]geq=r='${grey}':g='${grey}':b='${grey}'[checker]`,
+    `[1:v]scale=${width}:-2,format=gray[a]`,
+    "[c1]format=rgba[c]",
+    "[c][a]alphamerge[keyed]",
+    `[checker][keyed]overlay=format=auto${premultiplied ? ":alpha=premultiplied" : ""},format=rgb24`,
+  ].join(";");
 }
 
 export async function probeClip(path: string, kind: ClipKind, cacheDir: string, mediaUrl: (file: string) => string): Promise<ClipInfo> {

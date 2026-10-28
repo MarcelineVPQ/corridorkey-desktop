@@ -646,8 +646,13 @@ async function makeStills(job: Job): Promise<void> {
     const file = job.outputs.find((f) => basename(f).includes(`_${output === "checker" ? "checker_comp" : output}`));
     // loop: NOT-WORTH — one async stat per output, once per finished job
     if (!file || !(await exists(file))) continue;
+    // the foreground and the cutout over the checker through the alpha output, when it was written (never on black)
+    // loop: NOT-WORTH — ≤ four outputs, for two outputs at most
+    const alpha = output === "fg" || output === "cutout" ? job.outputs.find((f) => basename(f).includes("_alpha")) : undefined;
+    // loop: NOT-WORTH — one async stat for the alpha output, for two outputs at most
+    const over = alpha && (await exists(alpha)) ? { alpha, premultiplied: output === "cutout", square: Math.max(2, Math.round((64 * STILL_WIDTH) / (job.clip.width || STILL_WIDTH))) } : undefined;
     try {
-      job.stills.push({ output, url: mediaUrl(await still(mediaDir, file, seconds, STILL_WIDTH)) });
+      job.stills.push({ output, url: mediaUrl(await still(mediaDir, file, seconds, STILL_WIDTH, over)) });
       scheduleSend();
     } catch {
       // error: NOT-WORTH — a missing still leaves the output's row without a picture; the file itself is listed
