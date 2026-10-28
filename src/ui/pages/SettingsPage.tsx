@@ -166,7 +166,13 @@ export function SettingsPage(props: { state: AppState; panelShown: boolean; narr
       <Section id="updates" icon={Download} title="Updates" status={updateStatus(u)} task={props.sectionTasks["settings/updates"] ?? null}>
         {() => <Updates u={u} queueRunning={state.queueRunning} />}
       </Section>
-      <Section id="storage" icon={HardDrive} title="Storage" status={storageTotal === null ? "measuring…" : `${gbBytes(storageTotal)} on this PC`}>
+      <Section
+        id="storage"
+        icon={HardDrive}
+        title="Storage"
+        status={storageTotal === null ? "measuring…" : `${gbBytes(storageTotal)} on this PC`}
+        task={props.sectionTasks["settings/storage"] ?? null}
+      >
         {() =>
           !storage ? (
             <p className="hint-text">Measuring…</p>

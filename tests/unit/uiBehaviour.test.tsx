@@ -19,6 +19,7 @@ import { ConsolePage } from "../../src/ui/pages/ConsolePage";
 import { STAGE_TEXT } from "../../src/ui/format";
 import { appState, job, settings, updateState } from "./fixtures";
 import { App } from "../../src/ui/App";
+import { dots, tasksOf } from "../../src/shared/tasks";
 import { UpdateBanner } from "../../src/ui/UpdateBanner";
 import type { AppState, UpdateState } from "../../src/shared/types";
 import { Cpu } from "lucide-react";
@@ -425,5 +426,19 @@ describe("the app update notice (pinned above the page) and its task", () => {
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
     expect(screen.queryByRole("region", { name: "App update" })).toBeNull();
     expect(item.querySelector(".task")).not.toBeNull();
+  });
+});
+
+describe("every task's section header shows its dot", () => {
+  it("App settings → Storage: a missing cache drive (and Updates beside it)", () => {
+    mockCk();
+    const state = appState({ cacheMissing: "/media/scratch", update: updateState({ status: "ready", latest: "1.0.0-dev.2" }) });
+    const sectionTasks = dots(tasksOf(state)).sections;
+    render(<SettingsPage state={state} panelShown={true} narrow={false} glass={false} focus={null} sectionTasks={sectionTasks} hidePanel={() => {}} />);
+    const storage = screen.getByRole("button", { name: /^Storage/ });
+    expect(storage.textContent).toContain("Waiting: Drive not available for the cache folder: /media/scratch");
+    expect(storage.querySelector(".task")).not.toBeNull();
+    expect(screen.getByRole("button", { name: /^Updates/ }).querySelector(".task")).not.toBeNull();
+    expect(screen.getByRole("button", { name: /^Appearance/ }).querySelector(".task")).toBeNull();
   });
 });
