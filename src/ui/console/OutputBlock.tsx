@@ -4,7 +4,7 @@
 // Re-run (which puts the line back in the input, never runs it), shown on hover and on keyboard focus. An elevated
 // block is marked; a built-in's is compact. A program's commands are one row each (a button: click or Enter shows the
 // whole block; Collapse folds it again), and one that runs, failed or was refused shows whole on its own.
-import { memo, useContext, useEffect, useMemo, useState } from "react";
+import { memo, useContext, useEffect, useMemo, useRef, useState, type Ref } from "react";
 import { Check, ChevronDown, ChevronRight, Copy, CornerDownLeft, FolderOpen, ShieldAlert } from "lucide-react";
 import type { Registry } from "../../shared/console/registry";
 import type { ConsoleBlock } from "../../shared/types";
@@ -33,7 +33,8 @@ import { HomeContext } from "../PathText";
 
 const COPIED_MS = 1500;
 
-function CopyButton({ label, text }: { label: string; text: string }) {
+/** `text`: the text, or a function that makes it on the press (a running block's output isn't joined per push). */
+function CopyButton({ label, text }: { label: string; text: string | (() => string) }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -43,7 +44,7 @@ function CopyButton({ label, text }: { label: string; text: string }) {
     return () => clearTimeout(t);
   }, [copied]);
   return (
-    <button type="button" className="copy-btn" onClick={() => void window.ck.copyText(text).then(setCopied)}>
+    <button type="button" className="copy-btn" onClick={() => void window.ck.copyText(typeof text === "string" ? text : text()).then(setCopied)}>
       {copied ? <Check size={13} aria-hidden /> : <Copy size={13} aria-hidden />}
       <span aria-live="polite">{copied ? "Copied" : label}</span>
     </button>
@@ -74,14 +75,27 @@ export const OutputBlock = memo(function OutputBlock(props: BlockProps) {
   // a command's block folded to its line (SME review 2026-10-26 N8)
   const [folded, setFolded] = useState(false);
   const home = useContext(HomeContext);
+  // the row and the whole block are different elements: after a switch by the user, focus goes to the new one's toggle,
+  // never dropping to the page (senior review S3)
+  const toggle = useRef<HTMLButtonElement>(null);
+  const refocus = useRef(false);
+  const choose = (v: boolean) => {
+    refocus.current = true;
+    setOpen(v);
+  };
+  useEffect(() => {
+    if (!refocus.current) return;
+    refocus.current = false;
+    toggle.current?.focus();
+  }, [open]);
   if (b.parent === null) return <FullBlock {...props} onCollapse={null} fold={{ folded, toggle: () => setFolded(!folded) }} />;
-  if (open ?? childOpens(b)) return <FullBlock {...props} onCollapse={() => setOpen(false)} />;
+  if (open ?? childOpens(b)) return <FullBlock {...props} onCollapse={() => choose(false)} collapseRef={toggle} />;
   const st = blockStatus(b);
   const row = childRow(b, home);
   const took = duration(b);
   return (
     <article className={`cblock child row tone-${st.tone}`} aria-label={b.line}>
-      <button type="button" className="cb-row" aria-expanded={false} title="Show the whole block" onClick={() => setOpen(true)}>
+      <button ref={toggle} type="button" className="cb-row" aria-expanded={false} title="Show the whole block" onClick={() => choose(true)}>
         <ChevronRight size={13} aria-hidden />
         <span className={`cb-mark ${st.tone}`} aria-hidden>
           {row.mark}
@@ -100,14 +114,24 @@ export const OutputBlock = memo(function OutputBlock(props: BlockProps) {
   );
 });
 
-function FullBlock({ b, registry, windows, selected, onReinsert, onCollapse, fold = null }: BlockProps & { onCollapse: (() => void) | null; fold?: { folded: boolean; toggle: () => void } | null }) {
+function FullBlock({
+  b,
+  registry,
+  windows,
+  selected,
+  onReinsert,
+  onCollapse,
+  collapseRef,
+  fold = null,
+}: BlockProps & { onCollapse: (() => void) | null; collapseRef?: Ref<HTMLButtonElement>; fold?: { folded: boolean; toggle: () => void } | null }) {
   const folded = fold?.folded ?? false;
   const st = blockStatus(b);
   // the corridorkey line this block ran, for a terminal or a farm task (the Console's own flags left out)
   const farm = b.command ? commandLine(b.command, windows) : null;
   const took = duration(b);
   const written = b.state === "done" || b.state === "failed" || b.state === "cancelled" ? writtenPaths(b, registry) : [];
-  const out = blockText(b);
+  // Copy output joins up to 2000 lines and 5000 rows: on the press, not on every push of a running block (review N3)
+  const hasOutput = b.lines.length > 0 || (b.entries?.length ?? 0) > 0 || (b.doctor?.length ?? 0) > 0;
   const home = useContext(HomeContext);
   // each push brings a new copy of the same paths: one value, so the lines (OutLine) see no change
   const pathsKey = b.paths?.join("\n") ?? null;
@@ -127,7 +151,7 @@ function FullBlock({ b, registry, windows, selected, onReinsert, onCollapse, fol
           </button>
         )}
         {onCollapse && (
-          <button type="button" className="cb-collapse" aria-expanded={true} title="Fold this command into one row" onClick={onCollapse}>
+          <button ref={collapseRef} type="button" className="cb-collapse" aria-expanded={true} title="Fold this command into one row" onClick={onCollapse}>
             <ChevronDown size={13} aria-hidden />
             <span className="sr-only">Collapse</span>
           </button>
@@ -170,7 +194,7 @@ function FullBlock({ b, registry, windows, selected, onReinsert, onCollapse, fol
               <Copy size={13} aria-hidden /> Copy as farm line
             </button>
           )}
-          {out && <CopyButton label="Copy output" text={out} />}
+          {hasOutput && <CopyButton label="Copy output" text={() => blockText(b)} />}
           <button type="button" className="copy-btn" title="Put this line back in the input to edit or run it" onClick={() => onReinsert(b.line)}>
             <CornerDownLeft size={13} aria-hidden /> Re-run
           </button>
