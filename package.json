@@ -24,7 +24,7 @@
     "check": "npm run typecheck && npm run format:check && npm run gates && npm test && npm run test:reference && npm run test:farm && node tools/gen_cli_spec.mjs --status",
     "check:targets": "tools/check_targets.sh",
     "check:engine": "cd engine-rs && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test",
-    "prepare": "git config core.hooksPath .hooks"
+    "prepare": "git config core.hooksPath .hooks || echo prepare: not a git checkout, so the pre-commit gates are not installed"
   },
   "dependencies": {
     "lucide-react": "0.577.0",

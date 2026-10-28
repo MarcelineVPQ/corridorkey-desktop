@@ -25,6 +25,8 @@ if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITH
 // the deadlines of the two network reads (tools/release.sh runs this on the release PC; a stalled read fails the release)
 const API_TIMEOUT_MS = 60_000;
 const DOWNLOAD_TIMEOUT_MS = 20 * 60_000;
+// GitHub's release list, 100 per page
+const MAX_PAGES = 10;
 
 async function measure(asset) {
   // loop: SERIAL-REQUIRED — one release asset download per feed build [bounded: DOWNLOAD_TIMEOUT_MS, body included]
@@ -41,10 +43,19 @@ async function measure(asset) {
   return { sha512: hash.digest("hex"), size };
 }
 
-// loop: SERIAL-REQUIRED — one GitHub API read per feed build [bounded: API_TIMEOUT_MS]
-const r = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=50`, { headers, signal: AbortSignal.timeout(API_TIMEOUT_MS) });
-if (!r.ok) throw new Error(`GitHub API returned ${r.status}`);
-const picked = selectRelease(await r.json(), channel);
+// every release, page by page (GitHub lists 100 at most per page; model sets and dev builds add up), newest first
+const releases = [];
+let next = `https://api.github.com/repos/${REPO}/releases?per_page=100`;
+// loop: SERIAL-REQUIRED — GitHub's release list, one page after the other (each names the next) [bounded: MAX_PAGES pages, API_TIMEOUT_MS each]
+for (let page = 0; next && page < MAX_PAGES; page++) {
+  // loop: SERIAL-REQUIRED — one GitHub API read per page [bounded: API_TIMEOUT_MS]
+  const r = await fetch(next, { headers, signal: AbortSignal.timeout(API_TIMEOUT_MS) });
+  if (!r.ok) throw new Error(`GitHub API returned ${r.status}`);
+  releases.push(...(await r.json()));
+  next = /<([^>]+)>;\s*rel="next"/.exec(r.headers.get("link") ?? "")?.[1];
+}
+if (next) throw new Error(`more than ${MAX_PAGES * 100} releases: raise MAX_PAGES`);
+const picked = selectRelease(releases, channel);
 if (!picked) {
   console.error(`No ${channel} release with an AppImage yet; not writing ${out}.`);
   process.exit(2);

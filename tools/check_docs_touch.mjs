@@ -2,7 +2,8 @@
 // Docs-touch gate (audit row 7): a commit that changes the command line (ck-cli's args.rs, or the spec the app reads,
 // src/shared/console/cliSpec.json) also changes its docs: docs/CLI.md, the wiki's Command-Line.md and docs/GUIDE.md
 // (the app's guide says how the Queue and the CLI agree: GUIDE.md went stale on --linear after 0cdad0c). A commit
-// whose message has a line `docs: none-needed — <why>` is exempt. It reads the commits not on origin/main yet
+// whose message has a line `docs: none-needed — <why>` is exempt (the why is required: a bare `docs: none-needed`
+// isn't). It reads the commits not on origin/main yet
 // (`git log origin/main..HEAD`); without origin/main it checks nothing and says so.
 //   node tools/check_docs_touch.mjs                 the gate (npm run gates)
 //   node tools/check_docs_touch.mjs <A>..<B>        the commits in a range (tools/release.sh: since the last tag)
@@ -35,7 +36,7 @@ export function checkCommits(commits) {
   // loop: NOT-WORTH — the commits not on origin/main
   for (const c of commits) {
     // loop: NOT-WORTH — one commit's files
-    if (!c.files.some((f) => CLI_SOURCES.includes(f)) || /^docs: none-needed\b/m.test(c.message)) continue;
+    if (!c.files.some((f) => CLI_SOURCES.includes(f)) || /^docs: none-needed[^\S\n]*(—|-{1,2})[^\S\n]*\S/m.test(c.message)) continue;
     // loop: NOT-WORTH — three docs
     const missing = CLI_DOCS.filter((d) => !c.files.includes(d));
     if (missing.length) out.push(`${c.sha.slice(0, 7)} "${c.message.split("\n")[0]}" changes the CLI but not ${missing.join(", ")} (or add a line "docs: none-needed — why" to its message)`);

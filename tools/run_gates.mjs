@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // npm run gates: runs every gate (each one, even after a failure, so one run shows them all), prints each result,
-// and exits 1 when any failed.
+// and exits 1 when any failed. POSIX only (Linux, where the releases are built, and macOS CI): the security gate is
+// bash, and the gates compare repository paths with `/`; Windows CI runs only the engine's checks (windows.yml).
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 

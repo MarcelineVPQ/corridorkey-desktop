@@ -24,6 +24,14 @@ describe("the docs-touch gate", () => {
     expect(checkCommits([{ ...c, files: ["src/ui/App.tsx"] }])).toEqual([]);
   });
 
+  it("the exemption needs its why (whole-code review 2026-10-27: a bare line passed)", () => {
+    const c = { sha: "0cdad0cd5a", message: "CLI: a flag\n", files: [ARGS] };
+    // loop: NOT-WORTH — four messages
+    for (const bare of ["docs: none-needed", "docs: none-needed —", "docs: none-needed - ", "docs: none-needed because"])
+      expect(checkCommits([{ ...c, message: `${c.message}\n${bare}\nCo-Authored-By: someone\n` }]), bare).toHaveLength(1);
+    expect(checkCommits([{ ...c, message: `${c.message}\ndocs: none-needed - help text only\n` }])).toEqual([]);
+  });
+
   // senior review 2026-10-27 S6: the gate read only origin/main..HEAD, which a pushed commit has already left
   describe("in a scratch repository", () => {
     const repo = mkdtempSync(join(tmpdir(), "ck-docs-touch-"));

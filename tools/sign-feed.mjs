@@ -1,10 +1,12 @@
 #!/usr/bin/env node
-// Sign a feed file: an Ed25519 signature over its exact bytes, base64, written
+// Sign a feed file (or the release's SUMS): an Ed25519 signature over its exact bytes, base64, written
 // to <file>.sig. The app refuses a feed no key in TRUSTED_KEYS
 // (electron/main/updateFeed.ts) signed.
 //   CK_FEED_KEY="$(cat key.pem)" node tools/sign-feed.mjs latest.json
-// The key is the CK_FEED_KEY Actions secret; without it this fails, so CI can
-// never publish an unsigned feed. It never prints the private key.
+// tools/release.sh reads the key from ~/.config/corridorkey-release/feed-signing.pem
+// on the release PC into CK_FEED_KEY; without it this fails, so an unsigned feed is
+// never published. It never prints the private key. release.sh also signs the
+// release's SHA256SUMS / SHA512SUMS with it.
 import { createPrivateKey, createPublicKey, sign, verify } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 

@@ -37,8 +37,11 @@ done
 mkdir -p "$STATE/home" "$STATE/iso/no-services"
 RUN="$(mktemp -d /tmp/ck-iso-XXXXXX)"   # a socket path must fit 108 bytes; tiny, removed at exit
 chmod 700 "$RUN"
+# the scope (KWin, D-Bus, the app) by name, so a stop of this script (Ctrl+C, kill, a caller's timeout) ends all of it:
+# a signal to this shell alone left the scope running
+UNIT="ck-iso-$PORT-$$"
 trap 'rm -rf "$RUN"' EXIT
-trap 'exit 143' INT TERM
+trap 'systemctl --user stop "$UNIT.scope" 2>/dev/null; exit 143' INT TERM
 cat > "$STATE/iso/session.conf" <<CONF
 <!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN" "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
 <busconfig>
@@ -57,11 +60,14 @@ exec $(if [ -n "$PACKAGED" ]; then echo "\"$PACKAGED/corridorkey-desktop\""; els
 RUN
 chmod +x "$STATE/iso/run-app.sh"
 # not exec: the EXIT trap above removes RUN only if this shell is still there when the app ends (with exec every run
-# left a /tmp/ck-iso-* folder behind)
-systemd-run --user --scope --quiet --collect ${CK_SLICE:+--slice=$CK_SLICE} -p MemoryMax="$MEM" -p MemorySwapMax=0 -- \
+# left a /tmp/ck-iso-* folder behind). In the background with a wait, so the stop trap runs at once (bash runs a trap
+# only after a foreground command ends).
+systemd-run --user --scope --quiet --collect --unit="$UNIT" ${CK_SLICE:+--slice=$CK_SLICE} -p MemoryMax="$MEM" -p MemorySwapMax=0 -- \
   env -i HOME="$STATE/home" USER="$USER" PATH="/usr/local/bin:/usr/bin:/bin" LANG="${LANG:-C.UTF-8}" \
   XDG_RUNTIME_DIR="$RUN" XDG_CONFIG_HOME="$STATE/home/.config" XDG_CACHE_HOME="$STATE/home/.cache" XDG_DATA_HOME="$STATE/home/.local/share" \
   XDG_SESSION_TYPE=wayland GTK_USE_PORTAL=0 NO_AT_BRIDGE=1 GSETTINGS_BACKEND=memory GIO_USE_VFS=local "${ENVS[@]}" \
   dbus-run-session --config-file="$STATE/iso/session.conf" -- \
   kwin_wayland --virtual --no-lockscreen --no-global-shortcuts --socket "ck-wl-$PORT" --width "$W" --height "$H" \
-  --exit-with-session="$STATE/iso/run-app.sh" >"$STATE/app.log" 2>&1
+  --exit-with-session="$STATE/iso/run-app.sh" >"$STATE/app.log" 2>&1 &
+# loop: SERIAL-REQUIRED — waits for the app's scope [bounded: the app's quit (tools/drive.mjs closes it), or a stop]
+wait $!

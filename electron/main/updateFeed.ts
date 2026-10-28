@@ -3,11 +3,11 @@
 // (electron/main/feedSignature.ts, src/update/manifest.ts there) and Sonata
 // (update-feed.js):
 //
-// CI writes latest.json (Stable) and latest-dev.json (Development) on the
-// releases repository's main branch, signs each file's exact bytes with an
-// Ed25519 key that exists only as the CK_FEED_KEY Actions secret
-// (tools/sign-feed.mjs), and commits the signature beside it as <feed>.sig
-// (base64). The app refuses a feed no key in TRUSTED_KEYS signed, a feed whose
+// tools/release.sh writes latest.json (Stable) and latest-dev.json (Development)
+// on this repository's main branch, signs each file's exact bytes with an
+// Ed25519 key that exists only on the release PC
+// (~/.config/corridorkey-release/feed-signing.pem, tools/sign-feed.mjs), and
+// commits the signature beside it as <feed>.sig (base64). The app refuses a feed no key in TRUSTED_KEYS signed, a feed whose
 // download isn't this repository's release file for that version, and a
 // download whose size or SHA-512 differs from the signed feed.
 // See docs/RELEASING.md. Never edit the feeds by hand.
