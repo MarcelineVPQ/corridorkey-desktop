@@ -22,8 +22,8 @@ Label=corridorkey Executable
 Category=Executables
 CategoryOrder=0
 Index=0
-Default=C:\Program Files\CorridorKey Desktop\resources\engine\corridorkey.exe;/opt/corridorkey/corridorkey;/Applications/CorridorKey Desktop.app/Contents/Resources/engine/corridorkey
-Description=The corridorkey executable; the first path that exists on the worker is used. Enter alternative paths on separate lines.
+Default=C:\Program Files\CorridorKey\resources\engine\corridorkey.exe;/opt/corridorkey/squashfs-root/resources/engine/corridorkey;/Applications/CorridorKey.app/Contents/Resources/engine/corridorkey
+Description=The corridorkey executable; the first path that exists on the worker is used. Enter alternative paths on separate lines. Defaults: the Windows installer's all-users folder, the AppImage extracted into /opt/corridorkey (farm/README.md), the macOS app in /Applications.
 
 [ModelsDirectory]
 Type=multilinemultifolder

@@ -3,7 +3,7 @@ import { checkAll, checkFile, cliFlags } from "../../tools/check_farm_submitters
 
 const CLI = cliFlags({
   commands: [
-    { args: [{ long: "input" }, { long: "max-vram" }, { long: "progress-format", possible_values: ["openjd", "deadline", "plain", "json"] }] },
+    { args: [{ long: "input", short: "i" }, { long: "max-vram" }, { long: "progress-format", possible_values: ["openjd", "deadline", "plain", "json"] }] },
     { args: [{ long: null }, { long: "report" }] },
   ],
 });
@@ -26,5 +26,11 @@ describe("the farm submitter gate", () => {
     expect(checkFile("a.py", '"--progress-format", "plain"', CLI)).toEqual([]);
     expect(checkFile("t.yaml", "  - --progress-format\n  - openjd\n", CLI)).toEqual([]);
     expect(checkFile("a.js", '["--progress-format", "text"]', CLI)).toEqual([expect.stringContaining("--progress-format text")]);
+  });
+
+  it("(c) a quoted short flag the CLI doesn't have fails; the file's own don't", () => {
+    expect(checkFile("submit.py", 'ap.add_argument("-n", "--name")\ncmd = ["render", "-i", x]\n', CLI)).toEqual([]);
+    // -r isn't the CLI's (a Deadline plugin passing it would fail every task)
+    expect(checkFile("plugin.py", 'args = ["render", "-i", a, "-r", b]\n', CLI)).toEqual([expect.stringContaining("-r is neither")]);
   });
 });

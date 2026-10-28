@@ -4,7 +4,9 @@
 // own `__spec --json`). It fails when a file in farm/ (not README.md, not the sample job files)
 //   (a) has a long flag (`--x`) that is neither a CLI flag nor one of the file's own options (Python
 //       `add_argument("--x"`, a shell `case` pattern `--x)`);
-//   (b) gives `--progress-format` a value the CLI doesn't take.
+//   (b) gives `--progress-format` a value the CLI doesn't take;
+//   (c) has a quoted short flag (`"-x"`, as an argv list writes it) that is neither a CLI short flag nor one of the
+//       file's own (`add_argument("-x"`).
 //   node tools/check_farm_submitters.mjs    the gate (npm run gates)
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -12,23 +14,25 @@ import { fileURLToPath } from "node:url";
 
 export const APP = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** The CLI's long flags and --progress-format's values, from its spec. */
+/** The CLI's long and short flags and --progress-format's values, from its spec. */
 export function cliFlags(spec) {
   const flags = new Set();
+  const shorts = new Set();
   let formats = [];
   // loop: NOT-WORTH — the CLI's few commands
   for (const c of spec.commands) {
     // loop: NOT-WORTH — one command's flags
     for (const a of c.args) {
       if (a.long) flags.add(a.long);
+      if (a.short) shorts.add(a.short);
       if (a.long === "progress-format") formats = a.possible_values ?? [];
     }
   }
-  return { flags, formats };
+  return { flags, shorts, formats };
 }
 
-/** (a) and (b) for one submitter file. */
-export function checkFile(path, text, { flags, formats }) {
+/** (a), (b) and (c) for one submitter file. */
+export function checkFile(path, text, { flags, shorts, formats }) {
   const own = new Set();
   // loop: NOT-WORTH — a submitter's own options (a dozen)
   for (const m of text.matchAll(/add_argument\((?:\s*["']-\w["'],)?\s*["']--([\w-]+)["']|(?:^|\|)\s*--([\w-]+)\s*\)/gm)) own.add(m[1] ?? m[2]);
@@ -44,6 +48,13 @@ export function checkFile(path, text, { flags, formats }) {
   // loop: NOT-WORTH — a few progress formats per file
   for (const m of text.matchAll(/--progress-format["',\s-]+([a-z]+)/g)) {
     if (!formats.includes(m[1])) out.push(`${path}: --progress-format ${m[1]} isn't one of the CLI's (${formats.join(", ")})`);
+  }
+  const ownShort = new Set();
+  // loop: NOT-WORTH — a submitter's own short options (a few)
+  for (const m of text.matchAll(/add_argument\(\s*["']-(\w)["']/g)) ownShort.add(m[1]);
+  // loop: NOT-WORTH — one file's quoted short flags
+  for (const f of new Set([...text.matchAll(/["']-([A-Za-z])["']/g)].map((m) => m[1]))) {
+    if (!shorts.has(f) && !ownShort.has(f)) out.push(`${path}: -${f} is neither a corridorkey short flag (cliSpec.json) nor one of this file's own options`);
   }
   return out;
 }

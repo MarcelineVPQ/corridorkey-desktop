@@ -2,7 +2,7 @@
 
 One task keys the frames GetStartFrame()..GetEndFrame() with `corridorkey render -s START -e END`. Submit with
 ChunkSize = the shot's length (one task per shot): that is the app's matte, bit for bit. Smaller chunks are
-near-identical with --preroll warm-up frames; how many make seams invisible is not measured yet (docs/CLI.md,
+near-identical with --preroll / --tail warm-up frames; how many make seams invisible is not measured yet (docs/CLI.md,
 "Warm-up").
 
 Progress comes from the CLI's `--progress-format deadline` lines on stdout: `PROGRESS: 45%`, `STATUS: ...` and,
@@ -124,6 +124,9 @@ class CorridorKeyPlugin(DeadlinePlugin):
         preroll = self.GetIntegerPluginInfoEntryWithDefault("Preroll", 0)
         if preroll > 0:
             args += ["--preroll", str(preroll)]
+        tail = self.GetIntegerPluginInfoEntryWithDefault("Tail", 0)
+        if tail > 0:
+            args += ["--tail", str(tail)]
         maxVram = self.GetPluginInfoEntryWithDefault("MaxVram", "").strip()
         if maxVram:
             args += ["--max-vram", maxVram]

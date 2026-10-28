@@ -54,12 +54,25 @@ Description=Frames keyed before each task's range and thrown away (corridorkey -
 Required=false
 DisableIfBlank=true
 
+[Tail]
+Type=integer
+Minimum=0
+Maximum=1000
+Label=Tail Frames (chunks only)
+Category=CorridorKey
+CategoryOrder=0
+Index=5
+Default=0
+Description=Frames keyed after each task's range and thrown away (corridorkey --tail). Only for jobs split into chunks.
+Required=false
+DisableIfBlank=true
+
 [MaxVram]
 Type=string
 Label=Graphics Memory Limit (GB)
 Category=CorridorKey
 CategoryOrder=0
-Index=5
+Index=6
 Default=
 Description=Graphics memory a task may use (corridorkey --max-vram). Blank: the card's free memory.
 Required=false
@@ -70,8 +83,8 @@ Type=string
 Label=Extra Arguments
 Category=CorridorKey
 CategoryOrder=0
-Index=6
+Index=7
 Default=
-Description=More corridorkey flags, as typed (docs/CLI.md), e.g. --linear --tail 8.
+Description=More corridorkey flags, as typed (docs/CLI.md), e.g. --linear --low-vram.
 Required=false
 DisableIfBlank=true

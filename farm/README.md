@@ -133,8 +133,9 @@ Job options (the plugin info file):
 | `OutputPath` | `-o`: a folder, or `key.####.exr` |
 | `Outputs` | `--outputs`, e.g. `alpha` or `alpha,fg` |
 | `Preroll` | `--preroll`, for chunked jobs only |
+| `Tail` | `--tail`, for chunked jobs only |
 | `MaxVram` | `--max-vram` GB |
-| `ExtraArguments` | any other flags, e.g. `--linear --tail 8`; a value with a space in double quotes, as Windows programs read them (`--hint-video "/hints/my hint.mov"`: Deadline splits the line by the MSVC rules on every system, so single quotes don't group) |
+| `ExtraArguments` | any other flags, e.g. `--linear --low-vram`; a value with a space in double quotes, as Windows programs read them (`--hint-video "/hints/my hint.mov"`: Deadline splits the line by the MSVC rules on every system, so single quotes don't group) |
 | `Command` | `render`, or `verify` |
 
 To check a render, submit a second job with `Command=verify`, the same options, the same `Frames`, `ChunkSize` equal
@@ -143,7 +144,7 @@ to the shot's length, and `JobDependencies=<the render job's ID>`. It exits 9 if
 **What each task runs:**
 
 ```
-corridorkey render -i … -o … -s <start> -e <end> --progress-format deadline --overwrite [--outputs …] [--preroll N] [--max-vram GB] [--models …] [--ort …] [--gpu N] [extra]
+corridorkey render -i … -o … -s <start> -e <end> --progress-format deadline --overwrite [--outputs …] [--preroll N] [--tail N] [--max-vram GB] [--models …] [--ort …] [--gpu N] [extra]
 ```
 
 - `<start>` and `<end>` come from `GetStartFrame()` and `GetEndFrame()`.
@@ -165,20 +166,21 @@ corridorkey render -i … -o … -s <start> -e <end> --progress-format deadline 
     its hidden work folders.
 
 **Chunks.** A smaller `ChunkSize` splits the shot across tasks. Each chunk starts its recurrent state cold, so a
-chunk is only near-identical to the whole shot, even with `Preroll` warm-up frames. How many warm-up frames make the
+chunk is only near-identical to the whole shot, even with `Preroll` / `Tail` warm-up frames. How many warm-up frames make the
 seams invisible hasn't been measured yet (docs/CLI.md, "Warm-up"). Until it is, key one shot per task.
 
 **What's tested here, and what isn't.**
 
 - Tested on this PC (no Deadline here):
   - Both Python files pass `python3 -m py_compile`.
-  - A throwaway run with stand-in `Deadline` modules checked the plugin's logic. It confirmed the built command
-    line, the GPU pick, the progress, status and error handlers, and the exit-code failure. That stub run isn't in
-    the repo.
+  - A first, throwaway run with stand-in `Deadline` modules checked the built command line, the GPU pick, the
+    progress, status and error handlers, and the exit-code failure; the handlers and the exit-code failure were
+    checked only in that run. Its command-line part is now `farm/deadline10/test_plugin.py` (below).
   - The quoting: `farm/deadline10/test_quote.py` (`npm run test:farm`, part of `npm run check`) splits the quoted
     command line by MSVC's rules for Windows paths ending in `\`, with spaces, quotes and UNC shares.
   - `farm/deadline10/test_plugin.py` (same command) runs the plugin against stand-in Deadline modules: a GPU pick
-    sets `CUDA_DEVICE_ORDER=PCI_BUS_ID` for the task, no pick leaves the environment alone.
+    sets `CUDA_DEVICE_ORDER=PCI_BUS_ID` for the task, no pick leaves the environment alone; `Preroll` and `Tail`
+    reach the command line; the default executable paths are the packages' own.
 - **Not yet run on a real Deadline.**
 - The plugin uses these API names from the Deadline 10 scripting reference and Thinkbox's own plugins:
   - `DeadlinePlugin`, `PluginType.Simple`, `InitializeProcessCallback`, `RenderExecutableCallback`,
@@ -265,7 +267,8 @@ and restart the Manager; it appears as "CorridorKey".
 Settings: the command, clip, output (a folder or a `key.####.exr` pattern), outputs, scene-linear (`auto`: by the
 first frame, as corridorkey does; `scene-linear`: `--linear`; `display-coded`: `--no-linear`), frames (empty: the
 whole shot), chunk size (0: one task over the whole range), preroll and tail (chunks only), frames already there
-(`refuse`, `skip-existing`, `overwrite`), the models folder, the ONNX Runtime library, and extra flags (split as a
+(`overwrite` by default, since Flamenco retries a failed task and the retry must replace what its first try wrote;
+`skip-existing`, `refuse`), the models folder, the ONNX Runtime library, and extra flags (split as a
 shell would). With chunk size 0 the job is one `key` task; otherwise Flamenco's `frameChunker` makes one task per
 chunk. Each task runs the Worker's `exec` command (`exe` + `args`, Flamenco 3.3 or newer); a `verify` task depends on
 all of them. Tasks have the `misc` type, which every Worker runs by default: use worker tags to keep CorridorKey on
@@ -287,11 +290,12 @@ time.
 # shots.txt: INPUT OUTPUT [FRAMES] per line, tab-separated (spaces when no path has one); # comments
 #   /plates/sh010.####.exr	/key/sh010_key.####.exr
 #   /shots/sh020.mov	/key/sh020/	1001-1100
-CORRIDORKEY=/opt/corridorkey/corridorkey farm/shell/corridorkey-farm.sh --gpus 0,1 --logs farm-logs shots.txt -- \
+CORRIDORKEY=/opt/corridorkey/squashfs-root/resources/engine/corridorkey farm/shell/corridorkey-farm.sh --gpus 0,1 --logs farm-logs shots.txt -- \
   --models /opt/corridorkey/models/2.0.0-onnx.4 --ort /opt/corridorkey/runtime/libonnxruntime.so.1.31.0 --linear
 ```
 
-Each card in `--gpus` is a lane that keys its share of the list one shot after another (`--gpu N`); without
+Each card in `--gpus` is a lane that keys its share of the list one shot after another (`--gpu N`, counted in
+`nvidia-smi`'s order: the lane sets `CUDA_DEVICE_ORDER=PCI_BUS_ID`, as the Deadline plugin does); without
 `--gpus` one lane uses the card the environment gives. Every shot runs with `--skip-existing`, so running the list
 again resumes it (shots already whole end at once with exit 0); `--overwrite` keys them all again. Per shot,
 `farm-logs/shot-N.log` (stdout + stderr, `--progress-format plain`) and `shot-N.report.json`; at the end a table of

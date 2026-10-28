@@ -2,6 +2,7 @@
 2026-10-26 N8). Run: npm run test:farm."""
 import importlib.util
 import os
+import re
 import sys
 import types
 import unittest
@@ -26,7 +27,7 @@ class StandInPlugin:
         return {"InputPath": "/plates/", "OutputPath": "/key/"}[key]
 
     def GetIntegerPluginInfoEntryWithDefault(self, key, default):
-        return default
+        return self.ints.get(key, default)
 
     def GetConfigEntryWithDefault(self, key, default):
         return default
@@ -56,10 +57,10 @@ class StandInPlugin:
         self.env[key] = value
 
 
-def plugin(affinity):
-    """The plugin on a worker whose GPU affinity is `affinity` (empty: no override)."""
+def plugin(affinity, ints=None):
+    """The plugin on a worker whose GPU affinity is `affinity` (empty: no override); `ints`: integer job options."""
     p = load_plugin().GetDeadlinePlugin()
-    p.env, p.affinity = {}, affinity
+    p.env, p.affinity, p.ints = {}, affinity, ints or {}
     return p
 
 
@@ -87,6 +88,42 @@ class GpuOrderTest(unittest.TestCase):
         p = plugin([])
         self.assertNotIn("--gpu", p.RenderArgument())
         self.assertEqual(p.env, {})
+
+
+class WarmUpTest(unittest.TestCase):
+    """Chunked jobs get both warm-up options, as the other submitters (whole-code review 2026-10-27: no Tail)."""
+
+    def test_preroll_and_tail_reach_the_command_line(self):
+        args = plugin([], {"Preroll": 2, "Tail": 3}).RenderArgument()
+        self.assertIn("--preroll 2", args)
+        self.assertIn("--tail 3", args)
+
+    def test_none_by_default(self):
+        args = plugin([]).RenderArgument()
+        self.assertNotIn("--preroll", args)
+        self.assertNotIn("--tail", args)
+
+
+class DefaultExecutableTest(unittest.TestCase):
+    """The plugin's default executable paths are where each system's package puts corridorkey (whole-code review
+    2026-10-27: all three named a "CorridorKey Desktop" folder or app the packages don't make)."""
+
+    def test_the_defaults_are_the_packages_paths(self):
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, "..", "..", "electron-builder.yml"), encoding="utf-8") as f:
+            product = re.search(r"^productName: (.+)$", f.read(), re.M).group(1).strip()
+        with open(os.path.join(here, "..", "README.md"), encoding="utf-8") as f:
+            readme = f.read()
+        with open(os.path.join(here, "CorridorKey", "CorridorKey.param"), encoding="utf-8") as f:
+            param = f.read()
+        section = param[param.index("[CorridorKey_Executable]"):]
+        defaults = re.search(r"^Default=(.*)$", section, re.M).group(1).split(";")
+        # the NSIS installer's all-users folder is the product name; the macOS app is <product>.app
+        self.assertEqual(defaults[0], "C:\\Program Files\\%s\\resources\\engine\\corridorkey.exe" % product)
+        # the Linux path is the one farm/README.md tells a worker to extract the AppImage to
+        self.assertIn(defaults[1], readme)
+        self.assertTrue(defaults[1].endswith("/squashfs-root/resources/engine/corridorkey"))
+        self.assertEqual(defaults[2], "/Applications/%s.app/Contents/Resources/engine/corridorkey" % product)
 
 
 if __name__ == "__main__":

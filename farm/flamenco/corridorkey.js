@@ -46,9 +46,11 @@ const JOB_TYPE = {
     {
       key: "existing",
       type: "string",
-      default: "refuse",
-      choices: ["refuse", "skip-existing", "overwrite"],
-      description: "Frames already there: refuse (the task fails, exit 4), skip-existing (nothing to do when all are whole), overwrite",
+      // overwrite: Flamenco retries a failed task, and the retry must replace the frames its first try renamed into
+      // place (refuse would fail every retry with exit 4), as every other submitter does
+      default: "overwrite",
+      choices: ["overwrite", "skip-existing", "refuse"],
+      description: "Frames already there: overwrite (a retried task replaces its first try's), skip-existing (nothing to do when all are whole), refuse (the task fails, exit 4)",
     },
     { key: "models", type: "string", subtype: "dir_path", required: true, description: "The CorridorKey model set's folder on the Workers" },
     { key: "ort", type: "string", subtype: "file_path", required: true, description: "ONNX Runtime's library on the Workers (libonnxruntime.so / onnxruntime.dll)" },

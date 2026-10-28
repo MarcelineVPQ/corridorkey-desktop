@@ -26,8 +26,8 @@ import outline.modules.shell
 
 # Graphics memory booked per task, GiB. Measured peaks (README.md, "The same-day pair on onnx.4 (2026-10-26)" and
 # "What we got wrong" 5, RTX 5080, onnx.4): CUDA 9.07 (1280x1080) and 9.29 (4096x2160); TensorRT 11.04 and 10.79;
-# 3200x1800 at the 8/4 window 11.79. The task also gets --max-vram of the same size, so the engine picks a window
-# whose (upper-bound) estimate fits the booking.
+# 3200x1800 at the 8/4 window 11.79. The booking doesn't limit the engine: give --max-vram the same size (or less) so
+# it picks a window whose (upper-bound) estimate fits the booking; without it the engine sizes to the card's free memory.
 DEFAULT_GPU_MEMORY_GB = 12
 # RAM booked per task, GiB: the engine's measured peak was 13.55 at 4K and 6.49 at 1280x1080 (the same tables).
 DEFAULT_MEMORY_GB = 16

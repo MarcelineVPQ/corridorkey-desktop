@@ -66,6 +66,9 @@ key_shot() {
 run_lane() {
     local k="$1" n
     trap : TERM # a stop: corridorkey gets the TERM too; the lane records its exit, then starts nothing new
+    # --gpu N counts in CUDA's order, fastest card first by default: PCI bus order makes it nvidia-smi's on mixed-card
+    # machines (as the Deadline plugin does; the lane is a subshell, so this stays in it)
+    [[ -n "${lanes[k]}" ]] && export CUDA_DEVICE_ORDER=PCI_BUS_ID
     # loop: NOT-WORTH — the lane's shots, one corridorkey run each [bounded: the shot list]
     for ((n = k; n < ${#inputs[@]}; n += ${#lanes[@]})); do
         [[ -e "$stop" ]] && break
@@ -79,12 +82,14 @@ stop="$logs/.stop"
 rm -f "$stop" "$logs"/shot-*.exit
 set -m
 pids=()
+# set before the first lane starts, so a stop while lanes are starting reaches the ones already running (a lane, a
+# subshell, doesn't inherit it)
+trap '[[ -e "$stop" ]] || { touch "$stop"; for p in ${pids[@]+"${pids[@]}"}; do kill -TERM -- "-$p" 2>/dev/null; done; }' INT TERM
 # loop: NOT-WORTH — one background lane per card
 for k in "${!lanes[@]}"; do
     run_lane "$k" &
     pids+=($!)
 done
-trap '[[ -e "$stop" ]] || { touch "$stop"; for p in "${pids[@]}"; do kill -TERM -- "-$p" 2>/dev/null; done; }' INT TERM
 # loop: NOT-WORTH — waits for each lane; a signal interrupts wait, so wait again [bounded: each lane ends after its last shot]
 for p in "${pids[@]}"; do
     # loop: SERIAL-REQUIRED — a signal interrupts wait, so wait again [bounded: the lane ends after its last shot]
