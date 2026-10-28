@@ -94,14 +94,8 @@ fn main() {
     // Windows: no DLL from the current folder (turbojpeg, nvml, nvcuda, nvinfer and ONNX Runtime's providers load by
     // bare name), before anything loads one
     ck_core::proc::no_dlls_from_current_folder();
-    // the environment ONNX Runtime reads itself, set while no other thread exists (config::set_process_env)
-    ck_core::config::set_process_env();
-    // end with the app on every system (ck_core::proc::end_with_parent). First thing, on the main thread, before any
-    // other thread exists: on Linux the parent-death signal is armed for this process from here on, and the protocol
-    // loop (`serve`) stays on this thread so the children it starts with proc::die_with_parent (the TensorRT
-    // builder) die with it: PR_SET_PDEATHSIG follows the spawning thread, not the process. (Read here, before the
-    // settings, so even a bad setting doesn't leave an engine without a parent.)
-    ck_core::proc::end_with_parent(ck_core::proc::parent_pid_from(std::env::var("CK_ENGINE_PARENT_PID").ok().as_deref()));
+    // --help and --version answer whatever the parent (final review 2026-10-28 N9: under a parent of PID 1 they
+    // exited silently in end_with_parent); they start no thread and load nothing
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--help" || a == "-h") {
         eprintln!("usage: corridorkey-engine --models DIR [--ort libonnxruntime.so] [--device auto|cuda|cpu|coreml|migraphx]");
@@ -111,6 +105,14 @@ fn main() {
         println!("corridorkey-engine {ENGINE_VERSION} (protocol {PROTOCOL})");
         return;
     }
+    // the environment ONNX Runtime reads itself, set while no other thread exists (config::set_process_env)
+    ck_core::config::set_process_env();
+    // end with the app on every system (ck_core::proc::end_with_parent). First thing, on the main thread, before any
+    // other thread exists: on Linux the parent-death signal is armed for this process from here on, and the protocol
+    // loop (`serve`) stays on this thread so the children it starts with proc::die_with_parent (the TensorRT
+    // builder) die with it: PR_SET_PDEATHSIG follows the spawning thread, not the process. (Read here, before the
+    // settings, so even a bad setting doesn't leave an engine without a parent.)
+    ck_core::proc::end_with_parent(ck_core::proc::parent_pid_from(std::env::var("CK_ENGINE_PARENT_PID").ok().as_deref()));
     let mut out = Replies::new(std::io::stdout());
     // a stub OCIO (built without the `ocio` feature) does no colour work: such an engine never runs (backlog row 29)
     if let Err(e) = ck_core::ocio::require_real_ocio() {

@@ -82,6 +82,10 @@ pub(crate) fn die_with_parent(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
+/// Said on stderr when the engine exits because its parent is gone (or is PID 1 on Linux: an orphan, or a container's
+/// first shell), so the exit is never silent (final review 2026-10-28 N9).
+pub const ORPHANED: &str = "corridorkey-engine: its parent process is gone (or is PID 1, e.g. a container's first shell); the engine ends with the program that starts it, so it exits";
+
 /// The engine ends with the app that started it, on every system (the hardcoded-values pass 2026-10-24: this was
 /// Linux-only, so on Windows and macOS an app crash left the engine keying, and holding the graphics card, for a
 /// whole job nobody would see; measured on Linux before the fix: tests/lifetime.rs).
@@ -107,6 +111,7 @@ pub fn end_with_parent(parent_pid: Option<u32>) {
             prctl(PR_SET_PDEATHSIG, SIGKILL);
             // the parent went before the request took effect: nobody is listening
             if parent == 1 || getppid() != parent {
+                eprintln!("{ORPHANED}");
                 std::process::exit(1);
             }
         }
@@ -125,6 +130,7 @@ pub fn end_with_parent(parent_pid: Option<u32>) {
         std::thread::spawn(move || loop {
             // SAFETY: as above
             if unsafe { getppid() } != parent {
+                eprintln!("{ORPHANED}");
                 std::process::exit(1);
             }
             // loop: SERIAL-REQUIRED — the watch's one-second sleep (not a spin)
@@ -290,6 +296,7 @@ mod win {
             if parent.is_null() {
                 // no such process: the app is already gone
                 if GetLastError() == ERROR_INVALID_PARAMETER {
+                    eprintln!("{}", super::ORPHANED);
                     std::process::exit(1);
                 }
                 return;
@@ -298,6 +305,7 @@ mod win {
             // loop: SERIAL-REQUIRED — waits on the app's process handle for the engine's whole life [bounded: returns when the app ends]
             std::thread::spawn(move || {
                 WaitForSingleObject(parent as Handle, INFINITE);
+                eprintln!("{}", super::ORPHANED);
                 std::process::exit(1);
             });
         }

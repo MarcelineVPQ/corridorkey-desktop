@@ -1,5 +1,6 @@
 //! The engine process ends with its parent (the app): the real binary, started by a shell that then exits.
-//! Before this, an engine whose app had died stayed up (idle here; in a job, until the job's end).
+//! Before this, an engine whose app had died stayed up (idle here; in a job, until the job's end). Also the binary's
+//! own startup answers: --help, --version and failures, on stderr whatever its parent.
 // Linux only (it reads /proc): the whole file, so its imports and helper don't count as unused on macOS/Windows
 #![cfg(target_os = "linux")]
 use std::io::BufRead;
@@ -69,4 +70,23 @@ fn a_startup_failure_is_on_stderr_too() {
     let _ = std::fs::remove_dir_all(&models);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success() && err.contains("engine failed to start:") && err.contains("models.json"), "{err}");
+}
+
+#[test]
+fn under_a_parent_of_pid_1_version_answers_and_a_run_says_why_it_exits() {
+    // final review 2026-10-28 N9: with getppid() == 1 (a container's first shell) the engine exited 1 silently, even
+    // for --version. A user and PID namespace makes the shell PID 1; where unprivileged namespaces are off, skip.
+    let bin = env!("CARGO_BIN_EXE_corridorkey-engine");
+    let ns =
+        |args: &[&str]| Command::new("unshare").args(["-Urpf", "sh", "-c", r#""$0" "$@"; echo "exit $?" >&2"#, bin]).args(args).stdin(Stdio::null()).output();
+    let Ok(probe) = Command::new("unshare").args(["-Urpf", "true"]).output() else { return };
+    if !probe.status.success() {
+        eprintln!("skipped: no unprivileged user namespaces here");
+        return;
+    }
+    let v = ns(&["--version"]).unwrap();
+    assert!(String::from_utf8_lossy(&v.stdout).starts_with("corridorkey-engine "), "{v:?}");
+    let r = ns(&["--models", "/nonexistent", "--device", "cpu"]).unwrap();
+    let err = String::from_utf8_lossy(&r.stderr);
+    assert!(err.contains("its parent process is gone (or is PID 1") && err.contains("exit 1"), "{err}");
 }
