@@ -85,11 +85,16 @@ function importedPackages() {
       const p = join(dir, e.name);
       if (e.isDirectory()) walk(p);
       else if ([".ts", ".tsx"].includes(extname(p)) && !/\.(test|d)\.tsx?$/.test(p))
+        // import/export … from "x" at a statement's start, import "x", import("x"): real imports only, never a word
+        // "from" in a string (a hint "…to copy or learn from" followed by a quote read as a package)
         // loop: NOT-WORTH — one file's imports
-        for (const m of readFileSync(p, "utf8").matchAll(/(?:from|import)\s*\(?\s*["']([^"'./][^"']*)["']/g)) {
-          const name = m[1]
+        for (const m of readFileSync(p, "utf8").matchAll(
+          /^\s*(?:import|export)\b[^"'`;]*?\bfrom\s*["']([^"'./][^"']*)["']|^\s*import\s*["']([^"'./][^"']*)["']|\bimport\(\s*["']([^"'./][^"']*)["']/gm,
+        )) {
+          const spec = m[1] ?? m[2] ?? m[3];
+          const name = spec
             .split("/")
-            .slice(0, m[1].startsWith("@") ? 2 : 1)
+            .slice(0, spec.startsWith("@") ? 2 : 1)
             .join("/");
           if (!name.startsWith("node:") && name !== "electron") names.add(name);
         }
