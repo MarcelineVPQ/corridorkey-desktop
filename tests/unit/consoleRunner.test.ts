@@ -31,7 +31,6 @@ import { makeRegistry } from "../../src/shared/console/registry";
 import { leavesQuoteOpen } from "../../src/shared/console/script";
 import { blockText, mergeBlocks } from "../../src/ui/console/model";
 import { parseLine } from "../../src/shared/console/script";
-import { blockText } from "../../src/ui/console/model";
 import { exrFile } from "./exrBytes";
 import { DEFAULT_OPTIONS, type ConsoleBlock, type DoctorRow, type Job } from "../../src/shared/types";
 

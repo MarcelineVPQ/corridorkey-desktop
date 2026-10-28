@@ -168,7 +168,9 @@ async function main(argv: string[]): Promise<number> {
     showInFolder: (p) => process.stdout.write(`${p}\n`),
     confirmAllow: (f) => nobody(`allow ${f}`),
     // no queue here: a GPU command runs as corridorkey render does on its own
-    takeGpu: () => null,
+    takeGpu: async () => null,
+    // no queue here, so nothing else holds the card
+    gpuBusy: () => null,
     releaseGpu: () => {},
     confirm: (r) => nobody(r.line),
     confirmScript: (r) => nobody(`${r.script}'s ${r.lines.length === 1 ? "line" : `${r.lines.length} lines`} that replace files`),
