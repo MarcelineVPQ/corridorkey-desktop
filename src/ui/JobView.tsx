@@ -52,7 +52,7 @@ export function JobView({ job, prebuild }: { job: Job; prebuild?: TrtPrebuild })
             <Stat k="Frames written" v={job.framesTotal ? `${job.framesDone} / ${job.framesTotal}` : String(job.framesDone)} />
             <Stat k="Speed (measured)" v={job.framesPerSecond ? `${job.framesPerSecond.toFixed(2)} fps` : "measuring…"} />
             <Stat k="Elapsed" v={elapsed !== null ? duration(elapsed) : "—"} />
-            {job.stageDetail && <Stat k="Stage 1" v={job.stageDetail} />}
+            {job.stageDetail && <Stat k={job.stage ? STAGE_TEXT[job.stage] : "Detail"} v={job.stageDetail} />}
           </div>
         </MainBlock>
       )}
@@ -68,7 +68,7 @@ export function JobView({ job, prebuild }: { job: Job; prebuild?: TrtPrebuild })
             <p className="hint-text">
               {prebuild?.status === "running"
                 ? `It builds in the background now: ${prebuildStep(prebuild.ranges) ?? "starting"}. Clips after it run on TensorRT.`
-                : "Engine settings, TensorRT builds it in the background; until then clips of this size run on CUDA."}
+                : "Choose this size in Engine settings → TensorRT to build it in the background; until then clips of this size run on CUDA."}
             </p>
           )}
           {notBuilt && prebuild?.status === "running" && steps && <ProgressBar label="TensorRT networks built" value={steps.done} max={steps.total} />}
