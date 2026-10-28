@@ -521,8 +521,10 @@ export class Queue {
     if (status !== "done") job.stage = null;
     this.deps.changed();
     const done = (async () => {
-      job.partial = status !== "done" && st ? await discard(job.outputDir, st.madeOutputDir, quitting) : null;
-      // after the discard: a failed job's log stays in its folder (which then isn't removed as empty)
+      // a log is written into the folder next, so it is never removed as empty: its background rmdir raced the log's
+      // mkdir + write and lost the log (macOS CI 2026-10-28, jobLog.test "cancelled job")
+      job.partial = status !== "done" && st ? await discard(job.outputDir, st.madeOutputDir && !this.deps.saveLog, quitting) : null;
+      // after the discard: a failed job's log stays in its folder
       if (this.deps.saveLog) job.logSaved = await this.deps.saveLog(job);
       this.deps.changed();
       this.deps.finished(job);
