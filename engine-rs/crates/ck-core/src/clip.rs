@@ -425,6 +425,17 @@ fn rational(s: &str) -> f64 {
     }
 }
 
+/// The most frames a video may say it has: 10 million (46 hours at 60 fps). The count sizes per-frame tables up front
+/// (FrameNumbers), so a crafted header's count would allocate gigabytes and abort the engine.
+const MAX_CLIP_FRAMES: usize = 10_000_000;
+
+fn bounded_frames(frames: usize) -> Result<usize, Error> {
+    if frames > MAX_CLIP_FRAMES {
+        return Err(Error::input(format!("the video says it has {frames} frames, more than {MAX_CLIP_FRAMES}: a damaged or crafted file")));
+    }
+    Ok(frames)
+}
+
 /// OpenCV's reading of an ffprobe answer (cap_ffmpeg get_fps / get_total_frames): the average frame rate,
 /// else the real base rate, else 24 (probe_video_meta's `or 24.0`); nb_frames, else
 /// round(duration * fps); a 90/270 degree rotation swaps width and height (both auto-rotate).
@@ -465,6 +476,7 @@ pub(crate) fn read_probe(json: &serde_json::Value) -> Result<VideoProbe, Error> 
         return Err(Error::input("the video stream has no size".into()));
     }
     let bits = stream_bits(st["bits_per_raw_sample"].as_str(), st["pix_fmt"].as_str());
+    let frames = bounded_frames(frames)?;
     Ok(VideoProbe { w, h, fps, frames, bits })
 }
 
@@ -498,7 +510,7 @@ pub(crate) fn ffprobe(path: &Path) -> Result<VideoProbe, Error> {
     let has_count = st["nb_frames"].as_str().and_then(|s| s.parse::<u64>().ok()).or_else(|| st["nb_frames"].as_u64()).is_some_and(|n| n > 0);
     if !has_count {
         if let Some(n) = count_packets(path)? {
-            p.frames = n;
+            p.frames = bounded_frames(n)?;
         }
     }
     Ok(p)
@@ -772,6 +784,17 @@ mod tests {
         let v = serde_json::json!({"streams":[{"width":1920,"height":1080,"avg_frame_rate":"0/0","r_frame_rate":"25/1","side_data_list":[{"rotation":-90}]}],"format":{"duration":"2.0"}});
         let p = read_probe(&v).unwrap();
         assert_eq!((p.w, p.h, p.frames, p.fps), (1080, 1920, 50, 25.0));
+    }
+
+    #[test]
+    fn a_crafted_frame_count_is_an_input_error() {
+        // review 2026-10-27: an unbounded nb_frames (or duration) allocated gigabytes and aborted the engine
+        let v = serde_json::json!({"streams":[{"width":64,"height":64,"avg_frame_rate":"24/1","nb_frames":"18446744073709551615"}]});
+        assert_eq!(read_probe(&v).err().map(|e| e.code), Some(crate::ErrorCode::Input));
+        let v = serde_json::json!({"streams":[{"width":64,"height":64,"avg_frame_rate":"24/1"}],"format":{"duration":"1e30"}});
+        assert_eq!(read_probe(&v).err().map(|e| e.code), Some(crate::ErrorCode::Input));
+        let v = serde_json::json!({"streams":[{"width":64,"height":64,"avg_frame_rate":"24/1","nb_frames":"10000000"}]});
+        assert_eq!(read_probe(&v).unwrap().frames, MAX_CLIP_FRAMES);
     }
 
     #[test]
