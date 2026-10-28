@@ -1,5 +1,6 @@
 // `corridorkey run FILE.ckcmd` (SME review 2026-10-27 N12, backlog row 151): the script runner the CLI starts in the
 // app as Node (electron/main/console/headless.ts): where the app's settings are, its arguments, and what it prints.
+import { readFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { headlessArgs, onStopLines, Printer, refusal, STOP_LINE, userDataDir } from "../../electron/main/console/headless";
@@ -144,5 +145,13 @@ describe("review 2026-10-28 #3: --ck-headless, the app's flag in place of runnin
     expect(headlessLaunch(macArgv, false, mac, mac, "darwin", 812)).toEqual({ argv: ["run", "/s/a.ckcmd"], cli: mac });
     expect(headlessLaunch(argv, false, cli, cli, "linux", 1)).not.toHaveProperty("error");
     expect(bundledCliPath("C:\\CK\\resources", "win32")).toMatch(/engine[\\/]corridorkey\.exe$/);
+  });
+});
+
+describe("re-review 2026-10-28 M1: boot.ts loads the window's code before Electron's ready", () => {
+  it("awaits index.ts at the top level (an import it doesn't wait for runs index.ts's before-ready calls too late)", () => {
+    const boot = readFileSync(new URL("../../electron/main/boot.ts", import.meta.url), "utf8");
+    expect(boot).toMatch(/^if \(launch === null\) await import\("\.\/index"\);$/m);
+    expect(boot).not.toMatch(/(void|then)\s*\(?\s*import\("\.\/index"\)|import\("\.\/index"\)\.then/);
   });
 });

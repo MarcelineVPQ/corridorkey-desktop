@@ -24,7 +24,9 @@ const bundledCli = app.isPackaged ? real(bundledCliPath(process.resourcesPath, P
 // loop: NOT-WORTH — a few words of argv, once at start
 const launch = process.argv.includes("--ck-headless") ? headlessLaunch(process.argv, !!process.defaultApp, cliEnv && real(cliEnv), bundledCli, PLATFORM, process.ppid) : null;
 
-if (launch === null) void import("./index");
+// awaited at the top level: Electron waits for it before "ready", so index.ts's before-ready calls (its command-line
+// switches, registerSchemesAsPrivileged for ck-media) run in time (re-review 2026-10-28 M1)
+if (launch === null) await import("./index");
 else {
   // no Dock icon, no graphics card (rule 11), and Chromium's own files in a folder of its own, not the window's
   app.dock?.hide();
