@@ -9,8 +9,9 @@
 # engine-rs/export/coreml/build_coreml_models.sh's OUT/set): ck2-*-fp16-coreml-*.onnx and coreml.json (their weights
 # are the model set's own .onnx.data, not in this release). Both also get the base set's licence and attribution
 # files (ATTRIBUTION.md, LICENSE, NOTICE, LICENSE-*), downloaded from models-<base set> into DIR. Idempotent: creates
-# the release only if it is missing (never as Latest), uploads only what isn't there with the right size, and at the
-# end checks every asset's size and SHA-256 on GitHub against the files here. Run it again after a failure.
+# the release only if it is missing (never as Latest), writes its notes (with the SHA-256 list) on every run, uploads
+# every file that isn't there with the same name, size and SHA-256 (a same-size replacement too), and at the end
+# checks every asset's size and SHA-256 on GitHub against the files here. Run it again after a failure.
 # Publishing needs Marcy's OK.
 set -euo pipefail
 DIR=${1:?usage: tools/upload_model_set.sh DIR SET}
@@ -52,11 +53,15 @@ gh release download "models-$BASE" -R "$REPO" -D . --clobber "${PATTERNS[@]}"
 FILES+=("${LICENCE_FILES[@]}")
 echo "hashing ${#FILES[@]} files in $DIR"
 SUMS=$(sha256sum "${FILES[@]}")
+# each file as GitHub's asset listing prints it: name, size, sha256 digest
+WANT=()
+# loop: NOT-WORTH — the set's few files
+while read -r hash name; do WANT+=("$name $(stat -c %s "$name") sha256:$hash"); done <<<"$SUMS"
 
-if ! gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
-  NOTES=$(mktemp)
-  trap 'rm -f "$NOTES"' EXIT
-  cat >"$NOTES" <<EOF
+# the notes on every run, so their SHA-256 list is always the files'
+NOTES=$(mktemp)
+trap 'rm -f "$NOTES"' EXIT
+cat >"$NOTES" <<EOF
 $WHAT
 
 **CorridorKey** is by Corridor Digital: designed and trained by Zachary Harris with Niko Pueringer and Corridor Digital. Converted from \`corridorkey_v2.safetensors\` (https://huggingface.co/nikopueringer/CorridorKey2.0) with this repository's $HOW. Licensed under the CorridorKey licence (a CC BY-NC-SA 4.0 variant with additional terms; LICENSE in this repository): free to use, never sold.
@@ -68,30 +73,32 @@ SHA-256:
 $SUMS
 \`\`\`
 EOF
+if gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
+  gh release edit "$TAG" -R "$REPO" --notes-file "$NOTES"
+else
   gh release create "$TAG" -R "$REPO" --title "$TITLE" --notes-file "$NOTES" --latest=false
 fi
 
-# loop: NOT-WORTH — one listing of the release's assets
-HAVE=$(gh release view "$TAG" -R "$REPO" --json assets --jq '.assets[] | "\(.name) \(.size)"')
+# GitHub's own record of each asset: name, size and sha256 digest
+assets() { gh release view "$TAG" -R "$REPO" --json assets --jq '.assets[] | "\(.name) \(.size) \(.digest)"'; }
+HAVE=$(assets)
 # loop: SERIAL-REQUIRED — one upload at a time (the line is the limit) [bounded: gh's own timeouts; rerun resumes]
-for f in "${FILES[@]}"; do
-  size=$(stat -c %s "$f")
-  if grep -qxF "$f $size" <<<"$HAVE"; then
+for want in "${WANT[@]}"; do
+  f=${want%% *}
+  if grep -qxF "$want" <<<"$HAVE"; then
     echo "already there: $f"
     continue
   fi
-  echo "uploading $f ($size bytes)"
+  echo "uploading $f ($(stat -c %s "$f") bytes)"
   gh release upload "$TAG" -R "$REPO" --clobber "$f"
 done
 
-# GitHub's own record of each asset: size and sha256 digest, against the files here
-# loop: NOT-WORTH — one listing of the release's assets
-GOT=$(gh release view "$TAG" -R "$REPO" --json assets --jq '.assets[] | "\(.name) \(.size) \(.digest)"')
+# against the files here, once more
+GOT=$(assets)
 bad=0
 # loop: NOT-WORTH — the set's few files compared
-for f in "${FILES[@]}"; do
-  want="$f $(stat -c %s "$f") sha256:$(grep -F "  $f" <<<"$SUMS" | awk -v n="$f" '$2 == n {print $1}')"
-  grep -qxF "$want" <<<"$GOT" || { echo "MISMATCH on GitHub: $f (want: $want)" >&2; bad=1; }
+for want in "${WANT[@]}"; do
+  grep -qxF "$want" <<<"$GOT" || { echo "MISMATCH on GitHub: ${want%% *} (want: $want)" >&2; bad=1; }
 done
 [ "$bad" = 0 ] || exit 1
 echo "OK: $TAG has all ${#FILES[@]} files, sizes and SHA-256 as here"
