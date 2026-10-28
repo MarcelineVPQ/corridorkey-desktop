@@ -35,8 +35,13 @@ else {
   const session = mkdtempSync(join(tmpdir(), "ck-headless-"));
   app.setPath("sessionData", session);
   const end = (code: number) => {
-    // loop: NOT-WORTH — Chromium's few files of one script run, once at exit (no window waits)
-    rmSync(session, { recursive: true, force: true });
+    try {
+      // loop: NOT-WORTH — Chromium's few files of one script run, once at exit (no window waits)
+      rmSync(session, { recursive: true, force: true });
+    } catch {
+      // error: NOT-WORTH — Windows: Chromium still holds files in it (ENOTEMPTY); the throw skipped app.exit and the run
+      // never ended (Windows VM, dev.2 release check 2026-10-28). The folder stays in the temp folder; the exit comes first
+    }
     app.exit(code);
   };
   // loop: NOT-WORTH — one script per process
