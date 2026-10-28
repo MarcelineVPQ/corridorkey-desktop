@@ -40,6 +40,12 @@ select {
   padding: 12px 16px;
   border-bottom: 1px solid var(--border-1);
 }
+/* a line under the page bar: why one of its buttons is off */
+.bar-note {
+  margin: 0;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--border-1);
+}
 .page-bar h1 {
   margin: 0;
   font-size: 17px;
@@ -761,6 +767,9 @@ select {
 }
 /* one command's block */
 .cblock {
+  /* a long log: the blocks out of view aren't laid out or painted (their last size is kept) */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 80px;
   margin: 0 0 10px;
   border: 1px solid var(--border-1);
   border-left: 3px solid var(--border-2);
@@ -1432,4 +1441,23 @@ kbd {
   border-radius: 4px;
   background: var(--bg-2);
   color: var(--text-1);
+}
+
+/* small spacings (last: they win over a component's own margin) */
+.gap-top {
+  margin-top: 8px;
+}
+.gap-bottom {
+  margin-bottom: 8px;
+}
+.hint-text.lead {
+  margin: 0 0 14px;
+}
+.notice.inset {
+  margin: 0 16px 12px;
+}
+/* a row's or the detail's text column may shrink below its longest word (names end in …) */
+.job-row > div,
+.detail-head > div {
+  min-width: 0;
 }

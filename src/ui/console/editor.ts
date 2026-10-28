@@ -279,10 +279,11 @@ export const setLine = (s: EditorState, line: string): EditorState => ({ ...at(s
  */
 export function pasted(s: EditorState, text: string): EditorState {
   // loop: NOT-WORTH — the pasted text's lines, once per paste
+  // a leading space is kept: a line typed with one isn't kept in the history (bash's ignorespace)
   const lines = text
     .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
+    .map((l) => l.trimEnd())
+    .filter((l) => l.trim());
   if (lines.length <= 1) return insertAt(s, lines[0] ?? "");
   return { ...s, paste: lines, list: null, search: null, hist: null, lastTab: null };
 }

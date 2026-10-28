@@ -31,6 +31,12 @@ export function setupNeeded(s: { install: InstallState; ffmpeg: FfmpegState; rus
 // "setup" is the first start's page (pages/SetupPage.tsx): not on the rail, it opens by itself while setup has work
 export type PageId = "queue" | "engine" | "console" | "settings" | "about" | "setup";
 
+// every page, once (a Record: a page added to PageId must be added here)
+const PAGES: Record<PageId, true> = { queue: true, engine: true, console: true, settings: true, about: true, setup: true };
+
+/** A remembered page (localStorage, any value) as a page; anything else (a page an older version had): `fallback`. */
+export const pageOr = (v: unknown, fallback: PageId): PageId => (typeof v === "string" && Object.hasOwn(PAGES, v) ? (v as PageId) : fallback);
+
 export interface Task {
   id: string;
   page: PageId;

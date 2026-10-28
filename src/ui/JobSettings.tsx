@@ -4,7 +4,7 @@
 import { Clapperboard, Film, FolderOpen, Layers, MemoryStick, Scaling, SunMedium, Wand2, X, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { HintFileKind, Job, JobOptions, MemoryChoice, MemoryEstimate, MemoryEstimateResult, ModelScale, OutputName, TrtState, VideoCodec, WindowEstimate } from "../shared/types";
-import { FRAME_DIR_FPS_RANGE, frameRateOf, LINEAR_RANGES, MANUAL_WINDOWS, OUTPUT_NAMES, VRAM_LIMIT_AUTO_HELP, scaledSize, videoCodecsFor, vramLimitChoices, withCutoutAlpha } from "../shared/types";
+import { FRAME_DIR_FPS_RANGE, frameRateOf, LINEAR_RANGES, OUTPUT_NAMES, VRAM_LIMIT_AUTO_HELP, scaledSize, videoCodecsFor, vramLimitChoices, windowChoices, withCutoutAlpha } from "../shared/types";
 import { gibBytes } from "../shared/units";
 import { AS_USED } from "../shared/texts";
 import { builtWindows, sizeRangeText, trtSizeKey, TRT_BUILD_COST, TRT_SPEED, type TrtSize } from "../shared/trt";
@@ -376,7 +376,7 @@ export function trtPlanFor(job: Job, trt: TrtState): { status: string; text: str
       // not "built for this size": a range is used only at its own window, and a short clip's automatic window is
       // often another (bug hunt 2026-10-26 T1)
       status: `On · built for a window of ${windows.join(" or ")} frames`,
-      text: `Built for ${width}×${height} with windows up to ${windows.join(" or ")} frames: it runs on TensorRT when the job's automatic window is one of those (at 4K on a 16 GB card it is 8).`,
+      text: `Built for ${width}×${height} with windows up to ${windows.join(" or ")} frames: it runs on TensorRT when the job's automatic window is one of those.`,
     };
   // loop: NOT-WORTH — two ranges
   const building = trt.prebuild.status === "running" && trt.prebuild.ranges.some((r) => trtSizeKey(r.width, r.height) === key && r.state !== "done");
@@ -524,10 +524,10 @@ function ManualMemory({ est, waiting, memory, onChange }: { est: MemoryEstimateR
           }}
         >
           {/* loop: HOT-PATH-OK — a few window choices per render */}
-          {MANUAL_WINDOWS.map(([c, s]) => {
+          {windowChoices(memory.hannChunk, memory.hannStride).map(([c, s]) => {
             const w = of(c, s, memory.lowVram);
             return (
-              <option key={c} value={`${c}/${s}`}>
+              <option key={`${c}/${s}`} value={`${c}/${s}`}>
                 {c} / {s}
                 {w ? ` · about ${gibBytes(w.peakBytes)}${fitText(w)}` : ""}
               </option>

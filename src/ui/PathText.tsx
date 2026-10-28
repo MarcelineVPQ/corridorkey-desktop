@@ -64,15 +64,28 @@ export function PathText({ path, max = 80 }: { path: string; max?: number }) {
     const t = setTimeout(() => setCopied(false), COPIED_MS);
     return () => clearTimeout(t);
   }, [copied]);
+  const copy = () => void window.ck.copyText(path).then(setCopied);
   return (
     <span ref={wrap} className="path-text">
       <span ref={text} className="path" title={path}>
         {shortenPath(path, home, room)}
       </span>
-      <button type="button" className="copy-btn" title={`Copy the full path:\n${path}`} onClick={() => void window.ck.copyText(path).then(setCopied)}>
+      {/* not a <button>: a locked section's disabled fieldset would disable it, and copying changes nothing */}
+      <span
+        role="button"
+        tabIndex={0}
+        className="copy-btn"
+        title={`Copy the full path:\n${path}`}
+        onClick={copy}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          copy();
+        }}
+      >
         {copied ? <Check size={13} aria-hidden /> : <Copy size={13} aria-hidden />}
         <span aria-live="polite">{copied ? "Copied" : "Copy"}</span>
-      </button>
+      </span>
     </span>
   );
 }

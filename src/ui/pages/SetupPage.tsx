@@ -14,15 +14,17 @@ function Step(props: { n: number; title: string; done: boolean; children: ReactN
     <MainBlock
       title={
         <>
-          <span className={`step-n ${props.done ? "done" : ""}`} aria-label={`Step ${props.n}${props.done ? ", done" : ""}`}>
+          {/* an aria-label on a plain span isn't read: the words are in the heading, for screen readers only */}
+          <span className={`step-n ${props.done ? "done" : ""}`} aria-hidden>
             {props.n}
           </span>
+          <span className="sr-only">{`Step ${props.n}${props.done ? ", done" : ""}: `}</span>
           {props.title}
         </>
       }
     >
       {props.done && (
-        <div className="check-line ok" style={{ marginBottom: 8 }}>
+        <div className="check-line ok gap-bottom">
           <Check size={15} aria-hidden /> Done
         </div>
       )}
@@ -43,7 +45,7 @@ export function SetupPage(props: { state: AppState; openQueue: () => void; openG
         <h1>Set up CorridorKey</h1>
       </div>
       <div className="page-content">
-        <p className="hint-text" style={{ margin: "0 0 14px" }}>
+        <p className="hint-text lead">
           Three steps, once. CorridorKey keys green and blue screen footage on your own graphics card: it needs its runtime and models, ffmpeg to read and write video, and your clips.
         </p>
         <Step n={1} title={INSTALL_STEP} done={installed}>
@@ -71,7 +73,7 @@ export function SetupPage(props: { state: AppState; openQueue: () => void; openG
           <section className="notice">
             <h3>All set</h3>
             <div className="hint-text">Pick a clip in the queue to choose its hint and outputs, then press Start queue.</div>
-            <button type="button" className="btn small primary" style={{ marginTop: 8 }} onClick={props.openQueue}>
+            <button type="button" className="btn small primary gap-top" onClick={props.openQueue}>
               <ListVideo size={14} /> Open the queue
             </button>
           </section>

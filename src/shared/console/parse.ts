@@ -134,6 +134,15 @@ export function tokenize(line: string, opts: ParseOptions): { words: Word[]; err
 export function quoteArg(value: string, opts: ParseOptions): string {
   const plain = opts.windows ? /^[\p{L}\p{N}_\-.,/\\:@%+=~#]+$/u : /^[\p{L}\p{N}_\-.,/:@%+=~#]+$/u;
   if (value !== "" && plain.test(value) && value !== "?" && value !== "--") return value;
+  // a literal ${ only in '…' ("…" fills in ${name}: vars.ts); a ' in it goes between the quoted parts
+  if (value.includes("${"))
+    return (
+      value
+        .split("'")
+        // loop: NOT-WORTH — one value's few quote marks, per word quoted
+        .map((p) => (p ? `'${p}'` : ""))
+        .join(opts.windows ? `"'"` : "\\'")
+    );
   if (opts.windows) return value.includes('"') ? `'${value}'` : `"${value}"`;
   return `"${value.replace(/[\\"]/g, "\\$&")}"`;
 }

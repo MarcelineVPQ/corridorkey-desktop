@@ -1,5 +1,5 @@
 // A page: its main view (readouts, MainBlocks) and its settings panel beside
-// it (the DS5 SplitView). The panel is shown or hidden only by the rail item of
+// it. The panel is shown or hidden only by the rail item of
 // the page you're on (no show button on the page, no hide button in the panel);
 // opening a page shows it. Narrow windows: the panel opens as a drawer over the
 // page, the page behind is dimmed, and the same rail item, Escape or a click on the dimmed page closes it. The drawer
@@ -48,7 +48,15 @@ export function SplitView(props: { main: ReactNode; panel: ReactNode; panelTitle
       {/* the page behind the drawer is dimmed; a click on it closes the drawer, as Escape does */}
       {narrow && shown && <div className="split-scrim" aria-hidden onClick={onEscape} />}
       {shown && (
-        <aside ref={asideRef} tabIndex={-1} className={`split-panel ${narrow ? "drawer" : ""} ${glass ? "glass" : ""}`} aria-label={panelTitle}>
+        <aside
+          ref={asideRef}
+          tabIndex={-1}
+          className={`split-panel ${narrow ? "drawer" : ""} ${glass ? "glass" : ""}`}
+          aria-label={panelTitle}
+          // the drawer is modal (the page behind is inert): said to screen readers too
+          role={drawer ? "dialog" : undefined}
+          aria-modal={drawer || undefined}
+        >
           <header className="panel-head">
             <h2>{panelTitle}</h2>
             {panelSub && <div className="panel-sub">{panelSub}</div>}

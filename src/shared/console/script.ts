@@ -405,6 +405,10 @@ export function globRegExp(pattern: string, fold: boolean, active?: readonly boo
       let body = pattern.slice(i + 1, close);
       const neg = body.startsWith("!") || body.startsWith("^");
       if (neg) body = body.slice(1);
+      // a range backwards is said in words (the regular expression's own error was shown raw)
+      // loop: NOT-WORTH — one bracket's few ranges
+      for (const [, lo, hi] of body.matchAll(/(.)-(.)/gu))
+        if (lo.codePointAt(0)! > hi.codePointAt(0)!) throw new Error(`[${lo}-${hi}] in ${pattern} runs backwards: write the range low to high ([${hi}-${lo}])`);
       re += `[${neg ? "^" : ""}${body.replace(/[\\\]^]/g, "\\$&")}]`;
       i = close;
     } else re += c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

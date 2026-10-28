@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dots, jobToSelect, missingInput, startBlocked, tasksOf } from "../../src/shared/tasks";
+import { dots, jobToSelect, missingInput, pageOr, startBlocked, tasksOf } from "../../src/shared/tasks";
 import { DEFAULT_OPTIONS, type InstallStatus } from "../../src/shared/types";
 import { appState as state, clipInfo, ffmpegState, installState, job, trtState } from "./fixtures";
 
@@ -80,5 +80,11 @@ describe("cache folder drive", () => {
     expect(tasksOf(state({ cacheMissing: "/media/m/disk isn't there: is its drive connected?" }))).toEqual([
       expect.objectContaining({ id: "cache-missing", page: "settings", section: "storage", level: "task" }),
     ]);
+  });
+});
+
+describe("whole review: the remembered page", () => {
+  it("is used only when it is a page", () => {
+    expect([pageOr("console", "queue"), pageOr("farm", "queue"), pageOr(null, "queue"), pageOr("toString", "queue")]).toEqual(["console", "queue", "queue", "queue"]);
   });
 });

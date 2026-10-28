@@ -1,9 +1,9 @@
 // The app shell: the page and its panel on the left, the rail on the right
-// edge (the house layout of the DS5 app and Sonata). Drop clips anywhere.
+// edge (the house layout). Drop clips anywhere.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppState } from "../shared/types";
 import { mergeBlocks, type BlockList } from "./console/model";
-import { dots, jobToSelect, tasksOf, type PageId, setupNeeded } from "../shared/tasks";
+import { dots, jobToSelect, pageOr, tasksOf, type PageId, setupNeeded } from "../shared/tasks";
 import { AppRail } from "./rail/AppRail";
 import { railPress } from "./rail/railModel";
 import { NARROW } from "./panel/SplitView";
@@ -19,7 +19,9 @@ import { HomeContext } from "./PathText";
 
 export function App() {
   const [state, setState] = useState<AppState | null>(null);
-  const [page, setPage] = usePref<PageId>("ck.page", "queue");
+  const [storedPage, setPage] = usePref<PageId>("ck.page", "queue");
+  // the stored value is checked: an unknown page would show nothing
+  const page = pageOr(storedPage, "queue");
   // Panels start shown (Marcy 2026-10-22: shown is the default); a hide lasts until the page is opened again.
   const [panels, setPanels] = useState<Partial<Record<PageId, boolean>>>({});
   const [focus, setFocus] = useState<{ page: PageId; section: string; n: number } | null>(null);

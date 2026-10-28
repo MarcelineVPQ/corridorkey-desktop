@@ -70,7 +70,7 @@ function InstallControls({ p, canStart, start }: { p: Pick<InstallState, "status
           <div className="hint-text">
             {p.step} · {gbBytes(p.done)} of {gbBytes(p.total)}
           </div>
-          <ProgressBar value={p.done} max={p.total} />
+          <ProgressBar label="Downloaded" value={p.done} max={p.total} />
           <button type="button" className="btn small" onClick={() => void window.ck.stopInstall()}>
             Stop
           </button>
@@ -185,7 +185,7 @@ function PrebuildBox({ trt }: { trt: TrtState }) {
       <TrtSizes trt={trt} />
       {p.status === "running" && (
         <>
-          <ProgressBar value={steps.done} max={steps.total} />
+          <ProgressBar label="TensorRT networks built" value={steps.done} max={steps.total} />
           <p className="hint-text">
             {step ?? "Starting the engine"} · {steps.done} of {steps.total} networks done · {p.startedAt ? `${duration((Date.now() - p.startedAt) / 1000)} elapsed` : ""}
           </p>

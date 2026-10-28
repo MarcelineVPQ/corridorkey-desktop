@@ -1,4 +1,4 @@
-// The one settings framework (the DS5 app's accordion/Section.tsx): every
+// The one settings framework (the house accordion): every
 // page's settings and actions are Sections in its panel. A Section is a
 // disclosure: its header (a button, aria-expanded) shows an icon, the title,
 // a live status line (how it's set now; the full text as its tooltip) and,
@@ -68,7 +68,7 @@ export function Section(props: { id: string; icon: LucideIcon; title: string; st
   return (
     <section ref={ref} className={`sec ${isOpen ? "open" : ""}`} data-section={id}>
       <div className="sec-head">
-        <button type="button" className="sec-toggle" aria-expanded={isOpen} aria-controls={bodyId} onClick={() => acc.setOpen(isOpen && !isPinned ? null : id)}>
+        <button type="button" className="sec-toggle" aria-expanded={isOpen} aria-controls={isOpen ? bodyId : undefined} onClick={() => acc.setOpen(isOpen && !isPinned ? null : id)}>
           <span className="sec-ic">
             <Icon size={17} aria-hidden />
             {task && <i className="task" aria-hidden />}

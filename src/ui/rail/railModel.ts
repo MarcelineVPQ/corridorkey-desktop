@@ -1,11 +1,10 @@
 // The navigation rail's pure logic (no DOM): its sizes, open/closed state,
-// keyboard map, pin/lock rules and items. Modeled on the DS5 app's AppRail and
-// Sonata's rail-model.js (the house rail): right edge, icons only, expands
+// keyboard map, pin/lock rules and items (the house rail): right edge, icons only, expands
 // over the page on hover or keyboard focus, closes right after a pointer
 // pick; pinned it takes its full width (Ctrl+B). Tested in tests/unit/rail.test.ts.
 import type { PageId } from "../../shared/tasks";
 
-// DS5 density: 52 px icon column, 196 px open, 36 px rows (hit targets ≥ 32 px).
+// Density: 52 px icon column, 196 px open, 36 px rows (hit targets ≥ 32 px).
 export const RAIL = { collapsed: 52, expanded: 196, minContent: 900, row: 36 } as const;
 
 export interface RailItem {

@@ -189,6 +189,13 @@ export const MANUAL_WINDOWS: readonly (readonly [number, number])[] = [
   [1, 1],
 ];
 
+/** The picker's windows: MANUAL_WINDOWS, plus the clip's own window when it isn't one of them (a settings file's, a
+ * farm line's), so the picker shows what is set instead of a blank. */
+export function windowChoices(chunk: number, stride: number): (readonly [number, number])[] {
+  // loop: NOT-WORTH — six windows, per render of the Manual picker
+  return MANUAL_WINDOWS.some(([c, s]) => c === chunk && s === stride) ? [...MANUAL_WINDOWS] : [...MANUAL_WINDOWS, [chunk, stride] as const];
+}
+
 // One window's graphics-memory estimate, as the engine's `estimate` reply gives it (docs/ENGINE_PROTOCOL.md, backlog row 41).
 export interface WindowEstimate {
   hannChunk: number;

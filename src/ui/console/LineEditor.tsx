@@ -55,6 +55,9 @@ interface Props {
   onJump: (by: -1 | 1) => void;
 }
 
+/** How long typing pauses before the suggestion's completion is asked (a fast typist's keys are ~50-100 ms apart). */
+const ASK_AFTER_MS = 60;
+
 // the line being typed outlives the page (a switch to the Queue and back keeps it)
 let draft: EditorState | null = null;
 
@@ -113,11 +116,15 @@ export const LineEditor = forwardRef<LineEditorHandle, Props>(function LineEdito
     [apply],
   );
 
-  // the suggestion and List mode need the completion as you type (only then: a path's folder is read per ask)
+  // the suggestion and List mode need the completion as you type (only then: a path's folder is read per ask), asked
+  // once typing pauses (ASK_AFTER_MS), not per keystroke; Tab asks at once
   useEffect(() => {
     if (s.search || s.list || s.hist || !s.line.trim() || freshCompletion(s)) return;
     if (!(s.mode === "list" || (s.autosuggest && s.cursor === s.line.length))) return;
-    void ask(s.line, s.cursor);
+    // lifetime: OK — cleared by the next keystroke or on unmount
+    // loop: NOT-WORTH — one short timer per keystroke while suggestions are on
+    const t = setTimeout(() => void ask(s.line, s.cursor), ASK_AFTER_MS);
+    return () => clearTimeout(t);
   }, [s, ask]);
 
   useLayoutEffect(() => {

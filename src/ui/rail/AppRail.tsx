@@ -1,4 +1,4 @@
-// The navigation rail (the house rail: DS5's AppRail, Sonata's rail): on the
+// The navigation rail (the house rail): on the
 // right edge, icons only by default, expanding over the page on hover or
 // keyboard focus and closing right after a page is picked with the pointer;
 // pinned open it takes its full width. Ctrl+B pins/unpins. The bottom shows

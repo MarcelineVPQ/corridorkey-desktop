@@ -78,7 +78,7 @@ missing there).
   block's lines printed as they come, `Printer`; exit = the script's status),
   `history [N|term]` (`--audit`: the elevated log), `version` (also `corridorkey --version`, `render --version`: the app's
   version, which its corridorkey shares; answered without running it), `run [--keep-going] <file.ckcmd>` (a script: Scripting, below; no script
-  inside a script; its elevation: Security rules below). Several lines pasted at once are never joined: the page offers them as a script (Enter runs them in
+  inside a script; its elevation: Security rules below). Several lines pasted at once are never joined (each keeps a leading space, so it isn't kept in the history): the page offers them as a script (Enter runs them in
   order through `consoleRunLines`, the same path as `run`, each line as a typed one: one that leaves a quote open is
   refused and nothing runs; Esc keeps the first line; Ctrl+C drops them), `sudo <command>`,
   `sudo -k`, `farm export` (below), and `corridorkey render | verify | prepare | info` (also bare `render` …). Other command lines' names get
@@ -313,7 +313,8 @@ inner loop's words);
   rule): `!!` the line before, `!N` line N (the stable numbers), `!-N` the Nth before, `!prefix` the newest line
   starting so, `!$` the line before's last word (as typed, quotes kept), `^old^new` the line before with its first
   `old` replaced; `sudo !!` is `sudo` and the line before, and the "replaces files" refusal says to type it. The main
-  process expands from the whole history (an event not found is refused, not kept); the expanded line is what runs,
+  process expands over the newest 200 lines, the same lines the page's preview shows (`HISTORY_WINDOW`, whole review
+  2026-10-27: an older line is "not found" in both, never run unseen; an event not found is refused, not kept); the expanded line is what runs,
   what the block shows (its first line `from <what was typed>`) and what the history keeps, as in bash. Frame tokens
   and file names stay literal (SME review): a `!` expands only at a word's start, outside quotes, not escaped (`\!`),
   and only before `!`, a digit, `-` and a digit, `$` (not `$F`) or a letter; so `sh010!.mov`, `'take!!'`, `!####`,

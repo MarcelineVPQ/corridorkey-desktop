@@ -1,6 +1,6 @@
 // The Console's scripting language (src/shared/console/script.ts): separators outside quotes, for, if, time.
 import { describe, expect, it } from "vitest";
-import { commandStart, commands, isCompound, parseLine, parseProgram, type List } from "../../src/shared/console/script";
+import { commandStart, commands, globRegExp, isCompound, parseLine, parseProgram, type List } from "../../src/shared/console/script";
 import { makeRegistry } from "../../src/shared/console/registry";
 
 const opts = { windows: false };
@@ -103,5 +103,12 @@ describe("a long program parses in linear time (review 2026-10-27 S5)", () => {
     expect(ms).toBeLessThan(500);
     expect(p.list.items).toHaveLength(30_000);
     expect([p.list.items[0].node, p.list.items[29_999].node]).toMatchObject([{ line: 1 }, { line: 30_000 }]);
+  });
+});
+
+describe("whole review: file-name patterns", () => {
+  it("a range written backwards ([z-a]) is said in words, not as the regular expression's error", () => {
+    expect(() => globRegExp("sh[z-a].exr", false)).toThrow("[z-a] in sh[z-a].exr runs backwards: write the range low to high ([a-z])");
+    expect(globRegExp("sh[a-z].exr", false).test("shq.exr")).toBe(true);
   });
 });

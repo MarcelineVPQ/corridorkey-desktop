@@ -4,7 +4,7 @@
 // Re-run (which puts the line back in the input, never runs it), shown on hover and on keyboard focus. An elevated
 // block is marked; a built-in's is compact. A program's commands are one row each (a button: click or Enter shows the
 // whole block; Collapse folds it again), and one that runs, failed or was refused shows whole on its own.
-import { memo, useContext, useEffect, useState } from "react";
+import { memo, useContext, useEffect, useMemo, useState } from "react";
 import { Check, ChevronDown, ChevronRight, Copy, CornerDownLeft, FolderOpen, ShieldAlert } from "lucide-react";
 import type { Registry } from "../../shared/console/registry";
 import type { ConsoleBlock } from "../../shared/types";
@@ -50,6 +50,21 @@ function CopyButton({ label, text }: { label: string; text: string }) {
   );
 }
 
+/**
+ * One printed line, memoised: a running block gets new lines on every push, and the lines it had keep their objects
+ * (mergeBlocks), so only the new ones render. A known long path (dir's folder) shown short; the whole line on hover
+ * and in Copy output.
+ */
+const OutLine = memo(function OutLine({ line, paths, home }: { line: ConsoleBlock["lines"][number]; paths: ConsoleBlock["paths"]; home: string }) {
+  const shown = shortenKnown(line.text, paths, home);
+  return (
+    <span className={`l-${line.kind}`} title={shown !== line.text ? line.text : undefined}>
+      {shown}
+      {"\n"}
+    </span>
+  );
+});
+
 type BlockProps = { b: ConsoleBlock; registry: Registry; windows: boolean; selected: boolean; onReinsert: (line: string) => void };
 
 export const OutputBlock = memo(function OutputBlock(props: BlockProps) {
@@ -94,6 +109,9 @@ function FullBlock({ b, registry, windows, selected, onReinsert, onCollapse, fol
   const written = b.state === "done" || b.state === "failed" || b.state === "cancelled" ? writtenPaths(b, registry) : [];
   const out = blockText(b);
   const home = useContext(HomeContext);
+  // each push brings a new copy of the same paths: one value, so the lines (OutLine) see no change
+  const pathsKey = b.paths?.join("\n") ?? null;
+  const paths = useMemo(() => b.paths, [pathsKey]);
   return (
     // the line is the user's own input: it labels the block, the live log announces only what the command printed
     <article
@@ -165,7 +183,7 @@ function FullBlock({ b, registry, windows, selected, onReinsert, onCollapse, fol
       </header>
       {!folded && (b.progress || (b.state === "running" && b.status)) && (
         <div className="cb-progress">
-          {b.progress && <ProgressBar value={b.progress.done} max={b.progress.total} />}
+          {b.progress && <ProgressBar label="Frames" value={b.progress.done} max={b.progress.total} />}
           <span className="cb-phase">
             {b.progress && `${b.progress.done} / ${b.progress.total} frames · ${Math.floor(b.progress.percent)} %`}
             {b.progress && b.rate && b.state === "running" && ` · ${rateText(b.rate)}`}
@@ -177,17 +195,10 @@ function FullBlock({ b, registry, windows, selected, onReinsert, onCollapse, fol
       {!folded && (b.lines.length > 0 || b.linesDropped > 0) && (
         <pre className={`cb-out ${b.nowrap ? "nowrap" : ""}`}>
           {b.linesDropped > 0 && <span className="l-info">{`… ${b.linesDropped} earlier lines not kept\n`}</span>}
-          {/* loop: HOT-PATH-OK — ≤ 2000 lines, per render of a changed block (memo: others don't re-render) */}
-          {b.lines.map((l, i) => {
-            // a known long path (dir's folder) shown short; the whole line on hover and in Copy output
-            const shown = shortenKnown(l.text, b.paths, home);
-            return (
-              <span key={b.linesDropped + i} className={`l-${l.kind}`} title={shown !== l.text ? l.text : undefined}>
-                {shown}
-                {"\n"}
-              </span>
-            );
-          })}
+          {/* loop: HOT-PATH-OK — ≤ 2000 lines, per render of a changed block; a line already shown doesn't render again (OutLine) */}
+          {b.lines.map((l, i) => (
+            <OutLine key={b.linesDropped + i} line={l} paths={paths} home={home} />
+          ))}
         </pre>
       )}
       {!folded && b.entries && b.entries.length > 0 && (

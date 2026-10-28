@@ -46,11 +46,17 @@ export function QueuePage(props: {
             <Square size={16} /> Stop
           </button>
         ) : (
-          <button type="button" className="btn primary" disabled={blocked !== null} title={blocked ?? undefined} onClick={() => window.ck.startQueue()}>
+          <button type="button" className="btn primary" disabled={blocked !== null} aria-describedby={blocked ? "start-blocked" : undefined} onClick={() => window.ck.startQueue()}>
             <Play size={16} /> Start queue
           </button>
         )}
       </div>
+      {/* why Start queue is off, said on screen (not only as a tooltip) */}
+      {!state.queueRunning && blocked && (
+        <p id="start-blocked" className="hint-text bar-note">
+          Start queue: {blocked}
+        </p>
+      )}
       {state.queueRunning && state.gpu && <OtherGpuUsers state={state} />}
       <div className="queue-split">
         <nav className="queue" aria-label="Clips">
@@ -126,13 +132,13 @@ function JobRowView({ job, selected, onSelect }: { job: Job; selected: boolean; 
         {job.clip.thumb ? <img className="thumb" src={job.clip.thumb} alt="" width={96} loading="lazy" decoding="async" /> : <div className="thumb" />}
         {need && <i className="task" aria-hidden />}
       </span>
-      <div style={{ minWidth: 0 }}>
+      <div>
         <button type="button" className="job-name" title={job.clip.path} aria-current={selected ? "true" : undefined}>
           {job.clip.name}
         </button>
         <div className="job-meta">{job.clip.probeError ?? clipFacts(job.clip)}</div>
         <div className={`job-status ${job.status}`}>{need ? `Waiting: ${need}` : statusText(job)}</div>
-        {job.status === "running" && <ProgressBar value={job.framesDone} max={job.framesTotal ?? 0} />}
+        {job.status === "running" && <ProgressBar label={`${job.clip.name}: frames written`} value={job.framesDone} max={job.framesTotal ?? 0} />}
       </div>
       {job.status !== "running" && (
         <button
@@ -157,13 +163,13 @@ function Detail({ job, prebuild, windows }: { job: Job; prebuild: TrtPrebuild; w
     <>
       <div className="detail-head">
         {job.clip.thumb ? <img className="thumb" src={job.clip.thumb} alt="" width={240} /> : <div className="thumb" />}
-        <div style={{ minWidth: 0 }}>
+        <div>
           <h2>{job.clip.name}</h2>
           <div className="job-meta">{clipFacts(job.clip)}</div>
           <div>
             <PathText path={job.clip.path} />
           </div>
-          <div className="hint-text" style={{ marginTop: 8 }}>
+          <div className="hint-text gap-top">
             Results: <PathText path={job.outputDir} />
           </div>
           {job.status !== "waiting" && <LogLine job={job} />}
@@ -215,7 +221,7 @@ function LogLine({ job }: { job: Job }) {
           "The log is saved next to the results when the job ends."
         )}
       </div>
-      <div style={{ marginTop: 8 }}>
+      <div className="gap-top">
         <button type="button" className="btn small" onClick={() => void window.ck.copyJobLog(job.id).then(setCopied)}>
           {copied ? <Check size={14} aria-hidden /> : <ClipboardCopy size={14} aria-hidden />}
           <span aria-live="polite">{copied ? "Copied" : "Copy log"}</span>
@@ -241,15 +247,10 @@ function CopyCommand({ job, windows }: { job: Job; windows: boolean }) {
   }, [copied]);
   const r = job.command ? { line: job.command } : jobCommand(job, false, windows);
   // no safe line (a path a shell would read part of): said instead of a button that copies nothing
-  if ("error" in r)
-    return (
-      <div className="hint-text" style={{ marginTop: 8 }}>
-        Copy as command: {r.error}.
-      </div>
-    );
+  if ("error" in r) return <div className="hint-text gap-top">Copy as command: {r.error}.</div>;
   const line = r.line;
   return (
-    <div style={{ marginTop: 8 }}>
+    <div className="gap-top">
       <button type="button" className="btn small" title={line} onClick={() => void window.ck.copyText(line).then(setCopied)}>
         {copied ? <Check size={14} aria-hidden /> : <SquareTerminal size={14} aria-hidden />}
         <span aria-live="polite">{copied ? "Copied" : "Copy as command"}</span>
@@ -263,7 +264,7 @@ function OtherGpuUsers({ state }: { state: AppState }) {
   const others = state.gpu!.processes.filter((p) => !p.ours && p.usedMb >= OTHER_GPU_USER_MB);
   if (others.length === 0) return null;
   return (
-    <section className="notice" style={{ margin: "0 16px 12px" }}>
+    <section className="notice inset">
       <h3>Other programs are using the graphics card</h3>
       <div className="hint-text">Automatic memory picks a smaller window when less is free; both run slower together.</div>
       <ul className="gpu-procs">

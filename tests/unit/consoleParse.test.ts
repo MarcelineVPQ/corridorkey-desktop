@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { parse, quoteArg, tokenize, valueProblem } from "../../src/shared/console/parse";
 import { makeRegistry, MEANINGS, own, suggest } from "../../src/shared/console/registry";
 import { parseLine } from "../../src/shared/console/script";
+import { expandVars } from "../../src/shared/console/vars";
 
 const reg = makeRegistry();
 const posix = { windows: false };
@@ -60,11 +61,25 @@ describe("tokenize", () => {
 });
 
 describe("quoteArg", () => {
+  it("whole review: a literal ${ is quoted with '…', so no variable is filled in", () => {
+    // loop: NOT-WORTH — four cases
+    for (const [v, o] of [
+      ["a${b}c", posix],
+      ["it's ${x}", posix],
+      ["a${b}c", win],
+      ["it's ${x}", win],
+    ] as const) {
+      const q = quoteArg(v, o);
+      expect(expandVars(q, () => "FILLED", o)).toEqual({ line: q, changed: false });
+      expect(values(q, o)).toEqual([v]);
+    }
+  });
+
   it("leaves plain words alone and quotes the rest so tokenize gives the value back", () => {
     expect(quoteArg("plates/sh010.####.exr", posix)).toBe("plates/sh010.####.exr");
     expect(quoteArg("C:\\shots\\a", win)).toBe("C:\\shots\\a");
     // loop: NOT-WORTH — a handful of cases
-    for (const v of ["my shot.mov", 'say "hi"', "a\\b c", "?", "--", "", "it's", "Été 🎬"]) {
+    for (const v of ["my shot.mov", 'say "hi"', "a\\b c", "?", "--", "", "it's", "Été 🎬", "a${b}c", "it's ${x}"]) {
       expect(values(quoteArg(v, posix))).toEqual([v]);
       if (!(v.includes('"') && v.includes("'"))) expect(values(quoteArg(v, win), win)).toEqual([v]);
     }

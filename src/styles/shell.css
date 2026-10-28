@@ -1,6 +1,6 @@
 /* The app shell: the rail (AppRail.tsx), the page split and its panel
    (SplitView.tsx), sections (Section.tsx), main-view blocks and Glass.
-   The house look of the DS5 app and Sonata. Colors only through tokens.
+   Colors only through tokens.
    Idle cost: none (CSS states; transitions only on width/opacity changes). */
 
 .shell {
@@ -445,7 +445,7 @@
   box-shadow: 0 0 0 1px var(--mark-edge);
 }
 
-/* ---- Glass (App settings → Appearance; Liquid Glass from the DS5 app) ----
+/* ---- Glass (App settings → Appearance; Liquid Glass) ----
    The surface turns translucent and the SVG filter (useLiquidGlass) frosts and
    bends what's behind it; the rim highlight follows the pointer (useSpecular).
    Reduce transparency (OS) turns it back into the solid surface. */

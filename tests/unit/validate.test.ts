@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { loadSettings } from "../../electron/main/settings";
 import { fromAppPageOnly, idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir, vramLimit } from "../../electron/main/validate";
-import { DEFAULT_APPEARANCE, DEFAULT_OPTIONS, FRAME_DIR_FPS_RANGE, frameRateOf, scaledSize, vramLimitChoices } from "../../src/shared/types";
+import { DEFAULT_APPEARANCE, DEFAULT_OPTIONS, FRAME_DIR_FPS_RANGE, frameRateOf, MANUAL_WINDOWS, scaledSize, vramLimitChoices, windowChoices } from "../../src/shared/types";
 
 describe("IPC and settings validation", () => {
   it("keeps valid job options as they are", () => {
@@ -44,6 +44,13 @@ describe("IPC and settings validation", () => {
     expect([frameRateOf(String(lo)), frameRateOf(String(hi)), frameRateOf("23.976"), frameRateOf("2")]).toEqual([lo, hi, 23.976, 2]);
     // empty, half-typed or out of range: the field keeps the text, the setting stays (no 24 while typing)
     expect([frameRateOf(""), frameRateOf("0"), frameRateOf("-"), frameRateOf(String(hi + 1))]).toEqual([null, null, null, null]);
+  });
+
+  it("whole review: the Manual picker shows a kept window that isn't one of its choices", () => {
+    const kept = sanitizeOptions({ memory: { auto: false, hannChunk: 32, hannStride: 16 } }).memory;
+    expect(kept).toMatchObject({ hannChunk: 32, hannStride: 16 });
+    expect(windowChoices(32, 16)).toEqual([...MANUAL_WINDOWS, [32, 16]]);
+    expect(windowChoices(24, 12)).toEqual([...MANUAL_WINDOWS]);
   });
 
   it("sizes the internal resolution as the engine does (Python round, half to even)", () => {

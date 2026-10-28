@@ -361,6 +361,11 @@ describe("SME review 2026-10-26: pasting several lines (S2)", () => {
     expect([s.line, s.paste]).toEqual(["", ["dir", "cd ..", "pwd"]]);
   });
 
+  it("whole review: a pasted line keeps its leading space (it then isn't kept in the history)", () => {
+    expect(pasted(typed(""), " set token=x\npwd \n").paste).toEqual([" set token=x", "pwd"]);
+    expect(pasted(typed(""), " set token=x\n").line).toBe(" set token=x");
+  });
+
   it("Enter runs them as a script; Esc keeps the first; Ctrl+C drops them; other keys type nothing meanwhile", () => {
     const s = pasted(typed(""), "dir\ncd ..\npwd");
     const run = press(s, "Enter");

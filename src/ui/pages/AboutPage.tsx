@@ -27,6 +27,12 @@ const slug = (s: string) =>
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
+/** A heading's text as written in the doc ("## Title" → "Title"), from its place in the source. */
+const headingSource = (md: string, start = 0, end = 0) =>
+  md
+    .slice(start, end)
+    .replace(/^##\s+/, "")
+    .trim();
 // loop: NOT-WORTH — a doc's chapter headings (≤ 20), per render of the About page
 const chapters = (md: string) => [...md.matchAll(/^##\s+(.+)$/gm)].map((m) => m[1].trim());
 
@@ -45,7 +51,9 @@ export function AboutPage(props: { version: string; panelShown: boolean; narrow:
         <Markdown
           remarkPlugins={[remarkGfm]}
           components={{
-            h2: ({ children }) => <h2 id={slug(String(children))}>{children}</h2>,
+            // the id from the heading's own source line, as chapters() reads it (String(children) of a heading with
+            // `code` or a link was "[object Object]", so its chapter never scrolled)
+            h2: ({ node, children }) => <h2 id={slug(headingSource(d.text, node?.position?.start.offset, node?.position?.end.offset))}>{children}</h2>,
             a: ({ href, children }) => (
               <a href={href} target="_blank" rel="noreferrer">
                 {children}
@@ -75,7 +83,7 @@ export function AboutPage(props: { version: string; panelShown: boolean; narrow:
                     onClick={() => {
                       setDoc(id);
                       // loop: NOT-WORTH — one rAF per chapter click (scroll after the page switch)
-                      requestAnimationFrame(() => document.getElementById(slug(h))?.scrollIntoView({ behavior: "smooth" }));
+                      requestAnimationFrame(() => document.getElementById(slug(h))?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }));
                     }}
                   >
                     {h}

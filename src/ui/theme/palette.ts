@@ -1,4 +1,4 @@
-// The Desktop theme ("Match desktop", the DS5 app's desktopPalette.ts): the
+// The Desktop theme ("Match desktop"): the
 // main process reads the desktop's colors (KDE's kdeglobals; elsewhere just
 // the system accent) and this maps them onto the app's tokens (tokens.css).
 // Pure functions, unit-tested (tests/unit/palette.test.ts). Every text token
@@ -181,4 +181,10 @@ export function paletteToCssVars(p: DesktopPalette): Record<string, string> {
   }
   Object.assign(vars, accentVars(p.accent, grounds, p.isDark));
   return vars;
+}
+
+/** The accent in use: the Desktop theme takes the desktop's (whatever the accent setting says), when it has colors. */
+export function accentText(a: { theme: string; accent: string }, desktopColors: boolean): string {
+  if (a.theme !== "desktop" && a.accent !== "desktop") return "built-in accent";
+  return desktopColors ? "desktop accent" : "built-in accent (no desktop colors found)";
 }

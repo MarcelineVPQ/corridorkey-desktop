@@ -85,8 +85,9 @@ export function expandHistory(line: string, past: readonly HistoryLine[], opts: 
       if (!e) return { error: `${d.spec}: no line ${s} in the history (history lists the numbers)` };
       text = e.line;
     } else if (/^-\d+$/.test(s)) {
+      if (Number(s) === 0) return { error: `${d.spec}: !-N counts back from 1 (!-1 is the line before)` };
       const e = past[past.length + Number(s)];
-      if (!e || Number(s) === 0) return { error: `${d.spec}: the history has only ${past.length} lines` };
+      if (!e) return { error: `${d.spec}: the history has only ${past.length} lines` };
       text = e.line;
     } else {
       // loop: NOT-WORTH — ≤ the history's lines, newest first, per !prefix typed

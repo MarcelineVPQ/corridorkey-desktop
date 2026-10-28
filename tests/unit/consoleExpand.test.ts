@@ -43,6 +43,8 @@ describe("history expansion", () => {
   it("says when there is no such line (bash's event not found), and when there is no line before", () => {
     expect(x("!99")).toEqual({ error: "!99: no line 99 in the history (history lists the numbers)" });
     expect(x("!-9")).toEqual({ error: "!-9: the history has only 4 lines" });
+    // whole review: !-0 says how !-N counts, not that the history is short
+    expect(x("!-0")).toEqual({ error: "!-0: !-N counts back from 1 (!-1 is the line before)" });
     expect(x("!zzz")).toEqual({ error: "!zzz: no line in the history starts with zzz" });
     expect(expandHistory("!!", [], { windows: false })).toEqual({ error: "!!: the history is empty" });
   });

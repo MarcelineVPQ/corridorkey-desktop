@@ -1,4 +1,3 @@
-// Ported from the DS5 app (src/desktop/glass), unchanged except the filter ids.
 // Liquid glass for one element: what's behind it is frosted (a light blur)
 // and bent at the edges like light through the rim of a glass slab.
 //

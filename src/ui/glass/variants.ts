@@ -1,4 +1,4 @@
-// Apple's two Liquid Glass variants, as our filter settings (the DS5 app's values).
+// Apple's two Liquid Glass variants, as our filter settings.
 // Clear: highly translucent, for floating controls over rich backgrounds.
 // Regular: more frost, for text-heavy surfaces (the rail while open, the panel).
 // Square: they dock to the window edges.

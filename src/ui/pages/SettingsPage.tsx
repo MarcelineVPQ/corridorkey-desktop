@@ -15,6 +15,7 @@ import { gbBytes } from "../format";
 import { More } from "../More";
 import { PathText } from "../PathText";
 import { shortenPath } from "../paths";
+import { accentText } from "../theme/palette";
 
 // where results go without an output folder (the readout, the Results status and its button)
 const NEXT_TO_CLIP = "Next to each clip";
@@ -75,7 +76,7 @@ export function SettingsPage(props: { state: AppState; panelShown: boolean; narr
 
   const panel = (
     <Accordion page="settings" focus={props.focus}>
-      <Section id="appearance" icon={Palette} title="Appearance" status={`${THEME_TEXT[a.theme]} · ${a.accent === "desktop" ? "desktop accent" : "built-in accent"}${a.glass ? " · Glass" : ""}`}>
+      <Section id="appearance" icon={Palette} title="Appearance" status={`${THEME_TEXT[a.theme]} · ${accentText(a, state.desktopPalette !== null)}${a.glass ? " · Glass" : ""}`}>
         {() => (
           <>
             <Row label="Theme" hint={a.theme === "desktop" ? "Follows your desktop's colors live" : undefined}>
@@ -176,14 +177,16 @@ export function SettingsPage(props: { state: AppState; panelShown: boolean; narr
                     <button type="button" className="btn small" disabled={!i.bytes} onClick={() => void window.ck.openStorageFolder(i.id)}>
                       <FolderOpen size={14} /> Open
                     </button>
-                    <button type="button" className="btn small" disabled={!i.bytes || busy} title={busy ? NOT_WHILE_BUSY : undefined} onClick={() => void window.ck.removeStorage(i.id)}>
+                    <button type="button" className="btn small" disabled={!i.bytes || busy} onClick={() => void window.ck.removeStorage(i.id)}>
                       <Trash2 size={14} /> Remove…
                     </button>
                   </div>
                 </Row>
               ))}
               {state.cache && <CacheFolder cache={state.cache} missing={state.cacheMissing} busy={busy} />}
-              <p className="hint-text">Removing asks first. Your settings and results are never touched here.</p>
+              <p className="hint-text">
+                {busy ? `${NOT_WHILE_BUSY}: Remove and the cache folder's Change and Default wait until then.` : "Removing asks first."} Your settings and results are never touched here.
+              </p>
               <More>
                 <p className="hint-text">
                   The cache folder holds, per clip, its thumbnail and result stills; a job&apos;s working files stay in the system&apos;s cache folder on this PC wherever the cache folder is. Changing
@@ -272,10 +275,11 @@ function Updates({ u, queueRunning }: { u: UpdateState; queueRunning: boolean })
             </button>
           )}
           {u.status === "ready" && (
-            <button type="button" className="btn small primary" disabled={queueRunning} title={queueRunning ? "After the queue finishes" : undefined} onClick={() => window.ck.restartToUpdate()}>
+            <button type="button" className="btn small primary" disabled={queueRunning} onClick={() => window.ck.restartToUpdate()}>
               <RotateCcw size={14} /> Restart now
             </button>
           )}
+          {u.status === "ready" && queueRunning && <span className="hint-text">After the queue finishes</span>}
         </div>
       </Row>
       {u.channel === "stable" && /-dev\.\d+$/.test(u.current) && (
@@ -307,7 +311,7 @@ function CacheFolder({ cache, missing, busy }: { cache: CacheInfo; missing: stri
             <p className="hint-text">The chosen folder is used again when the app starts with its drive connected.</p>
           </More>
           <div className="file-pick">
-            <button type="button" className="btn small" disabled={locked} title={busy ? NOT_WHILE_BUSY : cache.defaultDir} onClick={() => void window.ck.pickCacheFolder("default")}>
+            <button type="button" className="btn small" disabled={locked} title={cache.defaultDir} onClick={() => void window.ck.pickCacheFolder("default")}>
               <RotateCcw size={14} /> Use the default folder from now on
             </button>
           </div>
@@ -315,11 +319,11 @@ function CacheFolder({ cache, missing, busy }: { cache: CacheInfo; missing: stri
       )}
       <Row label={`Cache folder · ${cache.bytes ? mbOrGbBytes(cache.bytes) : "empty"}`} hint={<PathText path={cache.dir} />}>
         <div className="file-pick">
-          <button type="button" className="btn small" disabled={locked} title={busy ? NOT_WHILE_BUSY : undefined} onClick={() => void window.ck.pickCacheFolder()}>
+          <button type="button" className="btn small" disabled={locked} onClick={() => void window.ck.pickCacheFolder()}>
             <FolderInput size={14} /> Change…
           </button>
           {!cache.isDefault && (
-            <button type="button" className="btn small" disabled={locked} title={busy ? NOT_WHILE_BUSY : cache.defaultDir} onClick={() => void window.ck.pickCacheFolder("default")}>
+            <button type="button" className="btn small" disabled={locked} title={cache.defaultDir} onClick={() => void window.ck.pickCacheFolder("default")}>
               <RotateCcw size={14} /> Default
             </button>
           )}
