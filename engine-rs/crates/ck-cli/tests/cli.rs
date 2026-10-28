@@ -188,7 +188,7 @@ fn verify_finds_missing_and_cut_frames() {
     let o = run(&["verify", "-i", s(&pl), "-o", s(&pat), "-F", "1"]);
     assert!(text(&o.stdout).contains("key_alpha.0001.exr") && text(&o.stdout).contains("key_fg.0001.exr"), "{}", text(&o.stdout));
     let o = run(&["verify", "-i", s(&pl), "-o", s(&d.0.join("out")), "--outputs", "alpha", "-e", "1"]);
-    assert!(text(&o.stdout).contains(s(&d.0.join("out/plates_alpha_exr/plates_alpha.0001.exr"))), "{}", text(&o.stdout));
+    assert!(text(&o.stdout).contains(s(&d.0.join("out").join("plates_alpha_exr").join("plates_alpha.0001.exr"))), "{}", text(&o.stdout));
 }
 
 #[test]
