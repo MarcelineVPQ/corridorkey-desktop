@@ -68,6 +68,8 @@ $WHAT
 
 **Foundation models inside:** C-RADIO by NVIDIA (NVIDIA Open Model License), MoGe by Microsoft (MIT), RVM by Google DeepMind (code Apache 2.0, weights CC-BY 4.0).
 
+**Licence and attribution files:** ATTRIBUTION.md, NOTICE and the LICENSE files here are model set \`$BASE\`'s, unchanged. The per-file rewrites ATTRIBUTION.md lists "in manifest.json" are in that set's manifest.json (https://github.com/$REPO/releases/tag/models-$BASE); this release has none: its own files are listed in \`$LIST\`, and what it changes is above.
+
 SHA-256:
 \`\`\`
 $SUMS

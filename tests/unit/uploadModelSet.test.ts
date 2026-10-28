@@ -62,6 +62,10 @@ describe.skipIf(process.platform !== "linux")("upload_model_set.sh", () => {
     expect(r.stderr).toBe("");
     expect(r.status).toBe(0);
     expect(readFileSync(join(fake, "log"), "utf8")).toBe("edit\nupload ck2-a-trt-fp16.onnx.data\n");
-    expect(readFileSync(join(fake, "notes"), "utf8")).toContain(`${sha("weights A\n")}  ck2-a-trt-fp16.onnx.data`);
+    const notes = readFileSync(join(fake, "notes"), "utf8");
+    expect(notes).toContain(`${sha("weights A\n")}  ck2-a-trt-fp16.onnx.data`);
+    // a derived set has no manifest.json: its notes say the ATTRIBUTION.md they carry points at the base set's (release review 2026-10-28)
+    expect(notes).toContain("manifest.json (https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.5)");
+    expect(notes).toContain("its own files are listed in `models.json`");
   });
 });
