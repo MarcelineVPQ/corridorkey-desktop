@@ -1203,7 +1203,7 @@ describe("SME review 2026-10-26: sequences (M4, S1)", () => {
     const b = await c.run("dir");
     expect(b.entries!.map((e) => [e.name, e.bytes, e.sequence])).toEqual([
       ["notes.txt", 1, null],
-      ["sh010_plate.####.exr", 1100, { range: "1001-1012", count: 11, missing: "1005" }],
+      ["sh010_plate.####.exr", 1100, { range: "1001-1012", count: 11, missing: "1005", span: 12, gaps: "1005", belowZero: 0 }],
       ["sh010_plate.mov", 1, null],
       ["sh010_plates", null, null],
     ]);
@@ -1628,7 +1628,7 @@ describe("Phase 4: sequences everywhere", () => {
       expect(
         b.entries!.map((e) => [e.name, e.bytes, e.sequence]),
         p,
-      ).toEqual([["sh010_plate.####.exr", 100, { range: "1001-1012", count: 10, missing: "1005-1006" }]]);
+      ).toEqual([["sh010_plate.####.exr", 100, { range: "1001-1012", count: 10, missing: "1005-1006", span: 12, gaps: "1005-1006", belowZero: 0 }]]);
     }
     const f = await c.run("dir -f plates/sh010_plate.####.exr");
     expect(f.entries!.map((e) => e.name)).toHaveLength(10);
