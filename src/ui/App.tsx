@@ -16,6 +16,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { AboutPage } from "./pages/AboutPage";
 import { SetupPage } from "./pages/SetupPage";
 import { HomeContext } from "./PathText";
+import { UpdateBanner } from "./UpdateBanner";
 
 export function App() {
   const [state, setState] = useState<AppState | null>(null);
@@ -119,6 +120,7 @@ export function App() {
     >
       <HomeContext.Provider value={state.system.home}>
         <main className="shell-page">
+          <UpdateBanner update={state.update} restartWait={state.restartWait} />
           {page === "queue" && <QueuePage state={state} selected={selected} onSelect={setSelected} panelShown={panelShown("queue")} sectionTasks={d.sections} {...common} />}
           {page === "engine" && <EnginePage state={state} panelShown={panelShown("engine")} sectionTasks={d.sections} openSetup={() => setPage("setup")} {...common} />}
           {page === "console" && <ConsolePage state={state} blocks={consoleBlocks} setBlocks={setConsoleBlocks} panelShown={panelShown("console")} {...common} />}

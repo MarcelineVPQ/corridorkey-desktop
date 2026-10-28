@@ -17,7 +17,10 @@ import { EnginePage } from "../../src/ui/pages/EnginePage";
 import { SettingsPage } from "../../src/ui/pages/SettingsPage";
 import { ConsolePage } from "../../src/ui/pages/ConsolePage";
 import { STAGE_TEXT } from "../../src/ui/format";
-import { appState, job, settings } from "./fixtures";
+import { appState, job, settings, updateState } from "./fixtures";
+import { App } from "../../src/ui/App";
+import { UpdateBanner } from "../../src/ui/UpdateBanner";
+import type { AppState, UpdateState } from "../../src/shared/types";
 import { Cpu } from "lucide-react";
 
 const registry = makeRegistry();
@@ -337,5 +340,90 @@ describe("re-review", () => {
     expect(known.classList.contains("indeterminate")).toBe(false);
     expect((known.firstElementChild as HTMLElement).style.width).toBe("30%");
     // its style (a moving band; still under reduced motion): jobView.test.ts
+  });
+});
+
+describe("the app update notice (pinned above the page) and its task", () => {
+  const offered = updateState({ status: "available", latest: "1.0.0-dev.2", size: 45_300_000 });
+  const banner = (u: UpdateState, restartWait: string | null = null) => <UpdateBanner update={u} restartWait={restartWait} />;
+
+  it("offered: the version and size in words; Download downloads it; Not now hides this step of this version, remembered", () => {
+    const ck = mockCk({ installUpdate: async () => {} });
+    const { unmount } = render(banner(offered));
+    expect(screen.getByRole("status").textContent).toBe("1.0.0 Dev 2 is available, 45.3 MB.");
+    fireEvent.click(screen.getByRole("button", { name: "Download" }));
+    expect(ck.installUpdate).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    expect(screen.queryByRole("region", { name: "App update" })).toBeNull();
+    // remembered: a new start doesn't show it again
+    unmount();
+    const { rerender } = render(banner(offered));
+    expect(screen.queryByRole("region", { name: "App update" })).toBeNull();
+    // the next step shows again, and so does a newer version
+    rerender(banner({ ...offered, status: "ready" }));
+    expect(screen.getByRole("status").textContent).toBe("1.0.0 Dev 2 is ready: restart to use it.");
+    rerender(banner({ ...offered, latest: "1.0.0-dev.3" }));
+    expect(screen.getByRole("status").textContent).toBe("1.0.0 Dev 3 is available, 45.3 MB.");
+  });
+
+  it("downloading: the measured share as a bar and a number", () => {
+    mockCk();
+    render(banner({ ...offered, status: "downloading", progress: 0.42 }));
+    expect(screen.getByRole("status").textContent).toBe("Downloading 1.0.0 Dev 2…");
+    expect(screen.getByRole("progressbar", { name: "Downloading 1.0.0 Dev 2" }).getAttribute("aria-valuenow")).toBe("42");
+    expect(screen.getByText("42%")).toBeTruthy();
+  });
+
+  it("ready: Restart now restarts; while work runs it waits and says why", () => {
+    const ck = mockCk({ restartToUpdate: async () => {} });
+    const ready = { ...offered, status: "ready" as const };
+    const why = "The queue is running: stop it or let it finish, then restart.";
+    const { rerender } = render(banner(ready, why));
+    const restart = screen.getByRole("button", { name: "Restart now" }) as HTMLButtonElement;
+    expect(restart.disabled).toBe(true);
+    expect(screen.getByText(why)).toBeTruthy();
+    expect(restart.getAttribute("aria-describedby")).toBe(screen.getByText(why).id);
+    rerender(banner(ready));
+    expect(restart.disabled).toBe(false);
+    fireEvent.click(restart);
+    expect(ck.restartToUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("a failed install is an alert, verbatim, until dismissed; failing again shows it again; a failed check says nothing here", () => {
+    mockCk();
+    const error = "The update didn't install: no space left on device. Your current version is untouched.";
+    const failed = { ...offered, status: "error" as const, errorFrom: "install" as const, error };
+    const { rerender, container } = render(banner(failed));
+    expect(screen.getByRole("alert").textContent).toContain(error);
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    rerender(banner(failed));
+    expect(screen.queryByRole("alert")).toBeNull();
+    // tried again, failed again
+    rerender(banner({ ...offered, status: "downloading", progress: 0.1 }));
+    rerender(banner(failed));
+    expect(screen.getByRole("alert").textContent).toContain(error);
+    rerender(banner({ ...failed, errorFrom: "check", error: "Couldn't check for updates: offline" }));
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("the app: the notice above the page, a dot on App settings with the task's words, and its press opens Updates", async () => {
+    const state: AppState = appState({ update: offered });
+    mockCk({ getState: async () => state, onState: () => () => {}, onConsoleBlocks: () => () => {}, setVisible: () => {} });
+    render(<App />);
+    expect((await screen.findByRole("region", { name: "App update" })).textContent).toContain("1.0.0 Dev 2 is available, 45.3 MB.");
+    const item = screen.getByRole("button", { name: /App settings/ });
+    expect(item.getAttribute("aria-description")).toBe("Waiting: 1.0.0 Dev 2 is available, 45.3 MB");
+    expect(item.querySelector(".task")).not.toBeNull();
+    // nothing waiting elsewhere
+    expect(screen.getByRole("button", { name: /^Queue/ }).querySelector(".task")).toBeNull();
+    fireEvent.click(item);
+    const updates = await screen.findByRole("button", { name: /^Updates/ });
+    expect(updates.getAttribute("aria-expanded")).toBe("true");
+    expect(updates.textContent).toContain("Waiting: 1.0.0 Dev 2 is available, 45.3 MB");
+    // Not now hides the notice; the task (and its dot) stays until it is done
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    expect(screen.queryByRole("region", { name: "App update" })).toBeNull();
+    expect(item.querySelector(".task")).not.toBeNull();
   });
 });

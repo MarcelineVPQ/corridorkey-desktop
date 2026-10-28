@@ -259,6 +259,30 @@ select {
   padding-left: 20px;
   color: var(--text-2);
 }
+/* the app update, pinned above the page (UpdateBanner.tsx): its words, then its buttons at the end of the line */
+.update-banner {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 12px 16px 0;
+}
+.update-banner p {
+  margin: 0;
+}
+.update-banner .btn-row {
+  margin-left: auto;
+}
+.update-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 160px;
+}
+.update-progress .bar {
+  flex: 1;
+}
 
 .spacer {
   flex: 1;
