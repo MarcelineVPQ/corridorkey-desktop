@@ -81,7 +81,8 @@ none of them changes what a user sees today.
 
 - Linux (the AppImage) or Windows 10/11 (the installer), x64, with an NVIDIA graphics card (RTX 20-series or newer, 8 GB or more; measured on an RTX 2070 SUPER 8 GB and an RTX 5080
   16 GB: the speed and quality numbers are the RTX 5080's (Speed), and the RTX 2070 SUPER measured the temporal windows
-  that fit an 8 GB card under a graphics-memory limit, docs/ENGINE_RUST.md "Where memory is tight").
+  that fit an 8 GB card under a graphics-memory limit, docs/ENGINE_RUST.md "Where memory is tight"; both machines in
+  Speed).
   **On Linux and Windows the NVIDIA card is required**: the engine keys only on CUDA. AMD and Intel graphics cards aren't
   supported, and without an NVIDIA card nothing falls back to the CPU: a job stops with "CorridorKey needs an NVIDIA
   graphics card with CUDA." (The engine has a MIGraphX path for AMD cards on Linux, `--device migraphx`: untested on
@@ -160,7 +161,7 @@ back, with the same settings. Measured 2026-10-24 with `tools/engine_bench.mjs`.
 
 **Test machine and software (PC)**
 
-Every PC number in this README (Speed and Quality) was measured on this machine:
+Every PC speed and quality number in this README was measured on this machine:
 
 | | |
 | --- | --- |
@@ -169,6 +170,17 @@ Every PC number in this README (Speed and Quality) was measured on this machine:
 | System | Kubuntu 26.04, Linux 7.0.0, KDE Plasma (Wayland) |
 | Original CorridorKey 2.0 | PyTorch 2.9.1 (CUDA 12.8, cuDNN 9.10), Python 3.12, its shipping mode: bf16 autocast |
 | CorridorKey Desktop | Rust engine on ONNX Runtime 1.31.0 (CUDA 13.4, cuDNN 9.27), fp16, model set `2.0.0-onnx.3`: the engine and GPU runtime the app shipped and downloaded then (since 2026-10-25 it downloads `2.0.0-onnx.4`, and dev.2 `2.0.0-onnx.5`; 0.0.8-dev and 0.0.9-dev below) |
+
+**Second test machine (8 GB card)**
+
+The temporal windows that fit an 8 GB card under a graphics-memory limit (Requirements; docs/ENGINE_RUST.md, "Where
+memory is tight") were measured on this one:
+
+| | |
+| --- | --- |
+| Graphics card | NVIDIA GeForce RTX 2070 SUPER, 8 GB, driver 615.71.09 |
+| Processor, memory | Intel Core i7-2600K (4 cores, 8 threads, 3.4 GHz), 16 GB RAM, ASUS P8Z68-V PRO |
+| System | Linux Mint 22, Linux 6.8.0 |
 
 **Method**
 
