@@ -45,6 +45,7 @@ describe("git hooks", () => {
 
   it("npm's prepare script points git at .hooks", () => {
     const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
-    expect(pkg.scripts.prepare).toBe("git config core.hooksPath .hooks");
+    // outside a git checkout (a tarball's npm ci) it says the hooks aren't installed instead of failing (dcac64f)
+    expect(pkg.scripts.prepare).toMatch(/^git config core\.hooksPath \.hooks \|\| echo prepare: not a git checkout/);
   });
 });
