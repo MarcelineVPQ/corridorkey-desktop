@@ -83,7 +83,8 @@ none of them changes what a user sees today.
   supported, and without an NVIDIA card nothing falls back to the CPU: a job stops with "CorridorKey needs an NVIDIA
   graphics card with CUDA." (The engine has a MIGraphX path for AMD cards on Linux, `--device migraphx`: untested on
   real hardware, and the app doesn't offer it; docs/AMD.md.)
-- macOS 14 or newer on Apple Silicon (M1 or newer; the disk image). Intel Macs aren't supported.
+- macOS 14 or newer on Apple Silicon (M1 or newer; the disk image, once a Mac build ships: there is none yet). Intel
+  Macs aren't supported.
 - Nothing else to set up: the engine comes with the app, and on first start the setup downloads the GPU runtime and
   the CorridorKey models (a 4.03 GB download on Linux, 3.81 GB on Windows, 4.76 GB on macOS, once). If `ffmpeg` is
   missing, it offers to install it (apt or pacman on Linux, `winget` on Windows, Homebrew on macOS).
