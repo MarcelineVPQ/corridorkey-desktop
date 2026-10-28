@@ -1,8 +1,11 @@
 //! `corridorkey run FILE.ckcmd` (SME review 2026-10-27 N12, backlog row 151): a Console script without the app's
 //! window, from cron or as a farm's pre-job. The Console's parser and rules are the app's own code (TypeScript), so
 //! this starts the app's executable as Node (`ELECTRON_RUN_AS_NODE=1`) on its `out/main/headless.js`, passing itself
-//! (`CK_HEADLESS_CLI`) for the script's render, verify, prepare and info; it waits and exits as the script ended. It
-//! needs the app installed next to it (this binary in `resources/engine/`); a bare copy on a worker says so (exit 7).
+//! (`CK_HEADLESS_CLI`) for the script's render, verify, prepare and info. On Unix it execs the app (same process: a
+//! farm's SIGTERM reaches the runner itself, and a death by signal shows as one); on Windows it waits and exits as the
+//! script ended: Ctrl+C / Ctrl+Break reach the app on the shared console while this process keeps waiting
+//! (signals.rs), and the app ends with it (ck_core::proc::children_end_with_me). It needs the app installed next to
+//! it (this binary in `resources/engine/`); a bare copy on a worker says so (exit 7).
 use crate::exit;
 use clap::ArgMatches;
 use std::path::{Path, PathBuf};
@@ -52,12 +55,26 @@ pub fn run(m: &ArgMatches) -> i32 {
         c.arg("--keep-going");
     }
     c.arg(file).env("ELECTRON_RUN_AS_NODE", "1").env("CK_HEADLESS_CLI", &exe);
-    // loop: NOT-WORTH — one wait for the script [bounded: the script's own end; SIGINT / SIGTERM reach it, it stops cleanly]
-    match c.status() {
-        Ok(s) => s.code().unwrap_or(exit::SIGTERM),
-        Err(e) => {
-            eprintln!("corridorkey run: the app ({}) didn't start: {e}", app.display());
-            exit::ASSETS
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // returns only when the app couldn't start
+        let e = c.exec();
+        eprintln!("corridorkey run: the app ({}) didn't start: {e}", app.display());
+        exit::ASSETS
+    }
+    #[cfg(not(unix))]
+    {
+        // the first Ctrl+C / Ctrl+Break is the app's to stop on (it gets the same console event); a second ends both
+        crate::signals::install();
+        // loop: NOT-WORTH — one wait for the script [bounded: the script's own end; Ctrl+C / Ctrl+Break reach it, it stops cleanly]
+        match c.status() {
+            // Windows always has an exit code
+            Ok(s) => s.code().unwrap_or(exit::ENGINE),
+            Err(e) => {
+                eprintln!("corridorkey run: the app ({}) didn't start: {e}", app.display());
+                exit::ASSETS
+            }
         }
     }
 }

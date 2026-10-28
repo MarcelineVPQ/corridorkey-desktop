@@ -133,6 +133,14 @@ pub fn end_with_parent(parent_pid: Option<u32>) {
     }
 }
 
+/// Windows: this process joins a job object that ends every process in it when this one ends (its children join it
+/// by inheritance): the CLI's children (`prepare`'s TensorRT builder, `run`'s app, ffmpeg) don't outlive a CLI its farm
+/// killed. Elsewhere nothing: Linux children use `die_with_parent`, and `corridorkey run` execs on Unix.
+pub fn children_end_with_me() {
+    #[cfg(windows)]
+    win::kill_children_on_close();
+}
+
 /// The app's pid as it passes it (CK_ENGINE_PARENT_PID); None when absent or not a pid (a bench run, a shell).
 pub fn parent_pid_from(v: Option<&str>) -> Option<u32> {
     v.and_then(|s| s.trim().parse::<u32>().ok()).filter(|&p| p > 0)
@@ -186,9 +194,9 @@ mod win {
     #[cfg(target_pointer_width = "64")]
     const _: () = assert!(std::mem::size_of::<ExtendedLimits>() == 144);
 
-    pub(crate) fn end_with_parent(parent_pid: Option<u32>) {
+    pub(crate) fn kill_children_on_close() {
         // SAFETY: documented kernel32 calls with a zeroed, correctly sized JOBOBJECT_EXTENDED_LIMIT_INFORMATION;
-        // the job handle is kept open for the engine's whole life on purpose (closing it is what kills the job)
+        // the job handle is kept open for the process's whole life on purpose (closing it is what kills the job)
         unsafe {
             let job = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
             if !job.is_null() {
@@ -204,6 +212,13 @@ mod win {
                     AssignProcessToJobObject(job, GetCurrentProcess());
                 }
             }
+        }
+    }
+
+    pub(crate) fn end_with_parent(parent_pid: Option<u32>) {
+        kill_children_on_close();
+        // SAFETY: documented kernel32 calls; the parent's handle is only waited on
+        unsafe {
             let Some(pid) = parent_pid else { return };
             let parent = OpenProcess(SYNCHRONIZE, 0, pid);
             if parent.is_null() {

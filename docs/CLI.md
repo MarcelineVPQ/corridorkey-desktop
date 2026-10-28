@@ -39,7 +39,7 @@ corridorkey verify -i plates/sh010.####.exr -o key/sh010_key.####.exr --outputs 
 | `corridorkey verify` | check that every requested frame is there and reads as a whole EXR (exit 0, or 9) |
 | `corridorkey prepare` | check the models, ONNX Runtime, the card, its free memory and ffmpeg before a farm's tasks start; `--tensorrt-size WxH` builds TensorRT's engines for that size (a one-time build of minutes, so no task waits on it) |
 | `corridorkey info` | version, model set, ONNX Runtime, provider, card, OpenColorIO, decoders (`--json`) |
-| `corridorkey run [--keep-going] FILE.ckcmd` | a Console script without the app's window (cron, a farm's pre-job): ck-cli's `headless.rs` starts the app's own executable as Node (`ELECTRON_RUN_AS_NODE=1`) on `resources/app.asar/out/main/headless.js` (`CK_APP` / `CK_APP_ENTRY` name a development build's), passing itself as `CK_HEADLESS_CLI`; the app's Console runner runs it with the app's settings (write folders, bookmarks, kept variables), its audit log and a history of its own (`console-history-headless.jsonl`); anything that needs a confirmation (`sudo` lines, `allow`) is refused in words; exit 7 when the app isn't next to it, else the script's status (backlog row 151) |
+| `corridorkey run [--keep-going] FILE.ckcmd` | a Console script without the app's window (cron, a farm's pre-job): ck-cli's `headless.rs` starts the app's own executable as Node (`ELECTRON_RUN_AS_NODE=1`) on `resources/app.asar/out/main/headless.js` (`CK_APP` / `CK_APP_ENTRY` name a development build's), passing itself as `CK_HEADLESS_CLI`; the app's Console runner runs it with the app's settings (write folders, bookmarks, kept variables), its audit log and a history of its own (`console-history-headless.jsonl`); anything that needs a confirmation (`sudo` lines, `allow`) is refused in words; exit 7 when the app isn't next to it, else the script's status (backlog row 151). On Linux and macOS it execs the app (the same process: a farm's SIGTERM reaches the runner, and a death by signal shows as that signal); on Windows it waits, the app gets Ctrl+C / Ctrl+Break on the shared console, and the app ends with it |
 | `corridorkey help [COMMAND]` | the help; `corridorkey COMMAND -h` too, with examples. `corridorkey --version` (and `corridorkey render --version`, any command's `-V`): the app release it ships in (package.json's version, e.g. `1.0.0-dev.1`; the engine's pong says the same) |
 
 Options are GNU style: `--frames 1001-1100` or `--frames=1001-1100`, short ones `-F 1001-1100`; `--` ends the options
@@ -219,7 +219,8 @@ Every other engine knob is its `CK_ENGINE_*` variable ([ENGINE_RUST.md](ENGINE_R
 ## Exit codes
 
 Farms treat any non-zero exit as a failure and retry; the code says whether a retry can help. Never 1 for anything
-specific, never 33 or 137 (OpenCue's retry codes).
+specific, never 33 or 137 (OpenCue's retry codes). `corridorkey run` is the exception: its status is the script's
+(the Console's `${status}`: a line's own exit code, else 2 refused, 130 stopped, 1 failed), not this table's.
 
 | code | meaning | retry? |
 |---|---|---|

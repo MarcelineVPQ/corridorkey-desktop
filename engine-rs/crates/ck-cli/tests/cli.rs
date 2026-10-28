@@ -344,3 +344,20 @@ fn falls_back_to_the_apps_models_and_runtime_and_says_so() {
     let o = c.args(["render", "-i", s(&d.0.join("nope.mov")), "-o", s(&d.0.join("out")), "--models", "/m", "--ort", "/o"]).output().unwrap();
     assert!(!text(&o.stderr).contains("using the app's"), "{}", text(&o.stderr));
 }
+
+/// `corridorkey run` becomes the app on Unix (exec): a farm's SIGTERM reaches the script runner itself, and a death by
+/// signal shows as one (review 2026-10-27: the runner was a child, orphaned by SIGTERM, and every signal death read 143)
+#[cfg(unix)]
+#[test]
+fn run_execs_the_app() {
+    let d = scratch("run-exec");
+    // a stand-in app: the shell, on a runner that prints its own pid and dies by SIGTERM
+    let entry = d.0.join("headless.sh");
+    std::fs::write(&entry, "echo $$\nkill -TERM $$\n").unwrap();
+    let child = bin().args(["run", "x.ckcmd"]).env("CK_APP", "/bin/sh").env("CK_APP_ENTRY", &entry).stdout(std::process::Stdio::piped()).spawn().unwrap();
+    let pid = child.id();
+    let o = child.wait_with_output().unwrap();
+    assert_eq!(text(&o.stdout).trim(), pid.to_string(), "the runner is the same process");
+    use std::os::unix::process::ExitStatusExt;
+    assert_eq!(o.status.signal(), Some(15), "a death by signal shows as one");
+}
