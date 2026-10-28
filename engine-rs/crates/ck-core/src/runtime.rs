@@ -253,6 +253,16 @@ pub struct Runtime {
 
 static GLOBAL: std::sync::OnceLock<Result<Runtime, String>> = std::sync::OnceLock::new();
 
+/// ONNX Runtime's library file on this system, as a message names it.
+#[cfg(feature = "ort-dynamic")]
+const ORT_LIBRARY: &str = if cfg!(windows) {
+    "onnxruntime.dll"
+} else if cfg!(target_os = "macos") {
+    "libonnxruntime.dylib"
+} else {
+    "libonnxruntime.so"
+};
+
 impl Runtime {
     /// The process's runtime (one ORT environment per process), with the engine's settings: `cfg.ort` is
     /// libonnxruntime for a load-dynamic build.
@@ -270,7 +280,7 @@ impl Runtime {
                 .ort
                 .as_ref()
                 .map(|p| p.to_string_lossy().into_owned())
-                .ok_or_else(|| "this build loads ONNX Runtime at run time: pass --ort (or CK_ENGINE_ORT) with libonnxruntime.so".to_string())?;
+                .ok_or_else(|| format!("this build loads ONNX Runtime at run time: pass --ort (or CK_ENGINE_ORT) with {ORT_LIBRARY}"))?;
             version = dylib_version(Path::new(&lib));
             ort::init_from(&lib).map_err(|e| format!("{lib}: {e}"))?
         };

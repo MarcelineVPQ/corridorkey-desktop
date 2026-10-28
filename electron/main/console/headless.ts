@@ -8,6 +8,7 @@
 // lifetime: one process per `corridorkey run`, ended by the script's end (SIGINT / SIGTERM stop it as Ctrl+C does; on
 // Windows, where Electron's run-as-node never calls them, ck-cli's `stop` line on stdin does: CK_HEADLESS_STOP=stdin).
 import { readFileSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -80,6 +81,11 @@ export function onStopLines(input: NodeJS.ReadableStream, stop: () => void): voi
   });
 }
 
+/** What a refusal says: what was refused, why, and where to run it (the next free version only where it fits). */
+export function refusal(what: string, offerVersion: boolean): string {
+  return `${what}: a script run outside the app has no one to confirm it; run it in the app's Console${offerVersion ? " (or write into the next free version, -o …_v###/, which replaces nothing)" : ""}`;
+}
+
 const say = (text: string) => process.stderr.write(`corridorkey run: ${text}\n`);
 
 async function main(argv: string[]): Promise<number> {
@@ -98,6 +104,11 @@ async function main(argv: string[]): Promise<number> {
   const pkg = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "package.json"), "utf8")) as { name: string; productName?: string; version: string };
   const home = homedir();
   const userData = userDataDir(pkg.productName ?? pkg.name, process.env, home, PLATFORM);
+  // a user who never started the app has no userData folder yet: its audit log and history go there
+  // loop: NOT-WORTH — one mkdir at start
+  await mkdir(userData, { recursive: true }).catch(() => {
+    // error: NOT-WORTH — the script still runs; the audit log and history say their own errors
+  });
   const settings = loadSettings(join(userData, "settings.json"));
   const folders = appDirs(process.env, home);
   const cacheDir = cacheDirFor(settings.cacheRoot, folders.cache);
@@ -106,8 +117,8 @@ async function main(argv: string[]): Promise<number> {
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.CK_HEADLESS_CLI;
   delete env.CK_HEADLESS_STOP;
-  const nobody = (what: string) => {
-    say(`${what}: a script run outside the app has no one to confirm it; run it in the app's Console (or write into the next free version, -o …_v###/, which replaces nothing)`);
+  const nobody = (what: string, offerVersion = true) => {
+    say(refusal(what, offerVersion));
     return Promise.resolve(false);
   };
   const out = new Printer((s, t) => (s === "err" ? process.stderr : process.stdout).write(t + "\n"));
@@ -136,14 +147,14 @@ async function main(argv: string[]): Promise<number> {
     variables: () => settings.consoleVariables,
     setVariables: () => say("set -p here lasts only this script (the app keeps its own variables)"),
     showInFolder: (p) => process.stdout.write(`${p}\n`),
-    confirmAllow: (f) => nobody(`allow ${f}`),
+    confirmAllow: (f) => nobody(`allow ${f}`, false),
     // no queue here: a GPU command runs as corridorkey render does on its own
     takeGpu: async () => null,
     // no queue here, so nothing else holds the card
     gpuBusy: () => null,
     releaseGpu: () => {},
     confirm: (r) => nobody(r.line),
-    confirmScript: (r) => nobody(`${r.script}'s ${r.lines.length === 1 ? "line" : `${r.lines.length} lines`} that replace files`),
+    confirmScript: (r) => nobody(`${r.script}'s ${r.lines.length === 1 ? "line that replaces" : `${r.lines.length} lines that replace`} files`),
     elevation: new Elevation(),
     audit: new AuditLog(join(userData, "console-audit.jsonl")),
     // its own history: a cron job's lines don't fill the Console's ↑

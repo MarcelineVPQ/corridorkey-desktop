@@ -57,7 +57,7 @@ export function highlight(line: string, parsed: Parsed): Span[] {
 /**
  * The prompt's folder (SME review 2026-10-26 N9: the last folder alone, `key`, says nothing when every shot has
  * comp/key): inside a bookmark, `@sh010` and the rest (`@sh010/key`, `@sh010/…/key`); else the last two folders
- * (`comp/key`); `~` at home.
+ * (`comp/key`, Windows `comp\key`); `~` at home.
  */
 export function promptFolder(cwd: string, home: string, bookmarks: Readonly<Record<string, string>>): string {
   const sep = (p: string) => p.replace(/[\\/]+$/, "");
@@ -76,7 +76,8 @@ export function promptFolder(cwd: string, home: string, bookmarks: Readonly<Reco
     return `@${best[0]}${rest.length === 0 ? "" : rest.length === 1 ? `/${rest[0]}` : `/…/${rest[rest.length - 1]}`}`;
   }
   const all = parts(at);
-  return all.length ? all.slice(-2).join("/") : cwd;
+  // the system's separator, as the folder is written (a Windows path has backslashes); @bookmark/… keeps its /
+  return all.length ? all.slice(-2).join(cwd.includes("\\") ? "\\" : "/") : cwd;
 }
 
 /** Blocks the page keeps (oldest dropped first); each keeps at most 2000 lines and 256 000 characters (the main process's caps). */

@@ -533,6 +533,8 @@ describe("SME review 2026-10-26 N9 (row 126): a shot-aware prompt", () => {
     expect(promptFolder("/home/m", "/home/m", marks)).toBe("~");
     expect(promptFolder("/", "/home/m", {})).toBe("/");
     expect(promptFolder("D:\\shows\\sh010\\key", "C:\\Users\\m", { sh010: "D:\\shows\\sh010" })).toBe("@sh010/key");
+    // Windows: the last two folders with its own separator (the VM run 2026-10-27 showed Zoë/Plates Zoë)
+    expect(promptFolder("C:\\Users\\Zoë\\Plates Zoë", "C:\\Users\\m", {})).toBe("Zoë\\Plates Zoë");
   });
 });
 

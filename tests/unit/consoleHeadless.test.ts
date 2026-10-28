@@ -2,7 +2,7 @@
 // app as Node (electron/main/console/headless.ts): where the app's settings are, its arguments, and what it prints.
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { headlessArgs, onStopLines, Printer, STOP_LINE, userDataDir } from "../../electron/main/console/headless";
+import { headlessArgs, onStopLines, Printer, refusal, STOP_LINE, userDataDir } from "../../electron/main/console/headless";
 import type { ConsoleBlock } from "../../src/shared/types";
 
 const block = (extra: Partial<ConsoleBlock>): ConsoleBlock => ({
@@ -90,4 +90,10 @@ describe("corridorkey run's script runner", () => {
     expect(stops).toBe(2);
   });
 
+  it("refuses in words, with the next free version only where it fits (not for allow)", () => {
+    expect(refusal("a.ckcmd's line that replaces files", true)).toMatch(
+      /^a\.ckcmd's line that replaces files: .*Console \(or write into the next free version, -o …_v###\/, which replaces nothing\)$/,
+    );
+    expect(refusal("allow /mnt/show", false)).toBe("allow /mnt/show: a script run outside the app has no one to confirm it; run it in the app's Console");
+  });
 });
