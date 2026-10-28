@@ -277,16 +277,34 @@ sign() { for f in "$@"; do touch "$f.sig"; done; }`;
     expect(calls[0]).toBeLessThan(at(/gh release edit "v\$v" --draft=false/));
     expect(calls[1]).toBeGreaterThan(at(/gh release upload "v\$v" "release\/\$file"/));
     const dir = mkdtempSync(join(scratch, "digest-"));
-    // loop: NOT-WORTH — two lines with a stand-in gh, 10 s deadline
-    const run = (served: string) => {
-      spawnSync("bash", ["-c", "mkdir -p release && printf 'aaa  A.AppImage\\nbbb  B-Setup.exe\\n' > release/SHA256SUMS"], { cwd: dir, timeout: 10_000 });
-      return spawnSync("bash", ["-c", `set -euo pipefail; v=1; gh() { printf '${served}'; }\n${block}\necho passed`], { cwd: dir, encoding: "utf8", timeout: 10_000 });
+    const SUMS = ["SHA256SUMS", "SHA256SUMS.sig", "SHA512SUMS", "SHA512SUMS.sig"];
+    // loop: NOT-WORTH — the function with a stand-in gh, 10 s deadline
+    const run = (served: string, sums = SUMS, tampered = "") => {
+      spawnSync(
+        "bash",
+        ["-c", "mkdir -p release && printf 'aaa  A.AppImage\\nbbb  B-Setup.exe\\n' > release/SHA256SUMS && for f in SHA256SUMS.sig SHA512SUMS SHA512SUMS.sig; do echo $f > release/$f; done"],
+        { cwd: dir, timeout: 10_000 },
+      );
+      // GitHub's listing: the given lines, then the SUMS files' real digests (one of them another's, if tampered)
+      const gh = `gh() { printf '${served}'; for f in ${sums.join(" ")}; do if [ "$f" = "${tampered}" ]; then echo "fff  $f"; else echo "$(sha256sum < release/$f | cut -d' ' -f1)  $f"; fi; done; }`;
+      return spawnSync("bash", ["-c", `set -euo pipefail; v=1; ${gh}\n${block}\necho passed`], { cwd: dir, encoding: "utf8", timeout: 10_000 });
     };
-    expect(run("aaa  A.AppImage\\nbbb  B-Setup.exe\\nccc  SHA256SUMS\\n").stdout).toContain("passed");
+    expect(run("aaa  A.AppImage\\nbbb  B-Setup.exe\\n").stdout).toContain("passed");
     const bad = run("aaa  A.AppImage\\nzzz  B-Setup.exe\\n");
     expect(bad.status).toBe(1);
     expect(bad.stderr).toContain("bbb  B-Setup.exe");
     expect(run("none  A.AppImage\\nnone  B-Setup.exe\\n").status).toBe(1);
+    // a cut-short upload: a SUMS file or a signature missing, or not the one written here (release re-review 3)
+    // loop: NOT-WORTH — the four SUMS files, one run each
+    for (const f of SUMS) {
+      const missing = run(
+        "aaa  A.AppImage\\nbbb  B-Setup.exe\\n",
+        SUMS.filter((x) => x !== f),
+      );
+      expect(missing.status).toBe(1);
+      expect(missing.stderr).toContain(`${f} isn't on the draft`);
+      expect(run("aaa  A.AppImage\\nbbb  B-Setup.exe\\n", SUMS, f).status).toBe(1);
+    }
   });
 
   // release re-review 2026-10-28 #2: the Windows installer starts in the VM before anything is public

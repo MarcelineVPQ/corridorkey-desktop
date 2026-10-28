@@ -70,6 +70,11 @@ sign() { CK_FEED_KEY="$(cat "$KEY")" bash -c 'for f in "$@"; do node tools/sign-
 digests_match() {
   gh release view "v$v" --json assets -q '.assets[] | "\(.digest // "none" | sub("^sha256:"; ""))  \(.name)"' > release/uploaded.sums
   if grep -vxFf release/uploaded.sums release/SHA256SUMS >&2; then echo "release: GitHub's digests differ from SHA256SUMS on the lines above: nothing published, rerun" >&2; return 1; fi
+  # and the SUMS with their signatures, as written here (release re-review 3: a cut-short upload could publish without)
+  # loop: NOT-WORTH — the four SUMS files
+  for f in SHA256SUMS SHA256SUMS.sig SHA512SUMS SHA512SUMS.sig; do
+    grep -qxF "$(sha256sum < "release/$f" | cut -d' ' -f1)  $f" release/uploaded.sums || { echo "release: $f isn't on the draft as written here: nothing published, rerun" >&2; return 1; }
+  done
 }
 
 # --mac RUN: the published release's SUMS gain the disk image's line (any earlier one replaced), signed again
