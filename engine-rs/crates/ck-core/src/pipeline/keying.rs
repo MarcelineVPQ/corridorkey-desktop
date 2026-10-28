@@ -376,16 +376,16 @@ impl<L: Loader> Pipeline<L> {
             let dec = window_decode_s.clone();
             let mut i = 0;
             let mut rgb_f16: Option<bool> = None;
-            Ahead::spawn("window-inputs", 0, move || {
+            Ahead::spawn_abandonable("window-inputs", 0, move |abandoned| {
                 let Some(&t0) = starts.get(i) else {
                     dec.set(reader.reader.seconds());
                     return Ok(None);
                 };
                 i += 1;
                 let t1 = (t0 + chunk).min(t_all);
-                let frames = reader.window(t0, t1)?;
+                let frames = reader.window(t0, t1, abandoned)?;
                 let hint_video = match hints.as_mut() {
-                    Some(hw) => Some(hw.window(t0, t1)?),
+                    Some(hw) => Some(hw.window(t0, t1, abandoned)?),
                     None => None,
                 };
                 let found = match found_files.as_mut() {

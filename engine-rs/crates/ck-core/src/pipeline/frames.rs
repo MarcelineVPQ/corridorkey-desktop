@@ -8,6 +8,7 @@ use crate::decode::{FrameReader, FrameStream, HintReader, Prefetch, Prepped};
 use crate::Error;
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 /// A job's frames: each `open` reads them again from the first.
@@ -35,10 +36,14 @@ impl WindowReader {
     pub(crate) fn open(frames: &dyn FrameSource) -> Result<WindowReader, Error> {
         Ok(WindowReader { reader: Prefetch::new("frame-decode", frames.open(false)?, 8)?, cache: BTreeMap::new(), next: 0 })
     }
-    /// Frames t0..t1 (decoding up to t1); frames before t0 are dropped.
-    pub(crate) fn window(&mut self, t0: usize, t1: usize) -> Result<Vec<Prepped>, Error> {
+    /// Frames t0..t1 (decoding up to t1); frames before t0 are dropped. `abandoned` (the window thread's consumer is
+    /// gone: a stop or an error) is checked between frames, so the window isn't decoded to its end for nobody.
+    pub(crate) fn window(&mut self, t0: usize, t1: usize, abandoned: &AtomicBool) -> Result<Vec<Prepped>, Error> {
         // loop: SERIAL-REQUIRED — frames decode in order
         while self.next < t1 {
+            if abandoned.load(Ordering::Relaxed) {
+                return Err(crate::ahead::abandoned_error());
+            }
             let f = self.reader.next_frame()?.ok_or_else(|| Error::input(format!("decoded only {} frames", self.next)))?;
             self.cache.insert(self.next, f);
             self.next += 1;
@@ -61,9 +66,12 @@ impl HintWindows {
     pub(crate) fn open(path: &Path, meta: &ClipMeta) -> Result<HintWindows, Error> {
         Ok(HintWindows { reader: HintReader::open(path, meta)?, cache: BTreeMap::new(), next: 0 })
     }
-    pub(crate) fn window(&mut self, t0: usize, t1: usize) -> Result<Vec<Arc<Vec<f32>>>, Error> {
+    pub(crate) fn window(&mut self, t0: usize, t1: usize, abandoned: &AtomicBool) -> Result<Vec<Arc<Vec<f32>>>, Error> {
         // loop: SERIAL-REQUIRED — hint frames decode in order
         while self.next < t1 {
+            if abandoned.load(Ordering::Relaxed) {
+                return Err(crate::ahead::abandoned_error());
+            }
             let h = self.reader.next_frame()?;
             self.cache.insert(self.next, Arc::new(h));
             self.next += 1;

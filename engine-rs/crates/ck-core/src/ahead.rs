@@ -6,7 +6,7 @@
 //! window while the halve-and-retry's new decode started). A producer must therefore never wait on something the
 //! consumer's owner drops after the `Ahead` (declare such a sender after it).
 use crate::Error;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver};
 use std::sync::Arc;
 
@@ -35,6 +35,14 @@ pub(crate) struct Ahead<T> {
     /// the producer thread, joined when its channel closes: a panic there becomes this sequence's error instead of
     /// a silent early end
     producer: Option<std::thread::JoinHandle<()>>,
+    /// set when the consumer is dropped: a producer whose item is long (a whole window) checks it between its parts,
+    /// so the drop's join waits for one part, not the item (`spawn_abandonable`)
+    abandoned: Arc<AtomicBool>,
+}
+
+/// Why an abandoned producer stopped mid-item (nobody reads it: its consumer is gone).
+pub(crate) fn abandoned_error() -> Error {
+    Error::engine("abandoned: its consumer was dropped".into())
 }
 
 /// Start a named thread (the name shows in panics, debuggers and `top -H`).
@@ -53,7 +61,20 @@ pub(crate) fn joined<R>(handle: std::thread::JoinHandle<R>) -> Result<R, Error> 
 impl<T: Send + 'static> Ahead<T> {
     /// Run `next` on a thread named `name`, keeping up to `depth` items ready.
     pub(crate) fn spawn(name: &str, depth: usize, mut next: impl FnMut() -> Result<Option<T>, Error> + Send + 'static) -> Result<Ahead<T>, Error> {
+        Self::spawn_abandonable(name, depth, move |_| next())
+    }
+
+    /// `spawn`, with `next` given the abandoned flag: a long item checks it between its parts and returns
+    /// `abandoned_error()` once it is set (final review 2026-10-28 #2: a stop's join waited for a whole window of
+    /// decoding, which could pass Windows' 4.5 s console-close window).
+    pub(crate) fn spawn_abandonable(
+        name: &str,
+        depth: usize,
+        mut next: impl FnMut(&AtomicBool) -> Result<Option<T>, Error> + Send + 'static,
+    ) -> Result<Ahead<T>, Error> {
         let (tx, rx) = sync_channel(depth);
+        let abandoned = Arc::new(AtomicBool::new(false));
+        let a2 = abandoned.clone();
         let seconds = Seconds::default();
         let s2 = seconds.clone();
         // loop: SERIAL-REQUIRED — one producer thread per sequence; it ends at the sequence's end, an error, or a dropped consumer
@@ -61,7 +82,7 @@ impl<T: Send + 'static> Ahead<T> {
             // loop: SERIAL-REQUIRED — items in order; ends at the producer's end, an error, or a dropped consumer
             loop {
                 let t = std::time::Instant::now();
-                let item = next();
+                let item = next(&a2);
                 s2.add(t.elapsed().as_secs_f64());
                 let msg = match item {
                     Ok(Some(v)) => Ok(v),
@@ -74,7 +95,7 @@ impl<T: Send + 'static> Ahead<T> {
                 }
             }
         })?;
-        Ok(Ahead { rx: Some(rx), seconds, producer: Some(producer) })
+        Ok(Ahead { rx: Some(rx), seconds, producer: Some(producer), abandoned })
     }
 
     /// The next item, or None at the end; Err when the producer failed or panicked.
@@ -100,7 +121,9 @@ impl<T: Send + 'static> Ahead<T> {
 
 impl<T> Drop for Ahead<T> {
     fn drop(&mut self) {
-        // the receiver first: a producer blocked on a send (or at its next one) then ends
+        // the flag and the receiver first: a producer between the parts of an item, blocked on a send (or at its next
+        // one) then ends
+        self.abandoned.store(true, Ordering::SeqCst);
         self.rx.take();
         if let Some(h) = self.producer.take() {
             // loop: SERIAL-REQUIRED — joins the producer after its receiver is gone [bounded: it finishes the item it is making, its send fails, it returns]
@@ -174,6 +197,33 @@ mod tests {
         assert_eq!(a.next_item().unwrap(), Some(1));
         drop(a);
         assert!(released.load(Ordering::SeqCst), "the producer (and what it holds) outlived its Ahead");
+    }
+
+    #[test]
+    fn an_abandonable_producer_stops_between_the_parts_of_its_item() {
+        // final review 2026-10-28 #2: the join waited for a whole window (tens of frames); now for one frame
+        use std::time::{Duration, Instant};
+        let mut i = 0;
+        let mut a = Ahead::spawn_abandonable("test-window", 0, move |abandoned| {
+            i += 1;
+            if i > 1 {
+                // a long item: 100 parts of 20 ms (2 s), the abandoned flag checked between them
+                // loop: SERIAL-REQUIRED — a test item's parts [bounded: 100]
+                for _ in 0..100 {
+                    if abandoned.load(Ordering::SeqCst) {
+                        return Err(abandoned_error());
+                    }
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            }
+            Ok(Some(i))
+        })
+        .unwrap();
+        assert_eq!(a.next_item().unwrap(), Some(1));
+        std::thread::sleep(Duration::from_millis(50));
+        let t = Instant::now();
+        drop(a);
+        assert!(t.elapsed() < Duration::from_millis(500), "the join waited {:?} for the whole item", t.elapsed());
     }
 
     #[test]
