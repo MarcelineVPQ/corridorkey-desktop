@@ -23,6 +23,24 @@ Everything is in **App settings → Updates**:
   while the queue runs: "After the queue finishes"; while the Console's corridorkey or a download runs it says so and
   waits).
 
+You don't have to open App settings to see an update. When there's something to do, it shows above every page and as
+a dot on **App settings** in the rail (a press opens Updates):
+
+| Step | What it says | Buttons |
+| --- | --- | --- |
+| Available | "1.0.0 Dev 2 is available, 45.3 MB." | **Download**, **Not now** |
+| Downloading | "Downloading 1.0.0 Dev 2…" and its progress | **Not now** |
+| Ready | "1.0.0 Dev 2 is ready: restart to use it." | **Restart now**, **Not now** |
+| Install failed | the reason, as it is | **Dismiss** |
+
+- **Restart now** waits while the queue, the Console's corridorkey, a download, a cache folder move or a TensorRT
+  build runs, and says which.
+- **Not now** hides that step of that version, also after a restart. The next step, or a newer version, shows again.
+  The dot on App settings stays while the update waits for you (to download, to restart, or after a failed install).
+- A failed install shows its reason until you dismiss it, and again if it fails again. A check that fails on its own
+  (no network) says so only in App settings → Updates.
+- With **Check automatically** off nothing changes: the app goes online for updates only when you press Check now.
+
 How it works, so nothing surprises you:
 
 - The update information is signed, and the download's size and checksum are checked before it's kept. Anything

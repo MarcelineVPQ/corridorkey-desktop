@@ -98,6 +98,7 @@ on its own rail icon. Not a system shell: its own commands only, each parsed and
   plugin installed the engine chooses its device exactly as before (NVIDIA, Mac and CPU setups are unchanged). With
   onnx.5, MIGraphX's own parser takes all five networks (their TensorRT-form files) at every size tried (offline
   check, no AMD card).
+- An app update now shows itself (it was said only in App settings → Updates): pinned above every page when one is available (Download), downloading, ready (Restart now) or its install failed, and as a dot on App settings whose press opens Updates; Not now hides that step of that version until the next step or a newer one.
 - A shipped copy has no developer tools and none of Electron's default reload and close shortcuts (Ctrl+Shift+I, Ctrl+R, F5, Ctrl+W); `npm run dev` keeps them.
 - The app runs only its Rust + ONNX Runtime engine: the PyTorch engine is gone from it (the Engine page's
   "Benchmark reference" section, its CorridorKey2.0 folder setting, and the PyTorch-only limits on a clip's codec,
