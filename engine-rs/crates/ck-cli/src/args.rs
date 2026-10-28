@@ -91,8 +91,8 @@ fn runtime(c: Command) -> Command {
         .arg(
             Arg::new("device")
                 .long("device")
-                .value_name("auto|cuda|cpu|coreml")
-                .help("auto/cuda: the graphics card; cpu: ONNX Runtime's CPU provider (slow); coreml: macOS [default: auto]"),
+                .value_name("auto|cuda|cpu|coreml|migraphx")
+                .help("auto: the graphics card; cuda: NVIDIA; migraphx: AMD (Linux); cpu: ONNX Runtime's CPU provider (slow); coreml: macOS [default: auto]"),
         )
         .arg(
             Arg::new("gpu")

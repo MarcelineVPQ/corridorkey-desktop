@@ -73,7 +73,7 @@ from `manifest.json` and refuses portrait clips up front (an `input` error) only
 cd engine-rs
 CARGO_TARGET_DIR=~/.cache/claude-scratch/corridorkey-rust/target cargo test          # CPU, static ORT
 cargo build --release -p ck-engine --no-default-features --features ort-dynamic,tensorrt  # GPU build
-corridorkey-engine --models DIR [--ort libonnxruntime.so] [--device auto|cuda|cpu|coreml]
+corridorkey-engine --models DIR [--ort libonnxruntime.so] [--device auto|cuda|cpu|coreml|migraphx]
 ```
 
 **The copy inside the app:** `npm run build:engine` (`tools/build_engine.sh`, also the first step of
@@ -94,6 +94,9 @@ The engine runs `ffmpeg` / `ffprobe` from the system: they are not bundled.
   `tensorrt_libs` next to the ORT library it is given (`electron/main/engine.ts`, `rustEngineEnv`).
 - `--device cpu` runs ONNX Runtime's CPU provider (tests). Without a usable GPU, jobs fail with `no-gpu`,
   as with the PyTorch engine.
+- `--device migraphx` (Linux only): ONNX Runtime's MIGraphX provider plugin on an AMD card (ROCm 10.1); `auto` picks
+  it when the plugin offers a GPU and no NVIDIA card has CUDA. Not usable yet: stage 1 and 2 don't parse in MIGraphX
+  (docs/AMD.md).
 - `--device coreml` (macOS only; elsewhere the engine stops with an error) runs ONNX Runtime's Core ML provider
   (BACKLOG row 24, phase 1): ML Program format, fp16, compute units `CK_ENGINE_COREML_UNITS` (all | cpu-gpu |
   cpu-ane | cpu; default cpu-gpu: with the Neural Engine allowed, every load of stage 2 compiled it again for ~145 s
@@ -124,7 +127,9 @@ The engine runs `ffmpeg` / `ffprobe` from the system: they are not bundled.
   Core ML measurement knobs, off by default and not measured yet: `CK_ENGINE_COREML_FAST_PREDICTION=1` (Core ML's
   SpecializationStrategy FastPrediction), `CK_ENGINE_COREML_LOW_PRECISION_GPU=1` (AllowLowPrecisionAccumulationOnGPU:
   float16 sums on the GPU; kept only if mattes stay within the CUDA bar).
-  Also `CK_ENGINE_DEVICE` (auto | cuda | cpu | coreml, = `--device`), `CK_ENGINE_PRECISION` (fp16 | fp32), `CK_ENGINE_MODELS`,
+  MIGraphX (AMD, docs/AMD.md): `CK_ENGINE_MIGRAPHX_EP` (the provider plugin `libmigraphx-ep.so`; else found next to ONNX
+  Runtime's package), `CK_ENGINE_MIGRAPHX_CACHE` (compiled programs; default `migraphx` next to the TensorRT cache root).
+  Also `CK_ENGINE_DEVICE` (auto | cuda | cpu | coreml | migraphx, = `--device`), `CK_ENGINE_PRECISION` (fp16 | fp32), `CK_ENGINE_MODELS`,
   `CK_ENGINE_ORT` / `ORT_DYLIB_PATH`, and `CK_ENGINE_PARENT_PID` (the app passes its pid; the engine ends with that
   process, ck-core `proc.rs`). All are read once at startup (`ck-core/src/config.rs`, `EngineConfig`; flags win
   over the environment, an empty value is unset); an unknown value stops the engine with an error naming the

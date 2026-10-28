@@ -198,7 +198,7 @@ Values are checked as the engine checks the protocol's options; a bad one is exi
 |---|---|---|
 | `--models DIR` | `CK_ENGINE_MODELS` | the ONNX model set's folder (the app's: `~/.local/share/corridorkey-desktop/models/<set>`) |
 | `--ort LIB` | `CK_ENGINE_ORT`, `ORT_DYLIB_PATH` | ONNX Runtime's library (the app's GPU runtime download) |
-| `--device auto\|cuda\|cpu\|coreml` | `CK_ENGINE_DEVICE` | the card (default); the CPU provider (slow; tests); Core ML (macOS) |
+| `--device auto\|cuda\|cpu\|coreml\|migraphx` | `CK_ENGINE_DEVICE` | the card (default); the CPU provider (slow; tests); Core ML (macOS); MIGraphX (an AMD card, Linux; untested on a real AMD card) |
 | `--gpu N\|UUID` | `CUDA_VISIBLE_DEVICES`, `CUE_GPU_CORES` | the card, an index in CUDA's order or a `GPU-…` / `MIG-…` UUID (Nuke's `--gpu`). It sets `CUDA_VISIBLE_DEVICES` before the runtime starts. Without it a `CUDA_VISIBLE_DEVICES` already set is the farm's choice; without both, OpenCue's booking (`CUE_GPU_CORES`) gives its first card |
 | `-t`, `--threads N` | `CK_ENGINE_THREADS` | CPU threads per network (0: ONNX Runtime's choice) |
 

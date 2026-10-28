@@ -1,5 +1,6 @@
 //! The one model-loading layer: ONNX Runtime, its execution provider (CUDA by default on an NVIDIA card,
-//! TensorRT when a job opts in, the CPU only when asked for), and the five networks' files.
+//! TensorRT when a job opts in, MIGraphX on an AMD card with AMD's MIGraphX provider plugin, the CPU only when asked
+//! for), and the five networks' files.
 //!
 //! Models folder (`--models DIR`): one ONNX file per network and precision, found by `models.json` when the
 //! folder has one ({"fp16": {"stage1": "stage1_op23fp16.onnx", ...}, "fp32": {...}}), else by the first
@@ -24,6 +25,8 @@ pub enum Provider {
     Cpu,
     /// ONNX Runtime's Core ML provider (macOS): every node of a fixed-shape Core ML set file, or no session
     CoreMl,
+    /// ONNX Runtime's MIGraphX provider (an AMD card, Linux; docs/AMD.md)
+    Migraphx,
 }
 
 impl Provider {
@@ -33,6 +36,7 @@ impl Provider {
             Provider::TensorRt => "tensorrt",
             Provider::Cpu => "cpu",
             Provider::CoreMl => "coreml",
+            Provider::Migraphx => "migraphx",
         }
     }
 }
@@ -198,6 +202,21 @@ impl ModelSet {
         f.exists().then_some(f)
     }
 
+    /// The MIGraphX set's file for `piece` at `p`: models.json's "migraphx-fp16" / "migraphx-fp32" (the TensorRT-ready
+    /// exports with RMSNormalization written as SimplifiedLayerNormalization, which MIGraphX parses;
+    /// engine-rs/export/migraphx_patch.py, docs/AMD.md). None: no such entry, the plain file is used.
+    pub(crate) fn migraphx_file(&self, piece: &str, p: Precision) -> Option<PathBuf> {
+        let name = self.manifest.get(&format!("migraphx-{}", p.name()))?.get(piece)?;
+        let f = self.dir.join(name);
+        f.exists().then_some(f)
+    }
+
+    /// Whether models.json has a MIGraphX set at `p` (without it MIGraphX refuses MoGe's resize and stage 1 and 2's
+    /// RMSNormalization).
+    pub(crate) fn has_migraphx(&self, p: Precision) -> bool {
+        self.manifest.contains_key(&format!("migraphx-{}", p.name()))
+    }
+
     /// Which networks are there at `p` (the pong's "assets").
     pub fn assets(&self, p: Precision) -> BTreeMap<String, bool> {
         // loop: NOT-WORTH — five networks, once per ping
@@ -246,6 +265,12 @@ pub struct Runtime {
     pub tensorrt_ep: bool,
     /// the loaded ONNX Runtime has the Core ML provider (macOS builds only; never true elsewhere)
     pub coreml_ep: bool,
+    /// AMD's MIGraphX provider plugin is registered and offers a GPU device (ROCm 10's onnxruntime-ep-migraphx)
+    pub migraphx_ep: bool,
+    /// the MIGraphX plugin: where it was looked for or loaded from, and what went wrong (for `unavailable_reason`)
+    migraphx_note: String,
+    /// `gpu` is the AMD card HIP sees as device 0 (amd.rs), not an NVIDIA card
+    amd: bool,
     pub ort_version: String,
     /// the engine's settings, read once at startup (config.rs); everything below the protocol loop reads them here
     pub cfg: EngineConfig,
@@ -309,20 +334,40 @@ impl Runtime {
         };
         #[cfg(not(target_os = "macos"))]
         let coreml_ep = false;
-        let gpu = if matches!(cfg.device, Device::Cpu | Device::CoreMl) { None } else { nvidia() };
-        Ok(Runtime { env, gpu, cuda_ep, tensorrt_ep, coreml_ep, ort_version: version, cfg: cfg.clone() })
+        // AMD's MIGraphX provider is a plugin library (ROCm 10: onnxruntime-ep-migraphx), registered when there is one;
+        // a CUDA setup has none, so nothing below changes there
+        let mx_lib = migraphx_lib(cfg.migraphx_ep.as_deref(), cfg.ort.as_deref());
+        let migraphx_note = match &mx_lib {
+            None => {
+                "no MIGraphX provider plugin (CK_ENGINE_MIGRAPHX_EP, or onnxruntime_ep_migraphx/libmigraphx-ep.so next to ONNX Runtime's package)".to_string()
+            }
+            Some(p) => match env.register_ep_library(MIGRAPHX_REG, p) {
+                Err(e) => format!("the MIGraphX provider plugin {}: {e}", p.display()),
+                Ok(()) => format!("the MIGraphX provider plugin {} offers no AMD GPU", p.display()),
+            },
+        };
+        let migraphx_ep = env.devices().any(|d| d.ep().is_ok_and(|e| e == MIGRAPHX_EP));
+        // the AMD card is read only for the MIGraphX provider: asked for, or `auto` with the MIGraphX plugin offering a GPU
+        // and no NVIDIA card CUDA can use (an NVIDIA setup never gets here: it has no MIGraphX plugin)
+        let amd_card = || crate::amd::card().and_then(|c| c.info());
+        let (gpu, amd) = match cfg.device {
+            Device::Cpu | Device::CoreMl => (None, false),
+            Device::Migraphx => (amd_card(), true),
+            Device::Cuda => (nvidia(), false),
+            Device::Auto => match nvidia() {
+                Some(g) if cuda_ep => (Some(g), false),
+                nv if !migraphx_ep => (nv, false),
+                nv => amd_card().map(|a| (Some(a), true)).unwrap_or((nv, false)),
+            },
+        };
+        Ok(Runtime { env, gpu, cuda_ep, tensorrt_ep, coreml_ep, migraphx_ep, migraphx_note, amd, ort_version: version, cfg: cfg.clone() })
     }
 
-    /// The normal provider: CUDA with a card and the CUDA EP (or when asked), the CPU only when asked.
-    /// Core ML only when asked for (--device coreml) and the loaded ONNX Runtime has it.
-    /// None: no usable GPU (the protocol's `no-gpu`), or no Core ML provider (`unavailable_reason`).
+    /// The normal provider (`choose`). None: no usable GPU (the protocol's `no-gpu`), or no Core ML / MIGraphX
+    /// provider (`unavailable_reason`).
     pub fn provider(&self) -> Option<Provider> {
-        match self.cfg.device {
-            Device::Cpu => Some(Provider::Cpu),
-            Device::CoreMl => self.coreml_ep.then_some(Provider::CoreMl),
-            _ if self.gpu.is_some() && self.cuda_ep => Some(Provider::Cuda),
-            _ => None,
-        }
+        let card = self.gpu.is_some();
+        choose(self.cfg.device, card && !self.amd && self.cuda_ep, card && self.amd && self.migraphx_ep, self.coreml_ep)
     }
 
     /// fp16 on the GPU, fp32 on the CPU; CK_ENGINE_PRECISION overrides.
@@ -336,7 +381,7 @@ impl Runtime {
 
     /// Why `provider()` is None, in words for the job's error.
     pub fn unavailable_reason(&self) -> String {
-        no_provider_reason(self.cfg.device, std::env::consts::OS, &self.ort_version)
+        no_provider_reason(self.cfg.device, std::env::consts::OS, &self.ort_version, self.migraphx_ep, &self.migraphx_note)
     }
 
     fn builder(&self) -> Result<ort::session::builder::SessionBuilder, String> {
@@ -387,6 +432,16 @@ impl Runtime {
                 {
                     return Err("this engine was built without the TensorRT execution provider".into());
                 }
+            }
+            Provider::Migraphx => {
+                // compiled programs cached per network file (MIGraphX compiles per input shape, minutes for a large
+                // one); nodes the plugin doesn't take run on ONNX Runtime's CPU provider
+                let gfx = crate::amd::opened().map(|c| c.gfx.as_str()).unwrap_or("amd");
+                let cache = coreml_cache_dir(&self.cfg.migraphx_cache, &self.ort_version, gfx, file);
+                std::fs::create_dir_all(&cache).map_err(|e| format!("the MIGraphX cache folder {}: {e}", cache.display()))?;
+                // the plugin's first GPU device: HIP's device 0, the card amd.rs reads
+                let dev = self.env.devices().filter(|d| d.ep().is_ok_and(|e| e == MIGRAPHX_EP)).take(1);
+                b = b.with_devices(dev, Some(&migraphx_options(&cache))).map_err(|e| e.to_string())?;
             }
             Provider::CoreMl => {
                 // every node on Core ML or no session: CPU fallback is switched off, so a node Core ML can't take is
@@ -453,22 +508,62 @@ fn cuda_ep(cfg: &EngineConfig, vram_cap: Option<u64>) -> ort::ep::CUDA {
         .with_tf32(false)
 }
 
-/// Why no provider runs `device` on system `os` (std::env::consts::OS): a Mac has no NVIDIA card, so its reason
-/// names Core ML (BACKLOG row 58).
-fn no_provider_reason(device: Device, os: &str, ort_version: &str) -> String {
+/// Which provider a `--device` setting gets: `cuda` an NVIDIA card with the CUDA provider, `migraphx` an AMD card with
+/// the MIGraphX provider, `auto` CUDA first, then MIGraphX (one ONNX Runtime build has at most one of them); Core ML
+/// only when asked for, the CPU only when asked for.
+pub(crate) fn choose(device: Device, cuda: bool, migraphx: bool, coreml_ep: bool) -> Option<Provider> {
+    match device {
+        Device::Cpu => Some(Provider::Cpu),
+        Device::CoreMl => coreml_ep.then_some(Provider::CoreMl),
+        Device::Migraphx => migraphx.then_some(Provider::Migraphx),
+        Device::Cuda => cuda.then_some(Provider::Cuda),
+        Device::Auto if cuda => Some(Provider::Cuda),
+        Device::Auto => migraphx.then_some(Provider::Migraphx),
+    }
+}
+
+/// Why no provider runs `device` on system `os` (std::env::consts::OS), given the ONNX Runtime it loaded, whether
+/// the MIGraphX plugin offers an AMD GPU and what became of the plugin (`note`): with the plugin in place the missing
+/// card is an AMD one; a Mac has no NVIDIA card, so its reason names Core ML (BACKLOG row 58).
+fn no_provider_reason(device: Device, os: &str, ort_version: &str, migraphx_ep: bool, note: &str) -> String {
     match device {
         Device::CoreMl => format!(
             "--device coreml: this ONNX Runtime ({ort_version}) has no Core ML execution provider (the macOS onnxruntime build has it); nothing runs on the CPU instead"
         ),
+        Device::Migraphx if !migraphx_ep => format!("--device migraphx: {note} (ONNX Runtime {ort_version}; docs/AMD.md)"),
+        Device::Migraphx | Device::Auto if migraphx_ep => {
+            "CorridorKey found no AMD graphics card ROCm can use (HIP sees no device, or the amdgpu driver's memory files are missing; check rocminfo).".into()
+        }
         _ if os == "macos" => "On a Mac, CorridorKey runs on Apple's Core ML: start the engine with --device coreml (CK_ENGINE_DEVICE=coreml; the app does this).".into(),
         _ => "CorridorKey needs an NVIDIA graphics card with CUDA.".into(),
     }
 }
 
+/// The MIGraphX plugin's provider name and the name it is registered under.
+const MIGRAPHX_EP: &str = "MIGraphXExecutionProvider";
+const MIGRAPHX_REG: &str = "MIGraphX";
+
+/// The MIGraphX provider plugin: CK_ENGINE_MIGRAPHX_EP, else where pip puts it next to ONNX Runtime
+/// (site-packages/onnxruntime/capi/libonnxruntime.so -> site-packages/onnxruntime_ep_migraphx/libmigraphx-ep.so).
+pub(crate) fn migraphx_lib(set: Option<&Path>, ort: Option<&Path>) -> Option<PathBuf> {
+    if let Some(p) = set {
+        return Some(p.to_path_buf());
+    }
+    let p = ort?.parent()?.parent()?.parent()?.join("onnxruntime_ep_migraphx").join("libmigraphx-ep.so");
+    p.exists().then_some(p)
+}
+
+/// The MIGraphX plugin's session options (its own names, prefixed with the provider's for `with_devices`): the
+/// compiled-program cache folder. The sets are already float16 where they should be: no quantisation is asked for.
+pub(crate) fn migraphx_options(cache: &Path) -> Vec<(String, String)> {
+    vec![(format!("{MIGRAPHX_EP}.cache_dir"), cache.display().to_string())]
+}
+
 /// The compiled-model cache folder of one Core ML set file: `<root>/<ORT version>/<units>/<file stem>-<bytes>-<mtime>`.
 /// The stem names the network, padded size and batch; size and modification time change when the file is rebuilt
-/// (ORT's own cache key follows the graph's structure, not its weights).
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+/// (ORT's own cache key follows the graph's structure, not its weights). The MIGraphX provider's cache uses the same
+/// layout with the card's gfx target for `units` (its .mxr names carry the graph's structure, the input shapes and
+/// the gfx target, not the weights).
 pub(crate) fn coreml_cache_dir(root: &Path, ort_version: &str, units: &str, file: &Path) -> PathBuf {
     let meta = std::fs::metadata(file).ok();
     let bytes = meta.as_ref().map(|m| m.len()).unwrap_or(0);
@@ -732,6 +827,60 @@ mod tests {
     }
 
     #[test]
+    fn provider_choice_per_device() {
+        // (device, NVIDIA card + CUDA provider, AMD card + MIGraphX provider) -> provider
+        let c = |d, cuda, mx| choose(d, cuda, mx, false);
+        assert_eq!((c(Device::Auto, true, false), c(Device::Cuda, true, false)), (Some(Provider::Cuda), Some(Provider::Cuda)));
+        assert_eq!((c(Device::Auto, false, true), c(Device::Migraphx, false, true)), (Some(Provider::Migraphx), Some(Provider::Migraphx)));
+        // cuda means CUDA, migraphx means MIGraphX: never the other vendor's card
+        assert_eq!((c(Device::Cuda, false, true), c(Device::Migraphx, true, false)), (None, None));
+        assert_eq!((c(Device::Auto, false, false), c(Device::Cpu, false, true)), (None, Some(Provider::Cpu)));
+        assert_eq!((choose(Device::CoreMl, true, true, false), choose(Device::CoreMl, false, false, true)), (None, Some(Provider::CoreMl)));
+    }
+
+    #[test]
+    fn unavailable_says_which_card_is_missing() {
+        // no MIGraphX plugin (the CUDA setup): an NVIDIA card, as before
+        assert_eq!(no_provider_reason(Device::Auto, "linux", "1.31.0", false, "no plugin"), "CorridorKey needs an NVIDIA graphics card with CUDA.");
+        // the plugin is there: never "NVIDIA"
+        let amd = no_provider_reason(Device::Auto, "linux", "1.31.0", true, "");
+        assert!(amd.contains("no AMD graphics card") && !amd.contains("NVIDIA"), "{amd}");
+        assert_eq!(no_provider_reason(Device::Migraphx, "linux", "1.31.0", true, ""), amd);
+        // asked for MIGraphX without a working plugin: what became of it
+        let no_ep =
+            no_provider_reason(Device::Migraphx, "linux", "1.31.0", false, "the MIGraphX provider plugin /x/libmigraphx-ep.so: libamdhip64.so.7: cannot open");
+        assert!(no_ep.starts_with("--device migraphx: the MIGraphX provider plugin /x/") && no_ep.contains("1.31.0"), "{no_ep}");
+    }
+
+    #[test]
+    fn migraphx_options_and_cache() {
+        let o = migraphx_options(Path::new("/c/migraphx/1.31.0/gfx1100/ck2-stage1-fp16-migraphx-2428281-1761580000"));
+        assert_eq!(
+            o,
+            vec![("MIGraphXExecutionProvider.cache_dir".to_string(), "/c/migraphx/1.31.0/gfx1100/ck2-stage1-fp16-migraphx-2428281-1761580000".to_string())]
+        );
+        // the plugin: set, or found where pip puts it next to ONNX Runtime
+        let site = std::env::temp_dir().join(format!("ck-mx-site-{}", std::process::id()));
+        let capi = site.join("onnxruntime").join("capi");
+        std::fs::create_dir_all(&capi).unwrap();
+        let ort = capi.join("libonnxruntime.so.1.31.0");
+        assert_eq!(migraphx_lib(None, Some(&ort)), None);
+        std::fs::create_dir_all(site.join("onnxruntime_ep_migraphx")).unwrap();
+        std::fs::write(site.join("onnxruntime_ep_migraphx").join("libmigraphx-ep.so"), b"").unwrap();
+        assert_eq!(migraphx_lib(None, Some(&ort)), Some(site.join("onnxruntime_ep_migraphx").join("libmigraphx-ep.so")));
+        assert_eq!(migraphx_lib(Some(Path::new("/x/ep.so")), Some(&ort)), Some(PathBuf::from("/x/ep.so")));
+        std::fs::remove_dir_all(&site).unwrap();
+        // one folder per ORT version, gfx target and network file (size + time: a rebuilt file compiles again)
+        let dir = std::env::temp_dir().join(format!("ck-mx-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("ck2-stage1-fp16-migraphx.onnx");
+        std::fs::write(&f, b"0123").unwrap();
+        let c = coreml_cache_dir(Path::new("/root"), "1.27.1", "gfx942", &f);
+        assert!(c.starts_with("/root/1.27.1/gfx942") && c.file_name().unwrap().to_string_lossy().starts_with("ck2-stage1-fp16-migraphx-4-"), "{c:?}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn version_from_build_info() {
         assert_eq!(ort_version("ORT Build Info: git-branch=rel-1.31.0, git-commit-id=402979a, build type=Release"), "1.31.0");
     }
@@ -739,12 +888,12 @@ mod tests {
     #[test]
     fn no_provider_reason_names_the_systems_real_need() {
         // a Mac has no NVIDIA card: the reason names Core ML, never NVIDIA (BACKLOG row 58)
-        let mac = no_provider_reason(Device::Auto, "macos", "1.31.0");
+        let mac = no_provider_reason(Device::Auto, "macos", "1.31.0", false, "");
         assert!(mac.contains("Core ML") && !mac.contains("NVIDIA"), "{mac}");
-        assert!(no_provider_reason(Device::Cuda, "macos", "1.31.0").contains("Core ML"));
-        assert!(no_provider_reason(Device::CoreMl, "macos", "1.31.0").contains("no Core ML execution provider"));
-        assert_eq!(no_provider_reason(Device::Auto, "linux", "1.31.0"), "CorridorKey needs an NVIDIA graphics card with CUDA.");
-        assert_eq!(no_provider_reason(Device::Auto, "windows", "1.31.0"), "CorridorKey needs an NVIDIA graphics card with CUDA.");
+        assert!(no_provider_reason(Device::Cuda, "macos", "1.31.0", false, "").contains("Core ML"));
+        assert!(no_provider_reason(Device::CoreMl, "macos", "1.31.0", false, "").contains("no Core ML execution provider"));
+        assert_eq!(no_provider_reason(Device::Auto, "linux", "1.31.0", false, ""), "CorridorKey needs an NVIDIA graphics card with CUDA.");
+        assert_eq!(no_provider_reason(Device::Auto, "windows", "1.31.0", false, ""), "CorridorKey needs an NVIDIA graphics card with CUDA.");
     }
 
     #[test]
@@ -809,6 +958,7 @@ mod tests {
         assert_eq!(m.file("rvm", Precision::Fp16), Some(dir.join("custom.onnx")));
         assert_eq!(m.file("moge", Precision::Fp16), None);
         assert_eq!(m.trt_file("rvm", Precision::Fp16), Some(dir.join("stage2_fp16.onnx")));
+        assert!(!m.has_migraphx(Precision::Fp16) && m.migraphx_file("stage1", Precision::Fp16).is_none());
         assert_eq!((m.trt_file("moge", Precision::Fp16), m.trt_file("rvm", Precision::Fp32)), (None, None));
         assert!(m.assets(Precision::Fp16)["stage1"]);
         // portrait: refused only for the sets whose C-RADIO was measured to fail on it

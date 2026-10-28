@@ -364,7 +364,7 @@ describe("SME review 2026-10-26: values by meaning (S12)", () => {
   });
 
   it("suggests by meaning where a word means one of the CLI's values (gpu: auto, not cpu)", () => {
-    expect(valueProblem(flag("device"), "gpu")).toBe("--device takes auto, cuda, cpu, coreml, not 'gpu' (did you mean auto?)");
+    expect(valueProblem(flag("device"), "gpu")).toBe("--device takes auto, cuda, cpu, coreml, migraphx, not 'gpu' (did you mean auto?)");
     expect(valueProblem(flag("format"), "mp4")).toMatch(/did you mean video\?/);
     expect(valueProblem(flag("datatype"), "fp32")).toMatch(/did you mean float\?/);
     // a typo with no meaning in the table: the closest spelling, as before

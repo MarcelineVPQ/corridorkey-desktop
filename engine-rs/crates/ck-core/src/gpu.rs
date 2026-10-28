@@ -1,5 +1,6 @@
 //! The NVIDIA card through NVML (libnvidia-ml.so.1, opened at run time; it creates no CUDA context, so
-//! asking costs no graphics memory): name, total and free memory, driver, and what this process holds.
+//! asking costs no graphics memory): name, total and free memory, driver, and what this process holds. The memory
+//! readings (`budget`, `card_memory`) read the AMD card instead when the MIGraphX provider runs (amd.rs).
 use libloading::{Library, Symbol};
 use std::ffi::{c_char, c_int, c_uint, c_void, CStr};
 
@@ -66,6 +67,11 @@ fn pci_key(s: &str) -> Option<(u32, u32, u32, u32)> {
     let (dev, func) = rest.split_once('.').unwrap_or((rest, "0"));
     let hex = |x: &str| u32::from_str_radix(x, 16).ok();
     Some((hex(domain)?, hex(bus)?, hex(dev)?, hex(func)?))
+}
+
+/// Whether two PCI bus ids name the same device, whatever their spelling (NVML / CUDA / HIP / sysfs).
+pub(crate) fn same_pci(a: &str, b: &str) -> bool {
+    pci_key(a).is_some_and(|k| pci_key(b) == Some(k))
 }
 
 /// The NVML card that is CUDA's device 0 (bug hunt 2026-10 C6, backlog row 17): the CUDA driver's own answer,
@@ -347,7 +353,13 @@ fn nvml() -> Option<&'static Nvml> {
 /// The memory budget the runtime's apply_auto_vram uses: free memory plus what this process already holds
 /// (its loaded models count for it). (budget bytes, free bytes, own bytes); own is None where NVML can't tell a
 /// process's memory (Windows WDDM): the budget is then the free memory alone (Pipeline::gpu_budget unloads first).
+/// The AMD card when the runtime opened one (the MIGraphX provider, amd.rs), else NVML.
 pub(crate) fn budget() -> Option<(u64, u64, Option<u64>)> {
+    if let Some(c) = crate::amd::opened() {
+        let info = c.info()?;
+        let own = c.own();
+        return Some((info.free + own.unwrap_or(0), info.free, own));
+    }
     let n = nvml()?;
     let info = n.info()?;
     let own = n.used_by(std::process::id());
@@ -356,6 +368,10 @@ pub(crate) fn budget() -> Option<(u64, u64, Option<u64>)> {
 
 /// The card's memory for the `estimate` command, from the same NVML reading as `budget`: (total, free, budget) bytes.
 pub fn card_memory() -> Option<(u64, u64, u64)> {
+    if let Some(c) = crate::amd::opened() {
+        let info = c.info()?;
+        return Some((info.total, info.free, info.free + c.own().unwrap_or(0)));
+    }
     let n = nvml()?;
     let info = n.info()?;
     let own = n.used_by(std::process::id()).unwrap_or(0);

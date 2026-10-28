@@ -1,12 +1,13 @@
 //! corridorkey-engine: CorridorKey on ONNX Runtime, speaking docs/ENGINE_PROTOCOL.md over stdio.
 //!
-//!   corridorkey-engine --models DIR [--ort libonnxruntime.so] [--device auto|cuda|cpu|coreml]
+//!   corridorkey-engine --models DIR [--ort libonnxruntime.so] [--device auto|cuda|cpu|coreml|migraphx]
 //!
 //! --models (CK_ENGINE_MODELS): the folder with the five ONNX networks (docs/ENGINE_RUST.md).
 //! --ort (CK_ENGINE_ORT, ORT_DYLIB_PATH): ONNX Runtime's library, for the GPU build that loads it at run time.
 //! --device (CK_ENGINE_DEVICE): auto = the graphics card (no card: jobs fail with `no-gpu`, as the
 //!   PyTorch engine); cpu = ONNX Runtime's CPU provider (tests; slow); coreml = ONNX Runtime's Core ML provider
-//!   (macOS only; the models folder's Core ML set, coreml.json; docs/ENGINE_RUST.md).
+//!   (macOS only; the models folder's Core ML set, coreml.json; docs/ENGINE_RUST.md); migraphx = ONNX Runtime's
+//!   MIGraphX provider on an AMD card (Linux; `auto` picks it with ONNX Runtime's MIGraphX build; docs/AMD.md).
 //! Every other setting is a CK_ENGINE_* variable (docs/ENGINE_RUST.md "Knobs"), read once (ck_core::config).
 use ck_core::config::EngineConfig;
 use ck_core::job::JobConfig;
@@ -29,6 +30,7 @@ impl Backend for Ort {
             "type": "pong", "version": ENGINE_VERSION, "protocol": PROTOCOL, "engine": "onnxruntime",
             "device": match prov {
                 Some(ck_core::runtime::Provider::CoreMl) => "coreml",
+                Some(ck_core::runtime::Provider::Migraphx) => "migraphx",
                 Some(p) if p != ck_core::runtime::Provider::Cpu => "cuda",
                 _ => "cpu",
             },
@@ -59,7 +61,8 @@ impl Backend for Ort {
     fn reset(&mut self) {
         self.pipeline.reset();
     }
-    // the reading the automatic window takes (pipeline/mod.rs): NVML on a card, the host's free memory on the CPU
+    // the reading the automatic window takes (pipeline/mod.rs): NVML (or the amdgpu driver) on a card, the host's free
+    // memory on the CPU
     fn card_memory(&mut self) -> Option<ck_core::vram::CardMemory> {
         use ck_core::runtime::Provider;
         use ck_core::vram::CardMemory;

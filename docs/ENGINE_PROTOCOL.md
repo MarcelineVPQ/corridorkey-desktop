@@ -143,7 +143,7 @@ The `corridorkey` command line ([CLI.md](CLI.md)) runs the same jobs without thi
    "config":{"device":"auto","precision":null,"graph_opt":"all","arena_shrink":"auto","trt_cache":"...",...},
    "decoders":{"jpeg":"libjpeg-turbo (/usr/lib/libturbojpeg.so.0.4.0, TurboJPEG 3 API)","ffmpeg":"8.0","ffprobe":"8.0"}}
 ← {"type":"progress","id":"j1","stage":"load|optimize|probe|rvm|foundations|keying","p":0.42,"detail":"window 3/9"}
-← {"type":"provider","id":"j1","provider":"cuda|tensorrt|tensorrt+cuda|cpu|coreml","precision":"fp16","tensorrt_requested":false,
+← {"type":"provider","id":"j1","provider":"cuda|tensorrt|tensorrt+cuda|cpu|coreml|migraphx","precision":"fp16","tensorrt_requested":false,
    "fallback_reason":"...","range":"h1024-1280_w1792-2176_t1-12","cache":"build|reused","pieces":{...},"fallbacks":{...},
    "build_s":{"stage1":88.0,...}}
 ← {"type":"clip","id":"j1","width":1920,"height":1080,"fps":23.976,"frames":240}

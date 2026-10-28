@@ -115,6 +115,14 @@ On a Mac the message is:
 **Cause:** the engine was started without `--device coreml` (the app always passes it; this comes from the command
 line). **Fix:** pass `--device coreml`, or set `CK_ENGINE_DEVICE=coreml`.
 
+On Linux with AMD's MIGraphX provider plugin installed (an AMD card; untested on a real AMD card so far) the message
+is:
+
+> CorridorKey found no AMD graphics card ROCm can use (HIP sees no device, or the amdgpu driver's memory files are missing; check rocminfo).
+
+**Cause:** the MIGraphX plugin loaded, but ROCm sees no AMD card the engine can read. **Fix:** check that `rocminfo`
+lists the card and that the amdgpu driver is loaded.
+
 ### The graphics card ran out of memory
 
 > The graphics card ran out of memory (`<what it was doing>`): `<details>`

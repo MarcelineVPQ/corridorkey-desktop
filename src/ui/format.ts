@@ -55,7 +55,7 @@ export function statusText(job: Job): string {
 /** The engine's provider name on screen ("tensorrt+cuda" → "TensorRT + CUDA"); null when the engine sent none. */
 export function providerName(p: string | null): string | null {
   if (!p) return null;
-  const names: Record<string, string> = { cuda: "CUDA", tensorrt: "TensorRT", "tensorrt+cuda": "TensorRT + CUDA", cpu: "CPU", coreml: "Core ML" };
+  const names: Record<string, string> = { cuda: "CUDA", tensorrt: "TensorRT", "tensorrt+cuda": "TensorRT + CUDA", cpu: "CPU", coreml: "Core ML", migraphx: "MIGraphX" };
   return names[p] ?? p;
 }
 

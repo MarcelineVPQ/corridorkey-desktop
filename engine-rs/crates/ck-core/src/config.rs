@@ -17,6 +17,8 @@ pub enum Device {
     Cpu,
     /// ONNX Runtime's Core ML provider (macOS only; the fixed-shape Core ML model set, coreml.json)
     CoreMl,
+    /// ONNX Runtime's MIGraphX provider: an AMD card (Linux only; the onnxruntime-migraphx build and ROCm, docs/AMD.md)
+    Migraphx,
 }
 
 impl Device {
@@ -26,6 +28,7 @@ impl Device {
             Device::Cuda => "cuda",
             Device::Cpu => "cpu",
             Device::CoreMl => "coreml",
+            Device::Migraphx => "migraphx",
         }
     }
 }
@@ -116,6 +119,10 @@ pub struct EngineConfig {
     /// CK_ENGINE_COREML_LOW_PRECISION_GPU=1: Core ML's AllowLowPrecisionAccumulationOnGPU (float16 sums on the GPU
     /// instead of float32). Off by default: a measurement knob; mattes must stay within the CUDA bar to keep it
     pub coreml_low_precision_gpu: bool,
+    /// MIGraphX's compiled-program cache root (CK_ENGINE_MIGRAPHX_CACHE, else `migraphx` next to the TensorRT cache root)
+    pub migraphx_cache: PathBuf,
+    /// CK_ENGINE_MIGRAPHX_EP: AMD's MIGraphX provider plugin (libmigraphx-ep.so; else found next to ONNX Runtime's package)
+    pub migraphx_ep: Option<PathBuf>,
     /// CK_ENGINE_TRT_BUILD: the engine builder (None: ck-trt-build next to the engine)
     pub trt_build: Option<PathBuf>,
     /// CK_ENGINE_TRT_BUILD_TIMEOUT_S: one engine build's deadline (1800 s)
@@ -146,6 +153,8 @@ impl Default for EngineConfig {
             coreml_cache: PathBuf::from("coreml"),
             coreml_fast_prediction: false,
             coreml_low_precision_gpu: false,
+            migraphx_cache: PathBuf::from("migraphx"),
+            migraphx_ep: None,
             trt_build: None,
             trt_build_timeout: Duration::from_secs(1800),
             parent_pid: None,
@@ -182,9 +191,16 @@ impl EngineConfig {
         let var = |k: &str| env(k).filter(|s| !s.trim().is_empty());
         let device = match arg_value(args, "--device").map(|v| ("--device", v)).or_else(|| var("CK_ENGINE_DEVICE").map(|v| ("CK_ENGINE_DEVICE", v))) {
             Some((name, v)) => {
-                let d = pick(name, &v, &[("auto", Device::Auto), ("cuda", Device::Cuda), ("cpu", Device::Cpu), ("coreml", Device::CoreMl)])?;
+                let d = pick(
+                    name,
+                    &v,
+                    &[("auto", Device::Auto), ("cuda", Device::Cuda), ("cpu", Device::Cpu), ("coreml", Device::CoreMl), ("migraphx", Device::Migraphx)],
+                )?;
                 if d == Device::CoreMl && os != "macos" {
                     return Err(format!("{name}: coreml is ONNX Runtime's Core ML provider, macOS only (this system: {os})"));
+                }
+                if d == Device::Migraphx && os != "linux" {
+                    return Err(format!("{name}: migraphx is ONNX Runtime's MIGraphX provider for AMD cards, Linux only (this system: {os})"));
                 }
                 d
             }
@@ -208,6 +224,9 @@ impl EngineConfig {
         };
         let coreml_fast_prediction = on_off("CK_ENGINE_COREML_FAST_PREDICTION")?;
         let coreml_low_precision_gpu = on_off("CK_ENGINE_COREML_LOW_PRECISION_GPU")?;
+        let migraphx_cache = var("CK_ENGINE_MIGRAPHX_CACHE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| trt_cache.parent().map(|p| p.join("migraphx")).unwrap_or_else(|| PathBuf::from("migraphx")));
         let precision = match var("CK_ENGINE_PRECISION") {
             Some(v) => Some(pick("CK_ENGINE_PRECISION", &v, &[("fp16", Precision::Fp16), ("fp32", Precision::Fp32)])?),
             None => None,
@@ -278,6 +297,8 @@ impl EngineConfig {
             coreml_cache,
             coreml_fast_prediction,
             coreml_low_precision_gpu,
+            migraphx_cache,
+            migraphx_ep: var("CK_ENGINE_MIGRAPHX_EP").map(PathBuf::from),
             trt_build: var("CK_ENGINE_TRT_BUILD").map(PathBuf::from),
             trt_build_timeout,
             parent_pid: crate::proc::parent_pid_from(var("CK_ENGINE_PARENT_PID").as_deref()),
@@ -315,6 +336,8 @@ impl EngineConfig {
             "coreml_cache": self.coreml_cache.to_string_lossy(),
             "coreml_fast_prediction": self.coreml_fast_prediction,
             "coreml_low_precision_gpu": self.coreml_low_precision_gpu,
+            "migraphx_cache": self.migraphx_cache.to_string_lossy(),
+            "migraphx_ep": path(&self.migraphx_ep),
             "trt_build": path(&self.trt_build),
             "trt_build_timeout_s": self.trt_build_timeout.as_secs(),
             "parent_pid": self.parent_pid,
@@ -358,6 +381,7 @@ mod tests {
         let d = EngineConfig {
             trt_cache: PathBuf::from("/h/.cache/corridorkey-desktop/tensorrt"),
             coreml_cache: PathBuf::from("/h/.cache/corridorkey-desktop/coreml"),
+            migraphx_cache: PathBuf::from("/h/.cache/corridorkey-desktop/migraphx"),
             ..EngineConfig::default()
         };
         assert_eq!(c, d);
@@ -440,6 +464,13 @@ mod tests {
         assert_eq!((c.coreml_units, EngineConfig::default().coreml_units), (CoremlUnits::CpuGpu, CoremlUnits::CpuGpu));
         assert_eq!(c.coreml_cache, PathBuf::from("/Users/m/Library/Caches/corridorkey-desktop/coreml"));
         assert_eq!(c.to_json()["device"].as_str(), Some("coreml"));
+        // MIGraphX: Linux only, a clear error elsewhere; on Linux its cache
+        assert!(EngineConfig::parse(&args(&["e", "--device", "migraphx"]), &env(&[]), "windows").unwrap_err().contains("Linux only"));
+        let e = env(&[("HOME", "/h"), ("CK_ENGINE_MIGRAPHX_CACHE", "/mx"), ("CK_ENGINE_MIGRAPHX_EP", "/ep/libmigraphx-ep.so")]);
+        let c = EngineConfig::parse(&args(&["e", "--device=MIGraphX"]), &e, "linux").unwrap();
+        assert_eq!((c.device, c.migraphx_cache.clone()), (Device::Migraphx, PathBuf::from("/mx")));
+        assert_eq!(c.migraphx_ep, Some(PathBuf::from("/ep/libmigraphx-ep.so")));
+        assert_eq!(c.to_json()["migraphx_cache"].as_str(), Some("/mx"));
         // empty means unset
         assert_eq!(EngineConfig::parse(&args(&["e"]), &env(&[("CK_ENGINE_DEVICE", ""), ("CK_ENGINE_THREADS", " ")]), "linux").unwrap().device, Device::Auto);
         // the arena values

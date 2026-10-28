@@ -366,9 +366,9 @@ impl<L: Loader> Pipeline<L> {
             }
             let file = match &key.coreml {
                 Some(c) => c.files.get(piece).cloned().ok_or_else(|| Error::assets(format!("no Core ML model for {piece} in this job's set")))?,
-                None => self
-                    .models
-                    .file(piece, key.precision)
+                // MIGraphX: the set's MIGraphX file where models.json lists one (run_job says when it has none)
+                None => (if key.provider == Provider::Migraphx { self.models.migraphx_file(piece, key.precision) } else { None })
+                    .or_else(|| self.models.file(piece, key.precision))
                     .ok_or_else(|| Error::assets(format!("missing ONNX model {piece} ({}) in {}", key.precision.name(), self.models.dir.display())))?,
             };
             self.loader.starting(piece);
@@ -665,6 +665,13 @@ impl Pipeline<OrtLoader> {
         if !missing.is_empty() {
             return Err(Error::assets(format!("missing ONNX model(s) {} ({}) in {}", missing.join(", "), precision.name(), self.models.dir.display())));
         }
+        if provider == Provider::Migraphx && !self.models.has_migraphx(precision) {
+            sink.log(&format!(
+                "  MIGraphX: {} has no MIGraphX set (models.json \"migraphx-{}\"): MIGraphX refuses MoGe's resize and stage 1 and 2's RMSNormalization (engine-rs/export/migraphx_patch.py, docs/AMD.md)",
+                self.models.dir.display(),
+                precision.name()
+            ));
+        }
         // ffmpeg -version once per job, 30 s deadline: it must run, and its version goes into the settings file
         let Ok(ffmpeg_version) = crate::decode::tool_version("ffmpeg") else {
             return Err(Error::assets("ffmpeg binary not found: ffmpeg. Install ffmpeg.".into()));
@@ -677,8 +684,9 @@ impl Pipeline<OrtLoader> {
         let is_dir = Path::new(&job.input).is_dir();
         // colour management (backlog row 29), before any network loads: a bad config or space is a bad-request now
         let color = color_setup(job, is_dir, sink)?;
+        // (MIGraphX: its plugin takes no arena limit; the budget still sizes the automatic window)
         let vram_cap = match provider {
-            Provider::Cpu | Provider::CoreMl => None,
+            Provider::Cpu | Provider::CoreMl | Provider::Migraphx => None,
             _ => job.vram_budget_gb.map(|g| (g * 1073741824.0) as u64),
         };
         let base_key = ModelKey { provider, precision, trt_cache: None, vram_cap, coreml: None };

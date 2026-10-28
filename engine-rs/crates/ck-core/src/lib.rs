@@ -4,6 +4,7 @@
 /// The app's version (package.json, read by build.rs): the engine's and the command line's, one number for both.
 pub const APP_VERSION: &str = env!("CK_APP_VERSION");
 pub(crate) mod ahead;
+pub(crate) mod amd;
 pub mod clip;
 pub mod color;
 pub mod config;

@@ -51,6 +51,7 @@ body:
         - CUDA (the default on NVIDIA)
         - TensorRT
         - Core ML (macOS)
+        - MIGraphX (AMD, Linux; untested on a real AMD card)
         - CPU
   - type: textarea
     id: log
