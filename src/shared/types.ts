@@ -77,6 +77,15 @@ export const MODEL_SCALES: ModelScale[] = [1, 0.75, 0.5, 0.25];
 // the linear adjust's ranges in the app (the original has none; the engine refuses 0 and below for brightness and contrast)
 export const LINEAR_RANGES = { brightness: [0.25, 4], contrast: [0.5, 2], pivot: [0.01, 1] } as const;
 
+// a frame folder's frame rate: what the field takes and what sanitizeOptions keeps (validate.ts; tied in validate.test.ts)
+export const FRAME_DIR_FPS_RANGE = [0.001, 1000] as const;
+
+/** The frame-rate field's text as a rate it takes, else null (empty, half-typed or out of range: the field keeps it). */
+export function frameRateOf(text: string): number | null {
+  const n = Number(text);
+  return text.trim() !== "" && Number.isFinite(n) && n >= FRAME_DIR_FPS_RANGE[0] && n <= FRAME_DIR_FPS_RANGE[1] ? n : null;
+}
+
 /** video_io.scaled_hw: each side × the scale, Python's round (half to even), at least 1. */
 export function scaledSize(n: number, scale: number): number {
   const x = n * scale;

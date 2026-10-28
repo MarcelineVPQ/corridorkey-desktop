@@ -4,7 +4,7 @@
 import { Clapperboard, Film, FolderOpen, Layers, MemoryStick, Scaling, SunMedium, Wand2, X, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { HintFileKind, Job, JobOptions, MemoryChoice, MemoryEstimate, MemoryEstimateResult, ModelScale, OutputName, TrtState, VideoCodec, WindowEstimate } from "../shared/types";
-import { LINEAR_RANGES, MANUAL_WINDOWS, OUTPUT_NAMES, VRAM_LIMIT_AUTO_HELP, scaledSize, videoCodecsFor, vramLimitChoices, withCutoutAlpha } from "../shared/types";
+import { FRAME_DIR_FPS_RANGE, frameRateOf, LINEAR_RANGES, MANUAL_WINDOWS, OUTPUT_NAMES, VRAM_LIMIT_AUTO_HELP, scaledSize, videoCodecsFor, vramLimitChoices, withCutoutAlpha } from "../shared/types";
 import { gibBytes } from "../shared/units";
 import { AS_USED } from "../shared/texts";
 import { builtWindows, sizeRangeText, trtSizeKey, TRT_BUILD_COST, TRT_SPEED, type TrtSize } from "../shared/trt";
@@ -230,7 +230,7 @@ export function JobSettings({
           {() => (
             <>
               <Row label="Frame rate" htmlFor="fps">
-                <input id="fps" type="number" min={1} max={240} step={0.001} value={o.frameDirFps} onChange={(e) => set({ frameDirFps: Number(e.target.value) || 24 })} />
+                <FrameRate value={o.frameDirFps} onChange={(frameDirFps) => set({ frameDirFps })} />
               </Row>
               <Row label="Color" hint={job.clip.exrFrames ? "EXR frames: scene-linear by format" : "PNG/JPEG frames: display-coded by format"}>
                 <label className="checks">
@@ -572,6 +572,44 @@ function estimateText(est: MemoryEstimateResult | null, w: WindowEstimate | null
   const card = e.totalBytes !== null ? ` on this ${gibBytes(e.totalBytes)} card` : "";
   const of = `${peak} of ${gibBytes(e.freeBytes)} free${card}${capped}${stale}`;
   return w.fits ? `${of}: fits.` : `${of}: doesn't fit (with the engine's safety margin it needs ${gibBytes(w.needsBytes)}).`;
+}
+
+/**
+ * A frame folder's frame rate: the field keeps what is typed; a rate it takes is set as you type, anything else (empty,
+ * half-typed, out of range) is marked and leaves the setting as it was, and the field shows the setting again on leaving.
+ */
+function FrameRate({ value, onChange }: { value: number; onChange: (fps: number) => void }) {
+  const [text, setText] = useState(String(value));
+  // another clip's settings, or a change from elsewhere: the field shows it
+  useEffect(() => {
+    setText((t) => (frameRateOf(t) === value ? t : String(value)));
+  }, [value]);
+  const bad = frameRateOf(text) === null;
+  return (
+    <>
+      <input
+        id="fps"
+        type="number"
+        min={FRAME_DIR_FPS_RANGE[0]}
+        max={FRAME_DIR_FPS_RANGE[1]}
+        step={0.001}
+        value={text}
+        aria-invalid={bad}
+        aria-describedby={bad ? "fps-bad" : undefined}
+        onChange={(e) => {
+          setText(e.target.value);
+          const fps = frameRateOf(e.target.value);
+          if (fps !== null) onChange(fps);
+        }}
+        onBlur={() => setText(String(value))}
+      />
+      {bad && (
+        <span id="fps-bad" className="row-hint">
+          {FRAME_DIR_FPS_RANGE[0]} to {FRAME_DIR_FPS_RANGE[1]}; kept: {value} fps
+        </span>
+      )}
+    </>
+  );
 }
 
 function FilePick({ path, onPick, onClear }: { path: string | null; onPick: () => void; onClear: () => void }) {

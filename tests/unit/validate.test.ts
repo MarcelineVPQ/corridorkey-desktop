@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { loadSettings } from "../../electron/main/settings";
 import { fromAppPageOnly, idArg, pathArg, pathsArg, sanitizeAppearance, sanitizeOptions, uniqueOutputDir, vramLimit } from "../../electron/main/validate";
-import { DEFAULT_APPEARANCE, DEFAULT_OPTIONS, scaledSize, vramLimitChoices } from "../../src/shared/types";
+import { DEFAULT_APPEARANCE, DEFAULT_OPTIONS, FRAME_DIR_FPS_RANGE, frameRateOf, scaledSize, vramLimitChoices } from "../../src/shared/types";
 
 describe("IPC and settings validation", () => {
   it("keeps valid job options as they are", () => {
@@ -35,6 +35,15 @@ describe("IPC and settings validation", () => {
     const bad = sanitizeOptions({ modelScale: 0.6, linearBrightness: 0, linearContrast: 9, linearContrastPivot: "x" });
     expect([bad.modelScale, bad.linearBrightness, bad.linearContrast, bad.linearContrastPivot]).toEqual([1, 1, 1, 0.18]);
     expect([sanitizeOptions({}).deepInput, sanitizeOptions({ deepInput: true }).deepInput, sanitizeOptions({ deepInput: "yes" }).deepInput]).toEqual([false, true, false]);
+  });
+
+  it("whole review S10: the frame-rate field takes what sanitizeOptions keeps, and never snaps while typing", () => {
+    const [lo, hi] = FRAME_DIR_FPS_RANGE;
+    expect([sanitizeOptions({ frameDirFps: lo }).frameDirFps, sanitizeOptions({ frameDirFps: hi }).frameDirFps]).toEqual([lo, hi]);
+    expect([sanitizeOptions({ frameDirFps: lo / 2 }).frameDirFps, sanitizeOptions({ frameDirFps: hi + 1 }).frameDirFps]).toEqual([24, 24]);
+    expect([frameRateOf(String(lo)), frameRateOf(String(hi)), frameRateOf("23.976"), frameRateOf("2")]).toEqual([lo, hi, 23.976, 2]);
+    // empty, half-typed or out of range: the field keeps the text, the setting stays (no 24 while typing)
+    expect([frameRateOf(""), frameRateOf("0"), frameRateOf("-"), frameRateOf(String(hi + 1))]).toEqual([null, null, null, null]);
   });
 
   it("sizes the internal resolution as the engine does (Python round, half to even)", () => {
