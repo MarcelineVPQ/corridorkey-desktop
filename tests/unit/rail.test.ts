@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialView, isOpen, ITEMS, railKey, railLayout, railPress, RAIL, toggleFlags, viewReduce } from "../../src/ui/rail/railModel";
+import { initialView, isOpen, isPinKey, ITEMS, railKey, railLayout, railPress, RAIL, tabStop, toggleFlags, viewReduce } from "../../src/ui/rail/railModel";
 
 describe("rail model (the house rail)", () => {
   // review N11: the Engine tip named the runtime twice ("the engine's runtime and models … its ONNX Runtime files")
@@ -39,6 +39,15 @@ describe("rail model (the house rail)", () => {
     expect(railKey("ArrowUp", 0, 4)).toEqual({ action: "move", index: 3 });
     expect(railKey("End", 0, 4)).toEqual({ action: "move", index: 3 });
     expect(railKey("b", 0, 4, { ctrl: true })).toBeNull();
+  });
+  it("whole review: Ctrl+B pins, but not when a field took it (the Console's Ctrl+B moves the cursor)", () => {
+    const k = { key: "b", ctrlKey: true, metaKey: false, altKey: false, shiftKey: false, defaultPrevented: false };
+    expect(isPinKey(k)).toBe(true);
+    expect(isPinKey({ ...k, defaultPrevented: true })).toBe(false);
+  });
+  it("whole review: one rail item always takes Tab, also on the setup page", () => {
+    expect(tabStop("engine")).toBe("engine");
+    expect(tabStop("setup")).toBe(ITEMS[0].id);
   });
   it("the page you're on toggles its panel; a task dot leads to its section", () => {
     expect(railPress("queue", "queue", true, null)).toEqual({ page: "queue", panel: "hide", section: null });

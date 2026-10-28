@@ -14,7 +14,7 @@ import { Activity, Cpu, Info, ListVideo, Lock, LockOpen, PanelRightClose, PanelR
 import type { AppState } from "../../shared/types";
 import type { PageId } from "../../shared/tasks";
 import { NO_VRAM_HELD } from "../../shared/texts";
-import { ITEMS, RAIL, initialView, isOpen, railKey, railLayout, toggleFlags, viewReduce, type RailEvent } from "./railModel";
+import { ITEMS, RAIL, initialView, isOpen, isPinKey, railKey, railLayout, tabStop, toggleFlags, viewReduce, type RailEvent } from "./railModel";
 import { usePref } from "../prefs";
 import { useGlass } from "../glass/useGlass";
 import { CLEAR_GLASS_RAIL, REGULAR_GLASS } from "../glass/variants";
@@ -42,10 +42,10 @@ export function AppRail(props: { state: AppState; page: PageId; pageDots: Partia
   );
   const pointerDown = useRef(false);
 
-  // Ctrl+B (⌘B on macOS) pins/unpins, from anywhere in the window.
+  // Ctrl+B (⌘B on macOS) pins/unpins, from anywhere in the window (not when a field took it: isPinKey).
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "b") {
+      if (isPinKey(e)) {
         e.preventDefault();
         setFlags((f) => toggleFlags(f, "pin"));
       }
@@ -105,7 +105,7 @@ export function AppRail(props: { state: AppState; page: PageId; pageDots: Partia
         }}
         onKeyDown={onKeyDown}
       >
-        <div className="rail-nav" role="list">
+        <div className="rail-nav">
           {/* loop: HOT-PATH-OK — the rail's few items per render */}
           {ITEMS.map((it) => {
             const Icon = ICONS[it.id];
@@ -115,13 +115,12 @@ export function AppRail(props: { state: AppState; page: PageId; pageDots: Partia
               <button
                 key={it.id}
                 type="button"
-                role="listitem"
                 data-rail={it.id}
                 className={`rail-link ${active ? "active" : ""}`}
                 aria-current={active ? "page" : undefined}
                 aria-description={waiting ? `Waiting: ${waiting}` : undefined}
                 title={waiting ? `${it.label}\n${waiting}` : open ? it.tip : it.label}
-                tabIndex={active ? 0 : -1}
+                tabIndex={it.id === tabStop(page) ? 0 : -1}
                 onClick={() => press(it.id)}
               >
                 <span className="rail-ic">

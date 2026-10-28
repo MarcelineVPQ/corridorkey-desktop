@@ -93,6 +93,17 @@ export function railKey(key: string, index: number, count: number, mods: { ctrl?
   }
 }
 
+/** Ctrl+B (⌘B on macOS) pins/unpins, unless a field already took the key (the Console's Ctrl+B: a character back). */
+export function isPinKey(e: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean; defaultPrevented: boolean }): boolean {
+  return !e.defaultPrevented && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "b";
+}
+
+/** The rail item that takes Tab (roving tabindex): the page you're on, else (setup) the first. */
+export function tabStop(page: PageId): PageId {
+  // loop: NOT-WORTH — the rail's 5 items, per render
+  return ITEMS.some((it) => it.id === page) ? page : ITEMS[0].id;
+}
+
 /** Pin and lock exclude each other: keeping it open unlocks it, locking it unpins it. */
 export function toggleFlags(flags: { pinned: boolean; locked: boolean }, which: "pin" | "lock"): { pinned: boolean; locked: boolean } {
   if (which === "pin") return flags.pinned ? { pinned: false, locked: flags.locked } : { pinned: true, locked: false };
