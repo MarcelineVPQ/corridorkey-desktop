@@ -6,14 +6,14 @@ export function ProgressBar({ label, value, max, big = false }: { label: string;
   const pct = known ? Math.min(100, Math.max(0, (value / max) * 100)) : 0;
   return (
     <div
-      className={big ? "bar big" : "bar"}
+      className={`bar${big ? " big" : ""}${known ? "" : " indeterminate"}`}
       role="progressbar"
       aria-label={label}
       aria-valuemin={known ? 0 : undefined}
       aria-valuemax={known ? max : undefined}
       aria-valuenow={known ? value : undefined}
     >
-      <span style={{ width: `${pct}%` }} />
+      <span style={known ? { width: `${pct}%` } : undefined} />
     </div>
   );
 }

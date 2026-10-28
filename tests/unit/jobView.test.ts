@@ -19,4 +19,11 @@ describe("job page", () => {
     expect(row).not.toMatch(/role="button"/);
     expect(row).toMatch(/<button type="button" className="job-name"/);
   });
+
+  it("re-review N2: an unknown total's bar is a moving band, still under reduced motion (tokens only: the theme gate)", () => {
+    const css = readFileSync(new URL("../../src/styles/app.css", import.meta.url), "utf8");
+    expect(css).toMatch(/\.bar\.indeterminate > span \{[^}]*animation: bar-sweep/);
+    const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
+    expect(reduced).toMatch(/\.bar\.indeterminate > span \{[^}]*animation: none/);
+  });
 });

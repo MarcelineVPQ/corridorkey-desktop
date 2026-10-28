@@ -118,14 +118,16 @@ export function ConsolePage(props: {
 
   const visible = useMemo(() => visibleBlocks(blocks, echoes), [blocks, echoes]);
   const { blocks: shown, hidden } = useMemo(() => filterBlocks(visible, failedOnly), [visible, failedOnly]);
-  // the status region says the newest command that started or ended since the last push (model.ts announcement)
+  // the status region says the newest shown command that started or ended since the last push (model.ts announcement).
+  // The states are every kept block's (not only the shown ones), and the page's first look says nothing: opening the
+  // page, or a filter bringing blocks back into view, isn't news (re-review N1).
   const [said, setSaid] = useState("");
-  const states = useRef<Map<number, ConsoleBlock["state"]>>(new Map());
+  const states = useRef<Map<number, ConsoleBlock["state"]> | null>(null);
   useEffect(() => {
-    const text = announcement(shown, states.current);
-    states.current = blockStates(shown);
+    const text = states.current ? announcement(shown, states.current) : null;
+    states.current = blockStates(blocks.blocks);
     if (text !== null) setSaid(text);
-  }, [shown]);
+  }, [shown, blocks]);
   const jump = useCallback(
     (by: -1 | 1) => {
       // loop: NOT-WORTH — ≤ 200 blocks, per Ctrl+↑ / Ctrl+↓

@@ -15,6 +15,7 @@ import { ProgressBar } from "../../src/ui/ProgressBar";
 import { Accordion, Section } from "../../src/ui/panel/Section";
 import { EnginePage } from "../../src/ui/pages/EnginePage";
 import { SettingsPage } from "../../src/ui/pages/SettingsPage";
+import { ConsolePage } from "../../src/ui/pages/ConsolePage";
 import { STAGE_TEXT } from "../../src/ui/format";
 import { appState, job, settings } from "./fixtures";
 import { Cpu } from "lucide-react";
@@ -282,5 +283,59 @@ describe("readouts", () => {
     expect(screen.getByText("ONNX Runtime (version not reported) · cuda")).toBeTruthy();
     expect(screen.queryByText(/\?/)).toBeNull();
     expect(screen.getByText(/stage1 found by the engine$/)).toBeTruthy();
+  });
+});
+
+describe("re-review", () => {
+  const cblock = (id: number, extra: Partial<ConsoleBlock> = {}): ConsoleBlock => ({
+    id,
+    line: `render s${id}.mov`,
+    parent: null,
+    cwd: "/home/m",
+    argv: null,
+    elevated: false,
+    state: "done",
+    exitCode: 0,
+    exitMeaning: "done",
+    startedAt: 1000,
+    finishedAt: 1400,
+    progress: null,
+    status: null,
+    lines: [],
+    linesDropped: 0,
+    entries: null,
+    errors: [],
+    clear: false,
+    ...extra,
+  });
+
+  it("N1: opening the Console, or a filter bringing blocks back, announces nothing; a new command still is", () => {
+    mockCk();
+    localStorage.setItem("ck.open.console", JSON.stringify("session"));
+    const page = (blocks: ConsoleBlock[]) => (
+      <ConsolePage state={appState()} blocks={{ blocks, clearedTo: 0 }} setBlocks={() => {}} panelShown={true} narrow={false} glass={false} focus={null} hidePanel={() => {}} />
+    );
+    const old = [cblock(1, { state: "failed", exitCode: 6 }), cblock(2)];
+    const { container, rerender } = render(page(old));
+    const said = () => container.querySelector('.sr-only[role="status"]')!.textContent;
+    expect(said()).toBe("");
+    fireEvent.click(screen.getByRole("radio", { name: "Failed only" }));
+    expect(said()).toBe("");
+    fireEvent.click(screen.getByRole("radio", { name: "All" }));
+    expect(said()).toBe("");
+    rerender(page([...old, cblock(3, { state: "running", exitCode: null })]));
+    expect(said()).toBe("render s3.mov: running");
+  });
+
+  it("N2: an unknown total is a moving band, not an empty bar", () => {
+    const { container } = render(<ProgressBar label="Frames" value={37} max={0} />);
+    const bar = container.querySelector(".bar")!;
+    expect(bar.classList.contains("indeterminate")).toBe(true);
+    expect((bar.firstElementChild as HTMLElement).style.width).toBe("");
+    cleanup();
+    const known = render(<ProgressBar label="Frames" value={3} max={10} />).container.querySelector(".bar")!;
+    expect(known.classList.contains("indeterminate")).toBe(false);
+    expect((known.firstElementChild as HTMLElement).style.width).toBe("30%");
+    // its style (a moving band; still under reduced motion): jobView.test.ts
   });
 });

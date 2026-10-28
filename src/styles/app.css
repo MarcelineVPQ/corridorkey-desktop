@@ -360,6 +360,20 @@ select {
   height: 10px;
   border-radius: 5px;
 }
+/* a total not known yet (ProgressBar, max ≤ 0): a moving band, never an empty bar that reads as 0 % (re-review N2);
+   transform only (the compositor), and only while a job runs with no total */
+.bar.indeterminate > span {
+  width: 30%;
+  animation: bar-sweep 1.4s ease-in-out infinite;
+}
+@keyframes bar-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
 
 /* ---- detail ---- */
 .detail {
@@ -727,6 +741,12 @@ select {
   .bar > span,
   .more-chev {
     transition: none;
+  }
+  /* still: the whole bar, faint (busy, total not known) */
+  .bar.indeterminate > span {
+    animation: none;
+    width: 100%;
+    opacity: 0.35;
   }
 }
 
