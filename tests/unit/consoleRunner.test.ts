@@ -405,7 +405,8 @@ describe("corridorkey from the Console", () => {
     expect((await c.run("allow-server \\\\NAS")).state).toBe("done");
     expect(c.session().servers).toEqual(["nas"]);
     expect((await c.run("cd \\\\nas\\show")).state).toBe("done");
-    expect(touched).toContain("\\\\nas\\show");
+    // a share's root as Node writes it, ending in its separator as C:\ does (path.win32.resolve of \\nas\show)
+    expect(touched).toContain("\\\\nas\\show\\");
     // another server still asks
     expect((await c.run("cd \\\\other\\show")).lines[0].text).toMatch(/allow-server other/);
     // a fresh session (the app started again): nothing allowed
