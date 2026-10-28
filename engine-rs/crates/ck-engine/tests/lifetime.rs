@@ -53,3 +53,20 @@ fn the_usage_lists_every_device() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success() && err.contains("--device auto|cuda|cpu|coreml|migraphx"), "{err}");
 }
+
+#[test]
+fn a_startup_failure_is_on_stderr_too() {
+    // final review 2026-10-28 N4: an unreadable models.json went only to stdout, so the app's error report (the
+    // stderr tail) had nothing
+    let models = std::env::temp_dir().join(format!("ck-startup-{}", std::process::id()));
+    std::fs::create_dir_all(&models).unwrap();
+    std::fs::write(models.join("models.json"), "{ not json").unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_corridorkey-engine"))
+        .args(["--models", models.to_str().unwrap(), "--device", "cpu"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    let _ = std::fs::remove_dir_all(&models);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains("engine failed to start:") && err.contains("models.json"), "{err}");
+}

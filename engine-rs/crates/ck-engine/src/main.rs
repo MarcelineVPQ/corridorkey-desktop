@@ -129,6 +129,7 @@ fn main() {
     };
     eprintln!("corridorkey-engine {ENGINE_VERSION} settings: {}", cfg.to_json());
     let Some(models) = cfg.models.clone() else {
+        eprintln!("engine failed to start: --models (or CK_ENGINE_MODELS) is required");
         out.send(json!({"type": "error", "code": "engine", "message": "engine failed to start: --models (or CK_ENGINE_MODELS) is required"}));
         std::process::exit(1);
     };
@@ -143,6 +144,7 @@ fn main() {
     let set = match ModelSet::open(&models) {
         Ok(s) => s,
         Err(e) => {
+            eprintln!("engine failed to start: {}", e.message);
             out.send(json!({"type": "error", "code": "engine", "message": format!("engine failed to start: {}", e.message)}));
             std::process::exit(1);
         }
