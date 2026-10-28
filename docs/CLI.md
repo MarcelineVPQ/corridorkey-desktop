@@ -93,7 +93,9 @@ the whole shot.**
 ## Paths
 
 `-i` / `--input`, or the first argument: a movie, a frame folder, or a frame pattern `plate.####.exr` (its folder,
-which must hold only that sequence: the engine keys a whole folder, and says so when other frames share it).
+which must hold only that sequence: the engine keys a whole folder, and says so when other frames share it). An EXR
+frame whose data window isn't its display window (overscan, autocropped) is refused, exit 3, until backlog rows 30 h
+and 34 carry both windows through.
 
 `-o` / `--output`:
 

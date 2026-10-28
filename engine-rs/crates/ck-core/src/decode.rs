@@ -376,6 +376,23 @@ pub(crate) fn read_hint_still(p: &Path) -> Result<Still, Error> {
     Ok(Still::F32 { ch, h, w, data })
 }
 
+/// An EXR layer whose data window isn't its display window (overscan, or an autocropped frame) is refused: the
+/// engine reads the data window as the whole frame and writes it at the origin, so it would key, and write, the wrong
+/// region (whole-code review 2026-10-27; backlog rows 30 h and 34 read and keep both windows).
+fn exr_whole_frame(hd: &exr::meta::header::Header, p: &Path) -> Result<(), Error> {
+    let (data, display) = (hd.data_window(), hd.shared_attributes.display_window);
+    if data == display {
+        return Ok(());
+    }
+    let b = |r: exr::meta::attribute::IntegerBounds| format!("{}x{} at ({}, {})", r.size.x(), r.size.y(), r.position.x(), r.position.y());
+    Err(Error::input(format!(
+        "{}: its data window ({}) isn't its display window ({}): cropped or overscan EXR frames aren't read yet; write whole frames",
+        p.display(),
+        b(data),
+        b(display)
+    )))
+}
+
 /// (h, w) of a still without keeping its pixels.
 pub(crate) fn image_size(p: &Path) -> Result<(usize, usize), Error> {
     if is_exr(p) {
@@ -389,6 +406,7 @@ pub(crate) fn image_size(p: &Path) -> Result<(usize, usize), Error> {
             .iter()
             .find(|hd| has(hd, "R") && has(hd, "G") && has(hd, "B"))
             .ok_or_else(|| Error::input(format!("{}: no RGB layer", p.display())))?;
+        exr_whole_frame(hd, p)?;
         return Ok((hd.layer_size.height(), hd.layer_size.width()));
     }
     let (w, h) = ::image::image_dimensions(p).map_err(|e| Error::input(format!("{}: {e}", p.display())))?;
@@ -404,6 +422,7 @@ pub(crate) fn still_size(p: &Path) -> Result<(usize, usize), Error> {
         Err(_) if is_exr(p) => {
             let meta = exr::meta::MetaData::read_from_file(p, false).map_err(|e| Error::input(format!("{}: {e}", p.display())))?;
             let hd = meta.headers.first().ok_or_else(|| Error::input(format!("{}: no layer", p.display())))?;
+            exr_whole_frame(hd, p)?;
             (hd.layer_size.height(), hd.layer_size.width())
         }
         Err(e) => return Err(e),
@@ -1079,6 +1098,31 @@ mod tests {
             [&la, &rgba, &y].into_iter().map(|p| load_initial_hint(p, &meta).map(|v| centre(&v)).map_err(|e| e.message)).collect();
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(got, vec![Ok(bf16_round(51.0 / 255.0)), Ok(bf16_round(0.9)), Ok(bf16_round(0.7))]);
+    }
+
+    /// whole-code review 2026-10-27: an EXR whose data window isn't its display window (autocropped, overscan) was
+    /// keyed as if the data window were the frame; it is refused until rows 30 h / 34
+    #[test]
+    fn a_cropped_exr_frame_is_refused() {
+        use exr::prelude::*;
+        let dir = std::env::temp_dir().join(format!("ck-crop-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let rgb = |n: usize| AnyChannels::sort(["B", "G", "R"].map(|c| AnyChannel::new(c, FlatSamples::F32(vec![0.5; n]))).into_iter().collect());
+        let at = LayerAttributes { layer_position: Vec2(2, 2), ..LayerAttributes::default() };
+        // 4x4 pixels at (2, 2) of an 8x8 frame (autocropped), and a whole one written the same way
+        let cropped = dir.join("crop.exr");
+        Image::new(ImageAttributes::new(IntegerBounds::from_dimensions((8, 8))), Layer::new((4, 4), at, Encoding::FAST_LOSSLESS, rgb(16)))
+            .write()
+            .to_file(&cropped)
+            .unwrap();
+        let whole = dir.join("whole.exr");
+        Image::from_layer(Layer::new((8, 8), LayerAttributes::default(), Encoding::FAST_LOSSLESS, rgb(64))).write().to_file(&whole).unwrap();
+        let (c, w) = (still_size(&cropped), still_size(&whole));
+        std::fs::remove_dir_all(&dir).unwrap();
+        let e = c.unwrap_err();
+        assert_eq!(e.code, crate::ErrorCode::Input);
+        assert!(e.message.contains("data window (4x4 at (2, 2)) isn't its display window (8x8 at (0, 0))"), "{}", e.message);
+        assert_eq!(w.unwrap(), (8, 8));
     }
 
     /// bug hunt 2026-10-26: a NaN in a float hint frame that is resized (model scale) became 0 over a whole block (it
