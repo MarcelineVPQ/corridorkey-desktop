@@ -83,11 +83,11 @@ on its own rail icon. Not a system shell: its own commands only, each parsed and
   Linux, 3.81 GB on Windows, was 4.86 / 4.64). Mattes against onnx.4: all 10 test clips within 0.25-0.50/255 at the
   most, no pixel over 1/255, and no more sizzle. Speed on CUDA (RTX 5080, one run per set): 0.3-3.5 % faster on every
   clip (HD 1280×1080 about 15.5 fps, 4K 0.78 fps), about the size of the run-to-run spread; the same graphics memory
-  (one 960×720 clip peaked 0.9 GB lower). The setup
+  (one 960×720 clip peaked 0.9 GB lower; README, Speed, "0.0.9-dev"). The setup
   downloads onnx.5 next to an installed onnx.4, whose folder stays as it is.
 - macOS moves to onnx.5 too, with its own Core ML set 2.0.0-onnx.5-coreml (1280×1080 and 1920×1080, every node on
   Core ML): the setup is 4.76 GB, was 5.51. Gated on the Mac mini (M6, 16 GB) against CUDA on both sizes: alpha MAE
-  2.1-2.5e-5, 0.002 % of pixels over 1/255 at 1280×1080 and none at 1920×1080.
+  2.1-2.5e-5, 0.002 % of pixels over 1/255 at 1280×1080 and none at 1920×1080 (README, Speed, "Apple Silicon (Core ML)").
 - TensorRT (Linux, opt-in) gets onnx.5's TensorRT set, 2.0.0-onnx.5-trt: stage 1 and stage 2 from onnx.5's export,
   C-RADIO, MoGe and RVM byte for byte onnx.4's. Its C-RADIO weights (fp32) are no longer in the normal set, so they
   are copied from an installed onnx.4 folder when there is one (5.53 GB in all, as before) and downloaded otherwise

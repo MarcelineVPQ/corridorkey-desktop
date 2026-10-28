@@ -18,7 +18,8 @@ and wrapped it in a desktop app that installs itself.
 
 On my RTX 5080 it keys 4K at about 1.7 frames a second: about 1.8-1.9× faster than the original on the same machine
 (1.5-1.9× at HD; a short clip gains less, since loading the models dominates), with the same mattes, less graphics
-memory and RAM, and less than half the install (the same-day pair of 2026-10-26, Speed). Every number is below, with
+memory and RAM, and less than half the install (the same-day pair of 2026-10-26 on model set onnx.4, Speed; dev.2's
+onnx.5 measured the same speed within run-to-run spread, Speed 0.0.9-dev). Every number is below, with
 the clips and the commands to check them yourself. On Linux, an optional TensorRT mode takes that to about 1.9-2.2×
 the original's speed at HD and about 2.3-2.4× at 4K. Rust and ONNX Runtime also mean one engine for every platform: NVIDIA on Linux and
 Windows, and Apple Silicon through Core ML.
@@ -91,12 +92,13 @@ none of them changes what a user sees today.
   the CorridorKey models (a 4.03 GB download on Linux, 3.81 GB on Windows, 4.76 GB on macOS, once). If `ffmpeg` is
   missing, it offers to install it (apt or pacman on Linux, `winget` on Windows, Homebrew on macOS).
 - Optional, Linux: **TensorRT** (Engine settings, TensorRT; off by default) for about 1.9-2.2× the original's speed at
-  HD and about 2.3-2.4× at 4K, with the same mattes (Speed, the same-day pair of 2026-10-26). Switching it on offers its own download: NVIDIA's TensorRT 10.16
+  HD and about 2.3-2.4× at 4K, with the same mattes (Speed, the same-day pair of 2026-10-26, on onnx.4; TensorRT on dev.2's
+  onnx.5 is being measured). Switching it on offers its own download: NVIDIA's TensorRT 10.16
   libraries (3.7 GB, from pypi.nvidia.com) and the TensorRT models (3.5 GB, from this repository's releases; C-RADIO's
   1.7 GB of weights are copied from the 2.0.0-onnx.4 models when they are still installed), 7.3 GB in all (5.5 GB
   with onnx.4's models), 6.1 GB on disk. Each
   resolution range is optimized once (about 4.4-4.8 minutes for the five networks on an RTX 5080: 4.4 at 1280×1080,
-  4.8 at 4K even with TensorRT's timing cache warm; Speed, "TensorRT on onnx.4"): the app builds 4K and HD in the background when TensorRT is
+  4.8 at 4K even with TensorRT's timing cache warm; Speed, "0.0.8-dev: TensorRT on onnx.4"): the app builds 4K and HD in the background when TensorRT is
   switched on, with a progress bar in Engine settings, and pauses while you key. Engine settings, TensorRT lists the
   common sizes (720p to 6K) by range: tick a size to build it, untick to remove it, or enter a size of your own; a
   waiting clip offers "Build for this clip's size". Jobs never wait on a build: a clip
@@ -634,8 +636,9 @@ full fp32 precision). On 2026-10-25 we measured against the truth and published 
 withdrew it: the truth and the original's bf16 run were fed 16-bit PNG frames converted by ffmpeg, while our engine
 read the video itself, so the inputs weren't the same and the numbers don't count. Acting on them, we also re-exported
 four networks with the original's precision policy (model set onnx.4); the hair didn't measurably change, so that
-wasn't the cause. onnx.4 ships anyway since 2026-10-25, for parity with CorridorKey 2.0's precision policy, not
-because it fixed the hair (its cost: Speed, "onnx.4"). The one deviation from CorridorKey 2.0 left in our input
+wasn't the cause. onnx.4 ships anyway since 2026-10-25 (dev.1), for parity with CorridorKey 2.0's precision policy, not
+because it fixed the hair (its cost: Speed, "0.0.8-dev"). dev.2's onnx.5 is built on onnx.4's export (docs/ONNX_EXPORT.md,
+"onnx.5"); its mattes are within 0.5/255 of onnx.4's (Speed, "0.0.9-dev"). The one deviation from CorridorKey 2.0 left in our input
 then: it reads video through OpenCV at 8 bits; we read 10/12-bit plates at 16 bits (same colour conversion), and
 rounded 10/12-bit 4:2:2 and 4:2:0 to 8 bits differently from OpenCV.
 
@@ -682,7 +685,8 @@ the background with a progress bar and an explanation, never inside a job.
 measured peaks. Recalibrated on 96 measured points; it is now above every one of them (+6 % margin).
 
 **5, again: the table was measured on the previous models (2026-10-26).** The 2026-10-24 table came from model set
-onnx.3; the app ships onnx.4 since 2026-10-25. The same sweep on onnx.4 (RTX 5080, CUDA fp16, 85 points: 69 ran, 16
+onnx.3; the app ships onnx.4 since 2026-10-25 (dev.1; dev.2's onnx.5 peaked at the same graphics memory or
+less at the automatic windows on the ten test clips, Speed "0.0.9-dev"). The same sweep on onnx.4 (RTX 5080, CUDA fp16, 85 points: 69 ran, 16
 ran out of memory) found the old table under the measured peak at 31 of 69 points (up to 16 %: 960×720 80/40
 low-memory, 11.58 GiB against 9.75), and on a 16 GB card it picked 48/24 low-memory for a 1920×1080 clip, which runs
 out of memory on onnx.4. The table is now onnx.4's, again above every measured point (by at least 0.12 GiB), and the
@@ -841,7 +845,7 @@ Run both engines the same way with `tools/engine_bench.mjs` (it writes this tabl
 ```
 node tools/engine_bench.mjs python --python <CorridorKey2.0>/venv/bin/python --script tools/reference/ck_engine.py \
   --package-root <CorridorKey2.0> --out out/pytorch --vram-budget 12 CLIP...
-node tools/engine_bench.mjs rust --bin <corridorkey-engine> --models <models>/2.0.0-onnx.4 \
+node tools/engine_bench.mjs rust --bin <corridorkey-engine> --models <models>/2.0.0-onnx.5 \
   --ort <runtime>/onnxruntime/capi/libonnxruntime.so.1.31.0 --env LD_LIBRARY_PATH=<runtime's library folders> \
   --device cuda --out out/rust --vram-budget 12 CLIP...
 ```
