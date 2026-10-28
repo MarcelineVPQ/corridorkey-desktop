@@ -5,7 +5,7 @@
 // The main process parses and checks every line again, whatever this page showed.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { History, Keyboard, SlidersHorizontal, SquareTerminal, Square, ShieldAlert, Check, X } from "lucide-react";
-import type { AppState, ConsoleHistoryEntry } from "../../shared/types";
+import type { AppState, ConsoleBlock, ConsoleHistoryEntry } from "../../shared/types";
 import { makeRegistry } from "../../shared/console/registry";
 import type { HistoryLine } from "../../shared/console/expand";
 import { Accordion, Row, Section, Segmented, type SectionFocus } from "../panel/Section";
@@ -16,7 +16,7 @@ import { usePref } from "../prefs";
 import { LineEditor, type LineEditorHandle } from "../console/LineEditor";
 import { OutputBlock } from "../console/OutputBlock";
 import { uniqueHistory, type SuggestMode } from "../console/editor";
-import { announcement, clearScreen, filterBlocks, historyRevision, inputTakesFocus, mergeBlocks, nextBlock, promptFolder, visibleBlocks, type BlockList } from "../console/model";
+import { announcement, blockStates, clearScreen, filterBlocks, historyRevision, inputTakesFocus, mergeBlocks, nextBlock, promptFolder, visibleBlocks, type BlockList } from "../console/model";
 
 const registry = makeRegistry();
 
@@ -116,6 +116,14 @@ export function ConsolePage(props: {
 
   const visible = useMemo(() => visibleBlocks(blocks, echoes), [blocks, echoes]);
   const { blocks: shown, hidden } = useMemo(() => filterBlocks(visible, failedOnly), [visible, failedOnly]);
+  // the status region says the newest command that started or ended since the last push (model.ts announcement)
+  const [said, setSaid] = useState("");
+  const states = useRef<Map<number, ConsoleBlock["state"]>>(new Map());
+  useEffect(() => {
+    const text = announcement(shown, states.current);
+    states.current = blockStates(shown);
+    if (text !== null) setSaid(text);
+  }, [shown]);
   const jump = useCallback(
     (by: -1 | 1) => {
       // loop: NOT-WORTH — ≤ 200 blocks, per Ctrl+↑ / Ctrl+↓
@@ -210,7 +218,7 @@ export function ConsolePage(props: {
       </div>
       {/* the output isn't live (every streamed line and listed row would be read out): this says each command's start and end */}
       <span className="sr-only" role="status">
-        {announcement(shown)}
+        {said}
       </span>
       <LineEditor
         ref={editor}

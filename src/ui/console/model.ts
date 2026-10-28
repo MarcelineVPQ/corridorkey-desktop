@@ -180,13 +180,23 @@ export function blockStatus(b: ConsoleBlock): { word: string; tone: Tone; exit: 
   return { word, tone, exit, meaning };
 }
 
+/** Each block's state, by id: what `announcement` compares against. */
+export const blockStates = (blocks: readonly ConsoleBlock[]): Map<number, ConsoleBlock["state"]> =>
+  // loop: NOT-WORTH — the blocks kept (≤ BLOCKS_KEPT), per push while the Console is shown
+  new Map(blocks.map((b) => [b.id, b.state]));
+
 /**
- * What a screen reader hears (the page's one polite status region): the newest command's start and end, as a word and
- * its exit, never the streamed lines, the progress or a listing's rows (the output itself isn't a live region).
+ * What a screen reader hears (the page's one polite status region): the newest top-level command that started or ended
+ * since `before` (blockStates of the last push), as a word and its exit; null: none did (what was said stands). Never
+ * the streamed lines, the progress or a listing's rows (the output itself isn't a live region). Not simply the last
+ * block (senior review N10): a queue echo arriving during `watch` would hide watch's end, and a program's commands
+ * after it would hide the program's own end.
  */
-export function announcement(blocks: readonly ConsoleBlock[]): string {
-  const b = blocks.at(-1);
-  if (!b) return "";
+export function announcement(blocks: readonly ConsoleBlock[], before: ReadonlyMap<number, ConsoleBlock["state"]> = new Map()): string | null {
+  let b: ConsoleBlock | undefined;
+  // loop: NOT-WORTH — the blocks kept (≤ BLOCKS_KEPT), newest first, per push while the Console is shown
+  for (let i = blocks.length - 1; i >= 0 && !b; i--) if (blocks[i].parent === null && before.get(blocks[i].id) !== blocks[i].state) b = blocks[i];
+  if (!b) return null;
   const { word, exit, meaning } = blockStatus(b);
   if (b.state === "refused") return `${b.line}: refused${b.lines[0] ? `: ${b.lines[0].text}` : ""}`;
   return `${b.line}: ${word}${exit ? `, ${exit}` : ""}${meaning ? ` (${meaning})` : ""}`;

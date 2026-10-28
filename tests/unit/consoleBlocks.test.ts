@@ -7,6 +7,7 @@ import { parse } from "../../src/shared/console/parse";
 import { makeRegistry } from "../../src/shared/console/registry";
 import {
   announcement,
+  blockStates,
   blockStatus,
   childOpens,
   childRow,
@@ -187,7 +188,7 @@ describe("the blocks", () => {
 
 describe("screen readers (review 2026-10-26 S8)", () => {
   it("announce only a command's start and end, never its streamed lines or a listing's rows", () => {
-    expect(announcement([])).toBe("");
+    expect(announcement([])).toBeNull();
     expect(announcement([block(1, { line: "render shot.mov", state: "running", exitCode: null, lines: [{ kind: "out", text: "frame 1" }] })])).toBe("render shot.mov: running");
     // a new line of output or progress doesn't change what is said
     expect(announcement([block(1, { line: "render shot.mov", state: "running", exitCode: null, progress: { percent: 40, done: 4, total: 10 }, lines: [{ kind: "out", text: "frame 2" }] })])).toBe(
@@ -200,6 +201,24 @@ describe("screen readers (review 2026-10-26 S8)", () => {
       "render a.mov --overwrite: refused: --overwrite replaces files",
     );
     expect(announcement([block(4, { line: "ls", entries: [{ name: "a", folder: false, bytes: 1, modified: 1, sequence: null }] })])).toBe("ls: done, exit 0");
+  });
+
+  it("review N10: says the newest top-level block that changed state, not simply the last block", () => {
+    const watch = block(1, { line: "watch 5 du renders", state: "running", exitCode: null });
+    const echo = block(2, { line: "render sh010.mov", echo: "the queue started sh010.mov" });
+    // the queue's echo arrives during watch: said (it's new)
+    let before = blockStates([watch]);
+    expect(announcement([watch, echo], before)).toBe("render sh010.mov: from the queue");
+    // watch ends after it: its end is said, though the echo is the last block
+    before = blockStates([watch, echo]);
+    expect(announcement([{ ...watch, state: "done", exitCode: 0 }, echo], before)).toBe("watch 5 du renders: done, exit 0");
+    // nothing changed state: null (what was said stands)
+    expect(announcement([watch, echo], blockStates([watch, echo]))).toBeNull();
+    // a program's end is said, though its commands come after it
+    const prog = block(3, { line: "for s in a b; do ls; done", state: "running", exitCode: null });
+    const kids = [block(4, { line: "ls", parent: 3 }), block(5, { line: "ls", parent: 3 })];
+    before = blockStates([prog, ...kids]);
+    expect(announcement([{ ...prog, state: "done", exitCode: 0 }, ...kids], before)).toBe("for s in a b; do ls; done: done, exit 0");
   });
 
   it("the input names the completion list only while it is shown (review 2026-10-26 N7, BACKLOG row 112)", () => {
@@ -230,7 +249,8 @@ describe("screen readers (review 2026-10-26 S8)", () => {
   it("the output isn't a live region; one polite status region carries the announcements", () => {
     const page = readFileSync(new URL("../../src/ui/pages/ConsolePage.tsx", import.meta.url), "utf8");
     expect(page).not.toMatch(/role="log"|aria-live="(polite|assertive)"[^>]*console-out/);
-    expect(page).toMatch(/role="status"[^>]*>\s*\{announcement\(/);
+    expect(page).toMatch(/role="status"[^>]*>\s*\{said\}/);
+    expect(page).toMatch(/announcement\(shown, states\.current\)/);
   });
 });
 
