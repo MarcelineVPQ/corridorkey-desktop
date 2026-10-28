@@ -1,7 +1,7 @@
 // History expansion (src/shared/console/expand.ts): bash's reflexes, with the SME review's rule that frame tokens and
 // a `!` inside a word or quotes are file names in this world, never expansions.
 import { describe, expect, it } from "vitest";
-import { expandHistory, hasExpansion } from "../../src/shared/console/expand";
+import { expandHistory, hasExpansion, HISTORY_WINDOW } from "../../src/shared/console/expand";
 
 /** newest last, with stable numbers */
 const past = [
@@ -46,6 +46,16 @@ describe("history expansion", () => {
     // whole review: !-0 says how !-N counts, not that the history is short
     expect(x("!-0")).toEqual({ error: "!-0: !-N counts back from 1 (!-1 is the line before)" });
     expect(x("!zzz")).toEqual({ error: "!zzz: no line in the history starts with zzz" });
+  });
+
+  it("review N2: past a full window, says the line is older than ! reaches (the history keeps more)", () => {
+    // loop: NOT-WORTH — a 200-line fixture, once
+    const full = Array.from({ length: HISTORY_WINDOW }, (_, i) => ({ n: 4122 + i, line: `info ${i}` }));
+    const y = (line: string) => expandHistory(line, full, { windows: false });
+    expect(y("!4000")).toEqual({ error: `!4000: line 4000 is older than the newest ${HISTORY_WINDOW} lines that ! reaches` });
+    expect(y("!-250")).toEqual({ error: `!-250: older than the newest ${HISTORY_WINDOW} lines that ! reaches` });
+    expect(y("!zzz")).toEqual({ error: `!zzz: no line in the newest ${HISTORY_WINDOW} lines that ! reaches starts with zzz` });
+    expect(y("!99999")).toEqual({ error: "!99999: no line 99999 in the history (history lists the numbers)" });
     expect(expandHistory("!!", [], { windows: false })).toEqual({ error: "!!: the history is empty" });
   });
 

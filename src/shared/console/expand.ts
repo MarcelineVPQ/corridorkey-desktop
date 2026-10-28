@@ -74,6 +74,8 @@ export function expandHistory(line: string, past: readonly HistoryLine[], opts: 
     const s = d.spec.slice(1);
     let text: string;
     if (!past.length) return { error: `${d.spec}: the history is empty` };
+    // a full window: the history keeps more (5000) than ! reaches, so "not there" would be untrue (senior review N2)
+    const reach = past.length >= HISTORY_WINDOW ? `the newest ${HISTORY_WINDOW} lines that ! reaches` : null;
     if (s === "!") text = prev.line;
     else if (s === "$") {
       const words = tokenize(prev.line, opts).words;
@@ -82,17 +84,17 @@ export function expandHistory(line: string, past: readonly HistoryLine[], opts: 
     } else if (/^\d+$/.test(s)) {
       // loop: NOT-WORTH — ≤ the history's lines, per !N typed
       const e = past.find((x) => x.n === Number(s));
-      if (!e) return { error: `${d.spec}: no line ${s} in the history (history lists the numbers)` };
+      if (!e) return { error: reach && Number(s) < past[0].n ? `${d.spec}: line ${s} is older than ${reach}` : `${d.spec}: no line ${s} in the history (history lists the numbers)` };
       text = e.line;
     } else if (/^-\d+$/.test(s)) {
       if (Number(s) === 0) return { error: `${d.spec}: !-N counts back from 1 (!-1 is the line before)` };
       const e = past[past.length + Number(s)];
-      if (!e) return { error: `${d.spec}: the history has only ${past.length} lines` };
+      if (!e) return { error: reach ? `${d.spec}: older than ${reach}` : `${d.spec}: the history has only ${past.length} lines` };
       text = e.line;
     } else {
       // loop: NOT-WORTH — ≤ the history's lines, newest first, per !prefix typed
       const e = [...past].reverse().find((x) => x.line.startsWith(s));
-      if (!e) return { error: `${d.spec}: no line in the history starts with ${s}` };
+      if (!e) return { error: reach ? `${d.spec}: no line in ${reach} starts with ${s}` : `${d.spec}: no line in the history starts with ${s}` };
       text = e.line;
     }
     out += line.slice(pos, d.start) + text;
