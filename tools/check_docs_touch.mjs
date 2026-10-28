@@ -3,7 +3,8 @@
 // src/shared/console/cliSpec.json) also changes its docs: docs/CLI.md, the wiki's Command-Line.md and docs/GUIDE.md
 // (the app's guide says how the Queue and the CLI agree: GUIDE.md went stale on --linear after 0cdad0c). A commit
 // whose message has a line `docs: none-needed — <why>` is exempt (the why is required: a bare `docs: none-needed`
-// isn't). It reads the commits not on origin/main yet
+// isn't). EXCEPTIONS below lists pushed commits (history isn't rewritten) whose docs came later, each with why. It
+// reads the commits not on origin/main yet
 // (`git log origin/main..HEAD`); without origin/main it checks nothing and says so.
 //   node tools/check_docs_touch.mjs                 the gate (npm run gates)
 //   node tools/check_docs_touch.mjs <A>..<B>        the commits in a range (tools/release.sh: since the last tag)
@@ -18,6 +19,19 @@ export const APP = join(dirname(fileURLToPath(import.meta.url)), "..");
 export const CLI_SOURCES = ["engine-rs/crates/ck-cli/src/args.rs", "src/shared/console/cliSpec.json"];
 export const CLI_DOCS = ["docs/CLI.md", "docs/wiki/Command-Line.md", "docs/GUIDE.md"];
 
+/**
+ * Pushed commits that changed the CLI without all three docs, by full hash, each with where its docs are now
+ * (reviewed 2026-10-28 for the dev.2 release check over v1.0.0-dev.1..HEAD; the gate came later, 0c6510a).
+ */
+export const EXCEPTIONS = new Map([
+  ["716a7a77a30f9863de62b6ba7df9f8976c5c0b86", "the CLI's first commit: docs/CLI.md (992326f), the wiki's Command-Line.md (0109b35) and GUIDE.md (0c6510a) describe it"],
+  ["5e74941eea2a6a655811b642c46fa426480144ed", "__spec --json: docs/CLI.md in the commit, the wiki's Command-Line.md since 0109b35; a tools' command, not the app's guide"],
+  ["8da6a11591c298b8f4513c087c47859a2120992b", "the Console's parser reads cliSpec.json, no CLI change: docs/CONSOLE.md says how; CLI.md's Adding an option names the file"],
+  ["bf1dc4a5cbed2b195fcde3cac224c5b42939d94f", "the spec's conflicts_with for the Console: docs/CLI.md and docs/CONSOLE.md in the commit; the CLI itself didn't change"],
+  ["98fb94712f02f1984fccec1e6e7f093f1b313b17", "--version: docs/CLI.md and GUIDE.md in the commit, the wiki's Command-Line.md since 0109b35"],
+  ["0cdad0cd5aa2238925741f357d3abde2c4d2302b", "frame folders read as the app starts them: docs/CLI.md and Command-Line.md in the commit, GUIDE.md since 0c6510a"],
+]);
+
 /** `git log --format=%x01%H%x02%B%x02 --name-only` output → [{ sha, message, files }]. */
 export function parseLog(text) {
   // loop: NOT-WORTH — the commits not on origin/main (a branch's few)
@@ -31,10 +45,11 @@ export function parseLog(text) {
     });
 }
 
-export function checkCommits(commits) {
+export function checkCommits(commits, exceptions = EXCEPTIONS) {
   const out = [];
   // loop: NOT-WORTH — the commits not on origin/main
   for (const c of commits) {
+    if (exceptions.has(c.sha)) continue;
     // loop: NOT-WORTH — one commit's files
     if (!c.files.some((f) => CLI_SOURCES.includes(f)) || /^docs: none-needed[^\S\n]*(—|-{1,2})[^\S\n]*\S/m.test(c.message)) continue;
     // loop: NOT-WORTH — three docs

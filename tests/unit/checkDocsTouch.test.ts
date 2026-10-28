@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { checkAll, checkCommits, checkStaged, parseLog } from "../../tools/check_docs_touch.mjs";
+import { EXCEPTIONS, checkAll, checkCommits, checkStaged, parseLog } from "../../tools/check_docs_touch.mjs";
 
 const ARGS = "engine-rs/crates/ck-cli/src/args.rs";
 
@@ -30,6 +30,15 @@ describe("the docs-touch gate", () => {
     for (const bare of ["docs: none-needed", "docs: none-needed —", "docs: none-needed - ", "docs: none-needed because"])
       expect(checkCommits([{ ...c, message: `${c.message}\n${bare}\nCo-Authored-By: someone\n` }]), bare).toHaveLength(1);
     expect(checkCommits([{ ...c, message: `${c.message}\ndocs: none-needed - help text only\n` }])).toEqual([]);
+  });
+
+  it("a listed pushed commit passes by its full hash only, and every listed one says why", () => {
+    const c = { sha: "0cdad0cd5aa2238925741f357d3abde2c4d2302b", message: "CLI: frame folders\n", files: [ARGS] };
+    expect(checkCommits([c])).toEqual([]);
+    expect(checkCommits([c], new Map())).toHaveLength(1);
+    expect(checkCommits([{ ...c, sha: "0cdad0c" }])).toHaveLength(1);
+    // loop: NOT-WORTH — six entries
+    for (const [sha, why] of EXCEPTIONS) expect([sha, why.length > 20], sha).toEqual([expect.stringMatching(/^[0-9a-f]{40}$/), true]);
   });
 
   // senior review 2026-10-27 S6: the gate read only origin/main..HEAD, which a pushed commit has already left
