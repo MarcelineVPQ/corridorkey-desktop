@@ -79,7 +79,8 @@ none of them changes what a user sees today.
 ## Requirements
 
 - Linux (the AppImage) or Windows 10/11 (the installer), x64, with an NVIDIA graphics card (RTX 20-series or newer, 8 GB or more; measured on an RTX 2070 SUPER 8 GB and an RTX 5080
-  16 GB, Speed).
+  16 GB: the speed and quality numbers are the RTX 5080's (Speed), and the RTX 2070 SUPER measured the temporal windows
+  that fit an 8 GB card under a graphics-memory limit, docs/ENGINE_RUST.md "Where memory is tight").
   **On Linux and Windows the NVIDIA card is required**: the engine keys only on CUDA. AMD and Intel graphics cards aren't
   supported, and without an NVIDIA card nothing falls back to the CPU: a job stops with "CorridorKey needs an NVIDIA
   graphics card with CUDA." (The engine has a MIGraphX path for AMD cards on Linux, `--device migraphx`: untested on
@@ -155,7 +156,9 @@ cuSPARSELt, for multi-GPU and training), and the fp16 models are a third smaller
 The same clips through the original CorridorKey 2.0 and CorridorKey Desktop's engine, on the same machine, back to
 back, with the same settings. Measured 2026-10-24 with `tools/engine_bench.mjs`.
 
-**Test machine and software**
+**Test machine and software (PC)**
+
+Every PC number in this README (Speed and Quality) was measured on this machine:
 
 | | |
 | --- | --- |
@@ -163,7 +166,7 @@ back, with the same settings. Measured 2026-10-24 with `tools/engine_bench.mjs`.
 | Processor, memory | AMD Ryzen 9 9950X3D (16 cores), 60 GB RAM |
 | System | Kubuntu 26.04, Linux 7.0.0, KDE Plasma (Wayland) |
 | Original CorridorKey 2.0 | PyTorch 2.9.1 (CUDA 12.8, cuDNN 9.10), Python 3.12, its shipping mode: bf16 autocast |
-| CorridorKey Desktop | Rust engine on ONNX Runtime 1.31.0 (CUDA 13.4, cuDNN 9.27), fp16, model set `2.0.0-onnx.3`: the engine and GPU runtime the app shipped and downloaded then (since 2026-10-25 it downloads `2.0.0-onnx.4`; "onnx.4" below) |
+| CorridorKey Desktop | Rust engine on ONNX Runtime 1.31.0 (CUDA 13.4, cuDNN 9.27), fp16, model set `2.0.0-onnx.3`: the engine and GPU runtime the app shipped and downloaded then (since 2026-10-25 it downloads `2.0.0-onnx.4`, and dev.2 `2.0.0-onnx.5`; 0.0.8-dev and 0.0.9-dev below) |
 
 **Method**
 
