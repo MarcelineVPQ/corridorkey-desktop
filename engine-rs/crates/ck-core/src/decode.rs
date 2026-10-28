@@ -887,17 +887,21 @@ impl HintReader {
 }
 
 /// A real w x h RGB EXR whose header then claims `claim_w` x `claim_h` (its data window patched, as in the senior Rust
-/// review's M1 reproduction): what the decoders would allocate from.
+/// review's M1 reproduction): what the decoders would allocate from. The display window is patched the same, so the
+/// header is a whole frame of that size (not a cropped one, which the header check refuses first).
 #[cfg(test)]
 pub(crate) fn exr_claiming(path: &Path, w: usize, h: usize, claim_w: i32, claim_h: i32) {
     crate::writers::write_exr(path, w, h, 3, &vec![0.5f32; w * h * 3], crate::writers::ExrType::Float).unwrap();
     let lines = exr::meta::MetaData::read_from_file(path, false).unwrap().headers[0].compression.scan_lines_per_block() as i32;
     let mut b = std::fs::read(path).unwrap();
-    // loop: NOT-WORTH — a test file's header bytes, twice
+    // loop: NOT-WORTH — a test file's header bytes, three times
     let value_at = |b: &[u8], key: &[u8]| b.windows(key.len()).position(|k| k == key).unwrap() + key.len() + 4;
-    let at = value_at(&b, b"dataWindow\0box2i\0");
-    b[at + 8..at + 12].copy_from_slice(&(claim_w - 1).to_le_bytes());
-    b[at + 12..at + 16].copy_from_slice(&(claim_h - 1).to_le_bytes());
+    // loop: NOT-WORTH — the two windows
+    for key in [&b"dataWindow\0box2i\0"[..], &b"displayWindow\0box2i\0"[..]] {
+        let at = value_at(&b, key);
+        b[at + 8..at + 12].copy_from_slice(&(claim_w - 1).to_le_bytes());
+        b[at + 12..at + 16].copy_from_slice(&(claim_h - 1).to_le_bytes());
+    }
     // the chunk count the header states follows the claimed size, so a reader that checks it gets as far as allocating
     let at = value_at(&b, b"chunkCount\0int\0");
     b[at..at + 4].copy_from_slice(&((claim_h + lines - 1) / lines).to_le_bytes());
