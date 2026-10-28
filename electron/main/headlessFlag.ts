@@ -17,10 +17,14 @@ export type HeadlessLaunch = { argv: string[]; cli: string } | { error: string }
  * What a start with HEADLESS_FLAG asks for: `[app] [switches…] --ck-headless run [--keep-going] FILE`, nothing else
  * (null: no flag, the app's window starts). `defaultApp`: a development Electron, whose argv[1] is the app's folder.
  * `bundledCli`: a packaged app's own command-line program, the only one it runs (null: a development build, any);
- * `cliEnv` and it as real paths (boot.ts), compared without case on Windows.
+ * `cliEnv` and it as real paths (boot.ts), compared without case on Windows. `parentPid`: the process that started this
+ * one; on macOS launchd's (1) means LaunchServices or launchd started it (`open -a`, a LaunchAgent), which is refused: the
+ * script's reads would run as CorridorKey with its privacy grants, not as the caller (re-review 2026-10-28 S1). ck-cli
+ * execs the app, so its parent is the caller's shell, cron or farm process.
  */
-export function headlessLaunch(argv: readonly string[], defaultApp: boolean, cliEnv: string | undefined, bundledCli: string | null, platform: NodeJS.Platform): HeadlessLaunch {
+export function headlessLaunch(argv: readonly string[], defaultApp: boolean, cliEnv: string | undefined, bundledCli: string | null, platform: NodeJS.Platform, parentPid: number): HeadlessLaunch {
   if (!argv.includes(HEADLESS_FLAG)) return null;
+  if (platform === "darwin" && parentPid === 1) return { error: "started by launchd or LaunchServices: start corridorkey run from a shell (a LaunchAgent: /bin/sh -c '… ; exit $?')" };
   const at = argv.indexOf(HEADLESS_FLAG);
   const before = argv.slice(defaultApp ? 2 : 1, at);
   // loop: NOT-WORTH — a few switches, once at start

@@ -22,7 +22,7 @@ const real = (p: string) => {
 const cliEnv = process.env.CK_HEADLESS_CLI;
 const bundledCli = app.isPackaged ? real(bundledCliPath(process.resourcesPath, PLATFORM)) : null;
 // loop: NOT-WORTH — a few words of argv, once at start
-const launch = process.argv.includes("--ck-headless") ? headlessLaunch(process.argv, !!process.defaultApp, cliEnv && real(cliEnv), bundledCli, PLATFORM) : null;
+const launch = process.argv.includes("--ck-headless") ? headlessLaunch(process.argv, !!process.defaultApp, cliEnv && real(cliEnv), bundledCli, PLATFORM, process.ppid) : null;
 
 if (launch === null) void import("./index");
 else {

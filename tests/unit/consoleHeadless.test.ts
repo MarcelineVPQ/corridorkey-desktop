@@ -102,7 +102,7 @@ describe("corridorkey run's script runner", () => {
 describe("review 2026-10-28 #3: --ck-headless, the app's flag in place of running it as Node", () => {
   const cli = "/opt/CK/resources/engine/corridorkey";
   const app = "/opt/CK/corridorkey-desktop";
-  const launch = (argv: string[], env: string | undefined = cli, own: string | null = cli, dev = false) => headlessLaunch(argv, dev, env, own, "linux");
+  const launch = (argv: string[], env: string | undefined = cli, own: string | null = cli, dev = false) => headlessLaunch(argv, dev, env, own, "linux", 4242);
 
   it("no flag: the window starts", () => {
     expect(launch([app])).toBeNull();
@@ -132,10 +132,17 @@ describe("review 2026-10-28 #3: --ck-headless, the app's flag in place of runnin
   it("a packaged app runs only its own command-line program; it must be named, by its full path", () => {
     const argv = [app, "--ck-headless", "run", "/s/a.ckcmd"];
     expect(launch(argv, "/tmp/evil")).toEqual({ error: expect.stringMatching(/isn't this app's own/) });
-    expect(headlessLaunch(argv, false, undefined, cli, "linux")).toEqual({ error: expect.stringMatching(/start it as corridorkey run/) });
+    expect(headlessLaunch(argv, false, undefined, cli, "linux", 4242)).toEqual({ error: expect.stringMatching(/start it as corridorkey run/) });
     expect(launch(argv, "corridorkey", null)).toEqual({ error: expect.stringMatching(/start it as corridorkey run/) });
-    expect(headlessLaunch(argv, false, "C:\\CK\\Resources\\Engine\\CORRIDORKEY.EXE", "C:\\CK\\resources\\engine\\corridorkey.exe", "win32")).not.toHaveProperty("error");
+    expect(headlessLaunch(argv, false, "C:\\CK\\Resources\\Engine\\CORRIDORKEY.EXE", "C:\\CK\\resources\\engine\\corridorkey.exe", "win32", 4242)).not.toHaveProperty("error");
     expect(bundledCliPath("/opt/CK/resources", "linux")).toBe(cli);
+    // re-review 2026-10-28 S1: a Mac start by launchd / LaunchServices (`open -a CorridorKey --args --ck-headless …`) is
+    // refused, its reads would be CorridorKey's; from a shell (ck-cli's exec) it runs; elsewhere launchd isn't a thing
+    const mac = "/Applications/CorridorKey.app/Contents/Resources/engine/corridorkey";
+    const macArgv = ["/Applications/CorridorKey.app/Contents/MacOS/CorridorKey", "--log-level=3", "--ck-headless", "run", "/s/a.ckcmd"];
+    expect(headlessLaunch(macArgv, false, mac, mac, "darwin", 1)).toEqual({ error: expect.stringMatching(/launchd or LaunchServices: start corridorkey run from a shell/) });
+    expect(headlessLaunch(macArgv, false, mac, mac, "darwin", 812)).toEqual({ argv: ["run", "/s/a.ckcmd"], cli: mac });
+    expect(headlessLaunch(argv, false, cli, cli, "linux", 1)).not.toHaveProperty("error");
     expect(bundledCliPath("C:\\CK\\resources", "win32")).toMatch(/engine[\\/]corridorkey\.exe$/);
   });
 });

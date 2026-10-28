@@ -70,7 +70,9 @@ needs one stops before anything runs (write into the next free version instead, 
 app installed next to it (exit 7 on a worker with only `corridorkey`) and starts it with no window and no graphics
 card (its own `--ck-headless` start, which runs nothing but this), prints each command's output as it goes and exits as
 the script ended. A farm's cancel (SIGTERM) and Ctrl+C stop it as Ctrl+C stops the Console (exit 130); on
-Windows, Ctrl+Break ends the script at once and says so (exit 143).
+Windows, Ctrl+Break ends the script at once and says so (exit 143). On a Mac, start it from a shell, cron or your
+farm's worker: a start by launchd itself is refused (exit 2), so a LaunchAgent runs it through a shell,
+`/bin/sh -c 'corridorkey run ~/scripts/nightly.ckcmd; exit $?'` (with the `; exit $?` the shell stays its parent).
 
 For tools: `corridorkey __spec --json` prints the whole command line as JSON (every command, flag, value and
 example). The app's Console reads it, and this wiki's gate checks this page against it.
