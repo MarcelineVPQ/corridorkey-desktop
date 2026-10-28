@@ -302,7 +302,8 @@ first, then the commands); it never runs by itself.
 | F2 | Switch completions between Tab and a list as you type (**Console settings → Completions**) |
 
 The panel's **Keys** section lists every key, the readline ones included (Ctrl+A, Ctrl+E, Ctrl+W, Ctrl+U, Ctrl+K,
-Ctrl+Y, Ctrl+D, Ctrl+F and Ctrl+B a character forward and back, Alt+D, Alt+B; Option on a Mac). The history keeps the newest 5000 lines across restarts; a line typed with a
+Ctrl+Y (paste back), Ctrl+D (delete under the cursor), Ctrl+F and Ctrl+B (a character forward, back), Alt+D, Alt+B;
+Option on a Mac). The history keeps the newest 5000 lines across restarts; a line typed with a
 leading space isn't kept; `!N`, `!-N` and `!abc` reach its newest 200.
 
 A screen reader hears each command's start and end, not every line it prints.
