@@ -305,6 +305,13 @@ select {
   display: block;
 }
 .job-name {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;

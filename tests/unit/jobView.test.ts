@@ -12,4 +12,11 @@ describe("job page", () => {
     expect(view).toMatch(/Frames written/);
     expect(Object.keys(format)).not.toContain("remaining");
   });
+
+  it("whole review S8: a queue row is no role=button around the Remove button; the clip's name is the button", () => {
+    const page = readFileSync(new URL("../../src/ui/pages/QueuePage.tsx", import.meta.url), "utf8");
+    const row = page.slice(page.indexOf("function JobRowView"), page.indexOf("function Detail"));
+    expect(row).not.toMatch(/role="button"/);
+    expect(row).toMatch(/<button type="button" className="job-name"/);
+  });
 });

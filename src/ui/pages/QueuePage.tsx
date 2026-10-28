@@ -119,22 +119,17 @@ const rowKey = (j: Job) => JSON.stringify({ ...j, log: undefined, logLines: unde
 function JobRowView({ job, selected, onSelect }: { job: Job; selected: boolean; onSelect: () => void }) {
   const need = missingInput(job);
   return (
-    <div
-      className={`job-row ${selected ? "selected" : ""}`}
-      role="button"
-      tabIndex={0}
-      aria-current={selected ? "true" : undefined}
-      onClick={onSelect}
-      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onSelect()}
-    >
+    // the whole row takes a click; the keyboard and screen readers get the clip's name as the button (a row as a
+    // button can't hold the Remove button)
+    <div className={`job-row ${selected ? "selected" : ""}`} onClick={onSelect}>
       <span className="thumb-wrap">
         {job.clip.thumb ? <img className="thumb" src={job.clip.thumb} alt="" width={96} loading="lazy" decoding="async" /> : <div className="thumb" />}
         {need && <i className="task" aria-hidden />}
       </span>
       <div style={{ minWidth: 0 }}>
-        <div className="job-name" title={job.clip.path}>
+        <button type="button" className="job-name" title={job.clip.path} aria-current={selected ? "true" : undefined}>
           {job.clip.name}
-        </div>
+        </button>
         <div className="job-meta">{job.clip.probeError ?? clipFacts(job.clip)}</div>
         <div className={`job-status ${job.status}`}>{need ? `Waiting: ${need}` : statusText(job)}</div>
         {job.status === "running" && <ProgressBar value={job.framesDone} max={job.framesTotal ?? 0} />}
