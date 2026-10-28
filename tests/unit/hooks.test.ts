@@ -89,6 +89,12 @@ describe("git hooks", () => {
       const amend = git("commit", "-q", "--amend", "-m", "CLI: a flag");
       expect(amend.status).toBe(1);
       expect(amend.stdout + amend.stderr).toContain("changes the CLI");
+      // through an alias too: `git ca` keeps "git ca" as its arguments (release re-review 2026-10-28 #5)
+      git("config", "alias.ca", "commit --amend");
+      expect(git("ca", "-q", "-m", "CLI: a flag").status).toBe(1);
+      // an alias without --amend is an ordinary commit: nothing staged, no CLI change in it
+      git("config", "alias.ci", "commit");
+      expect(git("ci", "-q", "--allow-empty", "-m", "Docs only").status).toBe(0);
     } finally {
       rmSync(r4, { recursive: true, force: true });
     }

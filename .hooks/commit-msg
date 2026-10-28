@@ -8,8 +8,17 @@ case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) exit 0 ;; esac
 msg="$(realpath "$1")"
 cd "$(git rev-parse --show-toplevel)"
 # an amend replaces HEAD, so the commit's files are the index against HEAD^ (release review 2026-10-28 #12). git doesn't
-# tell this hook; its parent, `git commit`, has --amend among its arguments
+# tell this hook; its parent, `git commit`, has --amend among its arguments, directly or through an alias (`git ca`
+# with alias.ca = commit --amend keeps "git ca" as its arguments: release re-review 2026-10-28 #5), so the first words
+# that name an alias are replaced by it
 amend=""
-ps -o args= -p "$PPID" 2>/dev/null | grep -qE -- '(^| )--amend( |$)' && amend=--amend
+parent="$(ps -o args= -p "$PPID" 2>/dev/null || true)"
+read -ra words <<<"$parent"
+# loop: NOT-WORTH — the command's first 8 words, one git config read each
+for w in "${words[@]:0:8}"; do
+  case "$w" in -* | */* | *=*) continue ;; esac
+  parent="$parent $(git config --get "alias.$w" 2>/dev/null || true)"
+done
+grep -qE -- '(^| )--amend( |$)' <<<"$parent" && amend=--amend
 # shellcheck disable=SC2086 # amend is empty or one word
 exec node tools/check_docs_touch.mjs --staged "$msg" $amend
