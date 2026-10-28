@@ -67,7 +67,22 @@ import { BlockPusher } from "./console/push";
 import { consoleFs } from "./console/files";
 import { realPathDeps } from "./console/paths";
 import { makeRegistry } from "../../src/shared/console/registry";
-import { cacheDirFor, cacheInfo, cacheUnavailable, CACHE_MARKER, clearOldCache, exists, JOBS_DIR, jobTempDir, MEDIA_DIR, moveCache, prepareTarget, remapMedia, targetProblem } from "./cacheFolder";
+import {
+  cacheDirFor,
+  cacheInfo,
+  clearCutMove,
+  cacheUnavailable,
+  CACHE_MARKER,
+  clearOldCache,
+  exists,
+  JOBS_DIR,
+  jobTempDir,
+  MEDIA_DIR,
+  moveCache,
+  prepareTarget,
+  remapMedia,
+  targetProblem,
+} from "./cacheFolder";
 import { gbBytes, mbOrGbBytes } from "../../src/shared/units";
 import { sanitizeTrtSize, sizeRangeText, sizeText, trtSizeKey } from "../../src/shared/trt";
 
@@ -805,6 +820,8 @@ async function pickCacheFolder(toDefault: boolean): Promise<void> {
       }
       cacheError = res.message;
     } else {
+      // a move into it cut short: its leftovers go first, never the new live cache
+      await clearCutMove(from, to, toOwned);
       await prepareTarget(to, toOwned);
       switchCache(root, to);
       cacheError = await clearOldCache(from, fromOwned);

@@ -148,6 +148,21 @@ export async function prepareTarget(to: string, owned: boolean): Promise<void> {
 }
 
 /**
+ * A folder of ours that isn't the cache in use (`owned`: the system's, else one with the marker) where a move was cut
+ * short (the app quit or crashed mid-copy: MOVING_MARKER left): its parts are that move's leftovers, maybe a file cut
+ * mid-copy, and go, the marker with them; else nothing in it is touched (review 2026-10-28 #4, N1). Before a move, or
+ * Start fresh, into it (re-review 3 N2: Start fresh made the leftovers the live cache). Returns whether it cleared.
+ */
+export async function clearCutMove(from: string, to: string, owned: boolean): Promise<boolean> {
+  // loop: NOT-WORTH — two async stats per location change
+  if (resolve(from) === resolve(to) || !(await exists(join(to, MOVING_MARKER))) || (!owned && !(await exists(join(to, CACHE_MARKER))))) return false;
+  // loop: NOT-WORTH — two parts, once per location change [bounded: the leftovers of one cut move]
+  for (const part of MOVED_PARTS) await rm(join(to, part), { recursive: true, force: true });
+  await unlink(join(to, MOVING_MARKER));
+  return true;
+}
+
+/**
  * Move the cache's parts (MOVED_PARTS) from `from` to `to`: copy, verify every copy, then remove the originals.
  * Any error before the removal: the copies made are removed, the originals stay, `ok` is false.
  */
@@ -161,13 +176,7 @@ export async function moveCache(from: string, to: string, owned: boolean, fromOw
   try {
     // loop: NOT-WORTH — two parts, once per move
     for (const part of MOVED_PARTS) plan.push(...(await filesUnder(join(from, part))).map((rel) => ({ part, rel })));
-    // a folder of ours that isn't the cache in use (the system's, or one with the marker) where a move was cut short (the
-    // app quit mid-copy: MOVING_MARKER left): its parts are that move's leftovers and go first, or the first one stopped
-    // every later move (review 2026-10-28 #4). Without the moving marker nothing in the target is removed (N1).
-    // loop: NOT-WORTH — two async stats per move
-    if (!made && resolve(from) !== resolve(to) && (owned || (await exists(join(to, CACHE_MARKER)))) && (await exists(join(to, MOVING_MARKER))))
-      // loop: NOT-WORTH — two parts, once per move [bounded: the leftovers of one cut move]
-      for (const part of MOVED_PARTS) await rm(join(to, part), { recursive: true, force: true });
+    if (!made) await clearCutMove(from, to, owned);
     await prepareTarget(to, owned);
     // loop: NOT-WORTH — one small write per move
     await writeFile(join(to, MOVING_MARKER), "A cache move into this folder is running, or was cut short.\n");

@@ -2,7 +2,20 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { CACHE_MARKER, MOVING_MARKER, cacheDirFor, cacheInfo, cacheUnavailable, clearOldCache, jobTempDir, moveCache, prepareTarget, remapMedia, targetProblem } from "../../electron/main/cacheFolder";
+import {
+  CACHE_MARKER,
+  MOVING_MARKER,
+  cacheDirFor,
+  clearCutMove,
+  cacheInfo,
+  cacheUnavailable,
+  clearOldCache,
+  jobTempDir,
+  moveCache,
+  prepareTarget,
+  remapMedia,
+  targetProblem,
+} from "../../electron/main/cacheFolder";
 import { job } from "./fixtures";
 
 // the cache folder's location (backlog row 44): only the app's own folders are ever written or removed
@@ -157,6 +170,35 @@ describe("cache folder", () => {
     const r3 = await moveCache(filled(), theirs, false, true);
     expect(r3.ok).toBe(false);
     expect(readFileSync(join(theirs, "media", "a.jpg"), "utf8")).toBe("theirs");
+  });
+
+  it("re-review 3 N2: Start fresh into a folder a move was cut short in clears that move's leftovers first", async () => {
+    const from = filled();
+    // a cut move's leftovers: a TensorRT engine cut mid-copy, the marker and the moving marker
+    const to = join(place(), "corridorkey-desktop");
+    put(join(to, CACHE_MARKER), "");
+    put(join(to, MOVING_MARKER), "");
+    put(join(to, "tensorrt", "rtx-5080__fp16", "h1024-1280_w1792-2176_t1-48_f1-4", "stage1.engine"), "engi");
+    put(join(to, "notes.txt"), "not a cache part");
+    expect(await clearCutMove(from, to, false)).toBe(true);
+    expect(tree(to)).toEqual([CACHE_MARKER, "notes.txt"].sort());
+    // no moving marker, someone else's folder, or the cache in use: nothing touched
+    const done = join(place(), "corridorkey-desktop");
+    put(join(done, CACHE_MARKER), "");
+    put(join(done, "media", "a.jpg"), "kept");
+    expect(await clearCutMove(from, done, false)).toBe(false);
+    const theirs = place();
+    put(join(theirs, MOVING_MARKER), "");
+    put(join(theirs, "media", "a.jpg"), "theirs");
+    expect(await clearCutMove(from, theirs, false)).toBe(false);
+    put(join(from, MOVING_MARKER), "");
+    expect(await clearCutMove(from, from, true)).toBe(false);
+    expect(tree(done)).toEqual([CACHE_MARKER, "media/a.jpg"].sort());
+    expect(tree(theirs)).toEqual([MOVING_MARKER, "media/a.jpg"].sort());
+    expect(tree(from)).toContain("media/a.jpg");
+    // index.ts's Start fresh clears it before the folder becomes the cache
+    const main = readFileSync(new URL("../../electron/main/index.ts", import.meta.url), "utf8");
+    expect(main).toMatch(/await clearCutMove\(from, to, toOwned\);\n\s+await prepareTarget\(to, toOwned\);\n\s+switchCache\(root, to\);/);
   });
 
   it("an unplugged drive: the chosen location is never made, only the app's own folder inside one that is there", async () => {
