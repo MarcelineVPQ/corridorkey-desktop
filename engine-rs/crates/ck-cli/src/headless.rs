@@ -3,9 +3,14 @@
 //! this starts the app's executable as Node (`ELECTRON_RUN_AS_NODE=1`) on its `out/main/headless.js`, passing itself
 //! (`CK_HEADLESS_CLI`) for the script's render, verify, prepare and info. On Unix it execs the app (same process: a
 //! farm's SIGTERM reaches the runner itself, and a death by signal shows as one); on Windows it waits and exits as the
-//! script ended: Ctrl+C / Ctrl+Break reach the app on the shared console while this process keeps waiting
-//! (signals.rs), and the app ends with it (ck_core::proc::children_end_with_me). It needs the app installed next to
-//! it (this binary in `resources/engine/`); a bare copy on a worker says so (exit 7).
+//! script ended. Windows: Electron's run-as-node never calls the runner's `process.on("SIGINT" | "SIGBREAK")` (measured
+//! on Electron 45.1.0, VM run 2026-10-27), so this process takes the console's events (signals.rs) and asks the runner
+//! to stop with a `stop` line on its stdin (CK_HEADLESS_STOP=stdin): the runner's own cancel, its "cancelled" report,
+//! exit 130. The runner starts in a process group of its own, which ignores Ctrl+C; Ctrl+Break still reaches every
+//! process on the console, so when it ends the runner first (0xC000013A) this process says the script stopped and exits
+//! 128 + the signal. A second Ctrl+C / Ctrl+Break ends this process, and the app with it (its job object,
+//! ck_core::proc::children_end_with_me). It needs the app installed next to it (this binary in `resources/engine/`); a
+//! bare copy on a worker says so (exit 7).
 use crate::exit;
 use clap::ArgMatches;
 use std::path::{Path, PathBuf};
@@ -65,17 +70,62 @@ pub fn run(m: &ArgMatches) -> i32 {
     }
     #[cfg(not(unix))]
     {
-        // the first Ctrl+C / Ctrl+Break is the app's to stop on (it gets the same console event); a second ends both
-        crate::signals::install();
-        // loop: NOT-WORTH — one wait for the script [bounded: the script's own end; Ctrl+C / Ctrl+Break reach it, it stops cleanly]
-        match c.status() {
-            // Windows always has an exit code
-            Ok(s) => s.code().unwrap_or(exit::ENGINE),
+        use std::os::windows::process::CommandExt;
+        use std::sync::Mutex;
+        // CREATE_NEW_PROCESS_GROUP: the console's Ctrl+C doesn't reach the runner (it ignores it); this process asks
+        c.creation_flags(CREATE_NEW_PROCESS_GROUP).env("CK_HEADLESS_STOP", "stdin").stdin(std::process::Stdio::piped());
+        let mut child = match c.spawn() {
+            Ok(ch) => ch,
             Err(e) => {
                 eprintln!("corridorkey run: the app ({}) didn't start: {e}", app.display());
-                exit::ASSETS
+                return exit::ASSETS;
+            }
+        };
+        let stdin = Mutex::new(child.stdin.take());
+        // the first Ctrl+C / Ctrl+Break: a `stop` line to the runner; a second ends this process and the runner with it
+        crate::signals::install_with(Box::new(move || {
+            if let Some(w) = stdin.lock().ok().as_deref_mut().and_then(Option::as_mut) {
+                // error: NOT-WORTH — a runner that already ended can't read it; the wait below reports its end
+                let _ = ask_to_stop(w);
+            }
+        }));
+        // loop: NOT-WORTH — one wait for the script [bounded: the script's own end; a `stop` line stops it, a second Ctrl+C ends it]
+        match child.wait() {
+            // Windows always has an exit code
+            Ok(s) => script_status(s.code().unwrap_or(exit::ENGINE), crate::signals::stopped_by()),
+            Err(e) => {
+                eprintln!("corridorkey run: lost the app's script runner ({e})");
+                exit::ENGINE
             }
         }
+    }
+}
+
+/// The line the runner reads on its stdin as Ctrl+C (electron/main/console/headless.ts STOP_LINE).
+pub const STOP_LINE: &[u8] = b"stop\n";
+
+/// Windows: a new process group (CreateProcess's CREATE_NEW_PROCESS_GROUP).
+#[cfg(windows)]
+const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+
+/// Windows: the exit code of a process the console's Ctrl+C / Ctrl+Break ended (STATUS_CONTROL_C_EXIT).
+const STATUS_CONTROL_C_EXIT: i32 = 0xC000_013Au32 as i32;
+
+/// Ask the runner to stop: its own cancel, as the Console's Ctrl+C.
+pub fn ask_to_stop(w: &mut impl std::io::Write) -> std::io::Result<()> {
+    w.write_all(STOP_LINE)?;
+    w.flush()
+}
+
+/// The exit code `run` passes on: the runner's, except when the console's event ended the runner before its own stop
+/// (Ctrl+Break reaches every process on the console): then the stop, said, and 128 + the signal, as a stopped run.
+pub fn script_status(code: i32, stopped_by: Option<i32>) -> i32 {
+    match stopped_by {
+        Some(sig) if code == STATUS_CONTROL_C_EXIT => {
+            eprintln!("corridorkey run: stopped (the console's {} ended the app's script runner at once)", if sig == 2 { "Ctrl+C" } else { "Ctrl+Break" });
+            128 + sig
+        }
+        _ => code,
     }
 }
 
@@ -104,5 +154,24 @@ mod tests {
         );
         // a bare binary with no folders above it
         assert_eq!(app_paths(Path::new("corridorkey"), "linux", &none), None);
+    }
+
+    #[test]
+    fn asks_the_runner_to_stop_with_one_stop_line() {
+        let mut pipe = Vec::new();
+        ask_to_stop(&mut pipe).unwrap();
+        assert_eq!(pipe, b"stop\n");
+    }
+
+    #[test]
+    fn a_runner_the_console_ended_after_a_stop_shows_as_a_stopped_run() {
+        // the runner's own stop: its code (130), as it is
+        assert_eq!(script_status(130, Some(2)), 130);
+        // Ctrl+Break ended the runner first (STATUS_CONTROL_C_EXIT): stopped, 128 + the signal
+        assert_eq!(script_status(0xC000_013Au32 as i32, Some(15)), 143);
+        assert_eq!(script_status(0xC000_013Au32 as i32, Some(2)), 130);
+        // no stop asked: the runner's code, whatever it is
+        assert_eq!(script_status(0xC000_013Au32 as i32, None), 0xC000_013Au32 as i32);
+        assert_eq!(script_status(1, None), 1);
     }
 }

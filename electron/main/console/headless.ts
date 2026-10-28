@@ -5,8 +5,10 @@
 // What a window would ask has no one to answer here, so it is refused, in words: a line that replaces files (sudo),
 // `allow`. The blocks print as they go (output on stdout, errors on stderr); the exit status is the script's.
 //
-// lifetime: one process per `corridorkey run`, ended by the script's end (SIGINT / SIGTERM stop it as Ctrl+C does).
+// lifetime: one process per `corridorkey run`, ended by the script's end (SIGINT / SIGTERM stop it as Ctrl+C does; on
+// Windows, where Electron's run-as-node never calls them, ck-cli's `stop` line on stdin does: CK_HEADLESS_STOP=stdin).
 import { readFileSync } from "node:fs";
+import { createInterface } from "node:readline";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -67,6 +69,17 @@ export class Printer {
   }
 }
 
+/** The line ck-cli writes on the runner's stdin for Ctrl+C / Ctrl+Break on Windows (ck-cli headless.rs STOP_LINE). */
+export const STOP_LINE = "stop";
+
+/** Calls `stop` for each `stop` line read from `input` (ck-cli's Ctrl+C on Windows); any other line is ignored. */
+export function onStopLines(input: NodeJS.ReadableStream, stop: () => void): void {
+  // lifetime: OK — reads until ck-cli's end of the pipe closes; the process ends with the script
+  createInterface({ input, terminal: false }).on("line", (l) => {
+    if (l.trim() === STOP_LINE) stop();
+  });
+}
+
 const say = (text: string) => process.stderr.write(`corridorkey run: ${text}\n`);
 
 async function main(argv: string[]): Promise<number> {
@@ -92,6 +105,7 @@ async function main(argv: string[]): Promise<number> {
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.CK_HEADLESS_CLI;
+  delete env.CK_HEADLESS_STOP;
   const nobody = (what: string) => {
     say(`${what}: a script run outside the app has no one to confirm it; run it in the app's Console (or write into the next free version, -o …_v###/, which replaces nothing)`);
     return Promise.resolve(false);
@@ -154,6 +168,7 @@ async function main(argv: string[]): Promise<number> {
   // lifetime: OK — the process ends with the script
   process.on("SIGINT", () => c.cancel());
   process.on("SIGTERM", () => c.cancel());
+  if (process.env.CK_HEADLESS_STOP === "stdin") onStopLines(process.stdin, () => c.cancel());
   // loop: NOT-WORTH — starts the script [bounded: its checks; the script itself is waited for below]
   const b = await c.run(`run ${args.keepGoing ? "--keep-going " : ""}${quoteArg(resolve(args.file), { windows: PLATFORM === "win32" })}`);
   // loop: NOT-WORTH — waits for the script's block to end [bounded: the script's own end; SIGINT / SIGTERM stop it]

@@ -69,7 +69,8 @@ commands, checks and folders it may write in (the app's settings: the results fo
 allowed), the same audit log. It never replaces files: no one is there to confirm a `sudo` line, so a script that
 needs one stops before anything runs (write into the next free version instead, `-o key/sh010_v###/`). It needs the
 app installed next to it (exit 7 on a worker with only `corridorkey`), prints each command's output as it goes and
-exits as the script ended. A farm's cancel (SIGTERM) stops it as Ctrl+C stops the Console.
+exits as the script ended. A farm's cancel (SIGTERM) and Ctrl+C stop it as Ctrl+C stops the Console (exit 130); on
+Windows, Ctrl+Break ends the script at once and says so (exit 143).
 
 For tools: `corridorkey __spec --json` prints the whole command line as JSON (every command, flag, value and
 example). The app's Console reads it, and this wiki's gate checks this page against it.

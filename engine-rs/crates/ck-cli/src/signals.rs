@@ -59,10 +59,17 @@ mod sys {
     const CTRL_C_EVENT: u32 = 0;
     const CTRL_BREAK_EVENT: u32 = 1;
 
+    /// What else the first event does (`corridorkey run`: ask the app's script runner to stop, headless.rs).
+    pub(super) static ON_STOP: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>> = std::sync::OnceLock::new();
+
     unsafe extern "system" fn handler(event: u32) -> i32 {
         let sig = if event == CTRL_C_EVENT { 2 } else { 15 };
         if super::on_signal(sig) {
             ExitProcess(128 + sig as u32);
+        }
+        // the system runs this handler on a thread of its own: an ordinary call (a pipe write) is fine here
+        if let Some(f) = ON_STOP.get() {
+            f();
         }
         // Ctrl+C / Ctrl+Break: handled, the run stops after its current frame. Closing the console, log-off and
         // shut-down end the process as soon as this handler returns (Microsoft's HandlerRoutine docs; the system
@@ -85,6 +92,14 @@ mod sys {
 
 /// Install the handlers (once, at the start of `render` and `prepare`).
 pub fn install() {
+    sys::install();
+}
+
+/// Windows: install the handlers, and on the first event also run `f` (before the close / log-off wait).
+#[cfg(windows)]
+pub fn install_with(f: Box<dyn Fn() + Send + Sync>) {
+    // error: NOT-WORTH — installed once per process; a second call can't happen
+    let _ = sys::ON_STOP.set(f);
     sys::install();
 }
 

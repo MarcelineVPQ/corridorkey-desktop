@@ -1,7 +1,8 @@
 // `corridorkey run FILE.ckcmd` (SME review 2026-10-27 N12, backlog row 151): the script runner the CLI starts in the
 // app as Node (electron/main/console/headless.ts): where the app's settings are, its arguments, and what it prints.
+import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { headlessArgs, Printer, userDataDir } from "../../electron/main/console/headless";
+import { headlessArgs, onStopLines, Printer, STOP_LINE, userDataDir } from "../../electron/main/console/headless";
 import type { ConsoleBlock } from "../../src/shared/types";
 
 const block = (extra: Partial<ConsoleBlock>): ConsoleBlock => ({
@@ -75,4 +76,18 @@ describe("corridorkey run's script runner", () => {
       ["err", "run nightly.ckcmd: failed (exit 4)"],
     ]);
   });
+
+  it("stops on each stop line ck-cli writes on its stdin (Windows Ctrl+C), across chunks; other lines do nothing", async () => {
+    const input = new PassThrough();
+    let stops = 0;
+    onStopLines(input, () => stops++);
+    input.write("hello\nst");
+    input.write("op\r\n");
+    input.write(`${STOP_LINE}\n`);
+    input.end();
+    await new Promise((r) => input.on("end", r));
+    await new Promise((r) => setImmediate(r));
+    expect(stops).toBe(2);
+  });
+
 });
