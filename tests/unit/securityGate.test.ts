@@ -141,7 +141,7 @@ describe("Electron security gate", () => {
     for (const w of loose) expect(runGate({ "electron/main/window.ts": w }).code, w).toBe(1);
   });
 
-  it("fails on a missing or loosened Electron fuse in electron-builder.yml; runAsNode only with its marker", () => {
+  it("fails on a missing or loosened Electron fuse in electron-builder.yml; runAsNode off, with no exception", () => {
     const fuses = ["enableNodeOptionsEnvironmentVariable: false", "enableNodeCliInspectArguments: false", "enableEmbeddedAsarIntegrityValidation: true", "onlyLoadAppFromAsar: true"];
     // loop: NOT-WORTH — four fuses, two fixtures each
     for (const f of fuses) {
@@ -155,11 +155,11 @@ describe("Electron security gate", () => {
       }
     }
     expect(runGate({ "electron-builder.yml": builder.replace("electronFuses:", "fuses:") }).code).toBe(1);
-    // runAsNode on without the marker, or left out (Electron's default is on)
-    const unmarked = builder.replace(/^.*gate: run-as-node-ok.*\n/m, "");
-    expect(unmarked).not.toBe(builder);
-    expect(runGate({ "electron-builder.yml": unmarked }).code).toBe(1);
+    // runAsNode on (even with the old marker), twice, or left out (Electron's default is on): review 2026-10-28 #3
+    expect(builder).toMatch(/^ {2}runAsNode: false$/m);
+    expect(runGate({ "electron-builder.yml": builder.replace("runAsNode: false", "# gate: run-as-node-ok — why\n  runAsNode: true") }).code).toBe(1);
+    expect(runGate({ "electron-builder.yml": builder.replace("runAsNode: false", "runAsNode: false\n  runAsNode: true") }).code).toBe(1);
     expect(runGate({ "electron-builder.yml": builder.replace(/^.*runAsNode:.*\n/m, "") }).code).toBe(1);
-    expect(runGate({ "electron-builder.yml": unmarked.replace("runAsNode: true", "runAsNode: false") }).code).toBe(0);
+    expect(runGate({ "electron-builder.yml": builder }).code).toBe(0);
   });
 });

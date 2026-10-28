@@ -37,9 +37,9 @@ function csp(): Plugin {
 }
 
 export default defineConfig({
-  // index: the app; headless: `corridorkey run FILE.ckcmd`'s script runner (electron/main/console/headless.ts), started by
-  // ck-cli as Node (ELECTRON_RUN_AS_NODE) from the same app
-  main: { build: { outDir: "out/main", rollupOptions: { input: { index: resolve("electron/main/index.ts"), headless: resolve("electron/main/console/headless.ts") } } } },
+  // boot: the entry (package.json main), which loads index (the app) or, with --ck-headless, `corridorkey run
+  // FILE.ckcmd`'s script runner (electron/main/console/headless.ts) in the same app, never as Node (review 2026-10-28 #3)
+  main: { build: { outDir: "out/main", rollupOptions: { input: { boot: resolve("electron/main/boot.ts"), index: resolve("electron/main/index.ts") } } } },
   preload: {
     build: {
       outDir: "out/preload",

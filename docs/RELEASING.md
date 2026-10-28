@@ -151,8 +151,10 @@ CHANGELOG says "not yet run on Windows").
 **The Windows installer, once per release, by hand:** `tools/release.sh` starts only the Linux build (the Windows
 one is built through Wine and can't start here). After it, install `release/CorridorKey-Desktop-<version>-Setup.exe`
 in the `win11-test` VM (libvirt, test-only) and start it once: it must reach its first page (the packaged app's
-Electron fuses check `app.asar` against its integrity hash at start on Windows). A build that doesn't start gets a
-fix and a new version, never an edited release.
+Electron fuses check `app.asar` against its integrity hash at start on Windows). Then, in a terminal there,
+`resources\engine\corridorkey.exe run` a two-line script (`pwd`, `dir`): it must print both and exit 0, and Ctrl+C
+during a long line must stop it with exit 130 (the app's `--ck-headless` start, since the `runAsNode` fuse is off:
+review 2026-10-28 #3). A build that doesn't start gets a fix and a new version, never an edited release.
 
 **Windows Defender** (until the Windows builds are signed): its machine-learning heuristic quarantined the unsigned
 `resources\engine\corridorkey.exe` as `Trojan:Win32/Bearfoos.A!ml` in the 2026-10-27 VM run, a false positive. After

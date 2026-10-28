@@ -13,6 +13,7 @@ export const APP = join(dirname(fileURLToPath(import.meta.url)), "..");
 // Modules without unit tests of their own, and why
 export const UNTESTED = new Map([
   ["electron/main/index", "the Electron wiring (windows, menus, IPC handlers): its parts are tested in their modules, the whole in tools/isolated.sh runs"],
+  ["electron/main/boot", "the entry's few lines of Electron (app.exit, dock, sessionData) around headlessFlag.ts, which is tested (consoleHeadless.test.ts)"],
   ["electron/main/ipc", "the IPC channel names, one constant object"],
   ["electron/main/updater", "Electron's net and app around updateFlow.ts (updateFlow.test.ts); end to end in tools/update_e2e.sh"],
   ["electron/main/desktopTheme", "reads the desktop's colours through Electron (nativeTheme, systemPreferences) and KDE's files; their parsing is palette.ts (palette.test.ts)"],

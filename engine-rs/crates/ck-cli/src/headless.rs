@@ -1,9 +1,10 @@
 //! `corridorkey run FILE.ckcmd` (SME review 2026-10-27 N12, backlog row 151): a Console script without the app's
 //! window, from cron or as a farm's pre-job. The Console's parser and rules are the app's own code (TypeScript), so
-//! this starts the app's executable as Node (`ELECTRON_RUN_AS_NODE=1`) on its `out/main/headless.js`, passing itself
-//! (`CK_HEADLESS_CLI`) for the script's render, verify, prepare and info. On Unix it execs the app (same process: a
+//! this starts the app's executable with `--ck-headless` (its fixed script runner, no window; never as Node, so the
+//! app ships with the runAsNode fuse off: review 2026-10-28 #3), passing itself (`CK_HEADLESS_CLI`) for the script's
+//! render, verify, prepare and info, which the app checks is its own. On Unix it execs the app (same process: a
 //! farm's SIGTERM reaches the runner itself, and a death by signal shows as one); on Windows it waits and exits as the
-//! script ended. Windows: Electron's run-as-node never calls the runner's `process.on("SIGINT" | "SIGBREAK")` (measured
+//! script ended. Windows: Electron didn't call the runner's `process.on("SIGINT" | "SIGBREAK")` (measured
 //! on Electron 45.1.0, VM run 2026-10-27), so this process takes the console's events (signals.rs) and asks the runner
 //! to stop with a `stop` line on its stdin (CK_HEADLESS_STOP=stdin): the runner's own cancel, its "cancelled" report,
 //! exit 130. The runner starts in a process group of its own, which ignores Ctrl+C; Ctrl+Break still reaches every
@@ -16,10 +17,10 @@ use clap::ArgMatches;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// The app's executable and the script runner inside it, from this binary's path (`<app>/resources/engine/corridorkey`):
-/// Linux `<app>/corridorkey-desktop`, Windows `<app>\CorridorKey.exe`, macOS `CorridorKey.app/Contents/MacOS/CorridorKey`;
-/// the runner `resources/app.asar/out/main/headless.js`. `CK_APP` and `CK_APP_ENTRY` name others (a development build).
-pub fn app_paths(exe: &Path, os: &str, var: &dyn Fn(&str) -> Option<String>) -> Option<(PathBuf, PathBuf)> {
+/// The app's executable, from this binary's path (`<app>/resources/engine/corridorkey`): Linux `<app>/corridorkey-desktop`,
+/// Windows `<app>\CorridorKey.exe`, macOS `CorridorKey.app/Contents/MacOS/CorridorKey`. `CK_APP` names another, and
+/// `CK_APP_ENTRY` the app folder a development Electron loads (a development build); a packaged app needs none.
+pub fn app_paths(exe: &Path, os: &str, var: &dyn Fn(&str) -> Option<String>) -> Option<(PathBuf, Option<PathBuf>)> {
     let resources = exe.parent()?.parent()?;
     let root = resources.parent()?;
     let app = match var("CK_APP") {
@@ -30,8 +31,7 @@ pub fn app_paths(exe: &Path, os: &str, var: &dyn Fn(&str) -> Option<String>) -> 
             _ => root.join("corridorkey-desktop"),
         },
     };
-    let entry = var("CK_APP_ENTRY").map(PathBuf::from).unwrap_or_else(|| resources.join("app.asar").join("out").join("main").join("headless.js"));
-    Some((app, entry))
+    Some((app, var("CK_APP_ENTRY").map(PathBuf::from)))
 }
 
 /// The run: the app's script runner with the file, waited for; its exit code is the script's.
@@ -45,8 +45,7 @@ pub fn run(m: &ArgMatches) -> i32 {
         }
     };
     let var = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
-    let found = app_paths(&exe, std::env::consts::OS, &var)
-        .filter(|(app, entry)| app.is_file() && (entry.is_file() || entry.components().any(|c| c.as_os_str() == "app.asar")));
+    let found = app_paths(&exe, std::env::consts::OS, &var).filter(|(app, entry)| app.is_file() && entry.as_ref().is_none_or(|e| e.exists()));
     let Some((app, entry)) = found else {
         eprintln!(
             "corridorkey run: the app isn't next to this program ({}): run needs the app installed (it runs the app's own Console code); render, verify, prepare and info work without it",
@@ -55,11 +54,12 @@ pub fn run(m: &ArgMatches) -> i32 {
         return exit::ASSETS;
     };
     let mut c = Command::new(&app);
-    c.arg(&entry).arg("run");
+    c.args(&entry).args(HEADLESS_SWITCHES).arg(HEADLESS_FLAG).arg("run");
     if m.get_flag("keep-going") {
         c.arg("--keep-going");
     }
-    c.arg(file).env("ELECTRON_RUN_AS_NODE", "1").env("CK_HEADLESS_CLI", &exe);
+    // absolute: a name starting with "-" never reads as a switch (the app refuses one)
+    c.arg(std::path::absolute(file).unwrap_or_else(|_| PathBuf::from(file))).env_remove("ELECTRON_RUN_AS_NODE").env("CK_HEADLESS_CLI", &exe);
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -101,6 +101,17 @@ pub fn run(m: &ArgMatches) -> i32 {
     }
 }
 
+/// The app's flag for its script runner (electron/main/headlessFlag.ts HEADLESS_FLAG).
+pub const HEADLESS_FLAG: &str = "--ck-headless";
+
+/// Chromium switches before the flag (headlessFlag.ts HEADLESS_SWITCHES): on Linux no display (cron, a farm worker), no
+/// sandbox helper (the AppImage's, as the app's own start passes it) and never the desktop's wallet (KWallet would ask
+/// to create one on the user's screen); everywhere none of Chromium's own log lines among the script's output.
+#[cfg(target_os = "linux")]
+const HEADLESS_SWITCHES: &[&str] = &["--no-sandbox", "--ozone-platform=headless", "--password-store=basic", "--log-level=3"];
+#[cfg(not(target_os = "linux"))]
+const HEADLESS_SWITCHES: &[&str] = &["--log-level=3"];
+
 /// The line the runner reads on its stdin as Ctrl+C (electron/main/console/headless.ts STOP_LINE).
 pub const STOP_LINE: &[u8] = b"stop\n";
 
@@ -137,7 +148,7 @@ mod tests {
     fn finds_the_app_and_its_script_runner_per_system() {
         let none = |_: &str| None;
         let (app, entry) = app_paths(Path::new("/opt/CK/resources/engine/corridorkey"), "linux", &none).unwrap();
-        assert_eq!((app, entry), (PathBuf::from("/opt/CK/corridorkey-desktop"), PathBuf::from("/opt/CK/resources/app.asar/out/main/headless.js")));
+        assert_eq!((app, entry), (PathBuf::from("/opt/CK/corridorkey-desktop"), None));
         let (app, _) = app_paths(Path::new("/Applications/CorridorKey.app/Contents/Resources/engine/corridorkey"), "macos", &none).unwrap();
         assert_eq!(app, PathBuf::from("/Applications/CorridorKey.app/Contents/MacOS/CorridorKey"));
         let (app, _) = app_paths(&PathBuf::from("C:/CK/resources/engine/corridorkey.exe"), "windows", &none).unwrap();
@@ -145,12 +156,12 @@ mod tests {
         // a development build names its own
         let dev = |k: &str| match k {
             "CK_APP" => Some("/dev/node_modules/electron/dist/electron".to_string()),
-            "CK_APP_ENTRY" => Some("/dev/out/main/headless.js".to_string()),
+            "CK_APP_ENTRY" => Some("/dev".to_string()),
             _ => None,
         };
         assert_eq!(
             app_paths(Path::new("/dev/engine-rs/target/release/corridorkey"), "linux", &dev).unwrap(),
-            (PathBuf::from("/dev/node_modules/electron/dist/electron"), PathBuf::from("/dev/out/main/headless.js"))
+            (PathBuf::from("/dev/node_modules/electron/dist/electron"), Some(PathBuf::from("/dev")))
         );
         // a bare binary with no folders above it
         assert_eq!(app_paths(Path::new("corridorkey"), "linux", &none), None);

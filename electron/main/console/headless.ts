@@ -1,12 +1,14 @@
 // `corridorkey run nightly.ckcmd` (SME review 2026-10-27 N12, backlog row 151): a Console script without the app's
-// window, from cron or as a farm's pre-job. ck-cli's `run` starts the app's own executable as Node
-// (ELECTRON_RUN_AS_NODE) on this file, so the script goes through the same parser, registry, checks and runner as the
-// Console's `run`: never a system shell, writes only into the folders the app's settings allow, the same audit log.
+// window, from cron or as a farm's pre-job. ck-cli's `run` starts the app's own executable with --ck-headless
+// (headlessFlag.ts, boot.ts; never as Node: review 2026-10-28 #3), which runs this, so the script goes through the same
+// parser, registry, checks and runner as the Console's `run`: never a system shell, writes only into the folders the
+// app's settings allow, the same audit log.
 // What a window would ask has no one to answer here, so it is refused, in words: a line that replaces files (sudo),
 // `allow`. The blocks print as they go (output on stdout, errors on stderr); the exit status is the script's.
 //
 // lifetime: one process per `corridorkey run`, ended by the script's end (SIGINT / SIGTERM stop it as Ctrl+C does; on
-// Windows, where Electron's run-as-node never calls them, ck-cli's `stop` line on stdin does: CK_HEADLESS_STOP=stdin).
+// Windows, where Electron didn't call them (measured as Node, Electron 45.1.0; the --ck-headless start keeps the same
+// way, not yet run there), ck-cli's `stop` line on stdin does: CK_HEADLESS_STOP=stdin).
 import { readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { createInterface } from "node:readline";
@@ -88,17 +90,19 @@ export function refusal(what: string, offerVersion: boolean): string {
 
 const say = (text: string) => process.stderr.write(`corridorkey run: ${text}\n`);
 
-async function main(argv: string[]): Promise<number> {
+/** Says why a start with --ck-headless was refused (headlessFlag.ts); exit 2, as a usage error. */
+export function refuseHeadless(why: string): number {
+  say(why);
+  return 2;
+}
+
+/**
+ * The script run: `argv` is `run [--keep-going] FILE` and `cli` the command-line program, both checked by
+ * headlessFlag.ts. Resolves with the script's exit status.
+ */
+export async function runHeadless(argv: string[], cli: string): Promise<number> {
   const args = headlessArgs(argv);
-  if ("error" in args) {
-    say(args.error);
-    return 2;
-  }
-  const cli = process.env.CK_HEADLESS_CLI;
-  if (!cli) {
-    say("start it as corridorkey run (the command line passes itself to it)");
-    return 2;
-  }
+  if ("error" in args) return refuseHeadless(args.error);
   // the app's name as Electron reads it from its package.json (its productName, else its name): its userData folder
   // loop: NOT-WORTH — one small sync read at start (no window, nothing else waits)
   const pkg = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "package.json"), "utf8")) as { name: string; productName?: string; version: string };
@@ -186,15 +190,3 @@ async function main(argv: string[]): Promise<number> {
   while (!ended.has(b.id)) await new Promise<void>((r) => (wake = r));
   return statusOf(ended.get(b.id)!);
 }
-
-// run only when ck-cli starts it (it sets CK_HEADLESS_CLI); the tests import its functions
-if (process.env.CK_HEADLESS_CLI !== undefined)
-  // loop: NOT-WORTH — one script per process
-  void main(process.argv.slice(2)).then(
-    (code) => process.exit(code),
-    (e: unknown) => {
-      // error: SHOWN — said on stderr, exit 8 (the CLI's "the engine failed: a bug")
-      say(`stopped: ${String((e as Error)?.message ?? e)}`);
-      process.exit(8);
-    },
-  );

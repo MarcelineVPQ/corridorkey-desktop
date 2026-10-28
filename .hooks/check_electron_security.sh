@@ -29,7 +29,7 @@
 #
 # Requires Electron's fuses in electron-builder.yml (electronFuses): enableNodeOptionsEnvironmentVariable: false,
 # enableNodeCliInspectArguments: false, enableEmbeddedAsarIntegrityValidation: true, onlyLoadAppFromAsar: true, and
-# runAsNode: false unless the line above it says `gate: run-as-node-ok — why` (whole-code review 2026-10-27).
+# runAsNode: false, with no exception (review 2026-10-28 #3: `corridorkey run` starts the app with --ck-headless now).
 #
 # From the DS5 app (same baseline). Optional argument: the tree to check (tests use fixtures); default the repo.
 set -uo pipefail
@@ -101,11 +101,8 @@ grep -q '^electronFuses:' "$yml" 2>/dev/null || missing=" electronFuses:"
 for f in "enableNodeOptionsEnvironmentVariable: false" "enableNodeCliInspectArguments: false" "enableEmbeddedAsarIntegrityValidation: true" "onlyLoadAppFromAsar: true"; do # loop: NOT-WORTH — four fixed fuses
   grep -qE "^[[:space:]]+$f[[:space:]]*(#.*)?$" "$yml" 2>/dev/null || missing="$missing $f"
 done
-n=$(grep -nE '^[[:space:]]+runAsNode:' "$yml" 2>/dev/null | head -1 | cut -d: -f1)
-if [ -z "$n" ]; then missing="$missing runAsNode (on unless set)"
-elif ! sed -n "${n}p" "$yml" | grep -qE 'runAsNode:[[:space:]]*false' && ! sed -n "$((n > 1 ? n - 1 : 1))p" "$yml" | grep -q "gate: run-as-node-ok"; then
-  missing="$missing runAsNode: false (or 'gate: run-as-node-ok — why' on the line above)"
-fi
+# runAsNode: Electron's default is on, so it must be there, set false, and set only once
+[ "$(grep -cE '^[[:space:]]+runAsNode:' "$yml" 2>/dev/null)" = 1 ] && grep -qE '^[[:space:]]+runAsNode: false[[:space:]]*(#.*)?$' "$yml" || missing="$missing runAsNode: false"
 if [ -n "$missing" ]; then
   echo "Electron security gate: the fuses in $yml are missing or loosened:$missing"
   exit 1

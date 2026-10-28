@@ -16,10 +16,9 @@ asar: true
 # Electron's fuses, flipped in the packaged binary (gate: .hooks/check_electron_security.sh): no NODE_OPTIONS, no
 # --inspect, the app only from its app.asar, checked against the integrity hash where Electron can (macOS, Windows).
 electronFuses:
-  # `corridorkey run FILE.ckcmd` starts this executable as Node (ELECTRON_RUN_AS_NODE) on out/main/headless.js
-  # (engine-rs/crates/ck-cli/src/headless.rs, electron/main/console/headless.ts); off once that runner is an app flag.
-  # gate: run-as-node-ok — the headless Console runner needs it
-  runAsNode: true
+  # never as Node: `corridorkey run FILE.ckcmd` starts this app with --ck-headless (electron/main/boot.ts, headlessFlag.ts;
+  # review 2026-10-28 #3: ELECTRON_RUN_AS_NODE ran any JavaScript as the signed app, with its macOS privacy grants)
+  runAsNode: false
   enableNodeOptionsEnvironmentVariable: false
   enableNodeCliInspectArguments: false
   enableEmbeddedAsarIntegrityValidation: true
