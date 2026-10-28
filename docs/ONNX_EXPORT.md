@@ -1,7 +1,10 @@
 # CorridorKey v2 on ONNX Runtime: model set and contract
 
 Scripts: `engine-rs/export/` (they load the model code and weights from the CorridorKey2.0 clone, `CK2_REPO`, default `~/projects/CorridorKey2.0`). Scratch (ONNX files, clips, results):
-`~/.cache/claude-scratch/corridorkey-onnx/`. The engine is decided: **Rust + ONNX Runtime**
+`CK_ONNX_SCRATCH`, default `~/.cache/claude-scratch/corridorkey-onnx/`. The scripts' other paths are variables too:
+`CK_ONNX_VENV` (the Python environment `run.sh` activates, default `<scratch>/venv`), `CK_MEMRUN` (the memory-capped
+runner, default `~/.cache/claude-scratch/tools/memrun.sh`), `CK_HEAVY_LOCK` (`coreml/build_coreml_models.sh`'s
+one-heavy-job lock, default `~/.cache/claude-scratch/heavy.lock`) and `PY` (its Python). The engine is decided: **Rust + ONNX Runtime**
 (the Electron app's `engine-rs`). This document is the single source of truth for the model files
 the engine loads: names, opsets, precisions, inputs/outputs, and the host-side steps around them.
 

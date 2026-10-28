@@ -17,7 +17,7 @@
 #   Core ML EP says how many nodes and partitions Core ML takes; it can't compile or run the model).
 # Python: PY (default the Core ML study's venv: onnx 1.23 + ONNX Runtime 1.31 with the Core ML EP compiled in).
 # Memory: each step in its own capped scope (CK_MEMRUN, default ~/.cache/claude-scratch/tools/memrun.sh, 12 GB),
-# one at a time under ~/.cache/claude-scratch/heavy.lock when that exists.
+# one at a time under CK_HEAVY_LOCK (default ~/.cache/claude-scratch/heavy.lock) when that exists.
 set -euo pipefail
 [ $# -ge 4 ] || { sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 2; }
 SET=$(cd "$1" && pwd) OUT=$2 SHAPE=$3; shift 3
@@ -26,7 +26,7 @@ H=${BASH_REMATCH[1]} W=${BASH_REMATCH[2]}
 HERE=$(cd "$(dirname "$0")" && pwd)
 PY=${PY:-$HOME/.cache/claude-scratch/ck-mac/bvenv/bin/python}
 MEMRUN=${CK_MEMRUN:-$HOME/.cache/claude-scratch/tools/memrun.sh}
-LOCK=$HOME/.cache/claude-scratch/heavy.lock
+LOCK=${CK_HEAVY_LOCK:-$HOME/.cache/claude-scratch/heavy.lock}
 export CUDA_VISIBLE_DEVICES=
 mkdir -p "$OUT/build" "$OUT/probe"
 OUT=$(cd "$OUT" && pwd)

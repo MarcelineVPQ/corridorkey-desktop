@@ -10,7 +10,8 @@
 # process (per-session ORT gpu_mem_limit + guard exit 76). Both are recorded, never retried.
 # Resumable: steps with an existing result or a recorded failure are skipped.
 # usage: gpu_validate.sh [clip...]   (default: gs720 gs1080)
-S=$HOME/.cache/claude-scratch/corridorkey-onnx
+S=${CK_ONNX_SCRATCH:-$HOME/.cache/claude-scratch/corridorkey-onnx}
+export CK_ONNX_SCRATCH=$S
 RUN="$(dirname "$0")/run.sh"
 R=$S/results/gpu
 mkdir -p $R

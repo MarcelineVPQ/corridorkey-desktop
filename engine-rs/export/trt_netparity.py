@@ -90,7 +90,8 @@ def main():
     if a.mode == "ref":
         import torch
         import pipeline
-        S = os.path.expanduser("~/.cache/claude-scratch/corridorkey-onnx/models")
+        from common import SCRATCH
+        S = str(SCRATCH / "models")
         # loop: NOT-WORTH — five paths, once
         be = pipeline.OrtBackend({p: os.path.join(S, f"ck2-{p}-fp32.onnx") for p in PIECES},
                                  [("CUDAExecutionProvider", {"use_tf32": 0}), "CPUExecutionProvider"], name="ref")
