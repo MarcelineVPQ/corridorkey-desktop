@@ -868,6 +868,9 @@ impl Pipeline<OrtLoader> {
             if job.tensorrt {
                 sink.log("  TensorRT was asked for: not on Core ML (ignored)");
             }
+            if let Some(why) = coreml_short_clip(t_all, chunk, &self.models.coreml_batches("stage1", (sh, sw))) {
+                return Err(Error::input(why));
+            }
             (self.coreml_key(&base_key, (sh, sw), chunk.min(t_all), low_vram, &self.loader.rt.cfg, sink)?, None)
         } else {
             self.job_key(job, &base_key, (sh, sw), chunk, low_vram, trt_skip.as_deref(), sink)?
@@ -1268,6 +1271,17 @@ impl Pipeline<OrtLoader> {
 /// CUDA context and libraries. None when the network takes less on the card than its file (C-RADIO's fp32 weights
 /// load as fp16): not measurable, so arena_limit keeps its 0.5 GiB default rather than counting the context as 0
 /// (senior review 2026-10-27 S3: 0 left a later low-VRAM job's stage-1 arena ~0.33 GiB over its limit).
+/// A clip shorter than its window runs stage 1 on all its frames at once; the Core ML set has fixed windows (`have`, its
+/// stage-1 batches at this size), and copies of the last frame would change the matte, so a clip shorter than every
+/// one is refused in words (whole-code review 2026-10-27: it said "pick a window it was built for", which a 1-3 frame
+/// clip can't).
+fn coreml_short_clip(t_all: usize, chunk: usize, have: &[usize]) -> Option<String> {
+    let smallest = *have.first()?;
+    (t_all < chunk && t_all < smallest).then(|| {
+        format!("this clip has {t_all} frame(s), fewer than the Core ML set's smallest window ({smallest} frames): so short a clip runs on a graphics card or the CPU provider")
+    })
+}
+
 fn overhead_outside_weights(own: u64, weights: u64) -> Option<u64> {
     (own >= weights).then(|| own - weights)
 }

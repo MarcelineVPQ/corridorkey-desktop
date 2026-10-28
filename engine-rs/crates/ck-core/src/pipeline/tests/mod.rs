@@ -371,3 +371,14 @@ fn an_unknown_own_memory_reading_unloads_the_networks_first() {
     assert_eq!(h.pipe.budget_from(|| read(None)), Some(6 << 30));
     assert_eq!((reads.get(), h.pipe.nets.len()), (3, 0));
 }
+
+#[test]
+fn a_clip_shorter_than_every_core_ml_window_is_refused_in_words() {
+    // review 2026-10-27: a 1-3 frame clip on Core ML failed "pick a window it was built for"
+    let e = coreml_short_clip(2, 8, &[8, 16]).unwrap();
+    assert!(e.starts_with("this clip has 2 frame(s), fewer than the Core ML set's smallest window (8 frames)"), "{e}");
+    // a window the set has, a clip at least as long as the window, or no set: not this message
+    assert_eq!(coreml_short_clip(2, 8, &[2, 8]), None);
+    assert_eq!(coreml_short_clip(8, 8, &[8]), None);
+    assert_eq!(coreml_short_clip(2, 8, &[]), None);
+}
