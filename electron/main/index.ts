@@ -835,6 +835,22 @@ function persist(): void {
   }
 }
 
+// A clip's options arrive per slider step: the settings file is written once they pause, not per step (senior review
+// M2), and at quit if one is still waiting.
+let persistTimer: NodeJS.Timeout | null = null;
+function persistSoon(): void {
+  if (persistTimer) clearTimeout(persistTimer);
+  // lifetime: OK — one-shot, re-armed by the next change; flushed at quit (flushPersist)
+  // loop: NOT-WORTH — one settings write once the changes pause for 500 ms
+  persistTimer = setTimeout(flushPersist, 500);
+}
+function flushPersist(): void {
+  if (!persistTimer) return;
+  clearTimeout(persistTimer);
+  persistTimer = null;
+  persist();
+}
+
 function registerIpc(): void {
   // Every channel answers only the app's own page (its window's top frame): fromAppPageOnly (validate.ts), on top of the
   // sandbox; gate tools/check_ipc_sender.mjs
@@ -1097,7 +1113,7 @@ function registerIpc(): void {
     const options: JobOptions = sanitizeOptions(optionsIn);
     queue.setOptions(id, options);
     settings = { ...settings, lastOptions: { ...options, hintFirstFrame: null, hintVideo: null, hintMode: "none" } };
-    persist();
+    persistSoon();
   });
   handle(IPC.estimateMemory, async (_e, idIn: unknown): Promise<MemoryEstimateResult> => {
     const id = idArg(idIn);
@@ -1343,6 +1359,7 @@ let quitCleaned = false;
 app.on("before-quit", (e) => {
   if (quitCleaned) return;
   quitCleaned = true;
+  flushPersist();
   e.preventDefault();
   // a running corridorkey stops cleanly (SIGTERM), or is killed within the grace: it doesn't end with the app on its own
   const cleanup = Promise.all([queue.shutdown(), appConsole.shutdown()]);

@@ -96,7 +96,7 @@ export function QueuePage(props: {
             queueRunning={state.queueRunning}
             platform={state.system.platform}
             tensorrt={state.tensorrt}
-            onChange={(o) => void window.ck.setJobOptions(job.id, o)}
+            onChange={(o) => window.ck.setJobOptions(job.id, o)}
           />
         ) : (
           <p className="hint-text">Select a clip to see its settings.</p>

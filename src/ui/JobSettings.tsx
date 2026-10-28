@@ -2,7 +2,7 @@
 // Every control maps to one engine option (docs/ENGINE_PROTOCOL.md) and
 // changes what the run does (rule 4). Locked once the clip has run.
 import { Clapperboard, Film, FolderOpen, Layers, MemoryStick, Scaling, SunMedium, Wand2, X, Zap } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { HintFileKind, Job, JobOptions, MemoryChoice, MemoryEstimate, MemoryEstimateResult, ModelScale, OutputName, TrtState, VideoCodec, WindowEstimate } from "../shared/types";
 import { FRAME_DIR_FPS_RANGE, frameRateOf, LINEAR_RANGES, OUTPUT_NAMES, VRAM_LIMIT_AUTO_HELP, scaledSize, videoCodecsFor, vramLimitChoices, windowChoices, withCutoutAlpha } from "../shared/types";
 import { gibBytes } from "../shared/units";
@@ -57,11 +57,36 @@ export function JobSettings({
   platform: string;
   // the TensorRT setting and what is built (a waiting clip's line); absent: no line
   tensorrt?: TrtState;
-  onChange: (o: JobOptions) => void;
+  /** sends the clip's new options; resolves once the main process has applied them */
+  onChange: (o: JobOptions) => Promise<void>;
 }) {
-  const o = job.options;
+  // The options shown are a local copy, changed at once (senior review M2): a slider or checkbox never waits for the
+  // main process's state push (coalesced to 100 ms) to echo it, so it doesn't snap back, and two quick changes never
+  // build on options without the first. The first push after every change was applied is the truth again.
+  const [local, setLocal] = useState<{ id: string; options: JobOptions } | null>(null);
+  const localRef = useRef(local);
+  const pending = useRef(0);
+  const seen = useRef(job.options);
+  useEffect(() => {
+    if (seen.current === job.options) return;
+    seen.current = job.options;
+    if (pending.current === 0) {
+      localRef.current = null;
+      setLocal(null);
+    }
+  }, [job.options]);
+  // another clip, or a clip that started: its own options
+  const current = (l: typeof local) => (l?.id === job.id && job.status === "waiting" ? l.options : job.options);
+  const o = current(local);
   // a video cutout always comes with the Alpha output (its alpha)
-  const set = (patch: Partial<JobOptions>) => onChange(withCutoutAlpha({ ...o, ...patch }));
+  const set = (patch: Partial<JobOptions>) => {
+    // on the newest copy, not this render's: a second change in the same moment keeps the first
+    const next = withCutoutAlpha({ ...current(localRef.current), ...patch });
+    localRef.current = { id: job.id, options: next };
+    setLocal(localRef.current);
+    pending.current++;
+    void onChange(next).finally(() => pending.current--);
+  };
   const video = o.outputFormat === "video";
   const alphaForCutout = video && o.outputs.includes("cutout");
   const codecs = videoCodecsFor(platform);
@@ -73,10 +98,11 @@ export function JobSettings({
     if (path) set(kind === "hint-image" ? { hintFirstFrame: path, hintMode: "first-frame" } : { hintVideo: path, hintMode: "video" });
   };
   const toggleOutput = (name: OutputName) => {
-    const has = o.outputs.includes(name);
-    if (has && o.outputs.length === 1) return; // at least one output
+    const outputs = current(localRef.current).outputs;
+    const has = outputs.includes(name);
+    if (has && outputs.length === 1) return; // at least one output
     // loop: NOT-WORTH — four outputs per click
-    set({ outputs: has ? o.outputs.filter((x) => x !== name) : OUTPUT_NAMES.filter((x) => x === name || o.outputs.includes(x)) });
+    set({ outputs: has ? outputs.filter((x) => x !== name) : OUTPUT_NAMES.filter((x) => x === name || outputs.includes(x)) });
   };
   const despillUsed = o.outputs.includes("checker") || o.outputs.includes("cutout");
   const hintFile = o.hintMode === "first-frame" ? o.hintFirstFrame : o.hintMode === "video" ? o.hintVideo : null;
