@@ -39,6 +39,28 @@ describe("EngineProcess", () => {
     expect(replies).toEqual([{ type: "log", text: "hi" }]);
   });
 
+  it("review 2026-10-28 N2: an engine dying at start reports once its pipes drain, so its last stderr line is in the tail", async () => {
+    let child: ChildProcess | null = null;
+    let tail: string[] = [];
+    const p = new EngineProcess(
+      launch,
+      () => {},
+      (_c, _s, t) => (tail = t),
+      () =>
+        (child = fakeChild(() => {
+          // the realistic order: the process exits, then its last stderr line arrives, then the pipes close
+          setImmediate(() => {
+            child!.emit("exit", 1, null);
+            (child!.stderr as PassThrough).end("engine failed to start: libonnxruntime.so.1: cannot open shared object file\n");
+            setTimeout(() => child!.emit("close", 1, null), 20);
+          });
+        })),
+    );
+    await expect(p.start()).rejects.toThrow(/exited before answering \(code 1\)/);
+    expect(p.stderrTail()).toEqual(["engine failed to start: libonnxruntime.so.1: cannot open shared object file"]);
+    expect(tail).toEqual(["engine failed to start: libonnxruntime.so.1: cannot open shared object file"]);
+  });
+
   it("refuses an engine with another protocol", async () => {
     const p = new EngineProcess(
       launch,

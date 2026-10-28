@@ -17,6 +17,8 @@ export const PROTOCOL = 1;
 const PING_TIMEOUT_MS = 120_000; // loading ONNX Runtime + CUDA init; more when the disk cache is cold
 const QUIT_GRACE_MS = 10_000;
 const STDERR_LINES = 40;
+/** How long an exited engine's report waits for its stdout and stderr to drain. */
+const CLOSE_WAIT_MS = 1_000;
 
 export type EngineReply = { type: string; id?: string; [key: string]: unknown };
 
@@ -132,8 +134,20 @@ export class EngineProcess {
     child.on("exit", (code, signal) => {
       this.exited = true;
       this.child = null;
-      this.fail(new Error(`engine exited before answering (${signal ?? `code ${code}`})`));
-      this.onExit(code, signal, [...this.stderr]);
+      // reported once its pipes are drained ('close'), so the tail holds its last words ("engine failed to start: …"),
+      // which 'exit' can come before (review 2026-10-28 N2); at most CLOSE_WAIT_MS later, should a writer it started
+      // still hold the pipes
+      let reported = false;
+      const report = () => {
+        if (reported) return;
+        reported = true;
+        this.fail(new Error(`engine exited before answering (${signal ?? `code ${code}`})`));
+        this.onExit(code, signal, [...this.stderr]);
+      };
+      child.once("close", report);
+      // lifetime: OK — one timer per engine exit, a no-op once reported
+      // loop: SERIAL-REQUIRED — the wait for the pipes to drain [bounded: CLOSE_WAIT_MS]
+      setTimeout(report, CLOSE_WAIT_MS).unref();
     });
     return new Promise<EngineReply>((resolve, reject) => {
       // loop: SERIAL-REQUIRED — the ping deadline (PING_TIMEOUT_MS), once per engine start
