@@ -1,6 +1,10 @@
 //! Work done ahead on its own thread: the next items of a sequence (decoded and resized network inputs) are
 //! prepared while the graphics card runs the current one. Items come out in order; the producer stops at its
-//! end (`Ok(None)`), at its first error (passed on), or when the consumer is dropped.
+//! end (`Ok(None)`), at its first error (passed on), or when the consumer is dropped. Dropping the consumer waits
+//! for the producer to end (at most the item it is making): a failed attempt's thread, and the frames and temporary
+//! files it holds, never outlive the attempt (final review 2026-10-28 S3: the window thread kept decoding a whole
+//! window while the halve-and-retry's new decode started). A producer must therefore never wait on something the
+//! consumer's owner drops after the `Ahead` (declare such a sender after it).
 use crate::Error;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver};
@@ -24,7 +28,8 @@ impl Seconds {
 }
 
 pub(crate) struct Ahead<T> {
-    rx: Receiver<Result<T, Error>>,
+    /// None only while dropping (dropped first, so a producer blocked on a send ends)
+    rx: Option<Receiver<Result<T, Error>>>,
     /// seconds the producer spent making items
     seconds: Seconds,
     /// the producer thread, joined when its channel closes: a panic there becomes this sequence's error instead of
@@ -69,13 +74,14 @@ impl<T: Send + 'static> Ahead<T> {
                 }
             }
         })?;
-        Ok(Ahead { rx, seconds, producer: Some(producer) })
+        Ok(Ahead { rx: Some(rx), seconds, producer: Some(producer) })
     }
 
     /// The next item, or None at the end; Err when the producer failed or panicked.
     pub(crate) fn next_item(&mut self) -> Result<Option<T>, Error> {
+        let Some(rx) = self.rx.as_ref() else { return Ok(None) };
         // loop: SERIAL-REQUIRED — the consumer takes items in order [bounded: the producer ends at its sequence's end or first error, which closes the channel]
-        match self.rx.recv() {
+        match rx.recv() {
             Ok(Ok(v)) => Ok(Some(v)),
             Ok(Err(e)) => Err(e),
             // the channel closed: the producer ended, normally or in a panic
@@ -89,6 +95,17 @@ impl<T: Send + 'static> Ahead<T> {
 
     pub(crate) fn seconds(&self) -> f64 {
         self.seconds.get()
+    }
+}
+
+impl<T> Drop for Ahead<T> {
+    fn drop(&mut self) {
+        // the receiver first: a producer blocked on a send (or at its next one) then ends
+        self.rx.take();
+        if let Some(h) = self.producer.take() {
+            // loop: SERIAL-REQUIRED — joins the producer after its receiver is gone [bounded: it finishes the item it is making, its send fails, it returns]
+            let _ = h.join();
+        }
     }
 }
 
@@ -128,6 +145,35 @@ mod tests {
         assert_eq!(a.next_item().unwrap(), Some(2));
         assert_eq!(a.next_item().unwrap_err().message, "bad frame");
         assert_eq!(a.next_item().unwrap(), None);
+    }
+
+    #[test]
+    fn dropping_the_consumer_waits_for_the_producer() {
+        // final review 2026-10-28 S3: a failed pass dropped its Ahead and the producer went on with its item (a whole
+        // window of frames, the temp files' handles) while the retry started
+        use std::sync::atomic::AtomicBool;
+        struct Held(Arc<AtomicBool>);
+        impl Drop for Held {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        let released = Arc::new(AtomicBool::new(false));
+        let held = Held(released.clone());
+        let mut i = 0;
+        let mut a = Ahead::spawn("test-slow", 0, move || {
+            let _held = &held;
+            i += 1;
+            if i > 1 {
+                // the item being made when the consumer gives up
+                std::thread::sleep(std::time::Duration::from_millis(300));
+            }
+            Ok(Some(i))
+        })
+        .unwrap();
+        assert_eq!(a.next_item().unwrap(), Some(1));
+        drop(a);
+        assert!(released.load(Ordering::SeqCst), "the producer (and what it holds) outlived its Ahead");
     }
 
     #[test]

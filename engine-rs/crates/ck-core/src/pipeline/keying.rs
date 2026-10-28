@@ -404,6 +404,9 @@ impl<L: Loader> Pipeline<L> {
                 Ok(Some(WindowInputs { frames, rgb, hint_video, found, rvm }))
             })?
         };
+        // the sender moved to a binding declared after `windows`, so it is dropped first: an error before stage 1's
+        // type is sent (its load failing) ends the input thread's wait, and `windows`' drop can join it
+        let rgb_type_tx = rgb_type_tx;
         let baton_frame = BATON_CH * h16 * w16;
         let mut baton_file = if low_vram { Some(F16File::create(&ctx.temps.baton, baton_frame)?) } else { None };
         let mut blend = BatonBlend::default();
