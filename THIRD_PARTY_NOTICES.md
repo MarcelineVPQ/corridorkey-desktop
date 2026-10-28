@@ -261,9 +261,14 @@ every copy of the app, unchanged, as Electron provides them:
 
 ## Downloaded at first run, not shipped
 
-The app's setup downloads these directly from their original sources onto the user's machine (each file pinned
-by size and SHA-256 in electron/main/install.ts); this app does not redistribute them. They stay under their
-publishers' licences; the wheels' own licence files are kept next to the libraries they unpack.
+The app's setup downloads these onto the user's machine (each file pinned by size and SHA-256 in
+electron/main/install.ts); they aren't inside the app's package.
+
+- The GPU runtime's wheels come directly from their publishers; this project does not redistribute them. They stay
+  under their publishers' licences; the wheels' own licence files are kept next to the libraries they unpack.
+- The model sets are this project's converted copies of Corridor Digital's, NVIDIA's, Microsoft's and Google
+  DeepMind's weights, redistributed from this repository's GitHub releases, each with ATTRIBUTION.md, NOTICE and
+  the licence texts (below).
 
 ### GPU runtime (Python wheels, unpacked; no Python is installed)
 
@@ -292,10 +297,11 @@ publishers' licences; the wheels' own licence files are kept next to the librari
   - `2.0.0-onnx.5-coreml` (macOS: Core ML): https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.5-coreml
   - `2.0.0-onnx.5-trt` (Linux: the opt-in TensorRT jobs): https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.5-trt
 - **Modified:** every network is converted from the original PyTorch checkpoint to ONNX, with exact graph rewrites
-  for speed and portrait input (listed in the set's manifest.json); the fp16 files follow CorridorKey 2.0's own
-  precision policy (fp16 convolutions, matrix multiplies and attention; fp32 norms, softmax, exp/pow, sums and
-  upsampling); the TensorRT set adds TensorRT-specific rewrites; the Core ML set holds fixed-shape copies for ONNX
-  Runtime's Core ML provider. Each model release carries ATTRIBUTION.md, NOTICE and the licence texts below.
+  for speed and portrait input (listed per file in the base set's manifest.json); the fp16 files follow
+  CorridorKey 2.0's own precision policy (fp16 convolutions, matrix multiplies and attention; fp32 norms, softmax,
+  exp/pow, sums and upsampling); the TensorRT set adds TensorRT-specific rewrites; the Core ML set holds
+  fixed-shape copies for ONNX Runtime's Core ML provider. Each model release carries ATTRIBUTION.md, NOTICE and the
+  licence texts below.
 - Three of the five networks are foundation models. They stay under their publishers' licences, **not** under the
   CorridorKey licence, with no added terms:
   - **C-RADIOv4-SO400M**, NVIDIA Corporation (https://huggingface.co/nvidia/C-RADIOv4-SO400M, revision
