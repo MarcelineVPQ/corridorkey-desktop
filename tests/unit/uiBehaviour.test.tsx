@@ -245,6 +245,28 @@ describe("readouts", () => {
     expect(bar.hasAttribute("aria-valuemax")).toBe(false);
   });
 
+  it("the Model set tile says the version; its long folder is its own shortened line, never clipped in the tile", () => {
+    mockCk();
+    const dir = "/home/someone/.local/share/corridorkey-desktop/models/2.0.0-onnx.5";
+    const tech = {
+      provider: "cuda",
+      precision: "fp16",
+      tensorrtRequested: false,
+      fallbackReason: null,
+      fallbacks: {},
+      range: null,
+      cache: null,
+      notAsked: null,
+      modelSet: "2.0.0-onnx.5",
+      modelsDir: dir,
+    };
+    const { container } = render(<JobView job={job("a", { status: "done", tech })} />);
+    const tile = [...container.querySelectorAll(".stat")].find((el) => el.textContent?.startsWith("Model set"));
+    expect(tile?.textContent).toBe("Model set2.0.0-onnx.5");
+    expect(screen.getByText(/Model set folder:/)).toBeTruthy();
+    expect(screen.getByTitle(dir)).toBeTruthy();
+  });
+
   it("review N4: a known total keeps its value and range", () => {
     render(<ProgressBar label="Frames" value={3} max={10} />);
     const bar = screen.getByRole("progressbar", { name: "Frames" });
