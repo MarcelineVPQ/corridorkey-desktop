@@ -210,6 +210,8 @@ Each engine build on the way is labelled as a dev step:
 | **0.0.5-dev** | 2026-10-24 | TensorRT re-measured on today's engine (opt-in, not in the app yet; results below) |
 | **0.0.6-dev** | 2026-10-24 | TensorRT takes CUDA's window, so its mattes match (results below) |
 | **0.0.7-dev** | 2026-10-24 | TensorRT at 4K: DCI 4K and UHD get their own engine range (results below) |
+| **0.0.8-dev** | 2026-10-25 | model set `onnx.4`: CorridorKey 2.0's precision policy (dev.1's models; results below, with TensorRT on it and a same-day re-measurement against the original on 2026-10-26) |
+| **0.0.9-dev** | 2026-10-28 | model set `onnx.5`: our own stage 1 / stage 2 graphs, C-RADIO's weights stored in fp16, download 3.30 → 2.48 GB; and its Core ML set `onnx.5-coreml` for the Mac (dev.2's models; results below) |
 
 The same HD bench, run on different days as the engine improved (totals, seconds; Original = PyTorch):
 
@@ -399,7 +401,7 @@ Today's CUDA 4K totals (147-152 s) are below the 4K table's 170-174 s (0.0.3-dev
 took 04_5h from 170.1 to 162.7 s; these runs also write EXR instead of video, and the rest of the gap wasn't measured
 on its own. The 4K table above stays as measured.
 
-### onnx.4: CorridorKey 2.0's precision policy (2026-10-25)
+### 0.0.8-dev: onnx.4, CorridorKey 2.0's precision policy (2026-10-25)
 
 The app now downloads model set `2.0.0-onnx.4`: MoGe, RVM, stage 1 and stage 2 compute the way CorridorKey 2.0 does
 under its autocast (fp16 convolutions, matrix multiplies and attention; fp32 norms, softmax, exp/pow, sums and
@@ -416,7 +418,7 @@ The cost is real: 12-21 % more time, and at HD 0.9 GiB more graphics memory and 
 with how CorridorKey 2.0 itself computes, not a measured quality change (Quality, "What we got wrong" 1). The tables
 above stay as measured with onnx.3.
 
-### TensorRT on onnx.4 (2026-10-25)
+### 0.0.8-dev: TensorRT on onnx.4 (2026-10-25)
 
 One run each on the RTX 5080, the shipping model set onnx.4 and the app's normal settings (automatic window, 12 GB
 budget, alpha + foreground video outputs). First a cold build into an empty TensorRT cache (the job builds its own
@@ -438,7 +440,7 @@ From these: the build pays for itself after about 750 frames at 4K (about 30 s o
 frames at 1280×1080. Not measured: the HD 1920×1080 range and every other range, other cards, and the build as the
 very first on a card (the 4K build ran second, with the timing cache the first one wrote).
 
-### The same-day pair on onnx.4 (2026-10-26)
+### 0.0.8-dev re-measured: the same-day pair on onnx.4 (2026-10-26)
 
 The headline numbers above, measured again because the app ships onnx.4 since 2026-10-25: the original and this
 engine back to back on the RTX 5080, the same day, with `tools/vs_original.sh --steps speed --repeats 1` (12 GB
@@ -472,6 +474,65 @@ so loading the models is most of its time.
 Since this pair the memory table moved to onnx.4 too (main 1e7cf76, "What we got wrong" item 5's follow-up): at the
 pair's 12 GB budget a 4K clip now gets the 4/2 window instead of 8/4 (slower, and safe: 3200×1800 at 8/4 measured
 11.79 GiB). On a 16 GB card with its whole free memory (about 14.5 GiB), 4K keeps 8/4 and 1080p gets 24/12 normal.
+
+### 0.0.9-dev: onnx.5, our own graphs (2026-10-28)
+
+dev.2 downloads model set `2.0.0-onnx.5`: our own export of stage 1 and stage 2, made so AMD's MIGraphX and Apple's
+Neural Engine can take them. Stage 2 runs one masked Swin attention per block, stage 1 takes its regions by one gather
+each in the original's frame-major token order, and the RMS norms are written in plain operations. C-RADIO's weights
+are stored in fp16 (ONNX Runtime converted them to fp16 on load before, so the card holds the same weights), which
+takes the models download from 3.30 to 2.48 GB. MoGe and RVM are byte for byte onnx.4's; Corridor's code and weights
+are unchanged (docs/ONNX_EXPORT.md, "onnx.5"). The Mac gets its own Core ML set from the same export,
+`onnx.5-coreml` (Apple Silicon, below).
+
+Method: RTX 5080 (the PC above), CUDA fp16, the same engine binary, the automatic window from the card's free memory
+(13.3-13.5 GiB; both sets picked the same window on every clip), alpha + foreground as float EXR, no hint. One run per
+set, back to back per clip, onnx.4 first (`tools/engine_bench.mjs`, then `tools/matte_compare.py` and
+`tools/temporal_stability.py` on the two outputs). Eight clips on 2026-10-27; 08_3a and 04_2c on 2026-10-28, after the
+first run was cut short. These runs write float EXR, where most tables above wrote video, so their totals and steady
+rates compare with each other, not with those tables.
+
+| Clip (window) | Steady fps, onnx.4 → onnx.5 | Change | Total, onnx.4 → onnx.5 | Change | Graphics memory (GiB), onnx.4 → onnx.5 | RAM (GiB), onnx.4 → onnx.5 |
+| --- | --- | --- | --- | --- | --- | --- |
+| godiva_close 960×720, 349 frames (80/40) | 11.04 → 11.43 | +3.5 % | 41.9 → 39.9 s | −5.0 % | 9.84 → 9.00 | 6.45 → 6.32 |
+| locked_backdrop 1280×1080, 80 (48/24 low) | 15.46 → 15.84 | +2.4 % | 18.8 → 17.7 s | −5.5 % | 9.04 → 9.04 | 6.49 → 6.58 |
+| metal_glasses 1280×1080, 139 (48/24 low) | 15.20 → 15.57 | +2.4 % | 28.9 → 27.8 s | −3.9 % | 9.04 → 9.04 | 6.61 → 6.70 |
+| smoke 1280×1080, 250 (48/24 low) | 15.11 → 15.45 | +2.3 % | 51.4 → 49.9 s | −2.8 % | 9.04 → 9.04 | 6.60 → 6.78 |
+| walking_sitting 1280×1080, 314 (48/24 low) | 16.45 → 16.50 | +0.3 % | 60.0 → 59.2 s | −1.3 % | 9.05 → 9.04 | 6.59 → 6.86 |
+| with_motion_blur 1280×1080, 50 (48/24 low) | 16.31 → 16.55 | +1.5 % | 13.4 → 12.5 s | −6.8 % | 9.04 → 9.04 | 6.11 → 6.27 |
+| 04_5h 4096×2160 EXR, 120 (8/4) | 0.75 → 0.76 | +2.1 % | 176.3 → 173.4 s | −1.6 % | 10.82 → 10.82 | 7.48 → 7.35 |
+| 04_5d 4096×2160 EXR, 120 (8/4) | 0.76 → 0.78 | +2.4 % | 174.9 → 170.0 s | −2.8 % | 10.82 → 10.82 | 7.43 → 7.31 |
+| 08_3a 4096×2160 EXR, 120 (8/4) | 0.76 → 0.78 | +3.2 % | 177.9 → 169.6 s | −4.7 % | 10.82 → 10.82 | 7.39 → 7.16 |
+| 04_2c 4096×2160 EXR, 120 (8/4) | 0.76 → 0.79 | +2.8 % | 175.5 → 168.5 s | −4.0 % | 10.82 → 10.82 | 7.42 → 7.12 |
+| **All ten** | | | **919.0 → 888.4 s** | **−3.3 %** | | |
+
+Honestly: 0.3-3.5 % faster steady (1.3-6.8 % on the totals) is about the size of the run-to-run spread (two runs of
+one build agreed within 1 % on four HD clips, 6 % on locked_backdrop and 8 % on godiva_close; "Repeatability" above),
+it is one run per set, and onnx.4 always ran first. So: no slower, the same graphics memory (godiva_close peaked
+0.84 GiB lower in its one run), RAM 0.09-0.27 GiB higher on the 1280×1080 clips (godiva_close 0.13 lower) and 0.12-0.30 GiB lower at 4K.
+
+Mattes, onnx.5 against onnx.4 (every frame, EXR read as float), and the hair "sizzle" (`temporal_stability.py`: the
+second difference of alpha in the static hair-edge band, pooled mean; the flow check kept the same moving pixels for
+both sets on every clip, so both are measured over the same regions):
+
+| Clip | alpha max | alpha MAE | % off by more than 1/255 | alpha PSNR | sizzle, onnx.4 / onnx.5 |
+| --- | --- | --- | --- | --- | --- |
+| godiva_close | 0.37/255 | 2.71e-5 | 0 | 79.5 dB | 0.010835 / 0.010835 |
+| locked_backdrop | 0.37/255 | 1.20e-5 | 0 | 84.6 dB | 0.020542 / 0.020543 |
+| metal_glasses | 0.37/255 | 1.31e-5 | 0 | 83.6 dB | 0.009265 / 0.009265 |
+| smoke | 0.50/255 | 1.72e-5 | 0 | 83.0 dB | 0.012760 / 0.012761 |
+| walking_sitting | 0.50/255 | 7.82e-6 | 0 | 88.3 dB | 0.036589 / 0.036569 |
+| with_motion_blur | 0.37/255 | 8.82e-6 | 0 | 86.6 dB | 0.037518 / 0.037536 |
+| 04_5h | 0.37/255 | 7.84e-6 | 0 | 86.4 dB | 0.018119 / 0.018120 |
+| 04_5d | 0.37/255 | 5.67e-6 | 0 | 87.8 dB | 0.025207 / 0.025204 |
+| 08_3a | 0.37/255 | 5.21e-6 | 0 | 88.7 dB | 0.021494 / 0.021494 |
+| 04_2c | 0.25/255 | 1.03e-5 | 0 | 84.8 dB | 0.020489 / 0.020491 |
+
+Every pixel of every frame within half a 1/255 step of onnx.4's, and the same sizzle to within 0.1 % on every clip.
+
+**TensorRT on onnx.5: being measured.** dev.2's TensorRT set (`2.0.0-onnx.5-trt`: stage 1 and stage 2 from onnx.5's
+export, C-RADIO, MoGe and RVM byte for byte onnx.4's) hasn't been timed or compared yet; until it is, the TensorRT
+numbers in this README are onnx.4's (0.0.8-dev).
 
 ### TensorRT, first measurement (2026-10-21)
 
