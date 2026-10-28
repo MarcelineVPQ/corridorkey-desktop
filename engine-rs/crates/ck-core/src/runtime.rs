@@ -292,6 +292,8 @@ impl Runtime {
     /// The process's runtime (one ORT environment per process), with the engine's settings: `cfg.ort` is
     /// libonnxruntime for a load-dynamic build.
     pub fn init(cfg: &EngineConfig) -> Result<&'static Runtime, Error> {
+        // a setting the writers read (CK_ENGINE_EXR_FSYNC), applied with the rest of the engine's settings
+        crate::writers::set_exr_fsync(cfg.exr_fsync);
         GLOBAL.get_or_init(|| Runtime::new(cfg)).as_ref().map_err(|e| Error::engine(e.clone()))
     }
 

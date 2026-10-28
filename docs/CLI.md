@@ -127,6 +127,7 @@ would find the key frames beside the plates.
   `.replaced` too.
 - Each EXR frame is written to a hidden `.<name>.partial`, flushed to disk (fsync) and renamed into place (ck-core,
   the app's jobs too): a writer killed mid-frame, or a power loss, never leaves a cut or empty EXR at the frame's name.
+  `CK_ENGINE_EXR_FSYNC=0` skips the fsync: unmeasured on SMB/NFS; turn off only if per-frame writes are slow there.
 - Temporary files (the RVM features and states, GBs on long shots) go in a folder of the run's own under `--temp DIR`,
   else `OPENJD_SESSION_WORKING_DIR` (OpenJD's session folder), else the job file's `temp_dir`, else `TMPDIR`.
 - Both folders are removed when the run ends, however it ends. A SIGKILL leaves them (hidden `.corridorkey-*` and

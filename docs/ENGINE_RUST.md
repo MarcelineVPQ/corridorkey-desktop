@@ -127,6 +127,9 @@ The engine runs `ffmpeg` / `ffprobe` from the system: they are not bundled.
   Core ML measurement knobs, off by default and not measured yet: `CK_ENGINE_COREML_FAST_PREDICTION=1` (Core ML's
   SpecializationStrategy FastPrediction), `CK_ENGINE_COREML_LOW_PRECISION_GPU=1` (AllowLowPrecisionAccumulationOnGPU:
   float16 sums on the GPU; kept only if mattes stay within the CUDA bar).
+  `CK_ENGINE_EXR_FSYNC=0`: EXR frames are renamed into place without an fsync first (default on: after a power loss a
+  frame's name never holds an empty file; ~10 ms per 40 MB on a local SSD). Unmeasured on SMB/NFS; turn off only if
+  per-frame writes are slow there.
   MIGraphX (AMD, docs/AMD.md): `CK_ENGINE_MIGRAPHX_EP` (the provider plugin `libmigraphx-ep.so`; else found next to ONNX
   Runtime's package), `CK_ENGINE_MIGRAPHX_CACHE` (compiled programs; default `migraphx` next to the TensorRT cache root).
   Also `CK_ENGINE_DEVICE` (auto | cuda | cpu | coreml | migraphx, = `--device`), `CK_ENGINE_PRECISION` (fp16 | fp32), `CK_ENGINE_MODELS`,

@@ -459,8 +459,11 @@ pub(crate) fn write_exr(path: &Path, w: usize, h: usize, channels: usize, nhwc: 
     });
     // on disk before the rename (final review 2026-10-28 N10): after a power loss or host crash the frame's name then
     // holds the whole frame or the old one, never a zero-length file that `--skip-existing` would trust. Write access:
-    // Windows' FlushFileBuffers needs it
+    // Windows' FlushFileBuffers needs it. CK_ENGINE_EXR_FSYNC=0 skips it (`set_exr_fsync`)
     let res = res.and_then(|()| {
+        if !EXR_FSYNC.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(());
+        }
         std::fs::OpenOptions::new().write(true).open(&part).and_then(|f| f.sync_all()).map_err(|e| crate::Error::write("an EXR frame", path, &e))
     });
     let res = res.and_then(|()| std::fs::rename(&part, path).map_err(|e| crate::Error::write("an EXR frame", path, &e)));
@@ -468,6 +471,14 @@ pub(crate) fn write_exr(path: &Path, w: usize, h: usize, channels: usize, nhwc: 
         let _ = std::fs::remove_file(&part);
     }
     res
+}
+
+/// Whether `write_exr` fsyncs a frame before its rename (CK_ENGINE_EXR_FSYNC, config.rs; on unless turned off).
+static EXR_FSYNC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Set from the engine's settings once at startup (`Runtime::init`).
+pub fn set_exr_fsync(on: bool) {
+    EXR_FSYNC.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// The hidden name a frame is written under before it is renamed into place (`write_exr`).

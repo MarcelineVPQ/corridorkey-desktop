@@ -120,6 +120,9 @@ pub struct EngineConfig {
     /// CK_ENGINE_COREML_LOW_PRECISION_GPU=1: Core ML's AllowLowPrecisionAccumulationOnGPU (float16 sums on the GPU
     /// instead of float32). Off by default: a measurement knob; mattes must stay within the CUDA bar to keep it
     pub coreml_low_precision_gpu: bool,
+    /// CK_ENGINE_EXR_FSYNC=0: EXR frames are renamed into place without an fsync first. On by default (a power loss
+    /// never leaves an empty frame at its name); unmeasured on SMB/NFS: turn off only if per-frame writes are slow there
+    pub exr_fsync: bool,
     /// MIGraphX's compiled-program cache root (CK_ENGINE_MIGRAPHX_CACHE, else `migraphx` next to the TensorRT cache root)
     pub migraphx_cache: PathBuf,
     /// CK_ENGINE_MIGRAPHX_EP: AMD's MIGraphX provider plugin (libmigraphx-ep.so; else found next to ONNX Runtime's package)
@@ -154,6 +157,7 @@ impl Default for EngineConfig {
             coreml_cache: PathBuf::from("coreml"),
             coreml_fast_prediction: false,
             coreml_low_precision_gpu: false,
+            exr_fsync: true,
             migraphx_cache: PathBuf::from("migraphx"),
             migraphx_ep: None,
             trt_build: None,
@@ -225,6 +229,10 @@ impl EngineConfig {
         };
         let coreml_fast_prediction = on_off("CK_ENGINE_COREML_FAST_PREDICTION")?;
         let coreml_low_precision_gpu = on_off("CK_ENGINE_COREML_LOW_PRECISION_GPU")?;
+        let exr_fsync = match var("CK_ENGINE_EXR_FSYNC") {
+            Some(v) => pick("CK_ENGINE_EXR_FSYNC", &v, &[("0", false), ("1", true), ("false", false), ("true", true)])?,
+            None => true,
+        };
         let migraphx_cache = var("CK_ENGINE_MIGRAPHX_CACHE")
             .map(PathBuf::from)
             .unwrap_or_else(|| trt_cache.parent().map(|p| p.join("migraphx")).unwrap_or_else(|| PathBuf::from("migraphx")));
@@ -298,6 +306,7 @@ impl EngineConfig {
             coreml_cache,
             coreml_fast_prediction,
             coreml_low_precision_gpu,
+            exr_fsync,
             migraphx_cache,
             migraphx_ep: var("CK_ENGINE_MIGRAPHX_EP").map(PathBuf::from),
             trt_build: var("CK_ENGINE_TRT_BUILD").map(PathBuf::from),
@@ -337,6 +346,7 @@ impl EngineConfig {
             "coreml_cache": self.coreml_cache.to_string_lossy(),
             "coreml_fast_prediction": self.coreml_fast_prediction,
             "coreml_low_precision_gpu": self.coreml_low_precision_gpu,
+            "exr_fsync": self.exr_fsync,
             "migraphx_cache": self.migraphx_cache.to_string_lossy(),
             "migraphx_ep": path(&self.migraphx_ep),
             "trt_build": path(&self.trt_build),
@@ -430,6 +440,19 @@ mod tests {
         assert_eq!((j["coreml_fast_prediction"].as_bool(), j["coreml_low_precision_gpu"].as_bool()), (Some(true), Some(true)));
         assert_eq!((j["precision"].as_str(), j["graph_opt"].as_str(), j["arena_shrink"][1].as_str()), (Some("fp32"), Some("layout"), Some("stage1")));
         assert_eq!((j["trt_build_timeout_s"].as_u64(), j["vram_budget_gb"].as_f64()), (Some(1), Some(12.0)));
+    }
+
+    #[test]
+    fn exr_fsync_is_on_unless_turned_off() {
+        // engine re-review 2026-10-28 #3: the opt-out for slow network storage
+        let none = |_: &str| None;
+        let c = EngineConfig::parse(&args(&["e"]), &none, "linux").unwrap();
+        assert!(c.exr_fsync && c.to_json()["exr_fsync"] == true);
+        let off = |k: &str| (k == "CK_ENGINE_EXR_FSYNC").then(|| "0".to_string());
+        let c = EngineConfig::parse(&args(&["e"]), &off, "linux").unwrap();
+        assert!(!c.exr_fsync && c.to_json()["exr_fsync"] == false);
+        let bad = |k: &str| (k == "CK_ENGINE_EXR_FSYNC").then(|| "maybe".to_string());
+        assert!(EngineConfig::parse(&args(&["e"]), &bad, "linux").unwrap_err().contains("CK_ENGINE_EXR_FSYNC"));
     }
 
     #[test]
