@@ -45,7 +45,8 @@ Everything planned lives in one list, [docs/BACKLOG.md](docs/BACKLOG.md), each i
 (row numbers in brackets):
 
 **Working on now: the Mac (Apple Silicon).** The Core ML engine keys 1280×1080 and 1920×1080 clips on an M6 Mac mini
-(CPU + GPU, 16 GB; mattes within 1/255 of CUDA's, 2026-10-27), and the setup installs the Core ML models. Next: the
+(CPU + GPU, 16 GB; model set onnx.5-coreml: alpha MAE 2.1-2.5e-5 against CUDA's mattes, 0.002 % of pixels over
+1/255 or none, 2026-10-28), and the setup installs the Core ML models. Next: the
 first Mac app build, Core ML for 4K [60], the real-Mac gate against CUDA's mattes [24], and self-update on the Mac
 [57].
 
@@ -121,9 +122,11 @@ instead of CUDA. Where that stands:
   It's published (release `models-2.0.0-onnx.5-coreml` from dev.2) and setup downloads it on a Mac; the first Mac build brings that setup.
 - **The app asks for Core ML** (row 58): built, not yet tried on a real Mac.
 - **1280×1080 and 1920×1080 clips only** (row 60): Core ML compiles for fixed frame sizes, so the set has files for
-  1280×1080 clips (padded to 1152×1280) and standard 1920×1080 HD (padded to 1152×1920). The 1920×1080 files are
-  tried on the Mac mini M6 16 GB (2026-10-27, 12 frames, CPU + GPU): peak 3.35 GB at window 4/2 and 5.25 GB at 8/4,
-  about 2.1 fps steady, mattes within 1/255 of CUDA (alpha PSNR 81 dB). 4K has no Core ML set yet.
+  1280×1080 clips (padded to 1152×1280) and standard 1920×1080 HD (padded to 1152×1920). dev.2's set,
+  `onnx.5-coreml`, on the Mac mini M6 16 GB (2026-10-28, CPU + GPU, window 4/2): 1280×1080, 120 frames, 111.0 s,
+  2.84 fps steady, peak 2.64 GB; 1920×1080, 12 frames, 2.02 fps steady, peak 3.78 GB. Mattes against CUDA: alpha MAE
+  2.1-2.5e-5, 0.002 % of pixels over 1/255 at 1280×1080 and none at 1920×1080. The figures and the earlier onnx.4
+  set's: Speed, "Apple Silicon (Core ML)". 4K has no Core ML set yet.
 - **Proven on a real Mac** (row 24): GitHub's runners are virtual Macs without the GPU or the Neural Engine, so Mac
   keying is measured on a real Apple Silicon Mac (an M6 Mac mini, `tools/mac_gate.sh`): mattes within fp16 rounding of
   CUDA on the same clips, and the speed. macOS is in 1.0 only if that gate passes; otherwise 1.0 is Linux and Windows
@@ -533,6 +536,47 @@ Every pixel of every frame within half a 1/255 step of onnx.4's, and the same si
 **TensorRT on onnx.5: being measured.** dev.2's TensorRT set (`2.0.0-onnx.5-trt`: stage 1 and stage 2 from onnx.5's
 export, C-RADIO, MoGe and RVM byte for byte onnx.4's) hasn't been timed or compared yet; until it is, the TensorRT
 numbers in this README are onnx.4's (0.0.8-dev).
+
+### Apple Silicon (Core ML)
+
+The Mac engine runs ONNX Runtime's Core ML backend on its own model set (Core ML compiles for fixed frame sizes:
+1280×1080 clips padded to 1152×1280, and 1920×1080 padded to 1152×1920; no 4K set yet). Measured on a real Mac with
+`tools/mac_gate.sh`, against CUDA on the PC above with the same clip, window and settings; memory is the peak
+phys_footprint of the engine's processes (`tools/mac_memgate.c`), since a Mac's graphics memory is its RAM.
+
+**Test machine (Mac)**
+
+| | |
+| --- | --- |
+| Computer | Mac mini (Mac18,5) |
+| Chip | Apple M6: 6 CPU cores (2 performance + 4 efficiency), 12-core GPU, Neural Engine |
+| Memory | 16 GB unified memory |
+| System | macOS 27.0.1 |
+| CorridorKey Desktop | Rust engine on ONNX Runtime 1.31.0, Core ML provider, compute units CPU + GPU (`cpu-gpu`; the Neural Engine is off by default, docs/ENGINE_RUST.md "Core ML on a 16 GB Mac"), fp16 |
+
+Results so far: 04_5d (Tears of Steel) scaled to 1280×1080 (120 frames) and to 1920×1080 (the first 12 frames),
+low-memory windows, alpha + foreground as float EXR.
+
+| Set, date | Clip, window | Total | Steady fps | Peak footprint | Mattes against CUDA: alpha MAE · alpha max · % > 1/255 |
+| --- | --- | --- | --- | --- | --- |
+| `onnx.4-coreml`, 2026-10-27 | 1280×1080, 120 frames, 4/2 | 160.2 s | | 2.36 GB | (12-frame runs: 2.7-3.1e-5 · 1/255 or less · 0 %) |
+| `onnx.4-coreml`, 2026-10-27 | 1280×1080, 120 frames, 8/4 | 171.9 s | | 3.33 GB | |
+| `onnx.4-coreml`, 2026-10-27 | 1920×1080, 12 frames, 4/2 | 26.2 s | 2.09 | 3.35 GB | 2.14e-5 · 3.42e-3 · 0 % |
+| `onnx.4-coreml`, 2026-10-27 | 1920×1080, 12 frames, 8/4 | 19.7 s | 2.08 | 5.25 GB | 2.23e-5 · 1.46e-3 · 0 % |
+| **`onnx.5-coreml`** (dev.2), 2026-10-28 | 1280×1080, 120 frames, 4/2 | 111.0 s | 2.84 | 2.64 GB | 2.50e-5 · 1.90e-2 · 0.002 % (none over 4/255) |
+| **`onnx.5-coreml`** (dev.2), 2026-10-28 | 1920×1080, 12 frames, 4/2 | 23.8 s | 2.02 | 3.78 GB | 2.10e-5 · 3.91e-3 · 0 % |
+
+CUDA on the PC, the same onnx.5 jobs: 22.8 s (15.99 fps steady) at 1280×1080 and 6.2 s (10.94 fps) at 1920×1080.
+The onnx.4 rows are docs/ENGINE_RUST.md ("Core ML on a 16 GB Mac") and backlog row 60; the onnx.5 rows are the Mac
+gate's reports of 2026-10-28 (both passed the gate's bar: within fp16 rounding of CUDA).
+
+What these don't show: whether onnx.5 is faster on the Mac. Core ML compiles each model file on first use and caches
+it, and the cache states differ between these runs (which also ran different engine builds: the 1920×1080
+onnx.4 runs 5e0d9e9, the onnx.5 runs e7eb105), so the totals aren't a like-for-like pair. The one comparable figure, the 1920×1080 steady rate at 4/2, is
+about the same (2.09 / 2.02 fps). onnx.5's peak footprint was 0.28-0.43 GB higher in these runs.
+
+**The Mac's full table comes after the Mac test round, which hasn't run yet**: all ten clips, against CUDA, with the
+speed and memory of each (backlog row 24).
 
 ### TensorRT, first measurement (2026-10-21)
 
