@@ -1,7 +1,79 @@
 # CorridorKey Desktop
 
+<p align="center">
+  <img src="docs/screenshots/01-results-04_5h-curly-hair.png" alt="CorridorKey Desktop keying curly hair at 4K: the result on a checkerboard, its matte and foreground" width="100%">
+</p>
+
+Download 1.0.0-dev.2 for Linux, Windows or Apple Silicon Macs from the
+[releases page](https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/v1.0.0-dev.2).
+
 > **A community project, not made or endorsed by Corridor Digital.** The CorridorKey model is theirs; their official
 > app and plugins are at [corridorkey.com](https://corridorkey.com).
+
+## What it is
+
+A free desktop app for [CorridorKey 2.0](https://github.com/nikopueringer/CorridorKey2.0),
+Corridor Digital's AI green-screen keyer (model by Zachary Harris). Drop clips in, pick a hint
+mode and outputs, and watch real progress: frames written, the temporal window the runtime
+chose from your free graphics memory, and stills of the results.
+
+Status: 1.0 is almost ready. The development builds (1.0.0-dev.N, on the Development update channel) key on Linux and
+Windows with an NVIDIA graphics card, and from 1.0.0-dev.2 on Apple Silicon Macs through Core ML, for 1280×1080 and
+1920×1080 clips (macOS, honestly, below).
+
+## Get started
+
+1. Download the file for your system from the
+   [releases page](https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/v1.0.0-dev.2): the AppImage
+   (Linux), the installer (Windows) or the disk image (Apple Silicon Mac).
+2. Open it. On first start the setup downloads the GPU runtime and the CorridorKey models once (4.03 GB on Linux,
+   3.81 GB on Windows, 4.76 GB on macOS) and offers to install ffmpeg if it's missing.
+3. Drop a clip on the window and start the queue.
+
+What your computer needs is under Requirements.
+
+## Highlights
+
+- **Faster on the card you have.** On an RTX 5080: 4K about 1.8-1.9× the original's speed, HD 1.5-1.9×; on Linux the
+   optional TensorRT mode about 2.3-2.4× at 4K and 1.9-2.2× at HD (Speed).
+- **The same mattes.** Measured against the original on every test clip; dev.2's model set onnx.5 stays within
+   0.25-0.50/255 of onnx.4 on all ten, with no more hair sizzle (Quality; Speed, 0.0.9-dev).
+- **Installs itself, no Python.** One file to download; the app fetches the rest (4.03 GB on Linux, 3.81 GB on
+   Windows, 4.76 GB on macOS), every file SHA-256 checked, less than half the original's install (Install size).
+- **One engine, every platform.** Rust on ONNX Runtime: NVIDIA (CUDA) on Linux and Windows, TensorRT on Linux, Core ML
+   on Apple Silicon (from dev.2, 1280×1080 and 1920×1080 clips; 4K next).
+- **Budget cards welcome.** The memory planner picks the largest temporal window your card holds; measured down to an
+   8 GB RTX 2070 SUPER on a 2011 Core i7 (Requirements; Speed, test machines).
+- **Studio outputs.** EXR named the studio way with the matte in alpha, lossless 10-bit H.264 or DNxHR 444, and 10-
+   and 12-bit plates read in full (Quality).
+- **Colour management.** OpenColorIO 2.5 built in: ACES, the camera log spaces, or your studio's own config.
+- **A Console, not a shell.** Its own command set with Tab completion, history, pipes into its own filters, `watch`
+   and scripts; anything that replaces files asks first, `sudo`-style ([wiki: Console](https://github.com/MarcelineVPQ/corridorkey-desktop/wiki/Console)).
+- **Farm-ready.** The `corridorkey` command line, job export for Deadline, OpenCue, Flamenco and OpenJD, and Console
+   scripts from cron ([wiki: Render farm](https://github.com/MarcelineVPQ/corridorkey-desktop/wiki/Render-Farm)).
+- **Free, open, measured.** Signed updates, every speed and quality claim measured with its method, including what
+  we got wrong (Quality, "What we got wrong").
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%" valign="top"><img src="docs/screenshots/02-results-08_3a-grey-hair.png" alt="Grey hair on 08_3a keyed at 4K"><br>Grey hair against a busy set, keyed at 4K.</td>
+    <td width="50%" valign="top"><img src="docs/screenshots/03-queue-job-card-settings.png" alt="A finished job: memory used and the settings it ran with"><br>A finished job: the memory it used and the settings it ran with.</td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top"><img src="docs/screenshots/04-engine-during-job.png" alt="The Engine page while a job runs"><br>The Engine page during a job: CUDA, onnx.5, the card busy.</td>
+    <td width="50%" valign="top"><img src="docs/screenshots/07-outputs-exr-half.png" alt="Outputs set to an EXR sequence, half float"><br>Outputs: an EXR sequence in half float, the studio deliverable.</td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top"><img src="docs/screenshots/05-console-doctor-ls.png" alt="The Console: doctor and an EXR sequence listing"><br>The Console: doctor checks the setup, ls reads an EXR sequence.</td>
+    <td width="50%" valign="top"><img src="docs/screenshots/06-console-farm-export-deadline.png" alt="The Console exporting a Deadline farm job"><br>The Console exporting a clip as a Deadline farm job.</td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top"><img src="docs/screenshots/08-app-settings-appearance.png" alt="App settings: Dark theme, CorridorKey accent, Glass"><br>App settings: Dark, the CorridorKey accent, Glass.</td>
+    <td width="50%"></td>
+  </tr>
+</table>
 
 ## Why this exists
 
@@ -25,42 +97,9 @@ the original's speed at HD and about 2.3-2.4× at 4K. Rust and ONNX Runtime also
 Windows, and Apple Silicon through Core ML.
 
 It's free, it stays free, and it's Corridor's model. Huge thanks to Niko, Zachary Harris and the Corridor crew.
-Windows testers wanted: see Requirements.
+Windows testers with a real NVIDIA PC wanted (dev.2 passed in a virtual machine): see Requirements.
 
 Marcy ([MarcelineVPQ](https://github.com/MarcelineVPQ))
-
-## What it is
-
-A free desktop app for [CorridorKey 2.0](https://github.com/nikopueringer/CorridorKey2.0),
-Corridor Digital's AI green-screen keyer (model by Zachary Harris). Drop clips in, pick a hint
-mode and outputs, and watch real progress: frames written, the temporal window the runtime
-chose from your free graphics memory, and stills of the results.
-
-Status: 1.0 is almost ready. The development builds (1.0.0-dev.N, on the Development update channel) key on Linux and
-Windows with an NVIDIA graphics card, and from 1.0.0-dev.2 on Apple Silicon Macs through Core ML, for 1280×1080 and
-1920×1080 clips (macOS, honestly, below).
-
-## Highlights
-
-1. **Faster on the card you have.** On an RTX 5080: 4K about 1.8-1.9× the original's speed, HD 1.5-1.9×; on Linux the
-   optional TensorRT mode about 2.3-2.4× at 4K and 1.9-2.2× at HD (Speed).
-2. **The same mattes.** Measured against the original on every test clip; dev.2's model set onnx.5 stays within
-   0.25-0.50/255 of onnx.4 on all ten, with no more hair sizzle (Quality; Speed, 0.0.9-dev).
-3. **Installs itself, no Python.** One file to download; the app fetches the rest (4.03 GB on Linux, 3.81 GB on
-   Windows, 4.76 GB on macOS), every file SHA-256 checked, less than half the original's install (Install size).
-4. **One engine, every platform.** Rust on ONNX Runtime: NVIDIA (CUDA) on Linux and Windows, TensorRT on Linux, Core ML
-   on Apple Silicon (from dev.2, 1280×1080 and 1920×1080 clips; 4K next).
-5. **Budget cards welcome.** The memory planner picks the largest temporal window your card holds; measured down to an
-   8 GB RTX 2070 SUPER on a 2011 Core i7 (Requirements; Speed, test machines).
-6. **Studio outputs.** EXR named the studio way with the matte in alpha, lossless 10-bit H.264 or DNxHR 444, and 10-
-   and 12-bit plates read in full (Quality).
-7. **Colour management.** OpenColorIO 2.5 built in: ACES, the camera log spaces, or your studio's own config.
-8. **A Console, not a shell.** Its own command set with Tab completion, history, pipes into its own filters, `watch`
-   and scripts; anything that replaces files asks first, `sudo`-style ([wiki: Console](https://github.com/MarcelineVPQ/corridorkey-desktop/wiki/Console)).
-9. **Farm-ready.** The `corridorkey` command line, job export for Deadline, OpenCue, Flamenco and OpenJD, and Console
-   scripts from cron ([wiki: Render farm](https://github.com/MarcelineVPQ/corridorkey-desktop/wiki/Render-Farm)).
-10. **Free, open, measured.** Signed updates, every speed and quality claim measured with its method, including what
-    we got wrong (Quality, "What we got wrong").
 
 ## What's coming
 
@@ -71,6 +110,9 @@ Everything planned lives in one list, [docs/BACKLOG.md](docs/BACKLOG.md), each i
 (CPU + GPU, 16 GB; model set onnx.5-coreml: alpha MAE 2.1-2.5e-5 against CUDA's mattes, 0.002 % of pixels over
 1/255 or none, 2026-10-28), and the setup installs the Core ML models. Next: Core ML for 4K [60], the real-Mac gate against CUDA's mattes [24], and self-update on the Mac
 [57].
+
+**Next, in dev.3:** choosing the model set in Engine settings (onnx.5 or onnx.4, with the matching TensorRT set)
+[168].
 
 **Next, toward 1.0:**
 - Keying on a real Windows PC with an NVIDIA card (only tested in a virtual machine so far)
@@ -114,8 +156,8 @@ none of them changes what a user sees today.
   the CorridorKey models (a 4.03 GB download on Linux, 3.81 GB on Windows, 4.76 GB on macOS, once). If `ffmpeg` is
   missing, it offers to install it (apt or pacman on Linux, `winget` on Windows, Homebrew on macOS).
 - Optional, Linux: **TensorRT** (Engine settings, TensorRT; off by default) for about 1.9-2.2× the original's speed at
-  HD and about 2.3-2.4× at 4K, with the same mattes (Speed, the same-day pair of 2026-10-26, on onnx.4; TensorRT on dev.2's
-  onnx.5 is being measured). Switching it on offers its own download: NVIDIA's TensorRT 10.16
+  HD and about 2.3-2.4× at 4K, with the same mattes (Speed, the same-day pair of 2026-10-26, on onnx.4; dev.2's
+  TensorRT jobs use onnx.4's TensorRT set). Switching it on offers its own download: NVIDIA's TensorRT 10.16
   libraries (3.7 GB, from pypi.nvidia.com) and the TensorRT models (3.5 GB, from this repository's releases; C-RADIO's
   1.7 GB of weights are copied from the 2.0.0-onnx.4 models when they are still installed), 7.3 GB in all (5.5 GB
   with onnx.4's models), 6.1 GB on disk. Each
@@ -165,7 +207,7 @@ decimal GB: `du --si`):
 
 | Part | CorridorKey Desktop | Original CorridorKey 2.0 |
 | --- | --- | --- |
-| App / code | **131 MB** (AppImage, engine inside) | 3 MB (Python scripts) |
+| App / code | **135 MB** (AppImage, engine inside) | 3 MB (Python scripts) |
 | Runtime | **2.4 GB**: ONNX Runtime + CUDA/cuDNN (a 1.6 GB download) | **7.6 GB** Python venv: PyTorch, NVIDIA libraries, Triton, other packages |
 | Models | **2.5 GB** (fp16) | **5.1 GB**: CorridorKey weights 2.7 GB + foundation models 2.4 GB |
 | **Total** | **5.0 GB** | **12.6 GB** |
@@ -294,6 +336,9 @@ same job. Each step's own section below has its details and its mattes.
 - Two runs of the same build agree within 1 % on four clips, 6 % on locked_backdrop and 8 % on godiva_close. The
   original varied more between days (godiva 68.4 → 61.1 s), so every comparison here is a back-to-back pair on the
   same day.
+
+<details>
+<summary>How the speed got here: 0.0.4-dev to 0.0.9-dev, measured release by release</summary>
 
 ### 0.0.4-dev: feeding the card faster at 4K
 
@@ -573,6 +618,8 @@ Every pixel of every frame within half a 1/255 step of onnx.4's, and the same si
 **TensorRT stays on onnx.4.** dev.2's TensorRT jobs use dev.1's TensorRT set (`2.0.0-onnx.4-trt`), so the TensorRT
 numbers in this README are onnx.4's (0.0.8-dev). onnx.5's own TensorRT set is still being measured.
 
+</details>
+
 ### Apple Silicon (Core ML)
 
 The Mac engine runs ONNX Runtime's Core ML backend on its own model set (Core ML compiles for fixed frame sizes:
@@ -614,6 +661,9 @@ about the same (2.09 / 2.02 fps). onnx.5's peak footprint was 0.28-0.43 GB highe
 **The Mac's full table comes after the Mac test round, which hasn't run yet**: all ten clips, against CUDA, with the
 speed and memory of each (backlog row 24).
 
+<details>
+<summary>TensorRT, first measurement (2026-10-21)</summary>
+
 ### TensorRT, first measurement (2026-10-21)
 
 TensorRT's first measurement in the engine, on 2026-10-21 (`onnx.2` models, the same HD bench), before it took
@@ -628,6 +678,8 @@ CUDA's window (0.0.6-dev above is what the app's switch runs). It needed a one-t
 | smoke | 37.0 s | 51.7 s | 76.5 s | 0.48× |
 | walking_sitting | 44.6 s | 63.1 s | 94.2 s | 0.47× |
 | with_motion_blur | 10.1 s | 12.3 s | 19.0 s | 0.53× |
+
+</details>
 
 ## Quality: the mattes against the original and the truth
 
