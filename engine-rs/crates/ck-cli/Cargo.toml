@@ -29,3 +29,9 @@ clap = { version = "=4.6.1", default-features = false, features = ["std", "help"
 [dev-dependencies]
 # tests make small EXR plates and frames (the engine's own EXR library, already in the lock)
 exr = "1.73"
+
+# Windows only: `corridorkey run`'s Ctrl+C / Ctrl+Break stop path end to end. Its own main: the test program is also
+# the stub script runner and the Ctrl+C helper, whose arguments libtest would refuse (the file's doc)
+[[test]]
+name = "run_stop_windows"
+harness = false

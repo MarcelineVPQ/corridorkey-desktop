@@ -5,7 +5,8 @@ name: Windows
 # (tools/build_engine.sh --windows, tools/check_targets.sh) but never run there: this runs `npm run check:engine`'s
 # steps (cargo fmt, clippy -D warnings, cargo test; default features: ONNX Runtime linked statically, OpenColorIO
 # built from source) on a real Windows (audit 2026-10-27 row 20). GitHub's runner builds with MSVC, not the MinGW the
-# release uses, and has no graphics card: tests that need one, or ffmpeg, skip. On demand only (gh workflow run
+# release uses, and has no graphics card: tests that need one, or ffmpeg, skip. Windows-only tests run here and nowhere
+# else: ck-cli/tests/run_stop_windows.rs (`corridorkey run`'s Ctrl+C / Ctrl+Break stop path with real console events). On demand only (gh workflow run
 # windows.yml, or Actions -> Windows -> Run workflow), never on every push.
 
 on:
