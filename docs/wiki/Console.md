@@ -289,7 +289,8 @@ first, then the commands); it never runs by itself.
 | Tab | Complete commands, flags, values, paths and `@bookmarks` (after `cd`, `pushd`, `allow`, `du`, `tree`: folders only); again (or when it's ambiguous) for the list |
 | Ctrl+Space | Open the list (on an empty line: every command) |
 | Tab, Shift+Tab on an empty line | Leave the input, to the next or previous control (Esc empties the line first) |
-| →, End, Ctrl+F | Take the grey suggestion; Alt+→ (Alt+F) one word of it |
+| →, End, Ctrl+F | Take the grey suggestion; Alt+→ (Alt+F, Ctrl+→) one word of it |
+| Shift+Tab, ↑ ↓, PageUp, PageDown | Move in the list (PageUp and PageDown eight items); Enter takes the item, Esc puts the line back |
 | ↑ ↓, Ctrl+P Ctrl+N | Earlier lines that start with what you typed |
 | Ctrl+R | Search the history; again for older; Esc or Ctrl+G cancels |
 | Alt+. | Insert the last word of the line before |
@@ -301,8 +302,8 @@ first, then the commands); it never runs by itself.
 | F2 | Switch completions between Tab and a list as you type (**Console settings → Completions**) |
 
 The panel's **Keys** section lists every key, the readline ones included (Ctrl+A, Ctrl+E, Ctrl+W, Ctrl+U, Ctrl+K,
-Ctrl+Y, Alt+D, Alt+B; Option on a Mac). The history keeps the newest 5000 lines across restarts; a line typed with a
-leading space isn't kept.
+Ctrl+Y, Ctrl+D, Ctrl+F and Ctrl+B a character forward and back, Alt+D, Alt+B; Option on a Mac). The history keeps the newest 5000 lines across restarts; a line typed with a
+leading space isn't kept; `!N`, `!-N` and `!abc` reach its newest 200.
 
 A screen reader hears each command's start and end, not every line it prints.
 

@@ -218,15 +218,17 @@ instead (**F2** switches).
 | Enter | Run the line |
 | Tab | Complete; again (or when it's ambiguous) for the list |
 | Tab, Shift+Tab, ↑ ↓ | Move in the list; Enter takes the item, Esc puts the line back |
+| PageUp, PageDown | Move eight items in the list |
 | Ctrl+Space | Open the list (on an empty line: every command) |
 | Tab, Shift+Tab on an empty line | Leave the input, to the next or previous control (Esc empties the line first) |
 | →, End, Ctrl+F | Take the grey suggestion |
-| Alt+→, Alt+F | Take one word of it (else a word forward) |
+| Alt+→, Alt+F, Ctrl+→ | Take one word of it (else a word forward) |
 | ↑ ↓, Ctrl+P Ctrl+N | Earlier lines that start with what you typed |
 | Ctrl+R | Search the history as you type; again for older; Enter runs; Esc or Ctrl+G cancels |
 | Alt+. | Insert the last word of the line before (the output path you just used) |
 | `!!` `!N` `!-N` `!abc` `!$` `^a^b` | History shortcuts, as in bash: the line before (`sudo !!`), line N of `history`, N lines back, the last line starting with abc, the last word of the line before, the line before with a changed to b; the hint shows what Enter runs. A `!` inside a name (`sh010!.mov`), in quotes or before a frame token (`!$F4`) stays as typed |
 | Ctrl+A, Ctrl+E | Start, end of the line |
+| Ctrl+F, Ctrl+B | A character forward, back (Ctrl+F takes the grey suggestion when there is one) |
 | Alt+B, Alt+← | A word back (Option on a Mac, Option+F a word forward) |
 | Ctrl+U, Ctrl+K, Ctrl+W, Alt+D | Cut to the start, to the end, the word before, the word after |
 | Ctrl+Y | Paste back what was cut last |
