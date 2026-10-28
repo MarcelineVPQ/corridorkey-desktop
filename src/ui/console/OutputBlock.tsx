@@ -135,6 +135,7 @@ function FullBlock({
   const home = useContext(HomeContext);
   // each push brings a new copy of the same paths: one value, so the lines (OutLine) see no change
   const pathsKey = b.paths?.join("\n") ?? null;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- by value (pathsKey), not by the push's new array
   const paths = useMemo(() => b.paths, [pathsKey]);
   return (
     // the line is the user's own input: it labels the block, the live log announces only what the command printed

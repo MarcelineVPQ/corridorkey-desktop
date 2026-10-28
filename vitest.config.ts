@@ -1,5 +1,7 @@
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-  test: { include: ["tests/**/*.test.ts"], environment: "node" },
+  // .tsx: the renderer's components, rendered under jsdom (each such file says `// @vitest-environment jsdom`)
+  test: { include: ["tests/**/*.test.{ts,tsx}"], environment: "node" },
+  esbuild: { jsx: "automatic" },
 });

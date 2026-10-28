@@ -28,5 +28,6 @@ export function useTheme(appearance: Appearance, palette: DesktopPalette | null)
     applied = Object.keys(vars);
     root.dataset.glass = appearance.glass ? "on" : "off";
     // palette: read from this render, which paletteKey says is a new value
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- by value (paletteKey): every push brings a new copy of the same palette
   }, [appearance.theme, appearance.accent, appearance.glass, paletteKey]);
 }

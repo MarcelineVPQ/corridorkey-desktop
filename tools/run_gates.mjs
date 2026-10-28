@@ -28,6 +28,8 @@ const GATES = [
   ["platform tests", "node", ["tools/check_platform_tests.mjs"]],
   ["test files", "node", ["tools/check_test_files.mjs"]],
   ["rail tips", "node", ["tools/check_rail_tips.mjs"]],
+  // the Rules of Hooks and every hook's dependencies over the renderer (eslint.config.js; senior review S6)
+  ["React hooks lint", "node", ["node_modules/eslint/bin/eslint.js", "src"]],
 ];
 
 const repo = fileURLToPath(new URL("..", import.meta.url));

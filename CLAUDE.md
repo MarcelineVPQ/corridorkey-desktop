@@ -42,3 +42,5 @@ Built to **Marcy's 17 basic rules for programming applications** (memory
 
 Commands: `npm run dev` · `npm run build` · `npm run check` (typecheck, format, gates, unit + reference-engine tests) ·
 `npm run check:engine` (engine-rs: cargo fmt --check, clippy -D warnings, cargo test).
+UI behaviour tests: `tests/unit/*.test.tsx` (`// @vitest-environment jsdom`, @testing-library/react); the React hooks lint
+(`npm run lint`, eslint.config.js) is a gate.
