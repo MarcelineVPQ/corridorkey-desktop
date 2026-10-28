@@ -71,9 +71,19 @@ pub fn run(m: &ArgMatches) -> i32 {
     #[cfg(not(unix))]
     {
         use std::os::windows::process::CommandExt;
-        use std::sync::Mutex;
+        use std::sync::{Arc, Mutex};
         // CREATE_NEW_PROCESS_GROUP: the console's Ctrl+C doesn't reach the runner (it ignores it); this process asks
         c.creation_flags(CREATE_NEW_PROCESS_GROUP).env("CK_HEADLESS_STOP", "stdin").stdin(std::process::Stdio::piped());
+        // the first Ctrl+C / Ctrl+Break: a `stop` line to the runner; a second ends this process and the runner with it.
+        // Installed before the runner starts (engine re-review 2026-10-28 #1: installed after, an event in between found
+        // the console's default handler and ended this process); an event before its pipe exists is sent once it does
+        let pipe: Arc<Mutex<StopPipe<std::process::ChildStdin>>> = Arc::new(Mutex::new(StopPipe::default()));
+        let p2 = pipe.clone();
+        crate::signals::install_with(Box::new(move || {
+            if let Ok(mut p) = p2.lock() {
+                p.stop();
+            }
+        }));
         let mut child = match c.spawn() {
             Ok(ch) => ch,
             Err(e) => {
@@ -81,14 +91,9 @@ pub fn run(m: &ArgMatches) -> i32 {
                 return exit::ASSETS;
             }
         };
-        let stdin = Mutex::new(child.stdin.take());
-        // the first Ctrl+C / Ctrl+Break: a `stop` line to the runner; a second ends this process and the runner with it
-        crate::signals::install_with(Box::new(move || {
-            if let Some(w) = stdin.lock().ok().as_deref_mut().and_then(Option::as_mut) {
-                // error: NOT-WORTH — a runner that already ended can't read it; the wait below reports its end
-                let _ = ask_to_stop(w);
-            }
-        }));
+        if let (Ok(mut p), Some(w)) = (pipe.lock(), child.stdin.take()) {
+            p.attach(w, crate::signals::stopped_by().is_some());
+        }
         // loop: NOT-WORTH — one wait for the script [bounded: the script's own end; a `stop` line stops it, a second Ctrl+C ends it]
         match child.wait() {
             // Windows always has an exit code
@@ -121,6 +126,41 @@ const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
 /// Windows: the exit code of a process the console's Ctrl+C / Ctrl+Break ended (STATUS_CONTROL_C_EXIT).
 const STATUS_CONTROL_C_EXIT: i32 = 0xC000_013Au32 as i32;
+
+/// The runner's stdin as the console handler sees it: the `stop` line goes once, whether the event comes before the
+/// runner's pipe exists (sent when it is attached) or after.
+pub struct StopPipe<W> {
+    w: Option<W>,
+    asked: bool,
+    sent: bool,
+}
+
+impl<W> Default for StopPipe<W> {
+    fn default() -> Self {
+        StopPipe { w: None, asked: false, sent: false }
+    }
+}
+
+impl<W: std::io::Write> StopPipe<W> {
+    /// The console's first event.
+    pub fn stop(&mut self) {
+        self.asked = true;
+        self.send();
+    }
+    /// The runner's pipe, once it started; `stopped`: an event already came (its handler may have run before `asked`).
+    pub fn attach(&mut self, w: W, stopped: bool) {
+        self.w = Some(w);
+        self.asked |= stopped;
+        self.send();
+    }
+    fn send(&mut self) {
+        if let (true, false, Some(w)) = (self.asked, self.sent, self.w.as_mut()) {
+            self.sent = true;
+            // error: NOT-WORTH — a runner that already ended can't read it; the wait reports its end
+            let _ = ask_to_stop(w);
+        }
+    }
+}
 
 /// Ask the runner to stop: its own cancel, as the Console's Ctrl+C.
 pub fn ask_to_stop(w: &mut impl std::io::Write) -> std::io::Result<()> {
@@ -172,6 +212,23 @@ mod tests {
         let mut pipe = Vec::new();
         ask_to_stop(&mut pipe).unwrap();
         assert_eq!(pipe, b"stop\n");
+    }
+
+    #[test]
+    fn a_stop_before_the_runners_pipe_exists_is_sent_once_it_does() {
+        // engine re-review 2026-10-28 #1: the handler is installed before the runner starts
+        let mut p: StopPipe<Vec<u8>> = StopPipe::default();
+        p.stop();
+        p.attach(Vec::new(), true);
+        p.stop();
+        assert_eq!(p.w.as_deref(), Some(&b"stop\n"[..]), "sent once, when attached");
+        // after: at once, and once
+        let mut p: StopPipe<Vec<u8>> = StopPipe::default();
+        p.attach(Vec::new(), false);
+        assert_eq!(p.w.as_deref(), Some(&b""[..]));
+        p.stop();
+        p.stop();
+        assert_eq!(p.w.as_deref(), Some(&b"stop\n"[..]));
     }
 
     #[test]

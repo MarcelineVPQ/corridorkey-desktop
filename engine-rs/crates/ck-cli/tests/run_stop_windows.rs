@@ -58,6 +58,7 @@ mod win {
             t();
             println!("test {name} ... ok");
         }
+        let _ = std::fs::remove_file(script());
     }
 
     /// The app's script runner, as far as `corridorkey run` sees it: started with `--ck-headless run FILE` and
@@ -95,9 +96,14 @@ mod win {
         std::process::exit(if ok { 0 } else { 1 });
     }
 
-    /// `corridorkey run` on a dummy script with this program as the app (stub `mode`), started with `flags`.
+    /// The dummy script `corridorkey run` is given (the stub never reads it); removed at the end.
+    fn script() -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("ck-run-stop-{}.ckcmd", std::process::id()))
+    }
+
+    /// `corridorkey run` on the dummy script with this program as the app (stub `mode`), started with `flags`.
     fn cli(mode: &str, flags: u32) -> (Child, Receiver<String>, std::thread::JoinHandle<String>) {
-        let script = std::env::temp_dir().join(format!("ck-run-stop-{}.ckcmd", std::process::id()));
+        let script = script();
         std::fs::write(&script, "info\n").unwrap();
         let mut child = Command::new(env!("CARGO_BIN_EXE_corridorkey"))
             .args(["run", script.to_str().unwrap()])
@@ -159,10 +165,10 @@ mod win {
         }
     }
 
-    /// The stub is up and the CLI's console handler installed (it is installed right after the stub starts).
+    /// The stub is up, so the CLI's console handler is installed (the CLI installs it before starting the runner; a
+    /// stop that comes before the runner's pipe is attached is sent when it is): no fixed wait.
     fn ready(rx: &Receiver<String>) -> u32 {
         let l = line(rx, "stub: ready ");
-        std::thread::sleep(Duration::from_millis(1000));
         l.trim_start_matches("stub: ready ").trim().parse().unwrap()
     }
 
