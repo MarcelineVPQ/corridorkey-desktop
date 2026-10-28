@@ -965,7 +965,7 @@ CorridorKey writes only these folders (plus the results you ask for, next to you
 | What | Linux | Windows | macOS |
 | --- | --- | --- | --- |
 | The app | the AppImage you downloaded (and, after updates, the previous version next to it) | the install folder (Apps & features) | `CorridorKey.app` in Applications |
-| GPU runtime and models (~5.0 GB; ~5.5 GB on macOS, with the Core ML set) | `~/.local/share/corridorkey-desktop` | `%LOCALAPPDATA%\corridorkey-desktop` | `~/Library/Application Support/corridorkey-desktop` |
+| GPU runtime and models (a 4.03 GB download on Linux, 3.81 GB on Windows, 4.76 GB on macOS, once; more on disk, as the runtime is unpacked: Install size) | `~/.local/share/corridorkey-desktop` | `%LOCALAPPDATA%\corridorkey-desktop` | `~/Library/Application Support/corridorkey-desktop` |
 | Thumbnails, stills, job temp files | `~/.cache/corridorkey-desktop` | `%LOCALAPPDATA%\corridorkey-desktop\cache` | `~/Library/Caches/corridorkey-desktop` |
 | Settings (a few KB) | `~/.config/corridorkey-desktop` | `%APPDATA%\corridorkey-desktop` | `~/Library/Application Support/corridorkey-desktop` (with the data) |
 

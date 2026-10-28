@@ -599,6 +599,9 @@ describe("TensorRT catalogue and rules", () => {
     expect(text).toBe("4.03 GB download on Linux, 3.81 GB on Windows, 4.76 GB on macOS, once");
     // loop: NOT-WORTH — two documents
     for (const doc of ["../../README.md", "../../docs/GUIDE.md"]) expect(readFileSync(new URL(doc, import.meta.url), "utf8")).toContain(text);
+    // and the README's Uninstall table, which states the same sizes (it once kept the old ~5.0 / ~5.5 GB)
+    const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
+    expect(readme.split("\n## Uninstall\n")[1]?.split("\n## ")[0]).toContain(text);
   });
 
   it("keeps the libraries the builder and ONNX Runtime's provider load, for Linux cards, and the licence", () => {
