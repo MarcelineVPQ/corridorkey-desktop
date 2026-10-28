@@ -85,36 +85,49 @@ v=1.0.0-dev.2 channel=dev mine=latest-dev.json`;
   });
 
   // release.sh runs on the Linux release PC (GNU sha256sum / sha512sum, which a Mac may not have)
-  it.skipIf(process.platform !== "linux")("--mac adds the disk image to the published SUMS (its old line replaced), signed, uploaded with them", () => {
-    const start = at(/^if \[ "\$mode" = --mac \]; then$/);
-    const end = lines.findIndex((l, i) => i > start && l === "fi");
-    expect(start).toBeGreaterThan(0);
-    expect(start).toBeLessThan(at(/^wiki="\$\(mktemp -d\)"/));
-    const block = lines.slice(start, end + 1).join("\n");
-    const dir = mkdtempSync(join(scratch, "mac-"));
-    const dmg = "CorridorKey-Desktop-1.0.0-dev.2-arm64.dmg";
-    writeFileSync(join(dir, dmg), "the disk image\n");
-    const stub = `set -euo pipefail; v=1.0.0-dev.2 mode=--mac
+  it.skipIf(process.platform !== "linux")(
+    "--mac takes the image of a green macOS run of the tag's commit only, adds it to the published SUMS (its old line replaced), signed, uploaded with them",
+    () => {
+      const start = at(/^if \[ "\$mode" = --mac \]; then$/);
+      const end = lines.findIndex((l, i) => i > start && l === "fi");
+      expect(start).toBeGreaterThan(0);
+      expect(start).toBeLessThan(at(/^wiki="\$\(mktemp -d\)"/));
+      const block = lines.slice(start, end + 1).join("\n");
+      const dir = mkdtempSync(join(scratch, "mac-"));
+      const dmg = "CorridorKey-Desktop-1.0.0-dev.2-arm64.dmg";
+      // runs: 1 = the tag's commit, green; 2 = another commit (main after the release); 3 = failed; 4 = another workflow;
+      // 5 = the tag's, but its artifact has another version's image
+      const stub = `set -euo pipefail; v=1.0.0-dev.2 mode=--mac
+git() { echo tagsha; }
 gh() {
-  case "$2" in
-    download) for a in 256 512; do printf 'aaa  CorridorKey-Desktop-1.0.0-dev.2.AppImage\\nold  ${dmg}\\n' > "$5/SHA\${a}SUMS"; done ;;
-    upload) echo "$*" > uploaded; cp "$sums/SHA256SUMS" got256; cp "$sums/SHA512SUMS" got512 ;;
+  case "$1 $2" in
+    "run view") case "$3" in 1|5) printf 'macOS\\ttagsha\\tsuccess\\n' ;; 2) printf 'macOS\\tmainsha\\tsuccess\\n' ;; 3) printf 'macOS\\ttagsha\\tfailure\\n' ;; 4) printf 'Windows\\ttagsha\\tsuccess\\n' ;; esac ;;
+    "run download") mkdir -p "$7"; if [ "$3" = 5 ]; then echo x > "$7/CorridorKey-Desktop-1.0.0-dev.1-arm64.dmg"; else echo 'the disk image' > "$7/${dmg}"; fi ;;
+    "release download") for a in 256 512; do printf 'aaa  CorridorKey-Desktop-1.0.0-dev.2.AppImage\\nold  ${dmg}\\n' > "$5/SHA\${a}SUMS"; done ;;
+    "release upload") echo "$*" > uploaded; cp "$sums/SHA256SUMS" got256; cp "$sums/SHA512SUMS" got512; cp "$sums/${dmg}" got.dmg ;;
   esac
 }
 sign() { for f in "$@"; do touch "$f.sig"; done; }`;
-    // loop: NOT-WORTH — the script's block with stand-ins for gh and the signing, 10 s deadline
-    const run = (file: string) => spawnSync("bash", ["-c", `${stub}\n${block}`, "_", "--mac", file], { cwd: dir, encoding: "utf8", timeout: 10_000 });
-    expect(run(join(dir, "CorridorKey-Desktop-1.0.0-dev.1-arm64.dmg")).status).toBe(1);
-    expect(run(join(dir, dmg)).status).toBe(0);
-    const want256 = spawnSync("sha256sum", [dmg], { cwd: dir, encoding: "utf8", timeout: 10_000 }).stdout;
-    expect(readFileSync(join(dir, "got256"), "utf8")).toBe(`aaa  CorridorKey-Desktop-1.0.0-dev.2.AppImage\n${want256}`);
-    const got512 = readFileSync(join(dir, "got512"), "utf8");
-    expect(got512).toContain(`  ${dmg}\n`);
-    expect(got512).not.toContain("old");
-    const uploaded = readFileSync(join(dir, "uploaded"), "utf8");
-    // loop: NOT-WORTH — five names
-    for (const f of [dmg, "SHA256SUMS ", "SHA256SUMS.sig", "SHA512SUMS ", "SHA512SUMS.sig"]) expect(uploaded).toContain(f);
-  });
+      // loop: NOT-WORTH — the script's block with stand-ins for git, gh and the signing, 10 s deadline
+      const run = (id: string) => spawnSync("bash", ["-c", `${stub}\n${block}`, "_", "--mac", id], { cwd: dir, encoding: "utf8", timeout: 10_000 });
+      expect(run("2").stderr).toContain("built mainsha, not v1.0.0-dev.2 (tagsha)");
+      expect(run("3").status).toBe(1);
+      expect(run("4").status).toBe(1);
+      expect(run("5").stderr).toContain(`has no ${dmg}`);
+      expect(spawnSync("ls", [dir], { encoding: "utf8", timeout: 10_000 }).stdout).not.toContain("uploaded");
+      expect(run("1").status).toBe(0);
+      writeFileSync(join(dir, dmg), "the disk image\n");
+      expect(readFileSync(join(dir, "got.dmg"), "utf8")).toBe("the disk image\n");
+      const want256 = spawnSync("sha256sum", [dmg], { cwd: dir, encoding: "utf8", timeout: 10_000 }).stdout;
+      expect(readFileSync(join(dir, "got256"), "utf8")).toBe(`aaa  CorridorKey-Desktop-1.0.0-dev.2.AppImage\n${want256}`);
+      const got512 = readFileSync(join(dir, "got512"), "utf8");
+      expect(got512).toContain(`  ${dmg}\n`);
+      expect(got512).not.toContain("old");
+      const uploaded = readFileSync(join(dir, "uploaded"), "utf8");
+      // loop: NOT-WORTH — five names
+      for (const f of [dmg, "SHA256SUMS ", "SHA256SUMS.sig", "SHA512SUMS ", "SHA512SUMS.sig"]) expect(uploaded).toContain(f);
+    },
+  );
 
   it("refuses a CHANGELOG header that says draft or unreleased", () => {
     const refuse = lines.find((l) => /draft\|unreleased/.test(l) && l.includes("CHANGELOG.md"));
@@ -215,5 +228,57 @@ sign() { for f in "$@"; do touch "$f.sig"; done; }`;
     const r = spawnSync("bash", ["-c", `set -euo pipefail; node() { echo "$*"; }\n${lines[docs]}`], { cwd: repo, encoding: "utf8", timeout: 10_000 });
     expect(r.status).toBe(0);
     expect(r.stdout.trim()).toBe("tools/check_docs_touch.mjs v1.0.0-dev.1..HEAD");
+  });
+
+  it("checks node_modules against the lock and wants a green Windows CI run of HEAD before building (release review 2026-10-28 #4, #6)", () => {
+    const nm = at(/^node tools\/check_node_modules\.mjs /);
+    const win = at(/gh run list --workflow windows\.yml --commit "\$head" --status success/);
+    const build = at(/npm run -s dist:linux/);
+    expect(nm).toBeGreaterThan(at(/^if \[ "\$mode" = --mac \]; then$/));
+    expect(nm).toBeLessThan(build);
+    expect(win).toBeGreaterThan(at(/^if \[ "\$state" != false \]/));
+    expect(win).toBeLessThan(at(/npm run -s check:engine$/));
+    // the gate's lines with a stand-in gh, in a throwaway repository
+    const block = lines.slice(win - 1, win + 4).join("\n");
+    const repo = mkdtempSync(join(scratch, "win-"));
+    // loop: NOT-WORTH — a throwaway repository with one commit, 10 s deadline
+    spawnSync("bash", ["-c", "git init -q && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m x"], { cwd: repo, timeout: 10_000 });
+    const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8", timeout: 10_000 }).stdout.trim();
+    // loop: NOT-WORTH — the gate with a stand-in gh, 10 s deadline
+    const run = (green: string) =>
+      spawnSync("bash", ["-c", `set -euo pipefail; gh() { echo "$*" > asked; [ "$6" = "${green}" ] && echo 1 || echo 0; }\n${block}\necho passed`], { cwd: repo, encoding: "utf8", timeout: 10_000 });
+    const no = run("other");
+    expect(no.status).toBe(1);
+    expect(no.stderr).toContain("gh workflow run windows.yml --ref main");
+    const ok = run(head);
+    expect(ok.stdout).toContain("passed");
+    expect(readFileSync(join(repo, "asked"), "utf8")).toContain(`--commit ${head} --status success`);
+  });
+
+  it("starts the packaged Linux build in an isolated copy and refuses to publish unless it shows its first page (#5)", () => {
+    const iso = at(/tools\/isolated\.sh --state "\$smoke" --packaged release\/linux-unpacked &/);
+    const drive = at(/node tools\/drive\.mjs --state "\$smoke"/);
+    expect(iso).toBeGreaterThan(at(/^\[ -z "\$\(git status --porcelain\)" \] \|\| \{ echo "release: the build changed/));
+    expect(drive).toBeGreaterThan(iso);
+    expect(drive).toBeLessThan(at(/^git push origin main$/));
+    expect(script).toContain("grep -qx 'eval: true' \"$smoke/drive.log\"");
+  });
+
+  it("refuses to publish when GitHub's digest of an upload isn't the signed SHA256SUMS' (#11)", () => {
+    const view = at(/gh release view "v\$v" --json assets/);
+    expect(view).toBeGreaterThan(at(/gh release upload "v\$v" "release\/\$file"/));
+    expect(view).toBeLessThan(at(/gh release edit "v\$v" --draft=false/));
+    const block = lines.slice(view, view + 2).join("\n");
+    const dir = mkdtempSync(join(scratch, "digest-"));
+    // loop: NOT-WORTH — two lines with a stand-in gh, 10 s deadline
+    const run = (served: string) => {
+      spawnSync("bash", ["-c", "mkdir -p release && printf 'aaa  A.AppImage\\nbbb  B-Setup.exe\\n' > release/SHA256SUMS"], { cwd: dir, timeout: 10_000 });
+      return spawnSync("bash", ["-c", `set -euo pipefail; v=1; gh() { printf '${served}'; }\n${block}\necho passed`], { cwd: dir, encoding: "utf8", timeout: 10_000 });
+    };
+    expect(run("aaa  A.AppImage\\nbbb  B-Setup.exe\\nccc  SHA256SUMS\\n").stdout).toContain("passed");
+    const bad = run("aaa  A.AppImage\\nzzz  B-Setup.exe\\n");
+    expect(bad.status).toBe(1);
+    expect(bad.stderr).toContain("bbb  B-Setup.exe");
+    expect(run("none  A.AppImage\\nnone  B-Setup.exe\\n").status).toBe(1);
   });
 });

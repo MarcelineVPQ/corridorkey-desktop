@@ -85,11 +85,16 @@ spent 29 minutes waiting on a package mirror).
    `npx -y npm@10.9.2 version X.Y.Z-dev.N --no-git-tag-version` (Development) or `… X.Y.Z …` (Stable).
    Add its `## X.Y.Z-dev.N` section to `CHANGELOG.md` (the release notes are that section). Commit on `main`.
    Publish the wiki if `docs/wiki/` changed since it was last published (The wiki, below): the release refuses a
-   published wiki that differs.
+   published wiki that differs. Then push that commit and run Windows CI on it (`git push origin main`,
+   `gh workflow run windows.yml --ref main`, `gh run watch`): the release refuses a commit without a green
+   `windows.yml` run (`gh run list --workflow windows.yml --commit <it> --status success`), since the engine's
+   Windows-only code runs nowhere else. After a pull, `npx -y npm@10.9.2 ci`: the release refuses a `node_modules`
+   that isn't `package-lock.json` (`tools/check_node_modules.mjs`: each locked package at its version, nothing extra).
 2. `tools/release.sh`. It checks the version shape (`X.Y.Z` = Stable, `X.Y.Z-dev.N` = Development), that it isn't
    released yet (no tag, no published release: run before step 1 it refuses), the lock, a
-   clean `main` in step with GitHub, the CHANGELOG section (the top one; its header must not say draft or unreleased) and the
-   signing key; runs the docs-touch gate over the commits since the last `v*` tag, `npm run check:engine` (its
+   clean `main` in step with GitHub, the CHANGELOG section (the top one; its header must not say draft or unreleased), the
+   signing key, `node_modules` against the lock and the green Windows CI run; runs the docs-touch gate over the
+   commits since the last `v*` tag, `npm run check:engine` (its
    `cargo test` builds `engine-rs/target/debug/corridorkey`), `npm run check` with `CK_CLI_BIN` set to that binary
    (so the Console's CLI-spec drift check runs, never skips) and `tools/check_targets.sh` (the engine's macOS and
    Windows lint), then `npm run dist:linux` (memory-capped; the engine is linked for glibc 2.28 with cargo-zigbuild, Zig in
@@ -100,10 +105,14 @@ spent 29 minutes waiting on a package mirror).
    downloaded once; only the two libraries are unpacked)) and `npm run dist:win` (the Windows engine cross-built with
    MinGW-w64, the NSIS installer through Wine); stops if the builds changed a tracked file (they rewrite
    `src/shared/console/cliSpec.json` from the engine they built: what ships must be the commit that gets tagged);
+   starts the packaged Linux build (`release/linux-unpacked`) in an isolated copy (`tools/isolated.sh --packaged`:
+   own HOME, private D-Bus, headless KWin, never the desktop) and stops unless `tools/drive.mjs` finds its first page
+   rendered (the folder, with `app.log` and a screenshot, is kept on a failure);
    writes `SHA256SUMS` / `SHA512SUMS` of the AppImage and the `-Setup.exe`, each signed with the feed key
    (`SHA256SUMS.sig`, below), uploads them; the update feeds name the AppImage only (Windows updates from the releases page);
    pushes `main`; creates the
-   release as a draft on that commit, uploads, and publishes it, which makes the `vX.Y.Z…` tag (Development as a
+   release as a draft on that commit, uploads, checks GitHub's sha256 digest of every upload against the signed
+   `SHA256SUMS` (nothing is published on a difference), and publishes it, which makes the `vX.Y.Z…` tag (Development as a
    **prerelease**, never *Latest*; Stable as *Latest*); then `tools/build-feed.mjs` picks the release per channel
    from GitHub's release list (retried until the released channel names the new version), downloads and hashes
    the AppImage and writes the feed, `tools/sign-feed.mjs` signs it, `tools/verify-feed.mjs` checks it exactly as
@@ -133,10 +142,17 @@ Links point at the releases page, never `releases/latest`.
 each pinned file there at its size and SHA-256, and the licence files (LICENSE, NOTICE, ATTRIBUTION.md, and the
 base set's LICENSE-* on every derived set).
 
-**On demand:** `.github/workflows/windows.yml` (`gh workflow run windows.yml`) runs the engine's checks (cargo fmt,
-clippy, cargo test) on GitHub's Windows runner, the only place its Windows-only code runs; worth a run before a
-stable release or after a change to that code. It hasn't passed yet (its one run, 2026-10-27, failed): until it does,
-nothing Windows-only in the engine counts as run on Windows (the CHANGELOG says "not yet run on Windows").
+**Windows CI, every release:** `.github/workflows/windows.yml` (`gh workflow run windows.yml --ref main`) runs the
+engine's checks (cargo fmt, clippy, cargo test) on GitHub's Windows runner, the only place its Windows-only code runs.
+It is started by hand (never on every push) on the release commit, and `tools/release.sh` refuses to tag a commit
+without a green run (step 1). Until a run passes, nothing Windows-only in the engine counts as run on Windows (the
+CHANGELOG says "not yet run on Windows").
+
+**The Windows installer, once per release, by hand:** `tools/release.sh` starts only the Linux build (the Windows
+one is built through Wine and can't start here). After it, install `release/CorridorKey-Desktop-<version>-Setup.exe`
+in the `win11-test` VM (libvirt, test-only) and start it once: it must reach its first page (the packaged app's
+Electron fuses check `app.asar` against its integrity hash at start on Windows). A build that doesn't start gets a
+fix and a new version, never an edited release.
 
 **Windows Defender** (until the Windows builds are signed): its machine-learning heuristic quarantined the unsigned
 `resources\engine\corridorkey.exe` as `Trojan:Win32/Bearfoos.A!ml` in the 2026-10-27 VM run, a false positive. After
@@ -153,14 +169,15 @@ isn't package.json's version); any other run, `--ref main`, is a check, not a re
 app's and the engine's checks on macOS, builds the engine for `aarch64-apple-darwin` and the arm64 `.dmg`
 (`npm run dist:mac`), installs it as a user does (a quarantined download into /Applications, Gatekeeper's answers
 recorded), starts it and screenshots every page. The image and the screenshots are the run's artifacts. Add the image
-to the release:
+to the release with the run's id (`gh run list --workflow macos.yml`):
 
 ```bash
-gh run download <run id> -n corridorkey-desktop-macos-arm64 -D release/mac
-tools/release.sh --mac release/mac/CorridorKey-Desktop-X.Y.Z…-arm64.dmg
+tools/release.sh --mac <run id>
 ```
 
-which refuses an image named for another version, adds its lines to the release's `SHA256SUMS` / `SHA512SUMS`,
+which refuses a run that isn't a green `macOS` run of the tag's own commit (`gh run view <id> --json headSha` against
+`git rev-parse vX.Y.Z…^{commit}`: a run of `main` after the release builds an image of the same name from other code),
+downloads the image from it, refuses one named for another version, adds its lines to the release's `SHA256SUMS` / `SHA512SUMS`,
 signs them again and uploads the image with them. The runner is a virtual Mac without
 the GPU or the Neural Engine: it proves the build and the app, not keying speed.
 

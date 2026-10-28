@@ -3,26 +3,30 @@
 #
 #   tools/release.sh            the version in package.json: X.Y.Z (Stable) or X.Y.Z-dev.N (Development)
 #   tools/release.sh --feeds    only the feeds of that version, published already (step 5 failed)
-#   tools/release.sh --mac DMG  adds the macOS disk image (built from the tag: docs/RELEASING.md "macOS") to that
-#                               published version, with the SUMS extended to it and signed again
+#   tools/release.sh --mac RUN  adds the macOS disk image of the macos.yml run RUN (which must have built the tag's
+#                               commit: docs/RELEASING.md "macOS") to that published version, with the SUMS extended
+#                               to it and signed again
 #
 # 1. checks: on main, clean, in step with origin; the version not released yet (no tag, no published release; --feeds:
 #    published); package.json and the lock carry the version; a CHANGELOG
 #    section for it, the top one, its header not saying draft / unreleased; the signing key is there; THIRD_PARTY_NOTICES.md is
 #    current (tools/gen_notices.mjs --check, which needs cargo-about on PATH or CARGO_ABOUT=<path>); the published
 #    wiki is docs/wiki/ (a read-only clone of the wiki repository compared by tools/check_wiki.mjs --published;
-#    tools/publish_wiki.mjs publishes it); every pinned model set on GitHub as pinned (tools/check_model_sets.mjs)
+#    tools/publish_wiki.mjs publishes it); every pinned model set on GitHub as pinned (tools/check_model_sets.mjs);
+#    node_modules is package-lock.json (tools/check_node_modules.mjs); a green windows.yml run of this commit
 # 2. the docs-touch gate over the commits since the last release tag, npm run check:engine (which builds the
 #    corridorkey the CLI-spec drift check then compares against: never skipped here), npm run check and
 #    tools/check_targets.sh (the engine's Linux / Windows / macOS lint), then
 #    npm run dist:linux (the engine for glibc 2.28, then the AppImage) and npm run dist:win (the Windows engine
 #    cross-built here, then the NSIS installer through Wine), memory-capped; a build that changed a tracked file
-#    (the CLI spec) stops here, so what ships is the commit that gets tagged
+#    (the CLI spec) stops here, so what ships is the commit that gets tagged; the packaged Linux build
+#    (release/linux-unpacked) must start and show its first page in an isolated copy (tools/isolated.sh + drive.mjs)
 # 3. SHA256SUMS / SHA512SUMS of both files, signed with the feed key (.sig beside each), and the notes (the CHANGELOG
 #    section)
 # 4. pushes main, creates the GitHub release as a draft on that commit (no tag yet; a draft left by a failed run is
-#    moved to this commit with these notes), uploads, then publishes it, which makes the tag (Development =
-#    prerelease, never Latest). A failure anywhere here can simply be rerun.
+#    moved to this commit with these notes), uploads, checks GitHub's sha256 of every upload against SHA256SUMS,
+#    then publishes it, which makes the tag (Development = prerelease, never Latest). A failure anywhere here can
+#    simply be rerun.
 # 5. the feeds: tools/build-feed.mjs from the published release, signed here with the key in
 #    ~/.config/corridorkey-release/feed-signing.pem (read into the environment, never printed),
 #    tools/verify-feed.mjs checks them exactly as the app does, then they are committed to main and pushed
@@ -36,7 +40,7 @@ KEY="$HOME/.config/corridorkey-release/feed-signing.pem"
 CAP=(systemd-run --user --scope --quiet --collect ${CK_SLICE:+--slice=$CK_SLICE} -p MemoryMax=8G -p MemorySwapMax=0 --)
 
 mode="${1:-}"
-case "$mode" in "" | --feeds | --mac) ;; *) echo "release: unknown option $mode (--feeds, --mac DMG)" >&2; exit 2 ;; esac
+case "$mode" in "" | --feeds | --mac) ;; *) echo "release: unknown option $mode (--feeds, --mac RUN)" >&2; exit 2 ;; esac
 v="$(node -p 'require("./package.json").version')"
 if [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then dev=false
 elif [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+-dev\.[0-9]+$ ]]; then dev=true
@@ -57,15 +61,21 @@ state="$(gh release view "v$v" --json isDraft -q .isDraft 2>/dev/null || echo no
 # signs files with the feed key: <file>.sig beside each (tools/sign-feed.mjs; the key never printed)
 sign() { CK_FEED_KEY="$(cat "$KEY")" bash -c 'for f in "$@"; do node tools/sign-feed.mjs "$f"; done' _ "$@"; }
 
-# --mac DMG: the published release's SUMS gain the disk image's line (any earlier one replaced), signed again
+# --mac RUN: the published release's SUMS gain the disk image's line (any earlier one replaced), signed again
 if [ "$mode" = --mac ]; then
-  dmg="${2:?release: --mac needs the disk image: gh run download <run> -n corridorkey-desktop-macos-arm64 -D release/mac}"
+  run="${2:?release: --mac needs the id of the macOS workflow run (gh run list --workflow macos.yml)}"
   name="CorridorKey-Desktop-$v-arm64.dmg"
-  # the file name carries package.json's version at the commit it was built from: the tag's, or it's refused
-  [ "$(basename "$dmg")" = "$name" ] || { echo "release: $dmg isn't $name: build it from the tag (gh workflow run macos.yml --ref v$v)" >&2; exit 1; }
+  # the image comes from a green macos.yml run of the tag's own commit (release review 2026-10-28 #7): a run of main
+  # after the release builds a file of the same name from other code
+  tagged="$(git rev-parse "v$v^{commit}")"
+  IFS=$'\t' read -r wf sha concl < <(gh run view "$run" --json workflowName,headSha,conclusion -q '[.workflowName, .headSha, .conclusion] | @tsv')
+  [ "$wf" = macOS ] && [ "$concl" = success ] || { echo "release: run $run is '$wf' ($concl), not a green macOS run" >&2; exit 1; }
+  [ "$sha" = "$tagged" ] || { echo "release: run $run built $sha, not v$v ($tagged): gh workflow run macos.yml --ref v$v" >&2; exit 1; }
   sums="$(mktemp -d)"; trap 'rm -rf "$sums"' EXIT
+  gh run download "$run" -n corridorkey-desktop-macos-arm64 -D "$sums/run"
+  [ -f "$sums/run/$name" ] || { echo "release: run $run has no $name" >&2; exit 1; }
   gh release download "v$v" -D "$sums" -p SHA256SUMS -p SHA512SUMS
-  cp "$dmg" "$sums/$name"
+  mv "$sums/run/$name" "$sums/$name"
   # loop: NOT-WORTH — the two SUMS files
   for a in 256 512; do
     (cd "$sums" && grep -vF "  $name" "SHA${a}SUMS" > "SHA${a}SUMS.new" || true; "sha${a}sum" "$name" >> "SHA${a}SUMS.new"; mv "SHA${a}SUMS.new" "SHA${a}SUMS")
@@ -88,8 +98,17 @@ export CARGO_ABOUT="${CARGO_ABOUT:-$HOME/.local/share/corridorkey-release/cargo-
 "${CAP[@]}" node tools/gen_notices.mjs --check
 # every pinned model set on GitHub as install.ts pins it, with its licence files (online; tools/check_model_sets.mjs)
 GITHUB_TOKEN="$(gh auth token)" node tools/check_model_sets.mjs
+# node_modules is the lock (release review 2026-10-28 #4): the build bundles node_modules, the notices read the lock
+node tools/check_node_modules.mjs || { echo "release: node_modules isn't package-lock.json: npx -y npm@10.9.2 ci, then rerun" >&2; exit 1; }
 
 if [ "$state" != false ]; then
+# a green Windows CI run of this very commit before it's tagged (release review 2026-10-28 #6): the engine's
+# Windows-only code runs nowhere else. Only read here: the run is started by hand once the commit is on GitHub
+head="$(git rev-parse HEAD)"
+[ "$(gh run list --workflow windows.yml --commit "$head" --status success --limit 1 --json databaseId -q length)" = 1 ] || {
+  echo "release: no green Windows CI run of $head: git push origin main; gh workflow run windows.yml --ref main; gh run watch; then rerun" >&2
+  exit 1
+}
 # the docs-touch gate over this release's commits (npm run check reads origin/main..HEAD: nothing once pushed; S6)
 node tools/check_docs_touch.mjs "$(git describe --tags --abbrev=0 --match 'v*')..HEAD"
 # the engine's own checks (cargo fmt, clippy -D warnings, cargo test), first: cargo test builds target/debug/corridorkey,
@@ -103,6 +122,23 @@ NODE_OPTIONS=--max-old-space-size=4096 "${CAP[@]}" npm run -s dist:win
 # the builds rewrite src/shared/console/cliSpec.json from the engine they built: a change means the checked commit isn't
 # what ships (senior review 2026-10-27)
 [ -z "$(git status --porcelain)" ] || { echo "release: the build changed tracked files; commit them and rerun:" >&2; git status --short >&2; exit 1; }
+# the packaged build starts and shows its first page (release review 2026-10-28 #5: the first build with Electron's
+# fuses; a broken asar check exits at start), in an isolated copy (own HOME, D-Bus and headless KWin; never this
+# screen), driven over CDP. The folder is kept on a failure, with the app's log.
+smoke="$(mktemp -d)"
+timeout 180 tools/isolated.sh --state "$smoke" --packaged release/linux-unpacked & iso=$!
+# loop: SERIAL-REQUIRED — waits for isolated.sh to write the port it picked [bounded: 20 tries, 0.5 s apart]
+for _ in $(seq 20); do [ -s "$smoke/port" ] && break; sleep 0.5; done
+if ! timeout 90 node tools/drive.mjs --state "$smoke" --out "$smoke/shots" --wait 3000 \
+  --eval 'document.title.startsWith("CorridorKey") && document.getElementById("root").childElementCount > 0' \
+  --shot first-page --close > "$smoke/drive.log" 2>&1 || ! grep -qx 'eval: true' "$smoke/drive.log"; then
+  kill "$iso" 2>/dev/null || true
+  echo "release: the packaged build didn't show its first page: $smoke (app.log, drive.log)" >&2
+  exit 1
+fi
+# loop: SERIAL-REQUIRED — waits for the closed copy to end [bounded: timeout 180 on isolated.sh]
+wait "$iso" || true
+rm -rf "$smoke"
 
 file="CorridorKey-Desktop-$v.AppImage"
 winfile="CorridorKey-Desktop-$v-Setup.exe"
@@ -124,6 +160,9 @@ if [ "$dev" = true ]; then flags+=(--prerelease --latest=false); else flags+=(--
 if [ "$state" = true ]; then gh release edit "v$v" --target "$(git rev-parse HEAD)" "${flags[@]}"
 else gh release create "v$v" --draft --target "$(git rev-parse HEAD)" "${flags[@]}"; fi
 gh release upload "v$v" "release/$file" "release/$winfile" release/SHA256SUMS release/SHA512SUMS release/SHA256SUMS.sig release/SHA512SUMS.sig --clobber
+# GitHub's own sha256 of each upload is the signed SHA256SUMS' line, before anything is public (review 2026-10-28 #11)
+gh release view "v$v" --json assets -q '.assets[] | "\(.digest // "none" | sub("^sha256:"; ""))  \(.name)"' > release/uploaded.sums
+if grep -vxFf release/uploaded.sums release/SHA256SUMS >&2; then echo "release: GitHub's digests differ from SHA256SUMS on the lines above: nothing published, rerun" >&2; exit 1; fi
 gh release edit "v$v" --draft=false
 git fetch -q origin "refs/tags/v$v:refs/tags/v$v"
 else
