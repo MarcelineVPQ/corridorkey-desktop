@@ -1,8 +1,10 @@
 // First-run install (BACKLOG row 2): the GPU runtime and the models, downloaded into the data folder
 // (engineFind.ts dataDir) where the Engine page's lists find them. Nothing is hosted for the runtime:
 // ONNX Runtime and NVIDIA's CUDA / cuDNN libraries come from PyPI as published wheels, pinned here by
-// URL, size and SHA-256. The models come from this repository's `models-2.0.0-onnx.5` release (macOS:
-// `models-2.0.0-onnx.4` and its Core ML set, below) (converted from Corridor Digital's checkpoint; CorridorKey licence). Every file is checked before use.
+// URL, size and SHA-256. The models come from this repository's `models-2.0.0-onnx.5` release on every system (macOS
+// adds its Core ML set, `models-2.0.0-onnx.5-coreml`, below; `2.0.0-onnx.4` is only recognised when installed, for the
+// TensorRT set's C-RADIO weights) (converted from Corridor Digital's checkpoint; CorridorKey licence). Every file is
+// checked before use.
 // After a Stop or a failure, pressing the button again resumes: finished files are checked offline and kept,
 // a partial one continues where it stopped. A set only appears in the lists once all of it is in place
 // (built in a `.partial-…` folder, then renamed; engineFind skips dot folders).

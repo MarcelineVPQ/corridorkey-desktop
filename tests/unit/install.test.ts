@@ -689,3 +689,14 @@ describe("each system's runtime and graphics check", () => {
     expect(systemSupport("win32", "x64", () => false, {}).problem).toContain("NVIDIA");
   });
 });
+
+describe("install.ts's header (review 2026-10-28 #7)", () => {
+  it("names the model sets the code downloads", () => {
+    const src = readFileSync(new URL("../../electron/main/install.ts", import.meta.url), "utf8");
+    const set = /^const MODEL_SET = "([^"]+)";$/m.exec(src)![1];
+    const header = src.slice(0, src.indexOf("\nimport "));
+    expect(header).toContain(`\`models-${set}\` release on every system`);
+    expect(header).toContain(`\`models-${set}-coreml\``);
+    expect(src).toMatch(/^const COREML_SET = `\$\{MODEL_SET\}-coreml`;$/m);
+  });
+});
