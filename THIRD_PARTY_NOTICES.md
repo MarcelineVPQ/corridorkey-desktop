@@ -290,7 +290,7 @@ publishers' licences; the wheels' own licence files are kept next to the librari
   - `2.0.0-onnx.5` (Linux, Windows): https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.5
   - `2.0.0-onnx.4` (macOS): https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.4
   - `2.0.0-onnx.4-coreml` (macOS: Core ML): https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.4-coreml
-  - `2.0.0-onnx.4-trt` (Linux: the opt-in TensorRT jobs): https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.4-trt
+  - `2.0.0-onnx.5-trt` (Linux: the opt-in TensorRT jobs): https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.5-trt
 - **Modified:** every network is converted from the original PyTorch checkpoint to ONNX, with exact graph rewrites
   for speed and portrait input (listed in the set's manifest.json); the fp16 files follow CorridorKey 2.0's own
   precision policy (fp16 convolutions, matrix multiplies and attention; fp32 norms, softmax, exp/pow, sums and

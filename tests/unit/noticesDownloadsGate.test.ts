@@ -33,7 +33,7 @@ const INSTALL = [
   "export const TENSORRT = {",
   '  libs: { file: "tensorrt_cu13_libs-10.16.1.11-py2.py3-none-manylinux_2_28_x86_64.whl" } as Download,',
   "};",
-  'const TRT_MODEL_SET = "2.0.0-onnx.4-trt";',
+  'const TRT_MODEL_SET = "2.0.0-onnx.5-trt";',
   "const trtModel = inRelease(TRT_MODEL_SET);",
 ].join("\n");
 const NOTICES = [
@@ -43,7 +43,7 @@ const NOTICES = [
   "- `2.0.0-onnx.5` (Linux, Windows)",
   "- `2.0.0-onnx.4` (macOS)",
   "- `2.0.0-onnx.4-coreml` (macOS: Core ML)",
-  "- `2.0.0-onnx.4-trt` (Linux: the opt-in TensorRT jobs)",
+  "- `2.0.0-onnx.5-trt` (Linux: the opt-in TensorRT jobs)",
 ].join("\n");
 
 let n = 0;
@@ -76,7 +76,7 @@ describe("notices gate (first-run downloads)", () => {
     expect(r.code).toBe(1);
     expect(r.out).toContain("model set 2.0.0-onnx.4-coreml");
     expect(runGate(INSTALL, NOTICES.replace("- `2.0.0-onnx.4` (macOS)\n", "")).out).toContain("model set 2.0.0-onnx.4\n");
-    expect(runGate(INSTALL, NOTICES.replace("`2.0.0-onnx.4-trt`", "2.0.0-onnx.4-trt")).code).toBe(1);
+    expect(runGate(INSTALL, NOTICES.replace("`2.0.0-onnx.5-trt`", "2.0.0-onnx.5-trt")).code).toBe(1);
   });
 
   it("fails on a wheel missing or at another version", () => {

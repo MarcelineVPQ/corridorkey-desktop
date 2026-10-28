@@ -488,6 +488,27 @@ describe("runInstall", () => {
     rmSync(data, { recursive: true, force: true });
   });
 
+  // dev.2: onnx.5's set no longer has the TensorRT C-RADIO's fp32 weights, an installed onnx.4 folder does
+  it("copies a TensorRT file an older installed set has, and downloads it only without that set", async () => {
+    const c0 = trtCatalog();
+    const weights = Buffer.from("W".repeat(30));
+    files["w-trt.onnx.data"] = weights;
+    const w = { file: "w-trt.onnx.data", url: `${base}/w-trt.onnx.data`, size: weights.length, sha256: sha(weights) };
+    const c: TrtCatalog = { ...c0, trtModels: { ...c0.trtModels, files: [w, ...c0.trtModels.files] }, older: [{ name: "m0", files: [{ ...w, file: "w.onnx.data" }] }] };
+    const data = installedBase();
+    expect(trtNeeds(data, existsSync, c).bytes).toBe(trtNeeds(data, existsSync, c0).bytes + 30);
+    mkdirSync(join(data, "models", "m0"), { recursive: true });
+    writeFileSync(join(data, "models", "m0", "w.onnx.data"), weights);
+    expect(trtNeeds(data, existsSync, c).bytes).toBe(trtNeeds(data, existsSync, c0).bytes);
+    asked.length = 0;
+    await runTrtInstall(data, deps(), c);
+    expect(asked).not.toContain("w-trt.onnx.data");
+    expect(readFileSync(join(data, "models", "m1", "w-trt.onnx.data")).equals(weights)).toBe(true);
+    // the older set keeps its own file
+    expect(existsSync(join(data, "models", "m0", "w.onnx.data"))).toBe(true);
+    rmSync(data, { recursive: true, force: true });
+  });
+
   it("resumes a TensorRT install whose model files were already moved into the set (a crash before the last step)", async () => {
     const c = trtCatalog();
     const data = installedBase();
@@ -528,19 +549,22 @@ describe("TensorRT catalogue and rules", () => {
     expect([TENSORRT.libs.size, TENSORRT.libs.sha256]).toEqual([3728705565, "91142c8ab3c58bed213cf1a563a6eb4e4f0ac529d05b5f909073acece0e3b712"]);
     expect(TENSORRT.models.files).toHaveLength(16);
     for (const f of TENSORRT.models.files) {
-      expect(f.url).toBe(`https://github.com/MarcelineVPQ/corridorkey-desktop/releases/download/models-2.0.0-onnx.4-trt/${f.file}`);
+      expect(f.url).toBe(`https://github.com/MarcelineVPQ/corridorkey-desktop/releases/download/models-2.0.0-onnx.5-trt/${f.file}`);
       expect(f.sha256).toMatch(/^[0-9a-f]{64}$/);
     }
     // the list goes last: its arrival is the mark that the set is whole
     expect(TENSORRT.models.files.at(-1)?.file).toBe("models.json");
-    // C-RADIO's TensorRT weights are onnx.4's fp32 bytes; onnx.5's normal set stores fp16 ones, so nothing is copied
+    // C-RADIO's TensorRT weights are onnx.4's fp32 bytes: onnx.5's normal set stores fp16 ones, so a fresh install
+    // downloads them (7.26 GB); one that still has onnx.4's folder copies them from it (5.53 GB, as with onnx.4)
     const cradio = TENSORRT.models.files.find((f) => f.file === "ck2-cradio-trt-fp16.onnx.data")!;
     expect(MODELS_MAC.files.find((f) => f.file === "ck2-cradio-fp16.onnx.data")).toMatchObject({ size: cradio.size, sha256: cradio.sha256 });
-    expect(MODELS_CUDA.files.some((f) => f.sha256 === cradio.sha256)).toBe(false);
+    // loop: NOT-WORTH — sixteen files against a dozen
+    expect(TENSORRT.models.files.some((t) => MODELS_CUDA.files.some((f) => f.sha256 === t.sha256))).toBe(false);
     // loop: NOT-WORTH — sixteen sizes
     const models = TENSORRT.models.files.reduce((n, f) => n + f.size, 0);
     expect(TRT_BYTES).toBe(TENSORRT.libs.size + models);
-    expect(TRT_BYTES).toBe(7258181540);
+    expect(TRT_BYTES).toBe(7258119136);
+    expect(TRT_BYTES - cradio.size).toBe(5533704448);
   });
 
   it("builds the shipped ck-trt-build against the same TensorRT wheel users download", () => {

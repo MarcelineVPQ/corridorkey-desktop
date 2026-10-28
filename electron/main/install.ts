@@ -494,10 +494,9 @@ export const TRT_LIBS_DIR = "tensorrt_libs";
 export const TRT_MODELS_LIST = "models-tensorrt.json";
 /** The wheel's licence folder, kept next to the libraries. */
 export const TRT_DIST_INFO = /^tensorrt_cu\d+_libs-[\d.]+\.dist-info$/;
-// still onnx.4's TensorRT set: onnx.5's (engine-rs/export/build_trt_models.sh) isn't complete yet (no -ctx.onnx stubs,
-// no "tensorrt-fp16-ctx" in its models.json). Each of its files is a whole network, so it runs beside onnx.5's set; its
-// C-RADIO weights (fp32) are no longer the normal set's bytes, so they are downloaded
-const TRT_MODEL_SET = "2.0.0-onnx.4-trt";
+// onnx.5's TensorRT set (engine-rs/export/build_trt_models.sh): stage 1 / 2 exported as onnx.5's; C-RADIO, MoGe and RVM
+// as in 2.0.0-onnx.4-trt, byte for byte (C-RADIO starts from onnx.4's fp32 weights, CK_TRT_CRADIO_FROM)
+const TRT_MODEL_SET = "2.0.0-onnx.5-trt";
 const trtModel = inRelease(TRT_MODEL_SET);
 export const TENSORRT = {
   libs: {
@@ -513,7 +512,7 @@ export const TENSORRT = {
       trtModel("ck2-cradio-trt-fp16-ctx.onnx", 600, "6276830bfeaa0226819f27064eb22c29e1fdad6ae5e4b16d2ed7daa4347b8cb9"),
       trtModel("ck2-cradio-trt-fp16.onnx", 742927, "1e6acbb7e9bd5f5fffe19fab97fbb5df3e9627b7082b4b7846b239f77ecfbe7a"),
       // onnx.4's ck2-cradio-fp16.onnx.data bytes (fp32 weights): onnx.5's normal set stores fp16 ones, so this one is
-      // downloaded (localTwin finds no twin)
+      // downloaded, or copied from an installed 2.0.0-onnx.4 folder (its ck2-cradio-fp16.onnx.data: TRT_CATALOG.older)
       trtModel("ck2-cradio-trt-fp16.onnx.data", 1724414688, "8f76c92ddf779b70745fc985820e7e312f7eb07ec82b4e20119062798f952b9f"),
       trtModel("ck2-moge-trt-fp16-ctx.onnx", 598, "9de6063abe191b1ad7ddac7415a9207f4e95101efdb89e7c2be83a296b2ac313"),
       trtModel("ck2-moge-trt-fp16.onnx", 425292, "0c94de749d02f1982c26f72f96c5392a0396b6b1c6a27ae2917ffc61776d4eff"),
@@ -521,11 +520,11 @@ export const TENSORRT = {
       trtModel("ck2-rvm-trt-fp16-ctx.onnx", 994, "a98773246f4b9c031a483795248ff2f4cd1a1dace4b1be9ede490a2f9d9ae228"),
       trtModel("ck2-rvm-trt-fp16.onnx", 611330, "845019115d9871e1101f6af1f4af5b6378fb3f9c043b453f4aa89369095c9be3"),
       trtModel("ck2-rvm-trt-fp16.onnx.data", 67419136, "5ebbca207937d92ef6fab97f165db4f68a3d7363df4e11e3023e872c7d7fa6ab"),
-      trtModel("ck2-stage1-trt-fp16-ctx.onnx", 1785, "f37de06c507fcd59e28890e57a15fedc485a160be4735ae066c45c8983f463f8"),
-      trtModel("ck2-stage1-trt-fp16.onnx", 2406474, "b11fc352da8b5e5dcfb9cf96d5fe9884f15b1ffe96b176f045faecacc7a2bc4b"),
-      trtModel("ck2-stage1-trt-fp16.onnx.data", 1125709568, "c11bc52e05d75773900b80b5b5ee28b6ddab0bbe1062e3f8d9857dcf69cde815"),
-      trtModel("ck2-stage2-trt-fp16-ctx.onnx", 843, "dd4183754f269fe4999384baf1fc689e13e12e24062a40b6dd87806ba289990e"),
-      trtModel("ck2-stage2-trt-fp16.onnx", 1297232, "8222676536502527095915bcb9dd2df8ac7a3741344f7bf4825817e05b85b646"),
+      trtModel("ck2-stage1-trt-fp16-ctx.onnx", 1785, "c9f6e12355339fade564f9c9f55d94d04670089c5e7fc6e7dcb62f6c9fcf5716"),
+      trtModel("ck2-stage1-trt-fp16.onnx", 2526652, "52fe3c19d1c3cb66fd6bcde0b26c041dd29c5bf95e2dbb102a5cf20a0c94f2b6"),
+      trtModel("ck2-stage1-trt-fp16.onnx.data", 1125711616, "0b12d2ed73521fa63dafaafbdaea0a0c5d6c5507b0d28b60bd4c56918b6e9683"),
+      trtModel("ck2-stage2-trt-fp16-ctx.onnx", 843, "d05a7d085eea3de18261ea1f7de0bda9be94cc2ebea891833d427bfb738c213b"),
+      trtModel("ck2-stage2-trt-fp16.onnx", 1112602, "dceba38fc853cf93bb35d73d5791b8654d082324efe28519d89e3d9a29b6f006"),
       trtModel("ck2-stage2-trt-fp16.onnx.data", 425429504, "ab6eae0f8c68a5056514f1e4a542a0bdefacc58ba9ef9bd9727f9577e1e38668"),
       // last: it becomes models-tensorrt.json once every file is in place (TRT_MODELS_LIST)
       trtModel("models.json", 476, "c5d65827ad8043fd67915d9cc37ff2110c559ce60450da86742de8c81eb74643"),
@@ -548,8 +547,11 @@ export function keepTensorrt(name: string): boolean {
 export interface TrtCatalog extends Catalog {
   libs: Download;
   trtModels: { name: string; files: Download[] };
+  // earlier model sets whose files a TensorRT file may equal, copied from their folder when it is still installed
+  older?: { name: string; files: Download[] }[];
 }
-const TRT_CATALOG: TrtCatalog = { ...CATALOG, libs: TENSORRT.libs, trtModels: TENSORRT.models };
+// 2.0.0-onnx.4 (dev.1's set on Linux): its ck2-cradio-fp16.onnx.data is the TensorRT C-RADIO's weights, 1.72 GB
+const TRT_CATALOG: TrtCatalog = { ...CATALOG, libs: TENSORRT.libs, trtModels: TENSORRT.models, older: [MODELS_MAC] };
 
 /** Where the TensorRT parts go: into the installed runtime and model set. */
 export function trtPaths(data: string, c: Catalog = TRT_CATALOG) {
@@ -558,10 +560,13 @@ export function trtPaths(data: string, c: Catalog = TRT_CATALOG) {
   return { runtime, libs: join(runtime, TRT_LIBS_DIR), provider: join(runtime, "onnxruntime", "capi", TRT_PROVIDER), models, list: join(models, TRT_MODELS_LIST) };
 }
 
-/** A TensorRT file the normal set already has (C-RADIO's weights are the same bytes): copied, not downloaded. */
-function localTwin(f: Download, c: Catalog): Download | undefined {
-  // loop: NOT-WORTH — a dozen model files, once per plan
-  return c.models.files.find((m) => m.sha256 === f.sha256 && m.size === f.size);
+/**
+ * Where an installed set may already have a TensorRT file's bytes (C-RADIO's weights): the normal set's folder first,
+ * then the older sets' (`root`: the models folder). Copied from the first that is there and checked, not downloaded.
+ */
+function localTwins(f: Download, c: Catalog & { older?: TrtCatalog["older"] }, root: string): string[] {
+  // loop: NOT-WORTH — two sets' dozen files, once per plan
+  return [c.models, ...(c.older ?? [])].flatMap((s) => s.files.filter((m) => m.sha256 === f.sha256 && m.size === f.size).map((m) => join(root, s.name, m.file)));
 }
 
 /** The ONNX Runtime wheel, which holds the TensorRT provider. */
@@ -586,18 +591,16 @@ export function trtNeeds(data: string, exists: (p: string) => boolean = existsSy
   const libs = !exists(p.libs);
   const provider = !exists(p.provider);
   const models = !exists(p.list);
-  const copied = (f: Download) => {
-    const twin = localTwin(f, c);
-    return !!twin && exists(join(p.models, twin.file));
-  };
+  // loop: NOT-WORTH — at most two candidate paths per file
+  const copied = (f: Download) => localTwins(f, c, dirname(p.models)).some((t) => exists(t));
   // loop: NOT-WORTH — sixteen model files, once per plan
   const modelBytes = total(c.trtModels.files.filter((f) => !copied(f)));
   return { libs, provider, models, bytes: (libs ? c.libs.size : 0) + (provider ? ortWheel(c).size : 0) + (models ? modelBytes : 0) };
 }
 
 // loop: NOT-WORTH — sixteen model files, once at load
-const TRT_MODEL_DOWNLOAD = TENSORRT.models.files.filter((f) => !localTwin(f, CATALOG));
-/** The TensorRT download on top of a 1.0 runtime and model set (what the setting's hint names). */
+const TRT_MODEL_DOWNLOAD = TENSORRT.models.files.filter((f) => !localTwins(f, CATALOG, "").length);
+/** The TensorRT download on top of a 1.0 runtime and model set (what the setting's hint names; less where an older set is still installed). */
 export const TRT_BYTES = TENSORRT.libs.size + total(TRT_MODEL_DOWNLOAD);
 
 /**
@@ -716,10 +719,9 @@ export async function runTrtInstall(data: string, deps: InstallDeps, c: TrtCatal
     // loop: SERIAL-REQUIRED — one file at a time, see fetcher
     for (const f of c.trtModels.files) {
       const target = join(partial, f.file);
-      const twin = localTwin(f, c);
-      const twinPath = twin ? join(p.models, twin.file) : null;
       // loop: NOT-WORTH — a few stats per model file
-      const fromTwin = !!twinPath && existsSync(twinPath);
+      const twinPath = localTwins(f, c, dirname(p.models)).find((t) => existsSync(t));
+      const fromTwin = !!twinPath;
       // loop: NOT-WORTH — one stat per model file
       if (!existsSync(target)) {
         // a crash after the moves below left it in the set's folder already: taken back, and checked again

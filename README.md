@@ -89,8 +89,9 @@ none of them changes what a user sees today.
   missing, it offers to install it (apt or pacman on Linux, `winget` on Windows, Homebrew on macOS).
 - Optional, Linux: **TensorRT** (Engine settings, TensorRT; off by default) for about 1.9-2.2× the original's speed at
   HD and about 2.3-2.4× at 4K, with the same mattes (Speed, the same-day pair of 2026-10-26). Switching it on offers its own download: NVIDIA's TensorRT 10.16
-  libraries (3.7 GB, from pypi.nvidia.com) and the TensorRT models (3.5 GB, from this repository's releases; still
-  onnx.4's TensorRT set, whose C-RADIO weights the 2.0.0-onnx.5 models no longer share), 7.3 GB in all, 6.1 GB on disk. Each
+  libraries (3.7 GB, from pypi.nvidia.com) and the TensorRT models (3.5 GB, from this repository's releases; C-RADIO's
+  1.7 GB of weights are copied from the 2.0.0-onnx.4 models when they are still installed), 7.3 GB in all (5.5 GB
+  with onnx.4's models), 6.1 GB on disk. Each
   resolution range is optimized once (about 4.4-4.8 minutes for the five networks on an RTX 5080: 4.4 at 1280×1080,
   4.8 at 4K even with TensorRT's timing cache warm; Speed, "TensorRT on onnx.4"): the app builds 4K and HD in the background when TensorRT is
   switched on, with a progress bar in Engine settings, and pauses while you key. Engine settings, TensorRT lists the

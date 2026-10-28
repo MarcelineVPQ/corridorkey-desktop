@@ -84,8 +84,10 @@ on its own rail icon. Not a system shell: its own commands only, each parsed and
   downloads onnx.5 next to an installed onnx.4, whose folder stays as it is.
 - macOS stays on 2.0.0-onnx.4 and its Core ML set (5.51 GB, as before): the Core ML files read their weights from
   onnx.4's files, and onnx.5's Core ML set is still to be converted on a Mac.
-- TensorRT (Linux, opt-in) stays on onnx.4's TensorRT set (onnx.5's isn't complete yet). Its C-RADIO weights are no
-  longer the normal set's bytes, so they are downloaded instead of copied: 7.26 GB in all (was 5.53 GB).
+- TensorRT (Linux, opt-in) gets onnx.5's TensorRT set, 2.0.0-onnx.5-trt: stage 1 and stage 2 from onnx.5's export,
+  C-RADIO, MoGe and RVM byte for byte onnx.4's. Its C-RADIO weights (fp32) are no longer in the normal set, so they
+  are copied from an installed onnx.4 folder when there is one (5.53 GB in all, as before) and downloaded otherwise
+  (7.26 GB). TensorRT's speed and mattes on onnx.5: (measuring).
 - **AMD graphics cards, engine only, untested on real hardware:** the engine can run on an AMD card on Linux through
   AMD's MIGraphX provider (`--device migraphx`, ROCm 10.1; docs/AMD.md). It has never run on an AMD card, and the app
   doesn't download an AMD runtime, so the app still needs an NVIDIA card on Linux and Windows. Without AMD's provider

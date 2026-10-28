@@ -177,11 +177,12 @@ The Core ML model set the Mac setup downloads (`models-2.0.0-onnx.4-coreml`, doc
 published once, before the first Mac build that pins it: `tools/upload_model_set.sh DIR 2.0.0-onnx.4-coreml` (the
 same script publishes the TensorRT set, `2.0.0-onnx.4-trt`), with Marcy's OK.
 
-From 1.0.0-dev.2 Linux and Windows pin `2.0.0-onnx.5` (install.ts `MODEL_SET`), while macOS stays on `2.0.0-onnx.4`
-and its Core ML set (`MAC_MODEL_SET`) and TensorRT on `2.0.0-onnx.4-trt`. `models-2.0.0-onnx.5` (at least the files install.ts
-pins, and LICENSE, NOTICE and ATTRIBUTION.md, which the model-set gate asks of a base set) is published before the
+From 1.0.0-dev.2 Linux and Windows pin `2.0.0-onnx.5` (install.ts `MODEL_SET`), and TensorRT `2.0.0-onnx.5-trt`,
+while macOS stays on `2.0.0-onnx.4` and its Core ML set (`MAC_MODEL_SET`). `models-2.0.0-onnx.5` (at least the files
+install.ts pins, and LICENSE, NOTICE and ATTRIBUTION.md, which the model-set gate asks of a base set) is published before the
 build that pins it; `upload_model_set.sh` publishes only `-trt` and `-coreml` sets, so the base set goes up by hand
-(`gh release create models-2.0.0-onnx.5 --latest=false`), and `tools/check_model_sets.mjs` then checks it.
+(`gh release create models-2.0.0-onnx.5 --latest=false`), then `tools/upload_model_set.sh DIR 2.0.0-onnx.5-trt`
+(it takes the licence files from the base release), and `tools/check_model_sets.mjs` checks both.
 
 Development builds ship one feature at a time on the Development channel; a stable release goes out when its
 planned set is done and Marcy has done her QC (the DS5 rhythm).
