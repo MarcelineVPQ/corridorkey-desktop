@@ -867,10 +867,11 @@ export class Console {
     // loop: NOT-WORTH — a pipe's few filters, parsed before anything runs
     for (const [i, st] of stages.slice(1).entries()) {
       const p = parse(st.text.trim(), this.d.registry, this.opts);
-      // loop: NOT-WORTH — a filter's few mistakes
-      if (p.errors.length) return this.finish(b, "refused", ...p.errors.map((e) => e.message));
+      // what may follow a | first: a command that isn't a filter (wc, which needs FILE on its own) says so, not its own usage
       const f = p.command?.kind === "builtin" ? p.command.name : "";
       if (!PIPE_FILTERS.has(f)) return this.finish(b, "refused", `After a | comes grep, head, tail or count (dir | grep sh010 | count), not ${st.text.trim().split(/\s+/)[0]}.`);
+      // loop: NOT-WORTH — a filter's few mistakes
+      if (p.errors.length) return this.finish(b, "refused", ...p.errors.map((e) => e.message));
       // loop: NOT-WORTH — the filter's few arguments
       if (p.positionals.some((x) => x.arg.id === "file")) return this.finish(b, "refused", `After a |, ${f} takes the command before's lines, not a file: ${f} -n 5.`);
       if (f === "count" && i < stages.length - 2) return this.finish(b, "refused", "count goes last (it prints one number).");
