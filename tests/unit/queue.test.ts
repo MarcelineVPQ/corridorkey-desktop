@@ -507,6 +507,8 @@ describe("TensorRT in the queue", () => {
       range: "h1792-2176_w3584-4096_t1-8_f1-4",
       cache: "reused",
       notAsked: null,
+      modelSet: null,
+      modelsDir: null,
     });
 
     // 08_3a, 2026-10-25: the parts weren't installed yet, so the job didn't ask, and the page says why

@@ -45,6 +45,8 @@ impl Backend for Ort {
             "tensorrt_available": rt.tensorrt_ep,
             "ort": rt.ort_version,
             "models_dir": self.pipeline.models.dir,
+            // the model set's version from its manifest.json (additive; null without one), for the job log
+            "model_set": self.pipeline.models.version,
             "assets": precision.map(|p| json!(self.pipeline.models.assets(p))).unwrap_or(json!({})),
             "python": null, "torch": null,
             // the settings it runs with (additive): its command line and CK_ENGINE_* variables, as read at startup

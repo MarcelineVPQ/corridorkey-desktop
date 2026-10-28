@@ -69,6 +69,12 @@ export function ranOnText(t: JobTech): string | null {
   return `${name}${t.precision ? ` · ${t.precision}` : ""}${partly}`;
 }
 
+/** The model set a job ran with, from the engine's pong: "2.0.0-onnx.5 (/models/2.0.0-onnx.5)"; null when not reported. */
+export function modelSetText(t: JobTech): string | null {
+  if (!t.modelsDir) return t.modelSet;
+  return `${t.modelSet ?? "no version (its folder has no manifest.json)"} (${t.modelsDir})`;
+}
+
 /** The TensorRT line of a job: why it wasn't used (the engine's reason, or the app's), or the range it ran. */
 export function trtJobText(t: JobTech): string | null {
   if (t.notAsked) return `not asked: ${t.notAsked}`;

@@ -81,8 +81,8 @@ While a clip runs, its page shows:
 - **Progress:** the stages (Starting the engine, Loading the model, Reading the clip, Motion features (RVM),
   Foundation features in low-memory mode, Keying), **Frames written**, the **measured speed** and the elapsed time.
   Every number comes from the engine; nothing is guessed.
-- **Technology for this run:** what it really ran on (CUDA or TensorRT, and the precision), and on Linux why
-  TensorRT was or wasn't used.
+- **Technology for this run:** what it really ran on (CUDA or TensorRT, and the precision), the model set the engine
+  loaded (its version, such as 2.0.0-onnx.5, and its folder), and on Linux why TensorRT was or wasn't used.
 - **Memory used for this run:** the temporal window the engine really used, whether low-memory mode was on, the free
   graphics memory it saw when it started, the limit, and the runtime's peak estimate.
 - **Engine log:** the engine's own output.

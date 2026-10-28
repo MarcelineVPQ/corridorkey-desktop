@@ -177,6 +177,9 @@ export interface JobTech {
   cache: string | null;
   // the app didn't ask for TensorRT: why (null when it asked, or where TensorRT doesn't exist: Windows, macOS)
   notAsked: string | null;
+  // the model set the engine had loaded when the job started (its pong): version and folder; null when not reported
+  modelSet: string | null;
+  modelsDir: string | null;
 }
 
 // the manual window choices (Graphics memory → Manual): what the picker offers and the estimate asks the engine about
@@ -286,6 +289,9 @@ export interface Pong {
   ort: string | null;
   provider: string | null;
   precision: string | null;
+  // the model set the engine loaded: its folder and its manifest's version ("2.0.0-onnx.5"); null when not sent
+  modelsDir: string | null;
+  modelSet: string | null;
   assets: Record<string, boolean>;
 }
 

@@ -102,7 +102,18 @@ export function providerText(r: EngineReply): string | null {
   return null;
 }
 
-const NO_TECH: JobTech = { provider: null, precision: null, tensorrtRequested: false, fallbackReason: null, fallbacks: {}, range: null, cache: null, notAsked: null };
+const NO_TECH: JobTech = {
+  provider: null,
+  precision: null,
+  tensorrtRequested: false,
+  fallbackReason: null,
+  fallbacks: {},
+  range: null,
+  cache: null,
+  notAsked: null,
+  modelSet: null,
+  modelsDir: null,
+};
 
 /**
  * What ran a job, from the engine's `provider` replies, each field as the engine sent it. A TensorRT job gets two:
@@ -128,6 +139,8 @@ export function techFrom(r: EngineReply, prev: JobTech | null | undefined): JobT
     range: str(r.range, p.range),
     cache: str(r.cache, p.cache),
     notAsked: requested ? null : p.notAsked,
+    modelSet: p.modelSet,
+    modelsDir: p.modelsDir,
   };
 }
 
@@ -298,6 +311,8 @@ export class Queue {
           ort: typeof pong.ort === "string" ? pong.ort : null,
           provider: typeof pong.provider === "string" ? pong.provider : null,
           precision: typeof pong.precision === "string" ? pong.precision : null,
+          modelsDir: typeof pong.models_dir === "string" ? pong.models_dir : null,
+          modelSet: typeof pong.model_set === "string" ? pong.model_set : null,
           assets: (pong.assets as Record<string, boolean>) ?? {},
         },
       };
@@ -366,8 +381,10 @@ export class Queue {
     await this.cleaning.get(job.id);
     if (this.current !== job) return;
     const trt = this.deps.tensorrt?.() ?? false;
-    // what ran it comes from the engine's provider reply; the app's own part is why it didn't ask for TensorRT
-    job.tech = { ...NO_TECH, notAsked: trt ? null : (this.deps.tensorrtWhyNot?.() ?? null) };
+    // what ran it comes from the engine's provider reply (the model set from its pong); the app's own part is why it
+    // didn't ask for TensorRT
+    const pong = this.engine.pong;
+    job.tech = { ...NO_TECH, notAsked: trt ? null : (this.deps.tensorrtWhyNot?.() ?? null), modelSet: pong?.modelSet ?? null, modelsDir: pong?.modelsDir ?? null };
     // the same job as a corridorkey line (teach by echo): its settings, and TensorRT as asked here
     // (none when a path has characters a shell would read: jobCommand says which; then nothing is echoed)
     const line = jobCommand(job, trt, PLATFORM === "win32");

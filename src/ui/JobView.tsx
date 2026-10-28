@@ -6,7 +6,7 @@ import { ProgressBar } from "./ProgressBar";
 import { FolderOpen, RotateCcw } from "lucide-react";
 import { LOG_SHOWN, type Job, type TrtPrebuild } from "../shared/types";
 import { buildSteps, prebuildStep, TRT_NOT_BUILT } from "../shared/trt";
-import { duration, ranOnText, STAGE_ORDER, STAGE_TEXT, trtJobText } from "./format";
+import { duration, modelSetText, ranOnText, STAGE_ORDER, STAGE_TEXT, trtJobText } from "./format";
 import { MainBlock } from "./panel/SplitView";
 import { PathText } from "./PathText";
 
@@ -28,6 +28,7 @@ export function JobView({ job, prebuild }: { job: Job; prebuild?: TrtPrebuild })
   const tech = job.tech ?? null;
   const ranOn = tech ? ranOnText(tech) : null;
   const trtLine = tech ? trtJobText(tech) : null;
+  const modelSet = tech ? modelSetText(tech) : null;
   const steps = prebuild ? buildSteps(prebuild.ranges) : null;
   const notBuilt = tech?.fallbackReason === TRT_NOT_BUILT;
 
@@ -56,10 +57,11 @@ export function JobView({ job, prebuild }: { job: Job; prebuild?: TrtPrebuild })
         </MainBlock>
       )}
 
-      {tech && (ranOn || trtLine) && (
+      {tech && (ranOn || trtLine || modelSet) && (
         <MainBlock title="Technology for this run">
           <div className="stats">
             {ranOn && <Stat k="Ran on" v={ranOn} />}
+            {modelSet && <Stat k="Model set" v={modelSet} />}
             {trtLine && <Stat k="TensorRT" v={trtLine} />}
           </div>
           {notBuilt && (

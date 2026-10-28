@@ -23,7 +23,6 @@ export const PONG_NOT_READ = new Map([
   ["coreml_available", "for Marcy (2026-10-27): show the engine's no-provider reason on the engine card? Not shown today"],
   ["unavailable", "for Marcy (2026-10-27): show the engine's no-provider reason on the engine card? Not shown today"],
   ["tensorrt_available", "the app asks for TensorRT only with the setting on and its parts installed (install.ts trtReady)"],
-  ["models_dir", "the app passes it (--models), so it knows it"],
   ["python", "the PyTorch reference engine's field; null in the Rust engine"],
   ["torch", "the PyTorch reference engine's field; null in the Rust engine"],
   ["config", "diagnostics: the engine's settings, also on its stderr"],

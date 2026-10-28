@@ -7,7 +7,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { Job } from "../../src/shared/types";
-import { duration, ranOnText, trtJobText } from "../../src/ui/format";
+import { duration, modelSetText, ranOnText, trtJobText } from "../../src/ui/format";
 import { rangeText } from "../../src/shared/trt";
 
 /** The engines' clip name (engine-rs clip.rs raw_clip_name, the original's): the file name without its extension
@@ -47,6 +47,7 @@ export function jobLogText(job: Job, appVersion: string): string {
     "Technology for this run",
     `  Ran on: ${(t && ranOnText(t)) ?? "not reported by the engine"}`,
     `  Precision: ${t?.precision ?? "not reported by the engine"}`,
+    `  Model set: ${(t && modelSetText(t)) ?? "not reported by the engine"}`,
     `  TensorRT: ${(t && trtJobText(t)) ?? "not asked"}`,
     `  TensorRT range: ${t?.range ? `${t.range} (${rangeText(t.range)})` : "none"}`,
     `  Temporal window: ${m ? `${m.hannChunk} / ${m.hannStride} (chosen ${m.auto ? "automatically" : "manually"})` : "not reported (the job ended before the engine chose it)"}`,

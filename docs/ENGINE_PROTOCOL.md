@@ -139,7 +139,7 @@ The `corridorkey` command line ([CLI.md](CLI.md)) runs the same jobs without thi
    "assets":{"weights":true,"foundation_stats":true,"rvm":true,"moge":true,"cradio":true}}
 ← {"type":"pong","version":"1.0.0-dev.1","protocol":1,"engine":"onnxruntime","device":"cuda","gpu":"NVIDIA GeForce RTX 5080",
    "vram_total_mb":16303,"provider":"cuda","precision":"fp16","ort":"1.31.0","tensorrt_available":true,
-   "models_dir":"/models","assets":{"cradio":true,"moge":true,"rvm":true,"stage1":true,"stage2":true},"python":null,"torch":null,
+   "models_dir":"/models","model_set":"2.0.0-onnx.5","assets":{"cradio":true,"moge":true,"rvm":true,"stage1":true,"stage2":true},"python":null,"torch":null,
    "config":{"device":"auto","precision":null,"graph_opt":"all","arena_shrink":"auto","trt_cache":"...",...},
    "decoders":{"jpeg":"libjpeg-turbo (/usr/lib/libturbojpeg.so.0.4.0, TurboJPEG 3 API)","ffmpeg":"8.0","ffprobe":"8.0"}}
 ← {"type":"progress","id":"j1","stage":"load|optimize|probe|rvm|foundations|keying","p":0.42,"detail":"window 3/9"}
@@ -222,6 +222,8 @@ The `corridorkey` command line ([CLI.md](CLI.md)) runs the same jobs without thi
   built), the same number `corridorkey --version` prints. Before 2026-10-26 it was the Rust workspace's own 0.2.0.
 - `coreml_available` (Rust engine pong, additive): the loaded ONNX Runtime has the Core ML provider. When no provider
   can run (`provider` null, e.g. `--device coreml` without it) `unavailable` says why; nothing runs on the CPU instead.
+- `model_set` (Rust engine pong, additive): the model set's version from its folder's `manifest.json` (null without
+  one). With `models_dir` it goes into each job's log and the job page's "Technology for this run".
 - `ocio` (Rust engine pong, additive): the version of the OpenColorIO library linked into the engine ("2.5.2"). An
   engine built without it (a stub) refuses to start.
 - Colour management (Rust engine, backlog row 29; docs/ENGINE_RUST.md "Colour"): with `input_colorspace` the clip's

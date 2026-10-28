@@ -9,6 +9,7 @@ import { discardsSettled } from "../../electron/main/partial";
 import { Queue, type EngineHandle } from "../../electron/main/queue";
 import type { EngineReply } from "../../electron/main/engine";
 import { LOG_KEPT, type Job } from "../../src/shared/types";
+import { modelSetText } from "../../src/ui/format";
 import { clipInfo, job as fixtureJob } from "./fixtures";
 
 const OUT = mkdtempSync(join(tmpdir(), "ck-joblog-"));
@@ -21,7 +22,7 @@ function rig() {
       reply = onReply;
       const h: EngineHandle = {
         running: true,
-        start: () => Promise.resolve({ type: "pong", protocol: 1, version: "1.0.0", engine: "onnxruntime", device: "cuda" }),
+        start: () => Promise.resolve({ type: "pong", protocol: 1, version: "1.0.0", engine: "onnxruntime", device: "cuda", models_dir: "/m/2.0.0-onnx.5", model_set: "2.0.0-onnx.5" }),
         send: () => {},
         quit: () => {},
         kill: () => {},
@@ -74,6 +75,8 @@ describe("the engine log saved with every job", () => {
     const text = readFileSync(file, "utf8");
     expect(text).toContain("Status: done");
     expect(text).toContain("  Ran on: TensorRT · fp16");
+    // the model set the engine loaded, from its pong: version and folder (inform users to decide)
+    expect(text).toContain("  Model set: 2.0.0-onnx.5 (/m/2.0.0-onnx.5)");
     expect(text).toContain("  TensorRT range: h1024-1280_w1792-2176_t1-48_f1-4 (up to 2176×1280, windows up to 48 frames)");
     expect(text).toContain("  Temporal window: 48 / 24 (chosen automatically)");
     expect(text).toContain("  Low-memory mode: on");
@@ -82,6 +85,13 @@ describe("the engine log saved with every job", () => {
     // every line, not the page's last 12
     expect(text).toContain("line 0\n");
     expect(text).toContain("line 39\n");
+  });
+
+  it("names the model set as the engine reported it: a folder without a manifest, or an engine that sent neither", () => {
+    const t = { provider: null, precision: null, tensorrtRequested: false, fallbackReason: null, fallbacks: {}, range: null, cache: null, notAsked: null };
+    expect(modelSetText({ ...t, modelSet: null, modelsDir: "/m/mine" })).toBe("no version (its folder has no manifest.json) (/m/mine)");
+    expect(modelSetText({ ...t, modelSet: null, modelsDir: null })).toBeNull();
+    expect(jobLogText(fixtureJob("f", { tech: { ...t, modelSet: null, modelsDir: null } }), "x")).toContain("  Model set: not reported by the engine\n");
   });
 
   it("writes it for a failed job into its folder, with the engine's error output, and the folder stays", async () => {
