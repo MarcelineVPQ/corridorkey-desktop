@@ -7,7 +7,7 @@ import { Check, Cpu, Download, Film, ListChecks, X, Zap } from "lucide-react";
 import type { AppState, EngineFileKind } from "../../shared/types";
 import { installMissing } from "../../shared/tasks";
 import { downloadingStatus, ENGINE_FAILED, NO_VRAM_HELD } from "../../shared/texts";
-import { Accordion, Row, Section } from "../panel/Section";
+import { Accordion, Row, Section, type SectionFocus } from "../panel/Section";
 import { MainBlock, SplitView } from "../panel/SplitView";
 import { Stat } from "../JobView";
 import { gib } from "../format";
@@ -19,7 +19,7 @@ export function EnginePage(props: {
   panelShown: boolean;
   narrow: boolean;
   glass: boolean;
-  focus: string | null;
+  focus: SectionFocus;
   sectionTasks: Record<string, string>;
   hidePanel: () => void;
   openSetup: () => void;

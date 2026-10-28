@@ -9,6 +9,7 @@ import { missingInput, startBlocked } from "../../shared/tasks";
 import { AS_USED, CANT_READ_CLIP } from "../../shared/texts";
 import { JobSettings } from "../JobSettings";
 import { JobView } from "../JobView";
+import type { SectionFocus } from "../panel/Section";
 import { SplitView } from "../panel/SplitView";
 import { PathText } from "../PathText";
 import { clipFacts, gib, statusText } from "../format";
@@ -20,7 +21,7 @@ export function QueuePage(props: {
   panelShown: boolean;
   narrow: boolean;
   glass: boolean;
-  focus: string | null;
+  focus: SectionFocus;
   sectionTasks: Record<string, string>;
   hidePanel: () => void;
 }) {

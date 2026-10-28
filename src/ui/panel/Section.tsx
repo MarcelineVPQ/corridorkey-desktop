@@ -12,21 +12,24 @@ import { createContext, useContext, useEffect, useId, useRef, type KeyboardEvent
 import { ChevronDown, type LucideIcon } from "lucide-react";
 import { usePref } from "../prefs";
 
+/** A task's deep link: the section to open and scroll to; `n` is new per press, so the same link works again. */
+export type SectionFocus = { section: string; n: number } | null;
+
 interface AccordionState {
   open: string | null;
   pinned: string[];
   setOpen: (id: string | null) => void;
   togglePin: (id: string) => void;
-  focus: string | null;
+  focus: SectionFocus;
 }
 const AccordionContext = createContext<AccordionState | null>(null);
 
 /** One accordion per page; `focus` opens and scrolls to a section (a task's deep link). */
-export function Accordion({ page, focus, children }: { page: string; focus: string | null; children: ReactNode }) {
+export function Accordion({ page, focus, children }: { page: string; focus: SectionFocus; children: ReactNode }) {
   const [open, setOpen] = usePref<string | null>(`ck.open.${page}`, null);
   const [pinned, setPinned] = usePref<string[]>(`ck.pinned.${page}`, []);
   useEffect(() => {
-    if (focus) setOpen(focus);
+    if (focus) setOpen(focus.section);
   }, [focus, setOpen]);
   // loop: NOT-WORTH — a few pinned sections per click
   const togglePin = (id: string) => setPinned((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
@@ -57,7 +60,7 @@ export function Section(props: { id: string; icon: LucideIcon; title: string; st
   const bodyId = useId();
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
-    if (acc.focus === id) ref.current?.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    if (acc.focus?.section === id) ref.current?.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   }, [acc.focus, id]);
   // a locked section's reason (a clip that ran: "As used for this run") is said once, in the panel's subtitle
   const line = task ?? status;

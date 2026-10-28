@@ -8,7 +8,7 @@ import { LINEAR_RANGES, MANUAL_WINDOWS, OUTPUT_NAMES, VRAM_LIMIT_AUTO_HELP, scal
 import { gibBytes } from "../shared/units";
 import { AS_USED } from "../shared/texts";
 import { builtWindows, sizeRangeText, trtSizeKey, TRT_BUILD_COST, TRT_SPEED, type TrtSize } from "../shared/trt";
-import { Accordion, Row, Section, Segmented } from "./panel/Section";
+import { Accordion, Row, Section, Segmented, type SectionFocus } from "./panel/Section";
 import { More } from "./More";
 import { PathText } from "./PathText";
 
@@ -51,7 +51,7 @@ export function JobSettings({
   onChange,
 }: {
   job: Job;
-  focus: string | null;
+  focus: SectionFocus;
   sectionTasks: Record<string, string>;
   queueRunning: boolean;
   platform: string;

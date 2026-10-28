@@ -8,7 +8,7 @@ import type { Appearance, AppState, CacheInfo, UpdateState } from "../../shared/
 import { gibBytes, mbOrGbBytes } from "../../shared/units";
 import { VramLimitRow } from "../JobSettings";
 import { NOT_WHILE_BUSY } from "../../shared/texts";
-import { Accordion, Row, Section, Segmented } from "../panel/Section";
+import { Accordion, Row, Section, Segmented, type SectionFocus } from "../panel/Section";
 import { MainBlock, SplitView } from "../panel/SplitView";
 import { Stat } from "../JobView";
 import { gbBytes } from "../format";
@@ -21,7 +21,7 @@ const NEXT_TO_CLIP = "Next to each clip";
 
 const THEME_TEXT = { system: "System", light: "Light", dark: "Dark", desktop: "Desktop" } as const;
 
-export function SettingsPage(props: { state: AppState; panelShown: boolean; narrow: boolean; glass: boolean; focus: string | null; hidePanel: () => void }) {
+export function SettingsPage(props: { state: AppState; panelShown: boolean; narrow: boolean; glass: boolean; focus: SectionFocus; hidePanel: () => void }) {
   const { state } = props;
   const a = state.settings.appearance;
   const setA = (patch: Partial<Appearance>) => void window.ck.setAppearance({ ...a, ...patch });

@@ -80,7 +80,8 @@ export function App() {
     setPage(r.page);
     if (r.panel === "show") setPanel(r.page, true);
     if (r.panel === "hide") setPanel(r.page, false);
-    if (r.section) setFocus({ page: r.page, section: r.section, n: Date.now() });
+    // a deep link holds until the next press (a plain press clears it, so a page opened again doesn't jump back)
+    setFocus(r.section ? { page: r.page, section: r.section, n: Date.now() } : null);
     // a queue task about one clip selects it
     const job = jobToSelect(tasks, pressed);
     if (job) setSelected(job);
@@ -88,7 +89,7 @@ export function App() {
 
   if (!state) return null;
   const glass = state.settings.appearance.glass;
-  const common = { narrow, glass, hidePanel: () => setPanel(page, false), focus: focus?.page === page ? focus.section : null };
+  const common = { narrow, glass, hidePanel: () => setPanel(page, false), focus: focus?.page === page ? focus : null };
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();

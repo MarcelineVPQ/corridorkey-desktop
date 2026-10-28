@@ -8,7 +8,7 @@ import { History, Keyboard, SlidersHorizontal, SquareTerminal, Square, ShieldAle
 import type { AppState, ConsoleHistoryEntry } from "../../shared/types";
 import { makeRegistry } from "../../shared/console/registry";
 import type { HistoryLine } from "../../shared/console/expand";
-import { Accordion, Row, Section, Segmented } from "../panel/Section";
+import { Accordion, Row, Section, Segmented, type SectionFocus } from "../panel/Section";
 import { SplitView } from "../panel/SplitView";
 import { PathText } from "../PathText";
 import { shortenPath } from "../paths";
@@ -58,7 +58,7 @@ export function ConsolePage(props: {
   panelShown: boolean;
   narrow: boolean;
   glass: boolean;
-  focus: string | null;
+  focus: SectionFocus;
   hidePanel: () => void;
 }) {
   const { state, blocks, setBlocks } = props;
