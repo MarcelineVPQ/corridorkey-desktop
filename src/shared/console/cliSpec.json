@@ -1765,7 +1765,7 @@
         }
       ],
       "examples": [
-        "corridorkey prepare --models ~/models/2.0.0-onnx.4 --ort /opt/ort/libonnxruntime.so",
+        "corridorkey prepare --models ~/models/2.0.0-onnx.5 --ort /opt/ort/libonnxruntime.so",
         "corridorkey prepare --gpu 0 --tensorrt-size 4096x2160"
       ],
       "name": "prepare"
@@ -1865,7 +1865,7 @@
         }
       ],
       "examples": [
-        "corridorkey info --models ~/models/2.0.0-onnx.4",
+        "corridorkey info --models ~/models/2.0.0-onnx.5",
         "corridorkey info --json --device cpu"
       ],
       "name": "info"

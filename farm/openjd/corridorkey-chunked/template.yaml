@@ -119,7 +119,7 @@ parameterDefinitions:
     type: PATH
     objectType: DIRECTORY
     dataFlow: NONE
-    description: The CorridorKey model set's folder on the workers (the app's is ~/.local/share/corridorkey-desktop/models/2.0.0-onnx.4).
+    description: The CorridorKey model set's folder on the workers (the app's is ~/.local/share/corridorkey-desktop/models/2.0.0-onnx.5).
     userInterface:
       control: CHOOSE_DIRECTORY
       label: Models folder

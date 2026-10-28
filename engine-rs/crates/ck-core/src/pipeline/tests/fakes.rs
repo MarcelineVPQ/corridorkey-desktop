@@ -174,7 +174,7 @@ fn mean(v: &[f32]) -> f32 {
     v.iter().sum::<f32>() / v.len().max(1) as f32
 }
 
-/// The 2.0.0-onnx.4 fp16 set's float16 inputs and outputs (manifest.json): (network, tensor). Every other
+/// The fp16 set's float16 inputs and outputs (manifest.json; 2.0.0-onnx.4 and onnx.5 alike): (network, tensor). Every other
 /// tensor is float32: the features, RVM's frame and state, C-RADIO and MoGe, stage 1's baton.
 pub(crate) const MIXED_F16: [(&str, &str); 6] =
     [("stage1", "rgb"), ("stage1", "hint"), ("stage1", "hint_quality"), ("stage1", "aux"), ("stage2", "rgb"), ("stage2", "logits")];

@@ -1223,7 +1223,7 @@ describe("Phase 4: doctor", () => {
     gpu: { name: "NVIDIA GeForce RTX 5080", driver: "590.44", vram_total_mb: 16303 },
     tensorrt_available: true,
     // as ck-cli prints it (a real run: ModelSet::assets is a map of the five networks)
-    models: { dir: "/m/2.0.0-onnx.4", set: "2.0.0-onnx.4", assets: { cradio: true, moge: true, rvm: true, stage1: true, stage2: true } },
+    models: { dir: "/m/2.0.0-onnx.5", set: "2.0.0-onnx.5", assets: { cradio: true, moge: true, rvm: true, stage1: true, stage2: true } },
     decoders: { ffmpeg: "7.1" },
   };
   const app = (over: Partial<DoctorRow>[] = []) => ({
@@ -1260,7 +1260,7 @@ describe("Phase 4: doctor", () => {
     expect(gpuTaken).toBe(0);
     const text = blockText(b).split("\n");
     expect(text.find((l) => l.includes("Graphics card"))).toMatch(/^✓ Graphics card +NVIDIA GeForce RTX 5080 · driver 590.44 · 15.9 GiB · cuda \(fp16\)$/);
-    expect(text.find((l) => l.includes("Models"))).toMatch(/^✓ Models +2.0.0-onnx.4 in \/m\/2.0.0-onnx.4$/);
+    expect(text.find((l) => l.includes("Models"))).toMatch(/^✓ Models +2.0.0-onnx.5 in \/m\/2.0.0-onnx.5$/);
     expect(text.find((l) => l.includes("Results folder"))).toMatch(/^✓ Results folder .*writable · 500 GiB free/);
     // a folder made when something is written: a warning with what to do, not a failure
     expect(text.find((l) => l.includes("Cache folder"))).toMatch(/^⚠ Cache folder .*isn't there yet/);

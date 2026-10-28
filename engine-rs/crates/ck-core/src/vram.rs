@@ -2,8 +2,9 @@
 //! chosen from it (runtime.select_vram_profile's search with this engine's numbers).
 //!
 //! The table is the measured peak (GiB: nvidia-smi over the engine's process tree, tools/engine_bench.mjs; RTX 5080,
-//! ONNX Runtime 1.31 CUDA, docs/BACKLOG.md row 41) on model set 2.0.0-onnx.4, the set the app ships (measured
-//! 2026-10-26, engine 1afed1c: 69 points ran, 16 ran out of memory), per padded model-input size (megapixels:
+//! ONNX Runtime 1.31 CUDA, docs/BACKLOG.md row 41) on model set 2.0.0-onnx.4 (measured 2026-10-26, engine 1afed1c: 69
+//! points ran, 16 ran out of memory; onnx.5, the set the app ships on Linux and Windows since 1.0.0-dev.2, is still to
+//! be measured against it), per padded model-input size (megapixels:
 //! 960x720, 1280x1080, 1920x1080, 2560x1440, 3200x1800, 4096x2160) and window length, the highest of the clips and
 //! runs at each point, rounded up to 0.01 GiB, then made monotone (never lower for a longer window or a larger size).
 //! A window not measured at a size takes the next measured window's peak; past the largest one that ran, it is

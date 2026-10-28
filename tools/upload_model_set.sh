@@ -2,7 +2,7 @@
 # Publish a TensorRT or Core ML model set as this repository's GitHub release `models-<set>` (the app downloads it by
 # exact name, size and SHA-256: electron/main/install.ts TENSORRT.models, and COREML on macOS).
 #
-#   tools/upload_model_set.sh DIR SET     SET: 2.0.0-onnx.4-trt or 2.0.0-onnx.4-coreml
+#   tools/upload_model_set.sh DIR SET     SET: e.g. 2.0.0-onnx.5-trt or 2.0.0-onnx.5-coreml
 #
 # DIR holds the set as its build writes it. TensorRT (`-trt`, engine-rs/export/build_trt_models.sh):
 # ck2-*-trt-fp16.onnx, their .onnx.data, the -ctx.onnx EPContext stubs, and models.json. Core ML (`-coreml`,

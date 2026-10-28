@@ -14,7 +14,9 @@ const LICENCES = [
 describe("the model-set gate (online at release; these checks are offline)", () => {
   it("reads this repository's pinned sets and what each derives from", () => {
     const sets = pinnedSets(readFileSync(join(APP, "electron/main/install.ts"), "utf8"));
+    // macOS (and its Core ML set) and TensorRT stay on onnx.4 until onnx.5's Core ML and TensorRT sets are built
     expect(sets.map((s) => [s.set, s.base])).toEqual([
+      ["2.0.0-onnx.5", null],
       ["2.0.0-onnx.4", null],
       ["2.0.0-onnx.4-coreml", "2.0.0-onnx.4"],
       ["2.0.0-onnx.4-trt", "2.0.0-onnx.4"],

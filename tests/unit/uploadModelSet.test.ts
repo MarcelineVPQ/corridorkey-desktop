@@ -58,7 +58,7 @@ describe.skipIf(process.platform !== "linux")("upload_model_set.sh", () => {
     writeFileSync(join(fake, "assets"), assets.join("\n") + "\n");
     writeFileSync(join(fake, "exists"), "");
     // loop: NOT-WORTH — one run of the script with the stand-in gh, 30 s deadline
-    const r = spawnSync("bash", [script, dir, "2.0.0-onnx.4-trt"], { encoding: "utf8", timeout: 30_000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE: fake } });
+    const r = spawnSync("bash", [script, dir, "2.0.0-onnx.5-trt"], { encoding: "utf8", timeout: 30_000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE: fake } });
     expect(r.stderr).toBe("");
     expect(r.status).toBe(0);
     expect(readFileSync(join(fake, "log"), "utf8")).toBe("edit\nupload ck2-a-trt-fp16.onnx.data\n");

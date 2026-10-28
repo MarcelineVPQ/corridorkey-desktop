@@ -15,9 +15,11 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const wheel = (file: string) => `  wheels: [{ file: "${file}", url: "", size: 1, sha256: "" }],`;
 const INSTALL = [
-  'const MODEL_SET = "2.0.0-onnx.4";',
+  'const MODEL_SET = "2.0.0-onnx.5";',
   "const model = inRelease(MODEL_SET);",
-  "const COREML_SET = `${MODEL_SET}-coreml`;",
+  'const MAC_MODEL_SET = "2.0.0-onnx.4";',
+  "const macModel = inRelease(MAC_MODEL_SET);",
+  "const COREML_SET = `${MAC_MODEL_SET}-coreml`;",
   "const coremlModel = inRelease(COREML_SET);",
   "export const RUNTIME = {",
   wheel("onnxruntime_gpu-1.23.2-cp312-cp312-manylinux_2_27_x86_64.whl"),
@@ -38,7 +40,8 @@ const NOTICES = [
   "| onnxruntime | 1.23.2 | macOS | MIT |",
   "| onnxruntime-gpu | 1.23.2 | Linux, Windows | MIT |",
   "| tensorrt-cu13-libs | 10.16.1.11 | Linux, opt-in TensorRT | NVIDIA |",
-  "- `2.0.0-onnx.4` (every system)",
+  "- `2.0.0-onnx.5` (Linux, Windows)",
+  "- `2.0.0-onnx.4` (macOS)",
   "- `2.0.0-onnx.4-coreml` (macOS: Core ML)",
   "- `2.0.0-onnx.4-trt` (Linux: the opt-in TensorRT jobs)",
 ].join("\n");
@@ -68,10 +71,11 @@ describe("notices gate (first-run downloads)", () => {
     expect(r.code).toBe(0);
   });
 
-  it("fails on a model set the notices don't name, the derived Core ML one too", () => {
+  it("fails on a model set the notices don't name, the derived Core ML one and the Mac's own set too", () => {
     const r = runGate(INSTALL, NOTICES.replace("- `2.0.0-onnx.4-coreml` (macOS: Core ML)\n", ""));
     expect(r.code).toBe(1);
     expect(r.out).toContain("model set 2.0.0-onnx.4-coreml");
+    expect(runGate(INSTALL, NOTICES.replace("- `2.0.0-onnx.4` (macOS)\n", "")).out).toContain("model set 2.0.0-onnx.4\n");
     expect(runGate(INSTALL, NOTICES.replace("`2.0.0-onnx.4-trt`", "2.0.0-onnx.4-trt")).code).toBe(1);
   });
 
@@ -83,7 +87,7 @@ describe("notices gate (first-run downloads)", () => {
   });
 
   it("fails on a model release pinned past the set constants", () => {
-    const r = runGate(INSTALL + '\nconst x = inRelease("2.0.0-onnx.5");', NOTICES);
+    const r = runGate(INSTALL + '\nconst x = inRelease("2.0.0-onnx.6");', NOTICES);
     expect(r.code).toBe(1);
     expect(r.out).toContain("inRelease");
   });

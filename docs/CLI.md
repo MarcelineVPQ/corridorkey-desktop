@@ -285,7 +285,7 @@ say where it is (`loading the models`, `reading the clip`, `building TensorRT`, 
 | `message` | why it failed (null when it didn't) |
 | `input`, `output` | as given |
 | `frame_dir_linear` | a frame folder: `{"value", "why"}`, read scene-linear or not and why: `--linear`, `--no-linear`, `--job`, `default: EXR plates` or `default: not EXR`; null for a movie |
-| `models` | `{"dir", "set"}`: the folder and its manifest's version (`2.0.0-onnx.4`) |
+| `models` | `{"dir", "set"}`: the folder and its manifest's version (`2.0.0-onnx.5`) |
 | `onnxruntime` | ONNX Runtime's version |
 | `provider`, `precision`, `provider_fallback` | what ran the job (`cuda`, `tensorrt`, `tensorrt+cuda`, `cpu`, `coreml`; `fp16` / `fp32`) and why TensorRT wasn't used, if asked for |
 | `gpu` | `{"name", "driver", "vram_total_mb"}` or null |
@@ -328,5 +328,5 @@ SIGTERM mid-run:
 
 ```sh
 cd engine-rs && cargo build -p ck-engine && cargo test -p ck-cli --test e2e -- --ignored --test-threads=1
-# CK_TEST_MODELS=<model set> (default the app's 2.0.0-onnx.4), CK_TEST_PRECISION=fp32 for a set with fp32 files
+# CK_TEST_MODELS=<model set> (default the app's 2.0.0-onnx.5), CK_TEST_PRECISION=fp32 for a set with fp32 files
 ```

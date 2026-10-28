@@ -4,7 +4,7 @@
 //!
 //!   cargo build -p ck-engine && cargo test -p ck-cli --test e2e -- --ignored --test-threads=1
 //!
-//! CK_TEST_MODELS: the model set (default the app's ~/.local/share/corridorkey-desktop/models/2.0.0-onnx.4);
+//! CK_TEST_MODELS: the model set (default the app's ~/.local/share/corridorkey-desktop/models/2.0.0-onnx.5);
 //! CK_TEST_PRECISION: the CPU's precision (default fp16: that set has no fp32 files). No graphics card is used.
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -13,7 +13,7 @@ use std::process::{Command, Stdio};
 fn models() -> PathBuf {
     std::env::var_os("CK_TEST_MODELS")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").expect("HOME")).join(".local/share/corridorkey-desktop/models/2.0.0-onnx.4"))
+        .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").expect("HOME")).join(".local/share/corridorkey-desktop/models/2.0.0-onnx.5"))
 }
 
 fn precision() -> String {

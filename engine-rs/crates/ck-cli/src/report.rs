@@ -133,7 +133,7 @@ mod tests {
             input: Some("/plates/sh010".into()),
             output: Some("/out/key.####.exr".into()),
             models_dir: Some("/m".into()),
-            model_set: Some("2.0.0-onnx.4".into()),
+            model_set: Some("2.0.0-onnx.5".into()),
             onnxruntime: Some("1.31.0".into()),
             gpu: Some(json!({"name": "NVIDIA GeForce RTX 5080", "driver": "615.1", "vram_total_mb": 16303})),
             requested: vec![1003, 1005],
@@ -155,7 +155,7 @@ mod tests {
         assert_eq!(j["frames"]["written"], json!({"first": 1003, "last": 1005, "count": 2}));
         assert_eq!(j["frame_times"], json!([{"frame": 1003, "done_s": 1.0}, {"frame": 1004, "done_s": 1.0}, {"frame": 1005, "done_s": 2.5}]));
         assert_eq!((j["seconds"].as_f64(), j["skipped"].as_bool()), (Some(12.346), Some(false)));
-        assert_eq!(j["models"], json!({"dir": "/m", "set": "2.0.0-onnx.4"}));
+        assert_eq!(j["models"], json!({"dir": "/m", "set": "2.0.0-onnx.5"}));
         assert_eq!(j["gpu"]["name"], "NVIDIA GeForce RTX 5080");
         assert_eq!(j["frame_dir_linear"], json!({"value": true, "why": "default: EXR plates"}));
         // loop: NOT-WORTH — the schema's top-level keys

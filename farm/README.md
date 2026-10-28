@@ -88,7 +88,7 @@ Two limits of the 2023-09 template language, without a shell (which wouldn't run
 openjd check farm/openjd/corridorkey/template.yaml
 openjd run farm/openjd/corridorkey/template.yaml --step Verify --run-dependencies \
   -p Input=/plates/sh010.####.exr -p OutputDir=/key/sh010 -p Linear=true \
-  -p Models=/opt/corridorkey/models/2.0.0-onnx.4 -p OnnxRuntime=/opt/corridorkey/runtime/libonnxruntime.so.1.31.0
+  -p Models=/opt/corridorkey/models/2.0.0-onnx.5 -p OnnxRuntime=/opt/corridorkey/runtime/libonnxruntime.so.1.31.0
 deadline bundle submit farm/openjd/corridorkey          # or: deadline bundle gui-submit farm/openjd/corridorkey
 ```
 
@@ -205,7 +205,7 @@ seams invisible hasn't been measured yet (docs/CLI.md, "Warm-up"). Until it is, 
 ```sh
 python3 corridorkey_submit.py --show demo --shot sh010 \
     -i /shows/demo/sh010/plates/sh010.####.exr -o /shows/demo/sh010/key/sh010_key.####.exr \
-    --range 1001-1100 --models /opt/corridorkey/models/2.0.0-onnx.4 --ort /opt/onnxruntime/lib/libonnxruntime.so \
+    --range 1001-1100 --models /opt/corridorkey/models/2.0.0-onnx.5 --ort /opt/onnxruntime/lib/libonnxruntime.so \
     -- --linear --outputs alpha
 ```
 
@@ -291,7 +291,7 @@ time.
 #   /plates/sh010.####.exr	/key/sh010_key.####.exr
 #   /shots/sh020.mov	/key/sh020/	1001-1100
 CORRIDORKEY=/opt/corridorkey/squashfs-root/resources/engine/corridorkey farm/shell/corridorkey-farm.sh --gpus 0,1 --logs farm-logs shots.txt -- \
-  --models /opt/corridorkey/models/2.0.0-onnx.4 --ort /opt/corridorkey/runtime/libonnxruntime.so.1.31.0 --linear
+  --models /opt/corridorkey/models/2.0.0-onnx.5 --ort /opt/corridorkey/runtime/libonnxruntime.so.1.31.0 --linear
 ```
 
 Each card in `--gpus` is a lane that keys its share of the list one shot after another (`--gpu N`, counted in

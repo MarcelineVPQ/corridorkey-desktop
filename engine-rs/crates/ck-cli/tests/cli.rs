@@ -311,8 +311,8 @@ fn a_launcher_that_exits_first_doesnt_end_the_task() {
 fn falls_back_to_the_apps_models_and_runtime_and_says_so() {
     let d = scratch("appinstall");
     let app = d.0.join("data/corridorkey-desktop");
-    std::fs::create_dir_all(app.join("models/2.0.0-onnx.4")).unwrap();
-    std::fs::write(app.join("models/2.0.0-onnx.4/models.json"), "{}").unwrap();
+    std::fs::create_dir_all(app.join("models/2.0.0-onnx.5")).unwrap();
+    std::fs::write(app.join("models/2.0.0-onnx.5/models.json"), "{}").unwrap();
     let capi = app.join("runtime/ort-1.31.0/onnxruntime/capi");
     std::fs::create_dir_all(&capi).unwrap();
     let lib = if cfg!(windows) {
@@ -334,7 +334,7 @@ fn falls_back_to_the_apps_models_and_runtime_and_says_so() {
     let err = text(&o.stderr);
     if !cfg!(target_os = "macos") {
         // macOS keeps Application Support under HOME: the same rule, checked in appinstall.rs's tests
-        assert!(err.contains(&format!("no --models given: using the app's model set {}", app.join("models/2.0.0-onnx.4").display())), "{err}");
+        assert!(err.contains(&format!("no --models given: using the app's model set {}", app.join("models/2.0.0-onnx.5").display())), "{err}");
         assert!(err.contains(&format!("no --ort given: using the app's ONNX Runtime {}", capi.join(lib).display())), "{err}");
     }
     assert_eq!(o.status.code(), Some(3), "{err}");

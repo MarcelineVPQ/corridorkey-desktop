@@ -227,11 +227,11 @@ mod tests {
         // two model sets: the newer by its manifest's created; one without models.json and one in progress never count
         file(&d.join("models/2.0.0-onnx.3/models.json"), "{}");
         file(&d.join("models/2.0.0-onnx.3/manifest.json"), r#"{"version":"2.0.0-onnx.3","created":"2026-10-01"}"#);
-        file(&d.join("models/2.0.0-onnx.4/models.json"), "{}");
-        file(&d.join("models/2.0.0-onnx.4/manifest.json"), r#"{"version":"2.0.0-onnx.4","created":"2026-10-20"}"#);
+        file(&d.join("models/2.0.0-onnx.5/models.json"), "{}");
+        file(&d.join("models/2.0.0-onnx.5/manifest.json"), r#"{"version":"2.0.0-onnx.5","created":"2026-10-20"}"#);
         file(&d.join("models/zz-broken/manifest.json"), r#"{"created":"2027-01-01"}"#);
         file(&d.join("models/.partial-x/models.json"), "{}");
-        assert_eq!(newest_models(&d), Some(d.join("models/2.0.0-onnx.4")));
+        assert_eq!(newest_models(&d), Some(d.join("models/2.0.0-onnx.5")));
         // runtimes: newest by version, numerically (1.31.0 after 1.9.0)
         file(&d.join("runtime/ort-1.9.0/onnxruntime/capi/libonnxruntime.so.1.9.0"), "");
         file(&d.join("runtime/ort-1.31.0/onnxruntime/capi/libonnxruntime.so.1.31.0"), "");

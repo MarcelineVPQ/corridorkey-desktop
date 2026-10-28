@@ -31,7 +31,7 @@ are opt-in, with warm-up 0 ([Command line: warm-up](Command-Line#warm-up-and-chu
 Check each worker once before the first job; it exits 0 when it can key:
 
 ```sh
-corridorkey prepare --models /opt/ck/models/2.0.0-onnx.4 --ort /opt/ck/runtime/libonnxruntime.so.1.31.0
+corridorkey prepare --models /opt/ck/models/2.0.0-onnx.5 --ort /opt/ck/runtime/libonnxruntime.so.1.31.0
 ```
 
 **A retried task replaces its own frames.** Every submitter passes `--overwrite`, because a retry finds the frames its
@@ -122,7 +122,7 @@ and a `verify` layer after it.
 ```sh
 python3 corridorkey_submit.py --show demo --shot sh010 \
     -i /shows/demo/sh010/plates/sh010.####.exr -o /shows/demo/sh010/key/sh010_key.####.exr \
-    --range 1001-1100 --models /opt/ck/models/2.0.0-onnx.4 --ort /opt/ck/runtime/libonnxruntime.so \
+    --range 1001-1100 --models /opt/ck/models/2.0.0-onnx.5 --ort /opt/ck/runtime/libonnxruntime.so \
     -- --linear --outputs alpha
 ```
 
@@ -151,7 +151,7 @@ list of shots, one shot per graphics card at a time (bash; Linux).
 ```sh
 # shots.txt: INPUT OUTPUT [FRAMES] per line, tab-separated; # comments
 CORRIDORKEY=/opt/ck/corridorkey farm/shell/corridorkey-farm.sh --gpus 0,1 --logs farm-logs shots.txt -- \
-  --models /opt/ck/models/2.0.0-onnx.4 --ort /opt/ck/runtime/libonnxruntime.so.1.31.0 --linear
+  --models /opt/ck/models/2.0.0-onnx.5 --ort /opt/ck/runtime/libonnxruntime.so.1.31.0 --linear
 ```
 
 Every shot runs with `--skip-existing`, so running the list again resumes it. Per shot a log and a JSON report; at

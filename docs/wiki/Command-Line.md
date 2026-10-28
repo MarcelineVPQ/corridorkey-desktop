@@ -47,7 +47,7 @@ corridorkey render -i plates/sh010.####.exr -o key/sh010_key.####.exr --outputs 
 corridorkey verify -i plates/sh010.####.exr -o key/sh010_key.####.exr --outputs alpha
 
 # a worker, before the farm's tasks start
-corridorkey prepare --models /opt/ck/models/2.0.0-onnx.4 --ort /opt/ck/runtime/libonnxruntime.so.1.31.0
+corridorkey prepare --models /opt/ck/models/2.0.0-onnx.5 --ort /opt/ck/runtime/libonnxruntime.so.1.31.0
 
 # what this machine has
 corridorkey info --json
@@ -272,7 +272,7 @@ command line `--frames` picks the frames.
 | `-t`, `--threads N` | `CK_ENGINE_THREADS` | CPU threads per network (0: ONNX Runtime's choice) |
 
 ```sh
-corridorkey render shot.mov -o out/ --models /opt/ck/models/2.0.0-onnx.4 --ort /opt/ck/runtime/libonnxruntime.so.1.31.0 --gpu 1
+corridorkey render shot.mov -o out/ --models /opt/ck/models/2.0.0-onnx.5 --ort /opt/ck/runtime/libonnxruntime.so.1.31.0 --gpu 1
 corridorkey render shot.mov -o out/ --gpu GPU-5f1c2a3b-0000-0000-0000-000000000000
 corridorkey render shot.mov -o out/ --device cpu --threads 8
 corridorkey render shot.mov -o out/ --device cpu -t 0
@@ -368,7 +368,7 @@ goes to stderr.
 | `exit_code`, `exit_reason` | the exit code and its name: `done`, `usage`, `input`, `output`, `no-gpu`, `out-of-graphics-memory`, `assets`, `engine`, `incomplete`, `interrupted`, `terminated` |
 | `message` | why it failed (null when it didn't) |
 | `input`, `output` | as given |
-| `models` | `{"dir", "set"}`: the folder and its version (`2.0.0-onnx.4`) |
+| `models` | `{"dir", "set"}`: the folder and its version (`2.0.0-onnx.5`) |
 | `onnxruntime` | ONNX Runtime's version |
 | `provider`, `precision`, `provider_fallback` | what ran the job (`cuda`, `tensorrt`, `tensorrt+cuda`, `cpu`, `coreml`; `fp16` / `fp32`) and why TensorRT wasn't used, if asked for |
 | `gpu` | `{"name", "driver", "vram_total_mb"}` or null |

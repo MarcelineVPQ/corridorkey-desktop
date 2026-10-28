@@ -319,7 +319,7 @@ fn low_vram_gives_the_same_stage_inputs_and_outputs_as_all_loaded() {
     }
 }
 
-/// The mixed-precision set (2.0.0-onnx.4: MoGe, RVM and the features float32, stage 1's frames and hints and
+/// The mixed-precision set (2.0.0-onnx.4 on: MoGe, RVM and the features float32, stage 1's frames and hints and
 /// stage 2's frame float16, outputs in either type): every network gets its inputs in the type it takes. RVM and
 /// the foundations take and make float32 exactly as in the float32 set, so their runs are the float32 job's.
 #[test]

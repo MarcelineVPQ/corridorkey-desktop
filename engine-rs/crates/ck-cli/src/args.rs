@@ -202,12 +202,12 @@ pub fn command() -> Command {
             runtime(reporting(Command::new("prepare").about("check models, runtime, card and memory before a farm's tasks start; build TensorRT")))
                 .arg(Arg::new("tensorrt-size").long("tensorrt-size").value_name("WxH").help("build TensorRT's engines for clips of this size (one-time, minutes)"))
                 .arg(Arg::new("max-vram").long("max-vram").value_name("GB").help("graphics memory a job may use (the window TensorRT is built for)"))
-                .after_help("Examples:\n  corridorkey prepare --models ~/models/2.0.0-onnx.4 --ort /opt/ort/libonnxruntime.so\n  corridorkey prepare --gpu 0 --tensorrt-size 4096x2160"),
+                .after_help("Examples:\n  corridorkey prepare --models ~/models/2.0.0-onnx.5 --ort /opt/ort/libonnxruntime.so\n  corridorkey prepare --gpu 0 --tensorrt-size 4096x2160"),
         )
         .subcommand(
             runtime(Command::new("info").about("version, model set, runtime, provider and card"))
                 .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("as JSON"))
-                .after_help("Examples:\n  corridorkey info --models ~/models/2.0.0-onnx.4\n  corridorkey info --json --device cpu"),
+                .after_help("Examples:\n  corridorkey info --models ~/models/2.0.0-onnx.5\n  corridorkey info --json --device cpu"),
         )
         .subcommand(
             Command::new("run")
