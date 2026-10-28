@@ -43,7 +43,7 @@ else {
   void import("./console/headless").then(async (h) => {
     if ("error" in launch) return end(h.refuseHeadless(launch.error));
     await app.whenReady();
-    return h.runHeadless(launch.argv, launch.cli).then(end, (e: unknown) => {
+    return h.runHeadless(launch.argv, launch.cli, { name: app.getName(), version: app.getVersion() }).then(end, (e: unknown) => {
       // error: SHOWN — said on stderr, exit 8 (the CLI's "the engine failed: a bug")
       process.stderr.write(`corridorkey run: stopped: ${String((e as Error)?.message ?? e)}\n`);
       end(8);

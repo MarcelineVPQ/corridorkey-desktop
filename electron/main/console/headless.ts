@@ -9,12 +9,10 @@
 // lifetime: one process per `corridorkey run`, ended by the script's end (SIGINT / SIGTERM stop it as Ctrl+C does; on
 // Windows, where Electron didn't call them (measured as Node, Electron 45.1.0; the --ck-headless start keeps the same
 // way, not yet run there), ck-cli's `stop` line on stdin does: CK_HEADLESS_STOP=stdin).
-import { readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
 import { appDirs, PLATFORM } from "../platform";
 import { cacheDirFor } from "../cacheFolder";
 import { loadSettings } from "../settings";
@@ -98,16 +96,17 @@ export function refuseHeadless(why: string): number {
 
 /**
  * The script run: `argv` is `run [--keep-going] FILE` and `cli` the command-line program, both checked by
- * headlessFlag.ts. Resolves with the script's exit status.
+ * headlessFlag.ts; `pkg` Electron's app name and version (boot.ts: app.getName() and app.getVersion(), which read the
+ * packaged package.json wherever the bundler put this file). Resolves with the script's exit status.
  */
-export async function runHeadless(argv: string[], cli: string): Promise<number> {
+export async function runHeadless(argv: string[], cli: string, pkg: { name: string; version: string }): Promise<number> {
   const args = headlessArgs(argv);
   if ("error" in args) return refuseHeadless(args.error);
   // the app's name as Electron reads it from its package.json (its productName, else its name): its userData folder
-  // loop: NOT-WORTH — one small sync read at start (no window, nothing else waits)
-  const pkg = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "package.json"), "utf8")) as { name: string; productName?: string; version: string };
+  // (it was read from "../../package.json" beside this file, which became out/package.json once the bundler moved this
+  // file into out/main/chunks/: the packaged `corridorkey run` failed, release.sh smoke 2026-10-28)
   const home = homedir();
-  const userData = userDataDir(pkg.productName ?? pkg.name, process.env, home, PLATFORM);
+  const userData = userDataDir(pkg.name, process.env, home, PLATFORM);
   // a user who never started the app has no userData folder yet: its audit log and history go there
   // loop: NOT-WORTH — one mkdir at start
   await mkdir(userData, { recursive: true }).catch(() => {
