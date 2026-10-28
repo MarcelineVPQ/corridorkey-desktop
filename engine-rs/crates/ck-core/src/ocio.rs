@@ -140,7 +140,7 @@ const PLANAR_BLOCK: usize = 16384;
 /// An OCIO CPU processor run over float32 RGB pixels.
 pub struct Xform {
     cpu: ocio_rs::CPUProcessor,
-    /// "<from> -> <to>", for logs
+    /// `"<from> -> <to>"`, for logs
     pub what: String,
 }
 
