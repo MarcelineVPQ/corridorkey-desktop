@@ -16,7 +16,7 @@ electron/main/install.ts. Do not edit it by hand: run `node tools/gen_notices.mj
 | OpenColorIO and its bundled C++ libraries (inside the engine) | yes | 9 | BSD-3-Clause: 3 · MIT: 2 · Zlib: 2 · BSD-2-Clause: 1 · ICC Software License 0.2: 1 |
 | Electron 45.1.0 with Chromium | yes | 1 | MIT (Electron); Chromium's own notices in LICENSES.chromium.html |
 | TensorRT engine builder (ck-trt-build, Linux) | yes | 2 | Apache-2.0 (TensorRT headers); Apache-2.0 WITH LLVM-exception (LLVM libc++) |
-| GPU runtime, models | no: downloaded at first run from their publishers | 12 wheels, 3 model sets | see below |
+| GPU runtime, models | no: downloaded at first run from their publishers | 12 wheels, 4 model sets | see below |
 
 ## Shipped inside the app
 
@@ -287,7 +287,8 @@ publishers' licences; the wheels' own licence files are kept next to the librari
 - The model sets: CorridorKey 2.0's five networks converted to ONNX from Corridor Digital's checkpoint, downloaded
   from this app's GitHub releases. CorridorKey 2.0 is © Corridor Digital, under the CorridorKey licence
   (https://github.com/nikopueringer/CorridorKey2.0).
-  - `2.0.0-onnx.4` (every system): https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.4
+  - `2.0.0-onnx.5` (Linux, Windows): https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.5
+  - `2.0.0-onnx.4` (macOS): https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.4
   - `2.0.0-onnx.4-coreml` (macOS: Core ML): https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.4-coreml
   - `2.0.0-onnx.4-trt` (Linux: the opt-in TensorRT jobs): https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/models-2.0.0-onnx.4-trt
 - **Modified:** every network is converted from the original PyTorch checkpoint to ONNX, with exact graph rewrites

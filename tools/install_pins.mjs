@@ -2,8 +2,11 @@
 // sets and the wheels. One reader for tools/gen_notices.mjs and tools/check_notices_downloads.mjs, so the notices
 // and their gate can't disagree on what is downloaded.
 
-/** The model sets, in the file's order: every `const X_SET = "…"`, and `${OTHER_SET}-suffix` built from one before. */
-export function modelSets(src) {
+/**
+ * The model sets by their constant, in the file's order: every `const X_SET = "…"`, and `${OTHER_SET}-suffix` built
+ * from one before. Map: constant name -> set.
+ */
+export function modelSetConsts(src) {
   const sets = new Map();
   // loop: NOT-WORTH — the file's few set constants
   for (const [, name, literal, base, suffix] of src.matchAll(/const (\w+_SET) = (?:"([^"]+)"|`\$\{(\w+_SET)\}([^`$]*)`);/g)) {
@@ -14,8 +17,11 @@ export function modelSets(src) {
   // every download from a model release names one of those constants, so no set is pinned past this reader
   // loop: NOT-WORTH — the file's few inRelease calls
   for (const [, arg] of src.matchAll(/\binRelease\(([^)]*)\)/g)) if (!sets.has(arg)) throw new Error(`install.ts: inRelease(${arg}) is not one of the pinned sets (const …_SET = "…")`);
-  return [...sets.values()];
+  return sets;
 }
+
+/** The model sets, in the file's order. */
+export const modelSets = (src) => [...modelSetConsts(src).values()];
 
 // the catalog's parts in the file's order: Linux, Windows, macOS, then the opt-in TensorRT download
 const PARTS = [

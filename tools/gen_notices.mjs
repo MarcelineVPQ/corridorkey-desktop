@@ -21,7 +21,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { modelSets, wheels as pinnedWheels } from "./install_pins.mjs";
+import { modelSetConsts, wheels as pinnedWheels } from "./install_pins.mjs";
 
 const APP = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(APP, "THIRD_PARTY_NOTICES.md");
@@ -188,19 +188,22 @@ const WHEEL_LICENCES = [
     "Microsoft proprietary licence (PyPI: Proprietary): Microsoft's redistributable Visual C++ runtime, [its licence terms](https://visualstudio.microsoft.com/license-terms/vs2022-cruntime/)",
   ],
 ];
-// what each model set is for, by its suffix after the base set's name ("" = the base set)
-const SET_KINDS = { "": "every system", coreml: "macOS: Core ML", trt: "Linux: the opt-in TensorRT jobs" };
+// what each model set is for, by its constant in install.ts (macOS keeps 2.0.0-onnx.4 until onnx.5's Core ML set exists)
+const SET_KINDS = {
+  MODEL_SET: "Linux, Windows",
+  MAC_MODEL_SET: "macOS",
+  COREML_SET: "macOS: Core ML",
+  TRT_MODEL_SET: "Linux: the opt-in TensorRT jobs",
+};
 function downloads() {
   const src = readFileSync(join(APP, "electron/main/install.ts"), "utf8");
   const repo = readFileSync(join(APP, "electron/main/updateFeed.ts"), "utf8").match(/export const REPO = "([^"]+)"/)?.[1];
   if (!repo) throw new Error("gen_notices: updateFeed.ts no longer names the repository");
-  // the model sets (tools/install_pins.mjs): the base set first, then each kind by its suffix; a new kind needs its
-  // line here
-  const [base, ...more] = modelSets(src);
-  // loop: NOT-WORTH — the two or three sets
-  const sets = [base, ...more].map((name) => {
-    const kind = SET_KINDS[name === base ? "" : name.slice(base.length + 1)];
-    if (!name.startsWith(base) || kind === undefined) throw new Error(`gen_notices: model set ${name}: no SET_KINDS line for it`);
+  // the model sets (tools/install_pins.mjs) in install.ts's order; a new constant needs its line here
+  // loop: NOT-WORTH — the few sets
+  const sets = [...modelSetConsts(src)].map(([constant, name]) => {
+    const kind = SET_KINDS[constant];
+    if (kind === undefined) throw new Error(`gen_notices: model set ${name} (${constant}): no SET_KINDS line for it`);
     return { name, kind };
   });
   // loop: NOT-WORTH — ~15 wheels, once per run

@@ -84,12 +84,12 @@ none of them changes what a user sees today.
   graphics card with CUDA." (AMD would need ONNX Runtime's MIGraphX or DirectML build; not in 1.0.)
 - macOS 14 or newer on Apple Silicon (M1 or newer; the disk image). Intel Macs aren't supported.
 - Nothing else to set up: the engine comes with the app, and on first start the setup downloads the GPU runtime and
-  the CorridorKey models (a 4.86 GB download on Linux, 4.64 GB on Windows, 5.51 GB on macOS, once). If `ffmpeg` is
+  the CorridorKey models (a 4.03 GB download on Linux, 3.81 GB on Windows, 5.51 GB on macOS, once). If `ffmpeg` is
   missing, it offers to install it (apt or pacman on Linux, `winget` on Windows, Homebrew on macOS).
 - Optional, Linux: **TensorRT** (Engine settings, TensorRT; off by default) for about 1.9-2.2× the original's speed at
   HD and about 2.3-2.4× at 4K, with the same mattes (Speed, the same-day pair of 2026-10-26). Switching it on offers its own download: NVIDIA's TensorRT 10.16
-  libraries (3.7 GB, from pypi.nvidia.com) and the TensorRT models (1.8 GB, from this repository's releases; C-RADIO's
-  weights are copied from the models you already have), 5.5 GB in all, 6.1 GB on disk. Each
+  libraries (3.7 GB, from pypi.nvidia.com) and the TensorRT models (3.5 GB, from this repository's releases; still
+  onnx.4's TensorRT set, whose C-RADIO weights the 2.0.0-onnx.5 models no longer share), 7.3 GB in all, 6.1 GB on disk. Each
   resolution range is optimized once (about 4.4-4.8 minutes for the five networks on an RTX 5080: 4.4 at 1280×1080,
   4.8 at 4K even with TensorRT's timing cache warm; Speed, "TensorRT on onnx.4"): the app builds 4K and HD in the background when TensorRT is
   switched on, with a progress bar in Engine settings, and pauses while you key. Engine settings, TensorRT lists the
@@ -137,9 +137,9 @@ decimal GB: `du --si`):
 | --- | --- | --- |
 | App / code | **131 MB** (AppImage, engine inside) | 3 MB (Python scripts) |
 | Runtime | **2.4 GB**: ONNX Runtime + CUDA/cuDNN (a 1.6 GB download) | **7.6 GB** Python venv: PyTorch, NVIDIA libraries, Triton, other packages |
-| Models | **3.3 GB** (fp16) | **5.1 GB**: CorridorKey weights 2.7 GB + foundation models 2.4 GB |
-| **Total** | **5.9 GB** | **12.6 GB** |
-| Setup | Download one file; the app fetches the rest itself (4.86 GB on Linux, 4.64 GB on Windows, 5.51 GB on macOS) | Install Python, create a venv, pip install, run a download script |
+| Models | **2.5 GB** (fp16) | **5.1 GB**: CorridorKey weights 2.7 GB + foundation models 2.4 GB |
+| **Total** | **5.0 GB** | **12.6 GB** |
+| Setup | Download one file; the app fetches the rest itself (4.03 GB on Linux, 3.81 GB on Windows, 5.51 GB on macOS) | Install Python, create a venv, pip install, run a download script |
 
 PyTorch's environment carries NVIDIA libraries the ONNX Runtime engine never uses (NCCL and
 cuSPARSELt, for multi-GPU and training), and the fp16 models are a third smaller.
@@ -854,7 +854,7 @@ CorridorKey writes only these folders (plus the results you ask for, next to you
 | What | Linux | Windows | macOS |
 | --- | --- | --- | --- |
 | The app | the AppImage you downloaded (and, after updates, the previous version next to it) | the install folder (Apps & features) | `CorridorKey.app` in Applications |
-| GPU runtime and models (~5.7 GB; ~5.5 GB on macOS, with the Core ML set) | `~/.local/share/corridorkey-desktop` | `%LOCALAPPDATA%\corridorkey-desktop` | `~/Library/Application Support/corridorkey-desktop` |
+| GPU runtime and models (~5.0 GB; ~5.5 GB on macOS, with the Core ML set) | `~/.local/share/corridorkey-desktop` | `%LOCALAPPDATA%\corridorkey-desktop` | `~/Library/Application Support/corridorkey-desktop` |
 | Thumbnails, stills, job temp files | `~/.cache/corridorkey-desktop` | `%LOCALAPPDATA%\corridorkey-desktop\cache` | `~/Library/Caches/corridorkey-desktop` |
 | Settings (a few KB) | `~/.config/corridorkey-desktop` | `%APPDATA%\corridorkey-desktop` | `~/Library/Application Support/corridorkey-desktop` (with the data) |
 

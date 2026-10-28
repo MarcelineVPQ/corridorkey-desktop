@@ -1,8 +1,8 @@
 // First-run install (BACKLOG row 2): the GPU runtime and the models, downloaded into the data folder
 // (engineFind.ts dataDir) where the Engine page's lists find them. Nothing is hosted for the runtime:
 // ONNX Runtime and NVIDIA's CUDA / cuDNN libraries come from PyPI as published wheels, pinned here by
-// URL, size and SHA-256. The models come from this repository's `models-2.0.0-onnx.4` release
-// (converted from Corridor Digital's checkpoint; CorridorKey licence). Every file is checked before use.
+// URL, size and SHA-256. The models come from this repository's `models-2.0.0-onnx.5` release (macOS:
+// `models-2.0.0-onnx.4` and its Core ML set, below) (converted from Corridor Digital's checkpoint; CorridorKey licence). Every file is checked before use.
 // After a Stop or a failure, pressing the button again resumes: finished files are checked offline and kept,
 // a partial one continues where it stopped. A set only appears in the lists once all of it is in place
 // (built in a `.partial-…` folder, then renamed; engineFind skips dot folders).
@@ -236,36 +236,64 @@ export function keepFromWheel(name: string): boolean {
 }
 
 // the model set, and this repository's release that holds it (models-<set>)
-const MODEL_SET = "2.0.0-onnx.4";
+const MODEL_SET = "2.0.0-onnx.5";
 const release = (set: string) => `https://github.com/${REPO}/releases/download/models-${set}`;
 const inRelease =
   (set: string) =>
   (file: string, size: number, sha256: string): Download => ({ file, url: `${release(set)}/${file}`, size, sha256 });
 const model = inRelease(MODEL_SET);
-export const MODELS = {
+/** Linux and Windows: the fp16 set (BACKLOG row 165). */
+export const MODELS_CUDA = {
   name: MODEL_SET,
   files: [
-    model("ck2-cradio-fp16.onnx", 789360, "25e8656dffc2c639f1557b092ea5d2738d7c4002b495195f93ba41a3610b0334"),
-    model("ck2-cradio-fp16.onnx.data", 1724414688, "8f76c92ddf779b70745fc985820e7e312f7eb07ec82b4e20119062798f952b9f"),
+    model("ck2-cradio-fp16.onnx", 690471, "cdc7b0569edb70a5164b0614aa9c9332a4525a6281b453826430dc46af6a8fe9"),
+    model("ck2-cradio-fp16.onnx.data", 900504288, "c5f8a2d73786f4c0308ea349f494c6affdff6e72b94ab746dea3589bcb4f1c9e"),
     model("ck2-moge-fp16.onnx", 425920, "b035a6904fc72f91abae20f31de342cbb6bffc65ed75d33cc4d88d7008de8712"),
     model("ck2-moge-fp16.onnx.data", 177747456, "fefb7ec179377603b5011202244c92176db42782d9281eef9f1ce2eee5294c45"),
     model("ck2-rvm-fp16.onnx", 657354, "cfb8aa3c20ec5a63421cfe480d1792950adde598edcb12b33810827de871a809"),
     model("ck2-rvm-fp16.onnx.data", 66827776, "988b0b97752df9c13c9e78ec7c844faecac35d7ae9eaede6a2c13609c79b9617"),
-    model("ck2-stage1-fp16.onnx", 2471932, "3c19272c263ec952bc16a02333c6fc3ee8acf71d75fd62fbebcc4e0280ccd10d"),
-    model("ck2-stage1-fp16.onnx.data", 924102400, "d354507432f0635409ea08ec2abdd10fb04539070ce8eac7b815f58ff5e32431"),
-    model("ck2-stage2-fp16.onnx", 1330091, "1c6a5ae09a752b738b9c75bee448b5ec4e82bd1b430192d72d167e5e5166bbfe"),
+    model("ck2-stage1-fp16.onnx", 2544426, "f8a7bb9f135cee0ba0591b72ae2168e4e200074a8f3f98a3fc3fa18e1d59df16"),
+    model("ck2-stage1-fp16.onnx.data", 924104448, "9807e184faa0f79b2f3b45aa85169e9655aa356e8b4dbc6e67a21dcc22d36b9c"),
+    model("ck2-stage2-fp16.onnx", 1133800, "9754495a70b1efcb73bdac9925cc78d37af29e0c07af4ee75747a9ecab69045f"),
     model("ck2-stage2-fp16.onnx.data", 403914240, "1e537c9b14bdf905d931338c5e2e8c83cfd03d5eb29bfeebdd73de51b3236530"),
-    model("manifest.json", 16779, "56d63e810ed798bbce5060bda555667abafbbdd4b6822ebb77ba94e509e7e7e9"),
+    model("manifest.json", 16830, "2d4f06a7d3930766e674bf4a7e25e9c091a629860e448c3bde61289ea0b85013"),
     model("models.json", 395, "01f0d8e592d10a9459f72ce23ebfaded0b56168b6d838799a0dad8172fe9ebff"),
   ],
 };
+
+// macOS stays on 2.0.0-onnx.4 until onnx.5's Core ML set is converted on the Mac: the Core ML files below read their
+// weights from this set's own .onnx.data files (C-RADIO's with fp32 weights, stage 1's of the onnx.4 graph), which
+// onnx.5's files of the same names are not
+const MAC_MODEL_SET = "2.0.0-onnx.4";
+const macModel = inRelease(MAC_MODEL_SET);
+/** macOS: the set the Core ML set is built from. */
+export const MODELS_MAC = {
+  name: MAC_MODEL_SET,
+  files: [
+    macModel("ck2-cradio-fp16.onnx", 789360, "25e8656dffc2c639f1557b092ea5d2738d7c4002b495195f93ba41a3610b0334"),
+    macModel("ck2-cradio-fp16.onnx.data", 1724414688, "8f76c92ddf779b70745fc985820e7e312f7eb07ec82b4e20119062798f952b9f"),
+    macModel("ck2-moge-fp16.onnx", 425920, "b035a6904fc72f91abae20f31de342cbb6bffc65ed75d33cc4d88d7008de8712"),
+    macModel("ck2-moge-fp16.onnx.data", 177747456, "fefb7ec179377603b5011202244c92176db42782d9281eef9f1ce2eee5294c45"),
+    macModel("ck2-rvm-fp16.onnx", 657354, "cfb8aa3c20ec5a63421cfe480d1792950adde598edcb12b33810827de871a809"),
+    macModel("ck2-rvm-fp16.onnx.data", 66827776, "988b0b97752df9c13c9e78ec7c844faecac35d7ae9eaede6a2c13609c79b9617"),
+    macModel("ck2-stage1-fp16.onnx", 2471932, "3c19272c263ec952bc16a02333c6fc3ee8acf71d75fd62fbebcc4e0280ccd10d"),
+    macModel("ck2-stage1-fp16.onnx.data", 924102400, "d354507432f0635409ea08ec2abdd10fb04539070ce8eac7b815f58ff5e32431"),
+    macModel("ck2-stage2-fp16.onnx", 1330091, "1c6a5ae09a752b738b9c75bee448b5ec4e82bd1b430192d72d167e5e5166bbfe"),
+    macModel("ck2-stage2-fp16.onnx.data", 403914240, "1e537c9b14bdf905d931338c5e2e8c83cfd03d5eb29bfeebdd73de51b3236530"),
+    macModel("manifest.json", 16779, "56d63e810ed798bbce5060bda555667abafbbdd4b6822ebb77ba94e509e7e7e9"),
+    macModel("models.json", 395, "01f0d8e592d10a9459f72ce23ebfaded0b56168b6d838799a0dad8172fe9ebff"),
+  ],
+};
+/** The model set this system downloads. */
+export const modelsFor = (platform: NodeJS.Platform) => (platform === "darwin" ? MODELS_MAC : MODELS_CUDA);
+export const MODELS = modelsFor(PLATFORM);
 
 // macOS: the Core ML set (BACKLOG rows 59, 60), fixed-shape copies of the five networks for ONNX Runtime's Core ML provider
 // (engine-rs/export/coreml), one file per network and frame size (1280×1080 and 1920×1080 clips, padded 1152×1280 and
 // 1152×1920), from release models-<set>-coreml. They keep their weights in the model set's own
 // .onnx.data files, so they go into the model set's folder (ONNX Runtime reads external weights only from the model's
 // own folder: a symlink fails); the engine finds them through coreml.json, which goes last.
-const COREML_SET = `${MODEL_SET}-coreml`;
+const COREML_SET = `${MAC_MODEL_SET}-coreml`;
 const coremlModel = inRelease(COREML_SET);
 export const COREML = {
   name: COREML_SET,
@@ -457,7 +485,7 @@ export async function runInstall(data: string, deps: InstallDeps, c: Catalog = C
 //     TensorRT provider load, as <runtime>/tensorrt_libs (engine.ts rustEngineEnv puts it on LD_LIBRARY_PATH);
 //   provider: libonnxruntime_providers_tensorrt.so next to libonnxruntime (the runtime install keeps it since 1.0;
 //     a runtime installed before that gets it from the ONNX Runtime wheel again);
-//   models: the TensorRT-ready set (release models-2.0.0-onnx.4-trt) in the normal set's folder, its models.json keys
+//   models: the TensorRT-ready set (release models-<TRT_MODEL_SET>) in the normal set's folder, its models.json keys
 //     merged into the set's: the engine finds TensorRT files only through its one --models folder's models.json
 //     (engine-rs runtime.rs ModelSet::trt_file / trt_stub). The set's own models.json stays as models-tensorrt.json:
 //     the list of what is TensorRT's (Storage removes exactly that) and the mark that the set is whole (written last).
@@ -466,6 +494,9 @@ export const TRT_LIBS_DIR = "tensorrt_libs";
 export const TRT_MODELS_LIST = "models-tensorrt.json";
 /** The wheel's licence folder, kept next to the libraries. */
 export const TRT_DIST_INFO = /^tensorrt_cu\d+_libs-[\d.]+\.dist-info$/;
+// still onnx.4's TensorRT set: onnx.5's (engine-rs/export/build_trt_models.sh) isn't complete yet (no -ctx.onnx stubs,
+// no "tensorrt-fp16-ctx" in its models.json). Each of its files is a whole network, so it runs beside onnx.5's set; its
+// C-RADIO weights (fp32) are no longer the normal set's bytes, so they are downloaded
 const TRT_MODEL_SET = "2.0.0-onnx.4-trt";
 const trtModel = inRelease(TRT_MODEL_SET);
 export const TENSORRT = {
@@ -481,7 +512,8 @@ export const TENSORRT = {
     files: [
       trtModel("ck2-cradio-trt-fp16-ctx.onnx", 600, "6276830bfeaa0226819f27064eb22c29e1fdad6ae5e4b16d2ed7daa4347b8cb9"),
       trtModel("ck2-cradio-trt-fp16.onnx", 742927, "1e6acbb7e9bd5f5fffe19fab97fbb5df3e9627b7082b4b7846b239f77ecfbe7a"),
-      // the same bytes as the normal set's ck2-cradio-fp16.onnx.data: copied from it, not downloaded (localTwin)
+      // onnx.4's ck2-cradio-fp16.onnx.data bytes (fp32 weights): onnx.5's normal set stores fp16 ones, so this one is
+      // downloaded (localTwin finds no twin)
       trtModel("ck2-cradio-trt-fp16.onnx.data", 1724414688, "8f76c92ddf779b70745fc985820e7e312f7eb07ec82b4e20119062798f952b9f"),
       trtModel("ck2-moge-trt-fp16-ctx.onnx", 598, "9de6063abe191b1ad7ddac7415a9207f4e95101efdb89e7c2be83a296b2ac313"),
       trtModel("ck2-moge-trt-fp16.onnx", 425292, "0c94de749d02f1982c26f72f96c5392a0396b6b1c6a27ae2917ffc61776d4eff"),

@@ -1,7 +1,7 @@
 // What the app keeps on disk, measured and removable from App settings, Storage (Marcy 2026-10-24: "good
 // stewards of the user's desktop and file system"), and the cache's own pruning at start.
 //   runtime: <data>/runtime (the GPU runtime the setup downloads, ~2.4 GB)
-//   models:  <data>/models  (the CorridorKey models, ~3.3 GB)
+//   models:  <data>/models  (the CorridorKey models, ~2.5 GB; ~5.5 GB on macOS with the Core ML set)
 //   tensorrt: the opt-in TensorRT parts inside those two (install.ts: its libraries in the runtime, its models in the
 //            set's folder), measured on their own and taken out of the runtime's and models' sizes (Linux only)
 //   cache:   <cache>/media  (clip thumbnails and result stills; rebuilt as needed)
