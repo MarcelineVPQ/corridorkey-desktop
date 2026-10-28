@@ -11,6 +11,7 @@
 import { createContext, useContext, useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { ChevronDown, type LucideIcon } from "lucide-react";
 import { usePref } from "../prefs";
+import { railKey } from "../rail/railModel";
 
 /** A task's deep link: the section to open and scroll to; `n` is new per press, so the same link works again. */
 export type SectionFocus = { section: string; n: number } | null;
@@ -111,13 +112,25 @@ export function Row({ label, hint, htmlFor, children }: { label: string; hint?: 
   );
 }
 
-/** The one segmented control (radio group). */
+/** The one segmented control (radio group): one Tab stop, the arrow keys (Home, End) choose, as a radio group does. */
 export function Segmented<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: [T, string][]; onChange: (v: T) => void }) {
+  // loop: NOT-WORTH — a few options per render
+  const at = Math.max(
+    0,
+    options.findIndex(([v]) => v === value),
+  );
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    const r = railKey(e.key, at, options.length, { ctrl: e.ctrlKey, alt: e.altKey, meta: e.metaKey });
+    if (r?.action !== "move") return;
+    e.preventDefault();
+    onChange(options[r.index][0]);
+    (e.currentTarget.children[r.index] as HTMLElement | undefined)?.focus();
+  };
   return (
-    <div className="seg" role="radiogroup" aria-label={label}>
+    <div className="seg" role="radiogroup" aria-label={label} onKeyDown={onKeyDown}>
       {/* loop: HOT-PATH-OK — a few options per render */}
-      {options.map(([v, text]) => (
-        <button key={v} type="button" role="radio" aria-checked={value === v} className={value === v ? "on" : ""} onClick={() => onChange(v)}>
+      {options.map(([v, text], i) => (
+        <button key={v} type="button" role="radio" aria-checked={value === v} tabIndex={i === at ? 0 : -1} className={value === v ? "on" : ""} onClick={() => onChange(v)}>
           {text}
         </button>
       ))}
