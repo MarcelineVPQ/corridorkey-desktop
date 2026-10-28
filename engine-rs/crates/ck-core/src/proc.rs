@@ -166,6 +166,33 @@ pub fn parent_pid_from(v: Option<&str>) -> Option<u32> {
     v.and_then(|s| s.trim().parse::<u32>().ok()).filter(|&p| p > 0)
 }
 
+/// Whether process `pid` runs on this machine: true when unsure (an id that can't be asked about is never called
+/// dead). Unix: kill(pid, 0); Windows: OpenProcess + GetExitCodeProcess. Shared by the CLI's run-folder sweep and
+/// the TensorRT build lock (senior review 2026-10-28 S1: the lock's dead-holder check was Linux-only).
+#[cfg(unix)]
+pub fn pid_alive(pid: u32) -> bool {
+    use std::os::raw::c_int;
+    extern "C" {
+        fn kill(pid: c_int, sig: c_int) -> c_int;
+    }
+    let Ok(p) = c_int::try_from(pid) else { return true };
+    if p <= 0 {
+        return true;
+    }
+    // SAFETY: kill(2) with signal 0 sends nothing; it only checks that the process exists
+    if unsafe { kill(p, 0) } == 0 {
+        return true;
+    }
+    // ESRCH (3 on Linux and macOS): no such process; EPERM: it exists, someone else's
+    std::io::Error::last_os_error().raw_os_error() != Some(3)
+}
+
+/// Whether process `pid` runs on this machine (true when unsure).
+#[cfg(windows)]
+pub fn pid_alive(pid: u32) -> bool {
+    win::pid_alive(pid)
+}
+
 #[cfg(windows)]
 mod win {
     use std::ffi::c_void;
@@ -180,6 +207,8 @@ mod win {
         fn OpenProcess(access: u32, inherit: i32, pid: u32) -> Handle;
         fn WaitForSingleObject(h: Handle, ms: u32) -> u32;
         fn GetLastError() -> u32;
+        fn GetExitCodeProcess(process: Handle, code: *mut u32) -> i32;
+        fn CloseHandle(handle: Handle) -> i32;
     }
     const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS: i32 = 9;
     const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000;
@@ -235,6 +264,23 @@ mod win {
         }
     }
 
+    pub(crate) fn pid_alive(pid: u32) -> bool {
+        const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+        const STILL_ACTIVE: u32 = 259;
+        // SAFETY: documented kernel32 calls; the handle is closed before returning
+        unsafe {
+            let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if h.is_null() {
+                // no such process; any other failure (access denied) means it exists
+                return GetLastError() != ERROR_INVALID_PARAMETER;
+            }
+            let mut code = 0;
+            let ok = GetExitCodeProcess(h, &mut code);
+            CloseHandle(h);
+            ok == 0 || code == STILL_ACTIVE
+        }
+    }
+
     pub(crate) fn end_with_parent(parent_pid: Option<u32>) {
         kill_children_on_close();
         // SAFETY: documented kernel32 calls; the parent's handle is only waited on
@@ -269,6 +315,17 @@ mod tests {
         assert_eq!(parent_pid_from(Some("0")), None);
         assert_eq!(parent_pid_from(Some("app")), None);
         assert_eq!(parent_pid_from(None), None);
+    }
+
+    #[test]
+    fn a_process_is_alive_until_it_ends() {
+        assert!(pid_alive(std::process::id()));
+        // a child that has ended and been reaped: gone (its pid isn't reused this soon)
+        let mut child = if cfg!(windows) { Command::new("cmd").args(["/C", "exit 0"]).spawn() } else { Command::new("true").spawn() }.unwrap();
+        let pid = child.id();
+        // loop: NOT-WORTH — reaps a child that exits at once [bounded: it runs nothing]
+        child.wait().unwrap();
+        assert!(!pid_alive(pid));
     }
 
     #[test]

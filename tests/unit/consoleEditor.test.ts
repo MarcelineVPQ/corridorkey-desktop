@@ -31,6 +31,19 @@ const withComp = (s: EditorState, start: number, items: ConsoleCompletionItem[])
 const press = (s: EditorState, key: string, mods: Partial<Key> = {}, c: KeyContext = ctx()) => keyDown(s, { key, ...mods }, c);
 
 describe("completion (Tab)", () => {
+  it("Tab and Shift+Tab on an empty line leave the input (no keyboard trap); Esc empties a line first", () => {
+    const empty = initialEditor();
+    expect(press(empty, "Tab").handled).toBe(false);
+    expect(press(empty, "Tab", { shift: true }).handled).toBe(false);
+    expect(needsCompletion({ key: "Tab" }, empty)).toBe(false);
+    expect(needsCompletion({ key: " ", ctrl: true }, empty)).toBe(true);
+    const cleared = press(typed("render"), "Escape").state;
+    expect(cleared.line).toBe("");
+    expect(press(cleared, "Tab").handled).toBe(false);
+    // with something typed, Tab still completes
+    expect(press(withComp(typed("ver"), 0, [item("verify", "command")]), "Tab").handled).toBe(true);
+  });
+
   it("one choice is inserted with a space after it", () => {
     const s = withComp(typed("render --over"), 7, [item("--overwrite")]);
     const r = press(s, "Tab");

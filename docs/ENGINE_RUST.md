@@ -621,8 +621,9 @@ of the job's budget (else of the card's free memory), at most 8 GiB: stage 1 for
 builds on 16 GB cards; a network whose build finds no tactic runs on CUDA at the same window (`fallbacks`).
 Only such deterministic failures (no tactic, a parse error, bad arguments) are remembered in `<piece>.failed`; a
 timeout, a lack of memory or a busy card is tried again by the next job. One engine process builds a range at a
-time (`build.lock` in the range folder; another engine waits, at most five build deadlines, and takes over a lock
-not refreshed for a build deadline). ck-trt-build writes the engine and the timing cache through per-process
+time (`build.lock` in the range folder, holding its engine's pid; another engine waits, at most five build deadlines,
+and takes over a lock whose engine has ended (on every system: kill(pid, 0) on Linux and macOS, OpenProcess on
+Windows) or that was not refreshed for a build deadline). ck-trt-build writes the engine and the timing cache through per-process
 temporary files and replaces the old file on every system (MoveFileEx on Windows).
 Before step 2: a range's longest window was the longest of 24/16/12/8/4 with window × largest frame ≤
 24 × 1152 × 1280, all networks loaded together.

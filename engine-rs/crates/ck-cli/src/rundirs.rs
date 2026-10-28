@@ -69,51 +69,8 @@ fn parse_id(id: &str) -> Option<(Option<&str>, u32)> {
     }
 }
 
-/// Whether process `pid` runs on this machine (true when unsure: an ID that can't be asked about is never called dead).
-#[cfg(unix)]
-pub fn pid_alive(pid: u32) -> bool {
-    use std::os::raw::c_int;
-    extern "C" {
-        fn kill(pid: c_int, sig: c_int) -> c_int;
-    }
-    let Ok(p) = c_int::try_from(pid) else { return true };
-    if p <= 0 {
-        return true;
-    }
-    // SAFETY: kill(2) with signal 0 sends nothing; it only checks that the process exists
-    if unsafe { kill(p, 0) } == 0 {
-        return true;
-    }
-    // ESRCH (3 on Linux and macOS): no such process; EPERM: it exists, someone else's
-    std::io::Error::last_os_error().raw_os_error() != Some(3)
-}
-
-/// Whether process `pid` runs on this machine (true when unsure).
-#[cfg(windows)]
-pub fn pid_alive(pid: u32) -> bool {
-    use std::ffi::c_void;
-    #[link(name = "kernel32")]
-    extern "system" {
-        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut c_void;
-        fn GetExitCodeProcess(process: *mut c_void, code: *mut u32) -> i32;
-        fn CloseHandle(handle: *mut c_void) -> i32;
-    }
-    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
-    const STILL_ACTIVE: u32 = 259;
-    const ERROR_INVALID_PARAMETER: i32 = 87;
-    // SAFETY: documented kernel32 calls; the handle is closed before returning
-    unsafe {
-        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if h.is_null() {
-            // no such process; any other failure (access denied) means it exists
-            return std::io::Error::last_os_error().raw_os_error() != Some(ERROR_INVALID_PARAMETER);
-        }
-        let mut code = 0;
-        let ok = GetExitCodeProcess(h, &mut code);
-        CloseHandle(h);
-        ok == 0 || code == STILL_ACTIVE
-    }
-}
+/// Whether process `pid` runs on this machine (true when unsure); ck-core's, shared with the TensorRT build lock.
+pub use ck_core::proc::pid_alive;
 
 /// The run's folders, removed with everything in them when the run ends, however it ends (a SIGKILL leaves them, and
 /// the next run beside them sweeps them: `sweep`).

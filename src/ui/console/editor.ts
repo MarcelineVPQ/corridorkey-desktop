@@ -291,7 +291,7 @@ export function pasted(s: EditorState, text: string): EditorState {
 /** Keys that need the completion for the line as it is now (the component asks first, then calls keyDown). */
 export function needsCompletion(k: Key, s: EditorState): boolean {
   if (s.search || s.list) return false;
-  return (k.key === "Tab" && !k.ctrl && !k.alt) || (k.ctrl && (k.key === " " || k.key === "Spacebar")) === true;
+  return (k.key === "Tab" && !k.ctrl && !k.alt && !tabLeaves(k, s)) || (k.ctrl && (k.key === " " || k.key === "Spacebar")) === true;
 }
 
 /** Cut from..to into the kill buffer (Ctrl+Y puts it back); an empty cut keeps the last one. */
@@ -304,6 +304,12 @@ function cut(s: EditorState, from: number, to: number): EditorState {
 function insertAt(s: EditorState, text: string): EditorState {
   if (!text) return s;
   return { ...at(s, s.line.slice(0, s.cursor) + text + s.line.slice(s.cursor), s.cursor + text.length), hist: null, list: null, lastTab: null };
+}
+
+/** Tab and Shift+Tab on an empty line, nothing open, move focus as anywhere else (WCAG 2.1.2, no keyboard trap; senior
+ * review M1): Esc clears the line, then Tab leaves. Ctrl+Space still lists the commands on an empty line. */
+export function tabLeaves(k: Key, s: EditorState): boolean {
+  return k.key === "Tab" && !k.ctrl && !k.alt && !k.meta && s.line === "" && !s.list && !s.search && !s.paste;
 }
 
 const ok = (state: EditorState, effect?: Effect): KeyResult => ({ state, handled: true, effect });
@@ -373,6 +379,7 @@ export function keyDown(s0: EditorState, k: Key, ctx: KeyContext): KeyResult {
   if (plain && k.key === "Escape" && s.line) return ok({ ...at(s, "", 0), kill: s.line, hist: null, lastTab: null });
 
   // --- completion ---
+  if (tabLeaves(k, s)) return pass(s);
   if (k.key === "Tab" && !k.ctrl && !k.alt && !k.meta) {
     if (k.shift && !s.list) {
       const c = freshCompletion(s);

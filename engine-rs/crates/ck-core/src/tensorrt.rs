@@ -210,19 +210,10 @@ pub(crate) struct BuildLock {
     path: PathBuf,
 }
 
-/// Whether a build lock's holder (the pid it holds) has ended: false when that can't be told (no pid, or a system
-/// without /proc), so only the lock's age decides there.
-pub(crate) fn lock_holder_gone(text: &str, alive: impl Fn(u32) -> Option<bool>) -> bool {
-    text.trim().parse::<u32>().ok().and_then(alive).is_some_and(|a| !a)
-}
-
-/// Whether a process runs: Linux reads /proc; elsewhere None (unknown).
-fn pid_alive(pid: u32) -> Option<bool> {
-    if cfg!(target_os = "linux") {
-        Some(Path::new("/proc").join(pid.to_string()).exists())
-    } else {
-        None
-    }
+/// Whether a build lock's holder (the pid it holds) has ended: false when that can't be told (no pid, or `alive`
+/// is unsure and says alive), so only the lock's age decides there.
+pub(crate) fn lock_holder_gone(text: &str, alive: impl Fn(u32) -> bool) -> bool {
+    text.trim().parse::<u32>().ok().is_some_and(|p| !alive(p))
 }
 
 /// How often a waiting engine looks at another engine's build lock.
@@ -256,7 +247,7 @@ impl BuildLock {
             }
             let age = std::fs::metadata(&path).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok());
             // the app ends its background build by killing that engine: its lock then names a process that is gone
-            let gone = std::fs::read_to_string(&path).is_ok_and(|t| lock_holder_gone(&t, pid_alive));
+            let gone = std::fs::read_to_string(&path).is_ok_and(|t| lock_holder_gone(&t, crate::proc::pid_alive));
             if gone || age.is_some_and(|a| a > stale_after) || std::time::Instant::now() >= end {
                 // gone stale, or past the deadline: take it over (a removal that loses a race just loops again); one
                 // that can't be removed (a read-only folder) fails the build and says why, instead of spinning
@@ -445,11 +436,32 @@ mod tests {
     #[test]
     fn a_killed_builders_lock_is_taken_over() {
         // the app kills its background build's engine (pause, cancel): the lock it left names a pid that is gone
-        assert!(lock_holder_gone("4242\n", |_| Some(false)));
-        assert!(!lock_holder_gone("4242\n", |_| Some(true)));
-        // unknown (no /proc) or no pid: only the lock's age decides
-        assert!(!lock_holder_gone("4242\n", |_| None));
-        assert!(!lock_holder_gone("", |_| Some(false)));
+        assert!(lock_holder_gone("4242\n", |_| false));
+        assert!(!lock_holder_gone("4242\n", |_| true));
+        // no pid: only the lock's age decides
+        assert!(!lock_holder_gone("", |_| false));
+    }
+
+    #[test]
+    fn a_dead_holders_lock_is_taken_over_at_once_on_every_system() {
+        // senior review 2026-10-28 S1: off Linux the dead holder went unseen, so the lock blocked the range until it
+        // aged out (build timeout + 120 s, ~32 min). A real pid that has ended, with stale/deadline far away.
+        use std::time::{Duration, Instant};
+        let dir = std::env::temp_dir().join(format!("ck-trt-lock-dead-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut child =
+            if cfg!(windows) { std::process::Command::new("cmd").args(["/C", "exit 0"]).spawn() } else { std::process::Command::new("true").spawn() }.unwrap();
+        let pid = child.id();
+        // loop: NOT-WORTH — reaps a child that exits at once [bounded: it runs nothing]
+        child.wait().unwrap();
+        std::fs::write(dir.join("build.lock"), format!("{pid}\n")).unwrap();
+        let long = Duration::from_secs(600);
+        let t = Instant::now();
+        let (l, waited) = BuildLock::acquire(&dir, long, long, || {}).unwrap();
+        assert!(!waited && t.elapsed() < Duration::from_secs(5), "waited {:?}", t.elapsed());
+        drop(l);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

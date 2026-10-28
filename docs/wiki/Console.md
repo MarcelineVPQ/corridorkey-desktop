@@ -287,7 +287,8 @@ first, then the commands); it never runs by itself.
 | --- | --- |
 | Enter | Run the line |
 | Tab | Complete commands, flags, values, paths and `@bookmarks` (after `cd`, `pushd`, `allow`, `du`, `tree`: folders only); again (or when it's ambiguous) for the list |
-| Ctrl+Space | Open the list |
+| Ctrl+Space | Open the list (on an empty line: every command) |
+| Tab, Shift+Tab on an empty line | Leave the input, to the next or previous control (Esc empties the line first) |
 | →, End, Ctrl+F | Take the grey suggestion; Alt+→ (Alt+F) one word of it |
 | ↑ ↓, Ctrl+P Ctrl+N | Earlier lines that start with what you typed |
 | Ctrl+R | Search the history; again for older; Esc or Ctrl+G cancels |

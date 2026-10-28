@@ -218,7 +218,8 @@ instead (**F2** switches).
 | Enter | Run the line |
 | Tab | Complete; again (or when it's ambiguous) for the list |
 | Tab, Shift+Tab, ↑ ↓ | Move in the list; Enter takes the item, Esc puts the line back |
-| Ctrl+Space | Open the list |
+| Ctrl+Space | Open the list (on an empty line: every command) |
+| Tab, Shift+Tab on an empty line | Leave the input, to the next or previous control (Esc empties the line first) |
 | →, End, Ctrl+F | Take the grey suggestion |
 | Alt+→, Alt+F | Take one word of it (else a word forward) |
 | ↑ ↓, Ctrl+P Ctrl+N | Earlier lines that start with what you typed |
