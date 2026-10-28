@@ -133,6 +133,26 @@ pub fn end_with_parent(parent_pid: Option<u32>) {
     }
 }
 
+/// Windows: a DLL loaded by bare name (ONNX Runtime's providers load cudart, cuDNN and TensorRT that way; the engine
+/// loads turbojpeg, nvml, nvcuda and nvinfer so) is otherwise looked for in the current folder before PATH, and the
+/// current folder is wherever the farm, the app or its Console started the process (a client's drive, Downloads). An
+/// empty SetDllDirectoryW takes the current folder out of the search order; the exe's folder, System32 and PATH stay
+/// (senior review of the Console 2026-10-26, S6; whole-code review 2026-10-27: the engine too). First thing in main.
+pub fn no_dlls_from_current_folder() {
+    #[cfg(windows)]
+    {
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn SetDllDirectoryW(path: *const u16) -> i32;
+        }
+        let empty: [u16; 1] = [0];
+        // SAFETY: a documented kernel32 call with a NUL-terminated (empty) wide string that outlives the call
+        unsafe {
+            SetDllDirectoryW(empty.as_ptr());
+        }
+    }
+}
+
 /// Windows: this process joins a job object that ends every process in it when this one ends (its children join it
 /// by inheritance): the CLI's children (`prepare`'s TensorRT builder, `run`'s app, ffmpeg) don't outlive a CLI its farm
 /// killed. Elsewhere nothing: Linux children use `die_with_parent`, and `corridorkey run` execs on Unix.

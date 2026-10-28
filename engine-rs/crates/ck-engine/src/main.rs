@@ -86,6 +86,9 @@ impl Backend for Ort {
 }
 
 fn main() {
+    // Windows: no DLL from the current folder (turbojpeg, nvml, nvcuda, nvinfer and ONNX Runtime's providers load by
+    // bare name), before anything loads one
+    ck_core::proc::no_dlls_from_current_folder();
     // the environment ONNX Runtime reads itself, set while no other thread exists (config::set_process_env)
     ck_core::config::set_process_env();
     // end with the app on every system (ck_core::proc::end_with_parent). First thing, on the main thread, before any
