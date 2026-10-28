@@ -86,6 +86,14 @@ ffmpeg the way your system recommends.
 page: it lists the engine program, the models folder and the ONNX Runtime library it uses, and what's missing. If
 files are missing, **Open the setup** downloads them again.
 
+### Windows Defender quarantined `corridorkey.exe`
+
+**Cause:** the Windows builds aren't code-signed yet, and Defender's machine-learning check can flag the app's
+unsigned command-line program (`resources\engine\corridorkey.exe`) as `Trojan:Win32/Bearfoos.A!ml`. It is a false
+positive: the program is built from this repository's open source, and each new build is sent to Microsoft to clear
+it. **Fix:** in Windows Security, **Protection history**, choose the entry and **Restore** (or **Allow on device**),
+then run the job again.
+
 ### The engine stopped unexpectedly (`<signal or exit code>`).
 
 **Cause:** the engine process ended in the middle of a job (it crashed, or something outside the app ended it). The page shows the engine's last error output under the message. **Fix:** press **Run again**. If

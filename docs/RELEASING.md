@@ -138,6 +138,12 @@ clippy, cargo test) on GitHub's Windows runner, the only place its Windows-only 
 stable release or after a change to that code. It hasn't passed yet (its one run, 2026-10-27, failed): until it does,
 nothing Windows-only in the engine counts as run on Windows (the CHANGELOG says "not yet run on Windows").
 
+**Windows Defender** (until the Windows builds are signed): its machine-learning heuristic quarantined the unsigned
+`resources\engine\corridorkey.exe` as `Trojan:Win32/Bearfoos.A!ml` in the 2026-10-27 VM run, a false positive. After
+each `npm run dist:win`, submit the new `release/win-unpacked/resources/engine/corridorkey.exe` and
+`corridorkey-engine.exe` to Microsoft as incorrectly detected (https://www.microsoft.com/en-us/wdsi/filesubmission),
+with their SHA-256, the repository URL and "open source, not yet code-signed".
+
 ### macOS (Apple Silicon)
 
 There is no Mac here and no cross-build from Linux without Apple's SDK, so the macOS disk image is built on
