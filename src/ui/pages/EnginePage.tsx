@@ -3,7 +3,7 @@
 // only while a job runs). Panel: the first-run install (GPU runtime and models),
 // ffmpeg (checked, and installed on request), and the lists of engine files found
 // (Automatic = the newest, Browse… for anything else).
-import { Check, Cpu, Download, Film, ListChecks, X, Zap } from "lucide-react";
+import { Check, Cpu, Download, Film, FolderOpen, ListChecks, X, Zap } from "lucide-react";
 import type { AppState, EngineFileKind } from "../../shared/types";
 import { installMissing } from "../../shared/tasks";
 import { downloadingStatus, ENGINE_FAILED, NO_VRAM_HELD } from "../../shared/texts";
@@ -71,9 +71,9 @@ export function EnginePage(props: {
         ))}
       </ul>
     );
-  // A list of what was found (newest first), Automatic on top, Browse… for anything else (Marcy 2026-10-23:
-  // choose from a list, not only a file browser). The path in use shows under it.
-  const BROWSE = "::browse";
+  // A list of what was found (newest first), Automatic on top, Browse… beside it for anything else (Marcy 2026-10-23:
+  // choose from a list, not only a file browser). Browse… is a button, not an option: arrowing through a closed list
+  // fires a change per step, and must never open a file dialog (senior review S5). The path in use shows under it.
   const pick = (what: EngineFileKind, label: string, setting: string | null, hint: string) => {
     const found = state.engineFiles[what];
     const inUse = state.enginePaths[what];
@@ -82,15 +82,7 @@ export function EnginePage(props: {
     return (
       <Row label={label} hint={hint} htmlFor={`engine-${what}`}>
         <div className="file-pick stacked">
-          <select
-            id={`engine-${what}`}
-            value={setting ?? ""}
-            onChange={(e) => {
-              const v = e.target.value;
-              if (v === BROWSE) void window.ck.pickRustEngine(what);
-              else void window.ck.setRustEngine(what, v === "" ? null : v);
-            }}
-          >
+          <select id={`engine-${what}`} value={setting ?? ""} onChange={(e) => void window.ck.setRustEngine(what, e.target.value === "" ? null : e.target.value)}>
             <option value="">{found.length ? `Automatic: ${found[0].label}` : "Automatic: none found"}</option>
             {/* loop: NOT-WORTH — one or two found copies per list */}
             {found.map((f) => (
@@ -99,8 +91,10 @@ export function EnginePage(props: {
               </option>
             ))}
             {custom && <option value={custom}>{custom}</option>}
-            <option value={BROWSE}>Browse…</option>
           </select>
+          <button type="button" className="btn small" aria-label={`Browse for the ${label.toLowerCase()}`} onClick={() => void window.ck.pickRustEngine(what)}>
+            <FolderOpen size={14} /> Browse…
+          </button>
           {inUse && <PathText path={inUse} />}
         </div>
       </Row>
@@ -136,7 +130,9 @@ export function EnginePage(props: {
             <div className="stats">
               <Stat k="State" v={{ stopped: `Idle · ${NO_VRAM_HELD}`, starting: "Starting", ready: "Running the queue", failed: "Failed" }[state.engine.status]} />
               <Stat k="Engine" v={`${p.engine} ${p.version} · protocol ${p.protocol}`} />
-              <Stat k="Runtime" v={`ONNX Runtime ${p.ort ?? "?"} · ${p.provider ?? "?"} · ${p.precision ?? "?"}`} />
+              {/* what the engine didn't report is left out, never shown as "?" (senior review N5) */}
+              {/* loop: NOT-WORTH — three parts per render */}
+              <Stat k="Runtime" v={[`ONNX Runtime${p.ort ? ` ${p.ort}` : " (version not reported)"}`, p.provider, p.precision].filter(Boolean).join(" · ")} />
               <Stat k="Graphics card" v={p.gpu ? `${p.gpu}${p.vramTotalMb ? ` · ${gib(p.vramTotalMb)}` : ""}` : "none found"} />
               {trt.supported && <Stat k="TensorRT" v={trt.on ? (trt.ready ? "On: jobs ask for it" : "On, not installed: jobs run on CUDA") : "Off"} />}
             </div>
@@ -152,7 +148,7 @@ export function EnginePage(props: {
               {/* loop: NOT-WORTH — five networks per render */}
               {Object.entries(p.assets).map(([k, ok]) => (
                 <li key={k} className={`check-line ${ok ? "ok" : "error"}`}>
-                  {ok ? <Check size={15} aria-hidden /> : <X size={15} aria-hidden />} {k} {ok ? `found by the engine (${p.precision ?? ""})` : "missing"}
+                  {ok ? <Check size={15} aria-hidden /> : <X size={15} aria-hidden />} {k} {ok ? `found by the engine${p.precision ? ` (${p.precision})` : ""}` : "missing"}
                 </li>
               ))}
             </ul>
