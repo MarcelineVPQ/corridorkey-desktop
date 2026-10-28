@@ -1,8 +1,13 @@
 # AMD graphics cards (MIGraphX)
 
-Status 2026-10-27: the engine has a MIGraphX provider (`--device migraphx`); **stage 1 and stage 2 don't parse in
-MIGraphX yet** (below), so no AMD test on a rented card until their export is changed. Measured offline on the Linux
-PC with AMD's own MIGraphX library; nothing here has run on an AMD card.
+**Untested on real hardware: nothing here has run on an AMD card.** The app doesn't download an AMD runtime, so the app
+itself still needs an NVIDIA card on Linux and Windows.
+
+Status 2026-10-27: the engine has a MIGraphX provider (`--device migraphx`); with set 2.0.0-onnx.4 **stage 1 and stage
+2 don't parse in MIGraphX** (below). Set 2.0.0-onnx.5 (the app's set on Linux and Windows from 1.0.0-dev.2) changed
+their export: its TensorRT-form files parse for all five networks at 384×256, 1280×1152, 1920×1152 and 3840×2176
+(docs/ONNX_EXPORT.md "onnx.5"); no models.json `migraphx-fp16` entry points at them yet. Measured offline on the
+Linux PC with AMD's own MIGraphX library.
 
 ## The runtime (ROCm 10.1)
 
@@ -73,11 +78,11 @@ network with more than 10 unsupported nodes: stage 1 and stage 2 would have run 
 
 ## Open
 
-- Stage 1 / stage 2 MIGraphX-friendly export (above): needs Marcy's go (model export work in CorridorKey2.0).
+- Stage 1 / stage 2 MIGraphX-friendly export: done in set 2.0.0-onnx.5 (backlog row 165; parsing checked offline only). Still open: a models.json `migraphx-fp16` entry for its TensorRT-form files, and a run on a real AMD card (a paid test needs Marcy's go).
 - ONNX Runtime 1.31 with the plugin built for 1.29 (`onnxruntime~=1.29.0` in its metadata; it negotiates the API
   version, "requires ORT API >= …"): expected to load, unproven until a card runs it.
 - The plugin's option names (`cache_dir`) are read from its binary; its source isn't public.
-- The cloud test kit (`tools/amd_cloud_test.sh`) and the CUDA reference mattes wait for the export.
+- The cloud test kit (`tools/amd_cloud_test.sh`) and the CUDA reference mattes are still to be written.
 
 Sources: ROCm 10.1 compatibility matrix (rocm.docs.amd.com/en/docs-10.1.0/compatibility/compatibility-matrix.html),
 AMD's ONNX Runtime install page (rocm.docs.amd.com/projects/ai-ecosystem/en/latest/inference/onnxruntime.html), the

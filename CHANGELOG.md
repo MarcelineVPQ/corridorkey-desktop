@@ -3,8 +3,8 @@
 ## 1.0.0-dev.2 (draft, unreleased)
 
 The second development build of 1.0: the `corridorkey` command line for render farms and power users, example
-submitters for the common farm schedulers, and the Console, a command line inside the app. Linux and Windows, as
-dev.1; still no macOS build.
+submitters for the common farm schedulers, the Console, a command line inside the app, and model set 2.0.0-onnx.5
+(a smaller download). Linux and Windows, as dev.1; still no macOS build.
 
 **The Electron security fix.** dev.1 runs on Electron 45.0.0-beta.3, whose Node (24.21.0) carries CVE-2026-111497,
 fixed in Node 24.22.1 (dev.1's release page says so). This build runs on Electron 45.1.0 (released 2026-10-27, Node
@@ -73,6 +73,25 @@ on its own rail icon. Not a system shell: its own commands only, each parsed and
 
 **Changed**
 
+- **Model set 2.0.0-onnx.5** on Linux and Windows (docs/ONNX_EXPORT.md "onnx.5"; backlog row 165): our own export of
+  stage 1 and stage 2, made so AMD's MIGraphX and Apple's Neural Engine can take them. Stage 2's shifted windows are
+  one masked attention per Swin block, stage 1's regions are taken by one gather each in the original's frame-major
+  token order (no empty tensor at any size), the RMS norms are written in plain operations, and C-RADIO's weights are
+  stored in fp16 (ONNX Runtime converted them to fp16 on load before, so the graphics card holds the same weights).
+  Corridor's code and weights are unchanged. The models download drops from 3.30 to 2.48 GB (the setup: 4.03 GB on
+  Linux, 3.81 GB on Windows, was 4.86 / 4.64). Mattes against onnx.4: 8 of the 10 test clips within 0.37-0.50/255 at
+  the most; the other two (4K plates): (measuring). Speed and graphics memory against onnx.4: (measuring). The setup
+  downloads onnx.5 next to an installed onnx.4, whose folder stays as it is.
+- macOS stays on 2.0.0-onnx.4 and its Core ML set (5.51 GB, as before): the Core ML files read their weights from
+  onnx.4's files, and onnx.5's Core ML set is still to be converted on a Mac.
+- TensorRT (Linux, opt-in) stays on onnx.4's TensorRT set (onnx.5's isn't complete yet). Its C-RADIO weights are no
+  longer the normal set's bytes, so they are downloaded instead of copied: 7.26 GB in all (was 5.53 GB).
+- **AMD graphics cards, engine only, untested on real hardware:** the engine can run on an AMD card on Linux through
+  AMD's MIGraphX provider (`--device migraphx`, ROCm 10.1; docs/AMD.md). It has never run on an AMD card, and the app
+  doesn't download an AMD runtime, so the app still needs an NVIDIA card on Linux and Windows. Without AMD's provider
+  plugin installed the engine chooses its device exactly as before (NVIDIA, Mac and CPU setups are unchanged). With
+  onnx.5, MIGraphX's own parser takes all five networks (their TensorRT-form files) at every size tried (offline
+  check, no AMD card).
 - A shipped copy has no developer tools and none of Electron's default reload and close shortcuts (Ctrl+Shift+I, Ctrl+R, F5, Ctrl+W); `npm run dev` keeps them.
 - The app runs only its Rust + ONNX Runtime engine: the PyTorch engine is gone from it (the Engine page's
   "Benchmark reference" section, its CorridorKey2.0 folder setting, and the PyTorch-only limits on a clip's codec,
@@ -101,6 +120,11 @@ on its own rail icon. Not a system shell: its own commands only, each parsed and
   allowed, Core ML compiled stage 2 again on every load (145-188 s) and its first call passed 9.7 GB, more than a 16 GB
   Mac has. On CPU + GPU a 1280×1080 job peaks at 1.8-3.4 GB up to window 8/4, its mattes within 1/255 of CUDA's
   (measured on an M6 Mac mini, 2026-10-27; docs/ENGINE_RUST.md "Core ML on a 16 GB Mac").
+- Core ML, measured on the same Mac: Apple's Neural Engine compiler crashes on stage 2 (a stack overflow in its
+  attention scheduler), so nothing was cached and every load compiled it again; C-RADIO, MoGe and RVM compile and
+  cache, but run 2-8× slower on the Neural Engine than on the GPU, so CPU + GPU stays the default. A low-memory Core ML
+  job now loads the next phase's network on its own thread, as on CUDA (its memory is still to be measured), and stage 1's frames are converted to its input type on the input thread. Two measurement switches, off
+  by default: `CK_ENGINE_COREML_FAST_PREDICTION`, `CK_ENGINE_COREML_LOW_PRECISION_GPU`.
 
 **Fixed**
 

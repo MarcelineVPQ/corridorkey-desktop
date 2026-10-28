@@ -81,7 +81,8 @@ none of them changes what a user sees today.
   16 GB, Speed).
   **On Linux and Windows the NVIDIA card is required**: the engine keys only on CUDA. AMD and Intel graphics cards aren't
   supported, and without an NVIDIA card nothing falls back to the CPU: a job stops with "CorridorKey needs an NVIDIA
-  graphics card with CUDA." (AMD would need ONNX Runtime's MIGraphX or DirectML build; not in 1.0.)
+  graphics card with CUDA." (The engine has a MIGraphX path for AMD cards on Linux, `--device migraphx`: untested on
+  real hardware, and the app doesn't offer it; docs/AMD.md.)
 - macOS 14 or newer on Apple Silicon (M1 or newer; the disk image). Intel Macs aren't supported.
 - Nothing else to set up: the engine comes with the app, and on first start the setup downloads the GPU runtime and
   the CorridorKey models (a 4.03 GB download on Linux, 3.81 GB on Windows, 5.51 GB on macOS, once). If `ffmpeg` is
