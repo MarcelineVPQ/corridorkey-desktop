@@ -744,7 +744,7 @@
         {
           "conflicts_with": [],
           "default": [],
-          "help": "auto: the graphics card; cuda: NVIDIA; migraphx: AMD (Linux); cpu: ONNX Runtime's CPU provider (slow); coreml: macOS [default: auto]",
+          "help": "auto: the graphics card (Core ML on a Mac); cuda: NVIDIA; migraphx: AMD (Linux); cpu: ONNX Runtime's CPU provider (slow); coreml: macOS [default: auto]",
           "hidden": false,
           "id": "device",
           "long": "device",
@@ -1539,7 +1539,7 @@
         {
           "conflicts_with": [],
           "default": [],
-          "help": "auto: the graphics card; cuda: NVIDIA; migraphx: AMD (Linux); cpu: ONNX Runtime's CPU provider (slow); coreml: macOS [default: auto]",
+          "help": "auto: the graphics card (Core ML on a Mac); cuda: NVIDIA; migraphx: AMD (Linux); cpu: ONNX Runtime's CPU provider (slow); coreml: macOS [default: auto]",
           "hidden": false,
           "id": "device",
           "long": "device",
@@ -1691,7 +1691,7 @@
         {
           "conflicts_with": [],
           "default": [],
-          "help": "auto: the graphics card; cuda: NVIDIA; migraphx: AMD (Linux); cpu: ONNX Runtime's CPU provider (slow); coreml: macOS [default: auto]",
+          "help": "auto: the graphics card (Core ML on a Mac); cuda: NVIDIA; migraphx: AMD (Linux); cpu: ONNX Runtime's CPU provider (slow); coreml: macOS [default: auto]",
           "hidden": false,
           "id": "device",
           "long": "device",
@@ -1806,7 +1806,7 @@
         {
           "conflicts_with": [],
           "default": [],
-          "help": "auto: the graphics card; cuda: NVIDIA; migraphx: AMD (Linux); cpu: ONNX Runtime's CPU provider (slow); coreml: macOS [default: auto]",
+          "help": "auto: the graphics card (Core ML on a Mac); cuda: NVIDIA; migraphx: AMD (Linux); cpu: ONNX Runtime's CPU provider (slow); coreml: macOS [default: auto]",
           "hidden": false,
           "id": "device",
           "long": "device",
