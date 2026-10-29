@@ -2,7 +2,7 @@ import { discardsSettled } from "../../electron/main/partial";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { clearJobTemps, engineOptions, providerText, Queue, type EngineHandle } from "../../electron/main/queue";
 import type { EngineReply } from "../../electron/main/engine";
 import { DEFAULT_OPTIONS, type Job } from "../../src/shared/types";
@@ -79,6 +79,8 @@ function harness(
   });
   // the queue's folder work is async (output folders can be on a share): flush waits for it too
   const flush = async () => {
+    // loop: NOT-WORTH — a fixed wait is right here: a 0 ms turn lets the replies' handlers start their file work (an
+    // ordering step, not a timing guess); settled() then awaits that work itself
     await new Promise((r) => setTimeout(r, 0));
     await q.settled();
   };
@@ -361,9 +363,8 @@ describe("a job's started files (staging, partial.ts)", () => {
     expect(readFileSync(join(dir, "s1_settings.txt"), "utf8")).toBe(`Output Directory: ${dir}\n`);
     expect(readFileSync(join(dir, "notes.txt"), "utf8")).toBe("the user's");
     // the replaced EXR folder is removed in the background, then nothing of the staging is left
-    // loop: SERIAL-REQUIRED — waits for the background removal [bounded: 50 × 20 ms]
-    for (let i = 0; i < 50 && existsSync(join(dir, ".corridorkey-partial")); i++) await new Promise((r) => setTimeout(r, 20));
-    expect(readdirSync(dir).sort()).toEqual(["notes.txt", "s1_alpha.mp4", "s1_alpha_exr", "s1_settings.txt"]);
+    // loop: NOT-WORTH — vi.waitFor polls one folder for the background removal [bounded: 2 s]
+    await vi.waitFor(() => expect(readdirSync(dir).sort()).toEqual(["notes.txt", "s1_alpha.mp4", "s1_alpha_exr", "s1_settings.txt"]), { timeout: 2000 });
   });
 });
 

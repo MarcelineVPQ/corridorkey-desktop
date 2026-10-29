@@ -40,6 +40,8 @@ function rig() {
     q,
     reply: (r: EngineReply) => reply(r),
     flush: async () => {
+      // loop: NOT-WORTH — a fixed wait is right here: a 0 ms turn lets the replies' handlers start their file work (an
+      // ordering step, not a timing guess); settled() then awaits that work itself
       await new Promise((r) => setTimeout(r, 0));
       await q.settled();
     },

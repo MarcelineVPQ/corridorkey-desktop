@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import type { ChildProcess } from "node:child_process";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { EngineProcess, launchCommand, rustEngineEnv } from "../../electron/main/engine";
 import { taskkillPath } from "../../electron/main/platform";
 
@@ -35,8 +35,9 @@ describe("EngineProcess", () => {
         }),
     );
     expect((await p.start()).version).toBe("0.1.0");
-    await new Promise((r) => setTimeout(r, 10));
-    expect(replies).toEqual([{ type: "log", text: "hi" }]);
+    // the line after the pong is read asynchronously
+    // loop: NOT-WORTH — vi.waitFor polls one array [bounded: 2 s]
+    await vi.waitFor(() => expect(replies).toEqual([{ type: "log", text: "hi" }]), { timeout: 2000 });
   });
 
   it("review 2026-10-28 N2: an engine dying at start reports once its pipes drain, so its last stderr line is in the tail", async () => {

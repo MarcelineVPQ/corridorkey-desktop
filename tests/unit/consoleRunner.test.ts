@@ -38,6 +38,8 @@ import { DEFAULT_OPTIONS, type ConsoleBlock, type DoctorRow, type Job } from "..
 const root = realpathSync(mkdtempSync(join(tmpdir(), "ck-console-run-")));
 // the last tests' history appends (fire-and-forget, as in the app) land before the folder goes
 afterAll(async () => {
+  // loop: NOT-WORTH — a fixed wait is right here: no test asserts after it, and the appends are fire-and-forget (nothing
+  // to wait on); a late one only loses its write to the removed folder
   await new Promise((r) => setTimeout(r, 50));
   rmSync(root, { recursive: true, force: true });
 });
@@ -67,6 +69,16 @@ function fakeChild(pid = 4242): FakeChild {
   Object.assign(c, { stdout: new PassThrough(), stderr: new PassThrough(), pid, kill: (s?: string) => (c.signals.push(s), true) });
   return c;
 }
+/**
+ * Async work landing before an assertion (a stream's lines, a program's next line, a file append): waits for the
+ * condition itself with a deadline, never a fixed sleep (fixed 5–20 ms waits lost the race on slow CI runners).
+ */
+// loop: NOT-WORTH — vi.waitFor polls a test's condition [bounded: 2 s]
+const until = <T>(check: () => T | Promise<T>) => vi.waitFor(check, { timeout: 2000, interval: 5 });
+
+/** blocks that have left "running" (or ended without running), counted as the Console reports them */
+let endedBlocks = 0;
+
 /** The child prints these lines, then exits with `code` (closing its streams first, as a process does). */
 async function finish(c: FakeChild, stdout: string[], code: number | null, stderr: string[] = []) {
   // loop: NOT-WORTH — a few test lines
@@ -75,9 +87,12 @@ async function finish(c: FakeChild, stdout: string[], code: number | null, stder
   for (const l of stderr) (c.stderr as PassThrough).write(l + "\n");
   (c.stdout as PassThrough).end();
   (c.stderr as PassThrough).end();
-  await new Promise((r) => setTimeout(r, 5));
+  // a process's close comes after its streams have been read to their end
+  await until(() => expect([c.stdout!.readableEnded, c.stderr!.readableEnded]).toEqual([true, true]));
+  const before = endedBlocks;
   c.emit("close", code, null);
-  await new Promise((r) => setTimeout(r, 5));
+  // its block ends once the close's async work (an audit append, the sequences it wrote) has landed
+  await until(() => expect(endedBlocks).toBeGreaterThan(before));
 }
 
 let spawned: { cmd: string; args: string[]; opts: SpawnOptions; child: FakeChild }[];
@@ -144,7 +159,10 @@ function make(over: Partial<ConsoleDeps> = {}, files = mkdtempSync(join(root, "u
     elevation: new Elevation(() => t),
     audit: new AuditLog(join(files, "console-audit.jsonl")),
     history: new History(join(files, "console-history.jsonl")),
-    changed: (b) => void blocks.set(b.id, structuredClone(b)),
+    changed: (b) => {
+      if (b.state !== "running" && blocks.get(b.id)?.state !== b.state) endedBlocks++;
+      blocks.set(b.id, structuredClone(b));
+    },
     sessionChanged: () => {},
     spawn: (cmd, args, opts) => {
       const child = fakeChild();
@@ -204,8 +222,7 @@ describe("corridorkey from the Console", () => {
     const b = await c.run("render shot.mov -o ../out/a");
     const s = spawned[0];
     (s.child.stdout as PassThrough).write('{"event":"status","text":"loading the models"}\n{"event":"progress","percent":45,"done":45,"total":100}\nplain line\n');
-    await new Promise((r) => setTimeout(r, 5));
-    expect(blocks.get(b.id)).toMatchObject({ status: "loading the models", progress: { percent: 45, done: 45, total: 100 }, state: "running" });
+    await until(() => expect(blocks.get(b.id)).toMatchObject({ status: "loading the models", progress: { percent: 45, done: 45, total: 100 }, state: "running" }));
     await finish(s.child, [], 0, ["keying window 1/2"]);
     const end = blocks.get(b.id)!;
     expect(end).toMatchObject({ state: "done", exitCode: 0, exitMeaning: "done" });
@@ -653,7 +670,9 @@ describe("built-ins", () => {
     const { c, files } = make();
     // loop: NOT-WORTH — four lines
     for (const l of ["pwd", "cd nowhere", " cd ..", "dir"]) await c.run(l);
-    await new Promise((r) => setTimeout(r, 10));
+    // each line's end (its ✓ or ✗) is recorded asynchronously after it ran
+    // loop: NOT-WORTH — three entries
+    await until(() => expect(c.history("").map((e) => e.state)).toEqual(["done", "failed", "done"]));
     const text = async (l: string) => (await c.run(l)).lines.map((x) => x.text);
     // the line with a leading space isn't kept (it still ran: cd .. moved up)
     const all = await text("history 10");
@@ -683,9 +702,8 @@ describe("run <script>", () => {
     const { c } = make();
     writeFileSync(join(shots, "a.ckcmd"), "# a comment\n\ncd ..\npwd\ncd nowhere\npwd\n");
     const b = await c.run("run a.ckcmd");
-    await new Promise((r) => setTimeout(r, 20));
+    await until(() => expect(blocks.get(b.id)!.state).toBe("failed"));
     const end = blocks.get(b.id)!;
-    expect(end.state).toBe("failed");
     expect(end.lines.map((l) => l.text)).toEqual(["a.ckcmd:3  cd ..", "a.ckcmd:4  pwd", "a.ckcmd:5  cd nowhere", "stopped at line 5: failed"]);
     // loop: NOT-WORTH — the script's blocks
     const children = [...blocks.values()].filter((x) => x.parent === b.id);
@@ -700,12 +718,10 @@ describe("run <script>", () => {
     const { c } = make();
     writeFileSync(join(shots, "b.ckcmd"), "render shot.mov -o ../out/a\nrun b.ckcmd\n");
     const b = await c.run("run b.ckcmd");
-    await new Promise((r) => setTimeout(r, 10));
-    expect(spawned).toHaveLength(1);
+    await until(() => expect(spawned).toHaveLength(1));
     expect((await c.run("info")).state).toBe("refused");
     await finish(spawned[0].child, [], 0);
-    await new Promise((r) => setTimeout(r, 10));
-    expect(blocks.get(b.id)!.state).toBe("failed");
+    await until(() => expect(blocks.get(b.id)!.state).toBe("failed"));
     // loop: NOT-WORTH — the script's blocks
     expect([...blocks.values()].find((x) => x.line === "run b.ckcmd" && x.parent === b.id)!.lines[0].text).toMatch(/^A script can't run another script/);
   });
@@ -714,12 +730,11 @@ describe("run <script>", () => {
     const { c } = make();
     writeFileSync(join(shots, "c.ckcmd"), "render shot.mov -o ../out/a\npwd\n");
     const b = await c.run("run c.ckcmd");
-    await new Promise((r) => setTimeout(r, 10));
+    await until(() => expect(spawned).toHaveLength(1));
     c.cancel();
     expect(spawned[0].child.signals).toEqual(["SIGTERM"]);
     await finish(spawned[0].child, [], 143);
-    await new Promise((r) => setTimeout(r, 10));
-    expect(blocks.get(b.id)!.state).toBe("cancelled");
+    await until(() => expect(blocks.get(b.id)!.state).toBe("cancelled"));
     // loop: NOT-WORTH — the script's blocks
     expect([...blocks.values()].some((x) => x.parent === b.id && x.line === "pwd")).toBe(false);
   });
@@ -1002,7 +1017,7 @@ describe("review 2026-10-26 probes", () => {
     expect([render.state, render.lines[0].text]).toEqual(["refused", expect.stringMatching(/^Busy with run s.ckcmd/)]);
     release();
     await script;
-    await new Promise((r) => setTimeout(r, 10));
+    await until(() => expect(c.session().running).toBeNull());
     expect(spawned).toEqual([]);
     expect(c.session().running).toBeNull();
   });
@@ -1260,7 +1275,8 @@ describe("Phase 4: doctor", () => {
   });
   /** the CLI's info prints this JSON, then exits with `code` */
   async function answer(json: unknown, code = 0, stderr: string[] = []) {
-    await new Promise((r) => setTimeout(r, 5));
+    // the doctor's earlier checks are async: info starts after them
+    await until(() => expect(spawned[0]).toBeDefined());
     await finish(spawned[0].child, json === null ? [] : JSON.stringify(json, null, 2).split("\n"), code, stderr);
   }
 
@@ -1348,7 +1364,7 @@ describe("Phase 4: doctor", () => {
     expect(f.lines.every((l) => l.kind === "out")).toBe(true);
     // a model set info can't open is the Models row
     const p2 = c.run("doctor");
-    await new Promise((r) => setTimeout(r, 5));
+    await until(() => expect(spawned[1]).toBeDefined());
     await finish(spawned[1].child, [], 7, ["ERROR: /m/models.json: not a model set manifest (exit 7, assets)"]);
     expect(
       blockText(await p2)
@@ -1406,8 +1422,7 @@ describe("Phase 4: history shortcuts", () => {
     const { c } = make();
     await c.run("pwd");
     const b = await c.runLines(["!!", "pwd"]);
-    await new Promise((r) => setTimeout(r, 20));
-    expect(blocks.get(b.id)!.state).toBe("failed");
+    await until(() => expect(blocks.get(b.id)!.state).toBe("failed"));
     expect([...blocks.values()].find((x) => x.parent === b.id)!.lines[0].text).toMatch(/unknown command '!!'/);
   });
 });
@@ -1681,8 +1696,6 @@ describe("Phase 4: sequences everywhere", () => {
 });
 
 describe("SME review 2026-10-26: scripts and elevation (S11), pasted lines (S2)", () => {
-  const settle = () => new Promise((r) => setTimeout(r, 20));
-
   it("a script's lines that replace files are listed in one dialog up front; cancelled, nothing runs", async () => {
     const { c, files } = make();
     writeFileSync(join(shots, "d.ckcmd"), "pwd\nsudo render shot.mov -o ../out/e/ --overwrite\nsudo render shot.mov -o ../out/f/ --overwrite\n");
@@ -1709,8 +1722,7 @@ describe("SME review 2026-10-26: scripts and elevation (S11), pasted lines (S2)"
     const { c } = make();
     writeFileSync(join(shots, "e.ckcmd"), "sudo render shot.mov -o ../out/g/ --overwrite\n");
     const b = await c.run("run e.ckcmd");
-    await settle();
-    expect([scriptAsks.length, confirms.length, spawned.length]).toEqual([1, 0, 1]);
+    await until(() => expect([scriptAsks.length, confirms.length, spawned.length]).toEqual([1, 0, 1]));
     expect([...blocks.values()].find((x) => x.parent === b.id)!.elevated).toBe(true);
     expect(c.session().elevatedUntil).toBeNull();
     await finish(spawned[0].child, [], 0);
@@ -1738,7 +1750,7 @@ describe("SME review 2026-10-26: scripts and elevation (S11), pasted lines (S2)"
   it("pasted lines run as a script: in order, the same checks, stopping at the first that fails", async () => {
     const { c } = make();
     const b = await c.runLines(["cd ..", "cd nowhere", "pwd"]);
-    await settle();
+    await until(() => expect(blocks.get(b.id)!.state).not.toBe("running"));
     expect(b.line).toBe("cd ..\ncd nowhere\npwd");
     const end = blocks.get(b.id)!;
     expect([end.state, end.lines.map((l) => l.text)]).toEqual(["failed", ["pasted:1  cd ..", "pasted:2  cd nowhere", "stopped at line 2: failed"]]);
@@ -1906,20 +1918,20 @@ describe("Phase 4: variables", () => {
     const { c } = make();
     await c.run("set d=../out");
     const b = await c.runLines(["set s=sh010", "dir ${d}/${s}"]);
-    await new Promise((r) => setTimeout(r, 20));
-    expect(blocks.get(b.id)!.state).toBe("done");
+    await until(() => expect(blocks.get(b.id)!.state).toBe("done"));
     expect([...blocks.values()].find((x) => x.parent === b.id && x.line.startsWith("dir"))!.line).toBe('dir "../out/sh010"');
   });
 });
 
 describe("Phase 4: scripting", () => {
   const kids = (id: number) => [...blocks.values()].filter((x) => x.parent === id);
-  const settle = () => new Promise((r) => setTimeout(r, 20));
+  /** a program's block once it has ended (it runs on after run() resolves) */
+  const settle = (b: ConsoleBlock) => until(() => expect(blocks.get(b.id)!.state).not.toBe("running"));
 
   it("; && || on a typed line: each command its own block, run as the operator says; the line ends as its last", async () => {
     const { c } = make();
     const b = await c.run("cd nowhere && pwd || echo fallback; version");
-    await settle();
+    await settle(b);
     expect(kids(b.id).map((x) => [x.line, x.state])).toEqual([
       ["cd nowhere", "failed"],
       ["echo fallback", "done"],
@@ -1928,7 +1940,7 @@ describe("Phase 4: scripting", () => {
     expect(blocks.get(b.id)!.state).toBe("done");
     // a typed line goes on after a failure (bash), and ends as its last command did
     const f = await c.run("pwd; cd nowhere");
-    await settle();
+    await settle(f);
     expect([kids(f.id).length, blocks.get(f.id)!.state, blocks.get(f.id)!.exitCode]).toEqual([2, "failed", 1]);
     expect(c.history("")[0].line).toBe("pwd; cd nowhere");
     // a pipe goes only to the Console's filters (backlog row 127): wc isn't one, nothing runs
@@ -1940,7 +1952,7 @@ describe("Phase 4: scripting", () => {
     const { c } = make();
     const echoes = async (line: string) => {
       const b = await c.run(line);
-      await settle();
+      await settle(b);
       return kids(b.id).map((x) => x.lines.at(-1)?.text);
     };
     expect(await echoes("for s in sh010 sh020; do echo ${s}; done")).toEqual(["sh010", "sh020"]);
@@ -1948,7 +1960,7 @@ describe("Phase 4: scripting", () => {
     expect(await echoes("for f in *.exr; do echo ${f}; done")).toEqual(["plate 9.exr", "plate 10.exr"]);
     expect(await echoes("for f in '*.exr'; do echo ${f}; done")).toEqual(["*.exr"]);
     const none = await c.run("for f in *.nope; do echo ${f}; done");
-    await settle();
+    await settle(none);
     expect([kids(none.id).length, blocks.get(none.id)!.lines.at(-1)!.text]).toEqual([0, "for f: no file matches *.nope"]);
     // the loop's variable is gone after it; one set before comes back
     await c.run("set s=before");
@@ -1962,7 +1974,7 @@ describe("Phase 4: scripting", () => {
     const { c } = make();
     const echoes = async (line: string) => {
       const b = await c.run(line);
-      await settle();
+      await settle(b);
       return kids(b.id).map((x) => x.lines.at(-1)?.text ?? blocks.get(b.id)!.lines.at(-1)?.text);
     };
     await c.run(`set od=${out}`);
@@ -1976,7 +1988,7 @@ describe("Phase 4: scripting", () => {
     expect(await echoes("for f in ../out/sh010/${hashes}; do echo ${f}; done")).toEqual(["../out/sh010/key.####.exr"]);
     // and a value's * is literal inside a typed pattern: only names with a real * match
     const lit = await c.run("for f in ../out/sh010/${star}*; do echo ${f}; done");
-    await settle();
+    await settle(lit);
     expect(blocks.get(lit.id)!.lines.at(-1)!.text).toBe("for f: no file matches ../out/sh010/*.exr*");
   });
 
@@ -1985,15 +1997,15 @@ describe("Phase 4: scripting", () => {
     const { c } = make();
     await c.run('set shots="sh010 sh020  sh030"');
     const b = await c.run("for s in ${shots[@]}; do echo ${s}; done");
-    await settle();
+    await settle(b);
     expect(kids(b.id).map((x) => x.lines.at(-1)?.text)).toEqual(["sh010", "sh020", "sh030"]);
     // each item is one word, never a flag or a pattern: a value of "--overwrite *.exr" is two plain items
     await c.run('set odd="--overwrite *.exr"');
     const o = await c.run("for s in ${odd[@]}; do echo ${s}; done");
-    await settle();
+    await settle(o);
     expect(kids(o.id).map((x) => x.lines.at(-1)?.text)).toEqual(["--overwrite", "*.exr"]);
     const one = await c.run("for s in ${shots}; do echo ${s}; done");
-    await settle();
+    await settle(one);
     expect(kids(one.id).map((x) => x.lines.at(-1)?.text)).toEqual(["sh010 sh020  sh030"]);
     expect(blocks.get(one.id)!.lines.map((l) => l.text)).toContain("${shots} is one item (a variable never splits): for s in ${shots[@]} takes its words one by one");
     // [@] is only a for loop's whole word
@@ -2003,11 +2015,11 @@ describe("Phase 4: scripting", () => {
   it("if on the last exit status; else; nested in for", async () => {
     const { c } = make();
     const b = await c.run("if cd nowhere; then echo yes; else echo no; fi");
-    await settle();
+    await settle(b);
     expect(kids(b.id).map((x) => x.line)).toEqual(["cd nowhere", "echo no"]);
     expect(blocks.get(b.id)!.state).toBe("done");
     const n = await c.run("for d in .. nowhere; do if cd ${d}; then pwd; fi; done");
-    await settle();
+    await settle(n);
     expect(kids(n.id).map((x) => x.line)).toEqual(['cd ".."', "pwd", 'cd "nowhere"']);
   });
 
@@ -2015,11 +2027,11 @@ describe("Phase 4: scripting", () => {
     const { c } = make();
     writeFileSync(join(shots, "k.ckcmd"), "cd nowhere && pwd\nif cd nowhere; then pwd; fi\nfor s in a b\ndo\n  echo ${s}\ndone\ncd nowhere\necho never\n");
     const b = await c.run("run k.ckcmd");
-    await settle();
+    await settle(b);
     expect(kids(b.id).map((x) => x.line)).toEqual(["cd nowhere", "cd nowhere", 'echo "a"', 'echo "b"', "cd nowhere"]);
     expect(blocks.get(b.id)!.lines.at(-1)!.text).toBe("stopped at line 7: failed");
     const k = await c.run("run --keep-going k.ckcmd");
-    await settle();
+    await settle(k);
     expect(kids(k.id).at(-1)!.line).toBe("echo never");
     expect([blocks.get(k.id)!.state, blocks.get(k.id)!.lines.at(-1)!.text]).toEqual(["failed", "1 command failed (--keep-going went on)"]);
     writeFileSync(join(shots, "bad.ckcmd"), "pwd\nfor x in a; do pwd\n");
@@ -2040,14 +2052,14 @@ describe("Phase 4: scripting", () => {
         movesFolder: false,
       },
     ]);
-    await settle();
+    await until(() => expect(spawned).toHaveLength(1));
     expect(spawned).toHaveLength(1);
     expect(spawned[0].args).toContain(join(out, "e"));
     await finish(spawned[0].child, [], 0);
-    await settle();
+    await until(() => expect(spawned).toHaveLength(2));
     expect(spawned).toHaveLength(2);
     await finish(spawned[1].child, [], 0);
-    await settle();
+    await settle(b);
     expect(blocks.get(b.id)!.state).toBe("done");
     // the session was never elevated
     expect(c.session().elevatedUntil).toBeNull();
@@ -2056,11 +2068,11 @@ describe("Phase 4: scripting", () => {
   it("time: how long a command took; a render's frames per second from its own events", async () => {
     const { c } = make();
     const b = await c.run("time render shot.mov -o ../out/t");
-    await settle();
+    await until(() => expect(spawned).toHaveLength(1));
     (spawned[0].child.stdout as PassThrough).write('{"event":"progress","percent":100,"done":50,"total":50}\n');
     t += 2000;
     await finish(spawned[0].child, [], 0);
-    await settle();
+    await settle(b);
     expect(blocks.get(b.id)!.lines.at(-1)!.text).toBe("time: 2.0 s · 50 frames · 25.00 fps (render shot.mov -o ../out/t)");
     expect((await c.run("sudo time pwd")).lines.at(-1)!.text).toMatch(/time goes first/);
   });
@@ -2233,7 +2245,8 @@ describe("review 2026-10-27 S6: the long built-ins take the slot and stop on Ctr
     for (const line of [`du ${d}`, `tree ${d}`, `wc ${join(d, "big.txt")}`, "j s6"]) {
       gate = new Promise<void>((r) => (open = r));
       const running = c.run(line);
-      await new Promise((r) => setTimeout(r, 10));
+      // it holds the slot once its checks have passed and it waits on the slow disk
+      await until(() => expect(c.session().running).toBe(line));
       const other = await c.run("pwd; pwd");
       expect([line, other.state, other.lines.at(-1)!.text]).toEqual([line, "refused", expect.stringMatching(new RegExp(`^Busy with ${line.split(" ")[0]}`))]);
       c.cancel();
@@ -2282,8 +2295,7 @@ describe("review 2026-10-27 S2: a program's confirmation shows its lines filled 
     const { c } = make();
     await c.run("set o=../out/s5/");
     const b = await c.run("pwd; sudo render shot.mov -o ${o} --overwrite");
-    await new Promise((r) => setTimeout(r, 20));
-    expect(spawned).toHaveLength(1);
+    await until(() => expect(spawned).toHaveLength(1));
     expect(spawned[0].args).toContain(join(out, "s5"));
     await finish(spawned[0].child, [], 0);
     expect(b.state).not.toBe("refused");
@@ -2445,8 +2457,7 @@ describe("SME reviews: shell reflexes, source, ? in a name", () => {
     const f = join(mkdtempSync(join(root, "src-")), "a.ckcmd");
     writeFileSync(f, "echo one\n");
     const b = await c.run(`source ${f}`);
-    await new Promise((r) => setTimeout(r, 20));
-    expect(blocks.get(b.id)!.state).toBe("done");
+    await until(() => expect(blocks.get(b.id)!.state).toBe("done"));
     expect([...blocks.values()].some((x) => x.parent === b.id && x.lines[0]?.text === "one")).toBe(true);
   });
 
@@ -2499,10 +2510,11 @@ describe("SME reviews: a measured frame rate", () => {
     const b = await c.run("render shot.mov -o ../out/rate");
     const ch = spawned[0].child.stdout as PassThrough;
     ch.write('{"event":"progress","percent":1,"done":1,"total":100}\n');
-    await new Promise((r) => setTimeout(r, 5));
+    // the first event is read at the first time, before the clock moves
+    await until(() => expect(blocks.get(b.id)!.progress?.done).toBe(1));
     t += 4000;
     ch.write('{"event":"progress","percent":9,"done":9,"total":100}\n');
-    await new Promise((r) => setTimeout(r, 5));
+    await until(() => expect(blocks.get(b.id)!.progress?.done).toBe(9));
     expect(blocks.get(b.id)!.rate).toEqual({ fps: 2, frames: 8 });
     await finish(spawned[0].child, [], 0);
   });
@@ -2523,7 +2535,6 @@ describe("SME reviews: Re-render missing", () => {
     const { c } = make();
     const b = await c.run("verify -i plate.####.exr -o ../out/key.####.exr -F 1001-1100 --outputs alpha");
     await finish(spawned[0].child, ["missing or incomplete: ../out/nothere.1012.exr", "missing frames: 1012-1015, 1040 (re-render them: -F 1012-1015,1040)"], 9);
-    await new Promise((r) => setTimeout(r, 10));
     expect(blocks.get(b.id)!.rerender).toBe("render --input plate.####.exr --output ../out/key.####.exr --outputs alpha --frames 1012-1015,1040");
     expect(spawned).toHaveLength(1);
   });
@@ -2533,7 +2544,6 @@ describe("SME reviews: Re-render missing", () => {
     writeFileSync(join(out, "sh010", "half.1012.exr"), "x");
     const b = await c.run("verify -i plate.####.exr -o ../out/sh010/half.####.exr");
     await finish(spawned[0].child, [`missing or incomplete: ${join(out, "sh010", "half.1012.exr")}`, "missing frames: 1012 (re-render them: -F 1012)"], 9);
-    await new Promise((r) => setTimeout(r, 10));
     expect(blocks.get(b.id)!.rerender).toBe("sudo render --input plate.####.exr --output ../out/sh010/half.####.exr --overwrite --frames 1012");
     const ok = await c.run("verify -i plate.####.exr -o ../out/sh010/half.####.exr");
     await finish(spawned[1].child, [], 0);
@@ -2550,7 +2560,6 @@ describe("SME reviews: Copy as Nuke Read", () => {
     // loop: NOT-WORTH — three test frames
     for (const f of [1001, 1002, 1003]) writeFileSync(join(o, "shot_alpha_exr", `shot_alpha.${f}.exr`), "x");
     await finish(spawned[0].child, [], 0);
-    await new Promise((r) => setTimeout(r, 10));
     expect(blocks.get(b.id)!.reads).toEqual([{ path: join(o, "shot_alpha_exr", "shot_alpha.####.exr"), first: 1001, last: 1003 }]);
     // a failed render offers none
     const f = await c.run("render shot.mov -o ../out/nuke2");

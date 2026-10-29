@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import type { EngineReply } from "../../electron/main/engine";
 import type { EngineHandle } from "../../electron/main/queue";
 import { BUILD_RECORD, Prebuilder, rangesOnDisk, recordBuild, removeSize, trtRangeDirs } from "../../electron/main/trtPrebuild";
@@ -179,8 +179,8 @@ describe("the background TensorRT build", () => {
     expect(r.b.state).toMatchObject({ status: "paused" });
     expect(r.b.state.ranges[1].state).toBe("todo");
     r.b.queueStopped();
-    await new Promise((res) => setTimeout(res, 0));
-    expect(r.sent.at(-1)).toEqual({ cmd: "trt_build", id: KHD, width: 1920, height: 1080 });
+    // loop: NOT-WORTH — vi.waitFor polls one array for the restart [bounded: 2 s]
+    await vi.waitFor(() => expect(r.sent.at(-1)).toEqual({ cmd: "trt_build", id: KHD, width: 1920, height: 1080 }), { timeout: 2000 });
     r.b.stop();
     expect(r.b.state.status).toBe("stopped");
 
@@ -198,15 +198,17 @@ describe("the background TensorRT build", () => {
     const r = rig({ others: () => others });
     await r.b.start(false);
     expect(r.b.state.status).toBe("blocked");
+    // loop: NOT-WORTH — a fixed wait is right here: nothing may start while the card is taken (four 5 ms looks)
     await new Promise((res) => setTimeout(res, 20));
     expect(r.sent).toEqual([]);
     others = [];
-    await new Promise((res) => setTimeout(res, 20));
-    expect(r.sent).toEqual([{ cmd: "trt_build", id: K4, width: 4096, height: 2160 }]);
+    // loop: NOT-WORTH — vi.waitFor polls one array for the next look's start [bounded: 2 s]
+    await vi.waitFor(() => expect(r.sent).toEqual([{ cmd: "trt_build", id: K4, width: 4096, height: 2160 }]), { timeout: 2000 });
     // stopped while blocked: no more looks
     const s = rig({ others: ["Sonata"] });
     await s.b.start(false);
     s.b.stop();
+    // loop: NOT-WORTH — a fixed wait is right here: no look may undo the stop (four 5 ms looks' time)
     await new Promise((res) => setTimeout(res, 20));
     expect(s.b.state.status).toBe("stopped");
   });
@@ -230,8 +232,8 @@ describe("the background TensorRT build", () => {
     q.b.waitForQueue();
     expect(q.b.state.status).toBe("paused");
     q.b.queueStopped();
-    await new Promise((res) => setTimeout(res, 0));
-    expect(q.sent).toEqual([{ cmd: "trt_build", id: KHD, width: 1920, height: 1080 }]);
+    // loop: NOT-WORTH — vi.waitFor polls one array for the restart [bounded: 2 s]
+    await vi.waitFor(() => expect(q.sent).toEqual([{ cmd: "trt_build", id: KHD, width: 1920, height: 1080 }]), { timeout: 2000 });
   });
 
   // bug hunt 2026-10-26 P2: started while the queue ran (TensorRT's download ending, the switch, Build now, a size
@@ -248,8 +250,8 @@ describe("the background TensorRT build", () => {
     expect(r.b.state.status).toBe("paused");
     r.queue(false);
     r.b.queueStopped();
-    await new Promise((res) => setTimeout(res, 0));
-    expect(r.sent).toEqual([{ cmd: "trt_build", id: K4, width: 4096, height: 2160 }]);
+    // loop: NOT-WORTH — vi.waitFor polls one array for the restart [bounded: 2 s]
+    await vi.waitFor(() => expect(r.sent).toEqual([{ cmd: "trt_build", id: K4, width: 4096, height: 2160 }]), { timeout: 2000 });
   });
 
   // bug hunt 2026-10-26 P3: a build held back by Sonata lost its look a minute when a queue ran (pause cleared the timer
@@ -263,8 +265,8 @@ describe("the background TensorRT build", () => {
     expect(r.b.state.status).toBe("paused");
     others = [];
     r.b.queueStopped();
-    await new Promise((res) => setTimeout(res, 0));
-    expect(r.sent).toEqual([{ cmd: "trt_build", id: K4, width: 4096, height: 2160 }]);
+    // loop: NOT-WORTH — vi.waitFor polls one array for the restart [bounded: 2 s]
+    await vi.waitFor(() => expect(r.sent).toEqual([{ cmd: "trt_build", id: K4, width: 4096, height: 2160 }]), { timeout: 2000 });
   });
 
   // bug hunt 2026-10-26 P4: Build now pressed while an automatic start read the card did nothing
@@ -290,21 +292,22 @@ describe("the background TensorRT build", () => {
     expect(r.b.state.status).toBe("stopped");
     others = [];
     resume();
-    await new Promise((res) => setTimeout(res, 0));
-    expect(r.sent).toHaveLength(1);
+    // loop: NOT-WORTH — vi.waitFor polls one array for the restart [bounded: 2 s]
+    await vi.waitFor(() => expect(r.sent).toHaveLength(1), { timeout: 2000 });
     // waiting for the queue: it waits again
     const q = rig();
     q.queue(true);
     await q.b.start(false);
     const again = q.b.suspend();
     again();
-    await new Promise((res) => setTimeout(res, 0));
-    expect(q.b.state.status).toBe("paused");
+    // loop: NOT-WORTH — vi.waitFor polls one field for the wait [bounded: 2 s]
+    await vi.waitFor(() => expect(q.b.state.status).toBe("paused"), { timeout: 2000 });
     // stopped by the user: it stays stopped
     const s = rig();
     await s.b.start(true);
     s.b.stop();
     s.b.suspend()();
+    // loop: NOT-WORTH — a fixed wait is right here: nothing may restart it; one turn lets a wrong restart show
     await new Promise((res) => setTimeout(res, 0));
     expect(s.b.state.status).toBe("stopped");
     expect(s.sent).toHaveLength(1);
