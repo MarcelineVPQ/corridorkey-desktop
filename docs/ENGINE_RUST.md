@@ -603,9 +603,40 @@ the window's result is used, also on an error); stage 1's and stage 2's inputs a
 low-VRAM mode's (unchanged), so the pinned all-loaded digests changed only by the run order and the foundations'
 batches.
 
-Not done here (measured where the time still goes, 04_5h after the pass): stage 1's 0.57 GB of states copied out of
-ONNX Runtime's buffer per window and stage 2's conversions ("convert" 4.1 + 2.3 s per job; I/O binding or handing ORT's
-own output buffer to the blend), the RVM phase still decode-bound on EXR (7 s for 1.4 s of RVM).
+### Second round (2026-10-29, afternoon)
+
+Same machine, clips, outputs and method; every run below byte for byte the same as the round-one engine's (`cmp`,
+240 EXR at 4K, 628 at HD), each change against the commit before it, three alternating runs each.
+
+| Change | Before → after, totals (s) | Median | Kept |
+|---|---|---|---|
+| The networks' outputs are read where ONNX Runtime made them (`Data::Out`), not copied out (stage 1's states: 0.57 GB per 4K window; "convert" 4.1 → 0.4 s at 4K) | 04_5h: 160.6, 158.3, 158.1 → 153.4, 154.2, 153.3; walking_sitting: 58.2, 57.8, 57.4 → 56.1, 55.9, 55.9 | 4K 158.3 → 153.4 (−3.1 %); HD 57.8 → 55.9 (−3.3 %) | yes |
+| Normal mode: stage 2 takes its frame as a view of the window's stage-1 rgb (already float16, made on the input thread) instead of converting the decoded frame between card calls | 04_5h: 153.5, 153.4, 153.9 → 152.0, 152.0, 152.6 | 153.5 → 152.0 (−1.0 %) | yes |
+| CUDA: outputs bound to page-locked host memory (I/O binding, `bind_output_to_device` CudaPinned; the report's `--pinned_io`) | 04_5h: 152.4, 152.5, 152.7 → 152.3, 151.3, 151.4; walking_sitting: 56.7, 56.2, 56.1 → 56.2, 56.1, 55.8 | 4K −0.7 % (one run inside the spread), HD −0.2 % | no: at the noise, and it holds 0.4-0.7 GB more RAM page-locked and 0.09 GB more graphics memory |
+| HD in normal mode at the low-VRAM window (walking_sitting forced to 48/24 normal) | 57.2 (48/24 low) vs 57.5 (48/24 normal), one run each | no gain | no planner change (below) |
+
+Why HD runs in low-VRAM mode on the 16 GB card, and why that costs nothing: the budget is 13.08 GB free; 48/24 normal
+is estimated at 11.73 GB × 1.06 = 12.43 GB and needs × 1.1 + 0.3 = 13.98 GB, so the automatic window takes 48/24
+low-VRAM (9.61 GB estimated). Forced, 48/24 normal ran (process peak 11.73 GB, the card at 14.56 GB with the desktop)
+and wrote all 628 EXR byte-identical to 48/24 low-VRAM (only the settings file differs: it names the mode). It was not
+faster: the HD job is GPU-bound in both modes (stage 1 30-31 s, stage 2 18 s of the card's time either way), so the
+planner is unchanged and smaller cards are untouched. A longer window than the table allows would change the mattes.
+Also tried at 4K and dropped: stage 2 keeping its arena in normal mode (`CK_ENGINE_ARENA_SHRINK=stage1`) ran out of
+memory.
+
+The two kept changes together against the dev.4 engine, alternating, three runs each (totals in s; every output file
+of every run byte for byte dev.4's, compared directly):
+
+| Clip | dev.4 engine | This engine | Median | Graphics memory (GB) | RAM (GB) |
+|---|---|---|---|---|---|
+| 04_5h 4K, 8/4 normal | 164.9, 165.7, 166.1 | 152.5, 152.5, 152.7 | 165.7 → 152.5 (**−8.0 %**) | 11.08 → 11.35 | 7.8 → 8.6-8.7 |
+| walking_sitting HD, 48/24 low-VRAM | 58.1, 57.5, 57.6 | 55.8, 56.0, 56.0 | 57.6 → 56.0 (**−2.8 %**) | 9.26 → 9.07-9.26 | 7.3-7.4 → 7.2-7.3 |
+
+After that series, one more piece of work removal: the RVM pass resizes its 1/4-size inputs straight from the decoded
+bfloat16 frame instead of a float32 copy of it (106 MB per 4K frame). One exactness run only (04_5h, all 240 EXR
+identical to dev.4's): its RVM phase took 6.1 s against 7.2 s in the run before; not a timing series, so not in the
+totals above. The RVM phase is now decode-bound (4.9 s of EXR decode). Left: TensorRT not measured; x264's thread
+count (fixed at 2, as the original's; more threads change the video bytes) not measured.
 
 ## Portrait (2026-10-22)
 

@@ -306,6 +306,7 @@ Each engine build on the way is labelled as a dev step:
 | **0.0.8-dev** | 2026-10-25 | model set `onnx.4`: CorridorKey 2.0's precision policy (dev.1's models; results below, with TensorRT on it and a same-day re-measurement against the original on 2026-10-26) |
 | **0.0.9-dev** | 2026-10-28 | model set `onnx.5`: our own stage 1 / stage 2 graphs, C-RADIO's weights stored in fp16, download 3.30 → 2.48 GB; and its Core ML set `onnx.5-coreml` for the Mac (dev.2's models; results below) |
 | **0.0.10-dev** | 2026-10-29 | the pipelining pass: decode while the models load, loads behind the first pass, the blend beside the next window, C-RADIO / MoGe once per frame; same output byte for byte (dev.5; results below) |
+| **0.0.11-dev** | 2026-10-29 | the networks' outputs read in place instead of copied out, stage 2 reusing stage 1's converted frames; same output byte for byte (dev.5; results below) |
 
 The same HD bench, run on different days as the engine improved (totals, seconds; Original = PyTorch):
 
@@ -350,7 +351,7 @@ same job. Each step's own section below has its details and its mattes.
   same day.
 
 <details>
-<summary>How the speed got here: 0.0.4-dev to 0.0.10-dev, measured release by release</summary>
+<summary>How the speed got here: 0.0.4-dev to 0.0.11-dev, measured release by release</summary>
 
 ### 0.0.4-dev: feeding the card faster at 4K
 
@@ -649,6 +650,23 @@ Each change was measured on its own at 4K (docs/ENGINE_RUST.md, "The pipelining 
 loads behind RVM −1.6 %, the blend on its own thread −1.5 %, C-RADIO and MoGe once per frame −1.6 % (medians). The
 read-only studies before it estimated +5-9 % at 4K and +3-6 % at HD; measured, the low-memory mode HD clips use gained
 nothing (the blend on its own thread was tried there and dropped), and TensorRT, always in that mode, wasn't measured.
+
+### 0.0.11-dev: fewer copies (2026-10-29)
+
+Same day, same method and machine, the dev.4 engine against this one (with 0.0.10-dev's pipelining), three runs
+each, alternating: the networks'
+results are read where ONNX Runtime made them instead of being copied out (stage 1's states are 0.57 GB per 4K
+window), and in the normal mode stage 2 takes each frame from stage 1's already converted input. Every output file of
+every run is byte for byte the same as dev.4's (`cmp`).
+
+| Clip (window) | dev.4 engine, total (s) | 0.0.11-dev, total (s) | Median | Graphics memory (GB) | RAM (GB) |
+| --- | --- | --- | --- | --- | --- |
+| 04_5h 4096×2160 EXR, 120 frames (8/4 normal) | 164.9 · 165.7 · 166.1 | 152.5 · 152.5 · 152.7 | **−8.0 %** | 11.08 → 11.35 | 7.8 → 8.6-8.7 |
+| walking_sitting 1280×1080, 314 frames (48/24 low-memory) | 58.1 · 57.5 · 57.6 | 55.8 · 56.0 · 56.0 | **−2.8 %** | 9.26 → 9.07-9.26 | 7.3-7.4 → 7.2-7.3 |
+
+Tried and dropped (docs/ENGINE_RUST.md, "The pipelining pass"): HD in the normal mode at the same window (identical
+mattes, no faster: HD is limited by the card's own work) and page-locked output memory (−0.7 % at 4K, inside the
+spread, for 0.4-0.7 GB of locked RAM).
 
 </details>
 

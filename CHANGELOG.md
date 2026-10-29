@@ -12,6 +12,12 @@
   TensorRT jobs, which always run in that mode, gain at most the earlier decode (not measured). The cost: about
   0.27 GB more graphics memory at the 4K peak (still inside the window's estimate) and about 1 GB more RAM there
   (backlog row 182; docs/ENGINE_RUST.md, "The pipelining pass").
+- **Faster again, fewer copies.** The networks' results are now read where ONNX Runtime made them instead of being
+  copied out, stage 2 reuses stage 1's already converted frames, and the first pass resizes its inputs without a
+  full-size copy (that last one checked once, not in the totals below). Still byte for byte dev.4's mattes and foregrounds. On the RTX 5080, with the pipelining pass above,
+  against dev.4 (three alternating runs each): the 4K EXR shot 04_5h keys in 152.5 s
+  instead of 165.7 s (**−8.0 %**), and the HD clip walking_sitting (1280×1080, low-memory mode) in 56.0 s instead of
+  57.6 s (−2.8 %), for 0.27 GB more graphics memory and about 0.9 GB more RAM at the 4K peak.
 
 ## 1.0.0-dev.4
 
