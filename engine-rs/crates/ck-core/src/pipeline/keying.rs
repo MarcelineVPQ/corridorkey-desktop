@@ -301,9 +301,7 @@ impl<L: Loader> Pipeline<L> {
                 dec2.set(reader.seconds());
                 return Ok(None);
             };
-            let mut disp = Vec::with_capacity(f.display.len());
-            bf16_to_f32(&f.display, &mut disp);
-            let mut small = resize_bilinear(&Planar::from_vec(3, sh, sw, disp), he, we);
+            let mut small = crate::image::resize_bilinear_bf16(&f.display, 3, sh, sw, he, we);
             small.map(|v| v.clamp(0.0, 1.0));
             Ok(Some(small.data))
         })?;

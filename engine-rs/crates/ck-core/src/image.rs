@@ -181,20 +181,33 @@ pub fn resize_bilinear(img: &Planar, ho: usize, wo: usize) -> Planar {
 
 /// `resize_bilinear` into `dst` (c * ho * wo).
 pub(crate) fn resize_bilinear_into(img: &Planar, ho: usize, wo: usize, dst_all: &mut [f32]) {
-    let ys = bilinear_axis(img.h, ho);
-    let xs = bilinear_axis(img.w, wo);
+    resize_planes(&img.data, img.c, img.h, img.w, ho, wo, dst_all, |v| v);
+}
+
+/// `resize_bilinear` of `c` bfloat16 planes of h x w, read as float32 (exact) where they are: the same values as
+/// converting the frame to float32 first, without that frame-sized copy (the RVM pass's inputs, backlog row 182).
+pub(crate) fn resize_bilinear_bf16(src: &[half::bf16], c: usize, h: usize, w: usize, ho: usize, wo: usize) -> Planar {
+    let mut out = Planar::new(c, ho, wo);
+    resize_planes(src, c, h, w, ho, wo, &mut out.data, half::bf16::to_f32);
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resize_planes<T: Copy + Sync>(all: &[T], c: usize, h: usize, w: usize, ho: usize, wo: usize, dst_all: &mut [f32], f: impl Fn(T) -> f32 + Sync) {
+    let ys = bilinear_axis(h, ho);
+    let xs = bilinear_axis(w, wo);
     use rayon::prelude::*;
     // loop: HOT-PATH-OK — per frame and plane (3, or 1 for a carry hint); the output rows in parallel
-    for c in 0..img.c {
-        let src = img.plane(c);
+    for c in 0..c {
+        let src = &all[c * h * w..(c + 1) * h * w];
         let dst = &mut dst_all[c * ho * wo..(c + 1) * ho * wo];
         // loop: HOT-PATH-OK — output rows in parallel
         dst.par_chunks_mut(wo).with_min_len(ROWS_MIN).zip(ys.par_iter()).for_each(|(drow, &(y0, y1, wy0, wy1))| {
-            let r0 = &src[y0 * img.w..(y0 + 1) * img.w];
-            let r1 = &src[y1 * img.w..(y1 + 1) * img.w];
+            let r0 = &src[y0 * w..(y0 + 1) * w];
+            let r1 = &src[y1 * w..(y1 + 1) * w];
             // loop: HOT-PATH-OK — one output row (≤ 2176)
             drow.iter_mut().zip(&xs).for_each(|(d, &(x0, x1, wx0, wx1))| {
-                *d = (r0[x0] * wx0 + r0[x1] * wx1) * wy0 + (r1[x0] * wx0 + r1[x1] * wx1) * wy1;
+                *d = (f(r0[x0]) * wx0 + f(r0[x1]) * wx1) * wy0 + (f(r1[x0]) * wx0 + f(r1[x1]) * wx1) * wy1;
             });
         });
     }
@@ -309,6 +322,23 @@ pub fn resize_lanczos4(img: &Planar, ho: usize, wo: usize) -> Planar {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bilinear_from_bfloat16_is_the_float32_frames_resize() {
+        // the RVM pass's inputs: resized straight from the bfloat16 frame, the same bits as converting it first
+        let (c, h, w) = (3, 37, 53);
+        // loop: NOT-WORTH — a test frame
+        let src: Vec<half::bf16> = (0..c * h * w).map(|i| half::bf16::from_f32(((i * 31) % 97) as f32 / 96.0)).collect();
+        // loop: NOT-WORTH — a test frame
+        let f32s = Planar::from_vec(c, h, w, src.iter().map(|x| x.to_f32()).collect());
+        // loop: NOT-WORTH — three sizes
+        for (ho, wo) in [(9, 13), (37, 53), (60, 80)] {
+            let a = resize_bilinear(&f32s, ho, wo).data;
+            let b = resize_bilinear_bf16(&src, c, h, w, ho, wo).data;
+            // loop: NOT-WORTH — a test frame
+            assert!(a.iter().zip(&b).all(|(x, y)| x.to_bits() == y.to_bits()), "{ho}x{wo}");
+        }
+    }
 
     #[test]
     fn reflect_101_indices() {
