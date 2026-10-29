@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0-dev.3 (draft, unreleased)
+## 1.0.0-dev.3
 
 The foundation build: the Mac on par with Linux and Windows, and the checks running on every change.
 
