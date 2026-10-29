@@ -2,22 +2,25 @@
 
 ## 1.0.0-dev.5 (draft, unreleased)
 
-- **Faster keying, the same mattes: the pipelining pass.** The engine keeps the graphics card busier: a clip's first
-  frames decode while the models load, and on CUDA three of the five models load while the first pass runs; each
-  temporal window's results are blended while the card already works on the next window; and C-RADIO and MoGe now
-  run once per frame instead of once per window a frame is in. Every matte and foreground is byte for byte the same as
-  dev.4's at the same settings. On the RTX 5080, a 4K EXR shot (Tears of Steel 04_5h, 120 frames, 8/4 window, CUDA)
-  keys in 159.4 s instead of 166.4 s (−4.2 %, the median of three alternating runs each). HD clips that run in the
-  low-memory mode (1280×1080 on a 16 GB card) are unchanged in speed (−0.9 %, inside the run-to-run spread), and
-  TensorRT jobs, which always run in that mode, gain at most the earlier decode (not measured). The cost: about
-  0.27 GB more graphics memory at the 4K peak (still inside the window's estimate) and about 1 GB more RAM there
-  (backlog row 182; docs/ENGINE_RUST.md, "The pipelining pass").
-- **Faster again, fewer copies.** The networks' results are now read where ONNX Runtime made them instead of being
-  copied out, stage 2 reuses stage 1's already converted frames, and the first pass resizes its inputs without a
-  full-size copy (that last one checked once, not in the totals below). Still byte for byte dev.4's mattes and foregrounds. On the RTX 5080, with the pipelining pass above,
-  against dev.4 (three alternating runs each): the 4K EXR shot 04_5h keys in 152.5 s
-  instead of 165.7 s (**−8.0 %**), and the HD clip walking_sitting (1280×1080, low-memory mode) in 56.0 s instead of
-  57.6 s (−2.8 %), for 0.27 GB more graphics memory and about 0.9 GB more RAM at the 4K peak.
+- **Faster keying, the same mattes.** The engine keeps the graphics card busier and copies less: a clip's first frames
+  decode while the models load; in the normal mode on CUDA with at least 10 GB for the job, three of the five models
+  load while the first pass runs; in the normal mode each temporal window's results are blended while the card already
+  works on the next window, and C-RADIO and MoGe run once per frame instead of once per window a frame is in (CUDA and
+  CPU); the networks' results are read where ONNX Runtime made them instead of being copied out; in the normal mode
+  stage 2 reuses stage 1's already converted frames; and the first pass resizes its inputs without a full-size copy.
+  On the RTX 5080 (CUDA fp16, model set 2.0.0-onnx.5, the automatic window, alpha and foreground as float EXR), against
+  dev.4, the median of three alternating runs each: the 4K EXR shot 04_5h (4096×2160, 120 frames, 8/4 normal mode)
+  keys in 152.5 s instead of 165.7 s (**−8.0 %**), the HD clip walking_sitting (1280×1080, 314 frames, 48/24
+  low-memory mode) in 56.0 s instead of 57.6 s (**−2.8 %**). Every output file of those runs is byte for byte dev.4's
+  (`cmp`). That is what was checked: the RTX 5080 only, those two windows, float EXR; other cards, other windows, the
+  CPU provider and Core ML were not compared with dev.4. The timing runs used the build before the last change (the
+  resize); the final build was checked byte for byte against dev.4 in one run at HD and, before the last load-order
+  fixes, one at 4K; not timed. TensorRT (on Linux today, Windows coming): not measured. The cost, at the 4K peak on
+  the RTX 5080: 0.27 GB more graphics memory (11.08 → 11.35 GB) and about 0.9 GB more RAM (7.8 → 8.6-8.7 GB); with
+  less than 10 GB for the job (an 8 GB card) the models load as in dev.4, and the graphics-memory cost there is not
+  measured. On the Mac mini M6 (16 GB), a 12-frame 1920×1080 Core ML job peaked at 2.74 GB (one run; dev.4 wasn't
+  measured there). Windows' memory: not measured. In the normal mode a job that is stopped or fails part-way writes
+  one window's frames fewer than dev.4 did (backlog row 182; docs/ENGINE_RUST.md, "The pipelining pass").
 
 ## 1.0.0-dev.4
 

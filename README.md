@@ -305,8 +305,8 @@ Each engine build on the way is labelled as a dev step:
 | **0.0.7-dev** | 2026-10-24 | TensorRT at 4K: DCI 4K and UHD get their own engine range (results below) |
 | **0.0.8-dev** | 2026-10-25 | model set `onnx.4`: CorridorKey 2.0's precision policy (dev.1's models; results below, with TensorRT on it and a same-day re-measurement against the original on 2026-10-26) |
 | **0.0.9-dev** | 2026-10-28 | model set `onnx.5`: our own stage 1 / stage 2 graphs, C-RADIO's weights stored in fp16, download 3.30 → 2.48 GB; and its Core ML set `onnx.5-coreml` for the Mac (dev.2's models; results below) |
-| **0.0.10-dev** | 2026-10-29 | the pipelining pass: decode while the models load, loads behind the first pass, the blend beside the next window, C-RADIO / MoGe once per frame; same output byte for byte (dev.5; results below) |
-| **0.0.11-dev** | 2026-10-29 | the networks' outputs read in place instead of copied out, stage 2 reusing stage 1's converted frames; same output byte for byte (dev.5; results below) |
+| **0.0.10-dev** | 2026-10-29 | the pipelining pass: decode while the models load, loads behind the first pass, the blend beside the next window, C-RADIO / MoGe once per frame; same output byte for byte on the RTX 5080 at the two windows measured (dev.5; results below) |
+| **0.0.11-dev** | 2026-10-29 | the networks' outputs read in place instead of copied out, stage 2 reusing stage 1's converted frames; same output byte for byte on the RTX 5080 at the two windows measured (dev.5; results below) |
 
 The same HD bench, run on different days as the engine improved (totals, seconds; Original = PyTorch):
 
@@ -633,13 +633,15 @@ numbers in this README are onnx.4's (0.0.8-dev). onnx.5's own TensorRT set is st
 
 ### 0.0.10-dev: the pipelining pass (2026-10-29)
 
-The engine keeps the card busier with the same output: a clip's first frames decode while the models load; on CUDA
-three of the five models load while the first pass (RVM) runs; in the normal mode each temporal window's results are
-blended while the card already runs the next window, and C-RADIO and MoGe run once per frame instead of once per
-window a frame is in. Method: RTX 5080 (the PC above), CUDA fp16, model set `2.0.0-onnx.5`, the automatic window
+The engine keeps the card busier with the same output: a clip's first frames decode while the models load; in the
+normal mode on CUDA three of the five models load while the first pass (RVM) runs (since the performance review, only
+with at least 10 GB for the job); in the normal mode each temporal window's results are blended while the card already
+runs the next window, and C-RADIO and MoGe run once per frame instead of once per window a frame is in. Method: RTX 5080 (the PC above), CUDA fp16, model set `2.0.0-onnx.5`, the automatic window
 (13.1 GB free), alpha + foreground as float EXR, three runs per engine, alternating back to back
 (`tools/engine_bench.mjs`; dev.4's engine against this one). Every output file of every run is byte for byte the same
-as dev.4's (240 EXR files at 4K, 628 at HD; `cmp`).
+as dev.4's (240 EXR files at 4K, 628 at HD; `cmp`; this round's per-run record wasn't kept). Checked on the RTX 5080
+only, at these two windows, float EXR; other cards, other windows, the CPU provider and Core ML: not checked
+(docs/ENGINE_RUST.md, "The pipelining pass").
 
 | Clip (window) | dev.4 engine, total (s) | 0.0.10-dev, total (s) | Median | Graphics memory (GB) | RAM (GB) |
 | --- | --- | --- | --- | --- | --- |
@@ -657,7 +659,9 @@ Same day, same method and machine, the dev.4 engine against this one (with 0.0.1
 each, alternating: the networks'
 results are read where ONNX Runtime made them instead of being copied out (stage 1's states are 0.57 GB per 4K
 window), and in the normal mode stage 2 takes each frame from stage 1's already converted input. Every output file of
-every run is byte for byte the same as dev.4's (`cmp`).
+every run is byte for byte the same as dev.4's (`cmp`, the result kept per run; the same scope as above). These runs
+are the build before the last change (the RVM pass resizing its inputs from bfloat16); the final build was checked byte
+for byte against dev.4 in one run at HD and, before the review's load-order fixes, one at 4K; not timed.
 
 | Clip (window) | dev.4 engine, total (s) | 0.0.11-dev, total (s) | Median | Graphics memory (GB) | RAM (GB) |
 | --- | --- | --- | --- | --- | --- |

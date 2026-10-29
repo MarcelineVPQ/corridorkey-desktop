@@ -558,9 +558,21 @@ Where walking_sitting's 62.4 s go now (engine log): stage 1 29.5 s run, stage 2 
 Goal: keep the card busy end to end with every output byte-identical. Measured on the RTX 5080 (README's test
 machine), CUDA fp16, model set `2.0.0-onnx.5`, the automatic window (13.1 GB free: 04_5h 4096×2160 EXR, 120 frames,
 8/4 normal mode; walking_sitting 1280×1080, 314 frames, 48/24 low-VRAM), alpha + foreground as float EXR,
-`tools/engine_bench.mjs`. Each change was checked byte for byte (`cmp` of every output EXR against the dev.4
-engine's run at the same settings: all 240 files of 04_5h and 628 of walking_sitting identical in every run below;
-two runs of the dev.4 engine are themselves identical) and timed in alternating back-to-back runs, three each.
+`tools/engine_bench.mjs`. Each change was timed in alternating back-to-back runs, three each, and checked byte for
+byte after its series with a compare script (`cmp` of every output EXR against the dev.4 engine's run at the same
+settings; it found all 240 files of 04_5h and 628 of walking_sitting identical in every run of this first round), but
+that script's output wasn't kept, so round one's per-run exactness has no record. The second round's series and the
+final comparison with dev.4 below write the result into each run's line, and those records are kept: every run of the
+final series, dev.4's own runs included, identical to a separate dev.4 run (so dev.4 is itself deterministic here).
+
+What "byte for byte" covers, in this section and in the CHANGELOG: the RTX 5080 only (sm_120), CUDA fp16, model set
+`2.0.0-onnx.5`; the windows 8/4 normal at 4K and 48/24 low-VRAM at HD, plus one HD run forced to 48/24 normal; float
+EXR alpha and foreground; two clips. C-RADIO's and MoGe's reuse changes their batch size (8 → 4 at 8/4, 48 → 24 at
+48/24), and the engine runs cuDNN in its heuristic mode, which picks kernels per shape and per card architecture, so
+the bytes staying the same there doesn't show they do on other cards (Turing, Ampere, Ada: the 8 GB RTX 2070 SUPER
+among them), at the longer windows a 24-32 GB card takes at 4K (16/8: batch 8 against 16), or on the CPU provider,
+which reuses them too: not checked. Other output formats (PNG, video, the comp) weren't compared; they are rendered by
+unchanged code from the same values.
 
 Where the card waited at 4K (the dev.4 engine's `timing` line, 04_5h): the RVM phase took 11-12 s for 2.1 s of RVM
 (5 s of session loads on the main thread before any frame was decoded, then EXR decode); between stage-1 windows the
@@ -573,6 +585,14 @@ main thread blended the window's states (2.4 s per job, "after"); C-RADIO and Mo
 | Normal mode: each window's states blended on their own thread (`baton-blend`) while the card runs the next window's foundations and stage 1; its final frames go to stage 2 after that | 163.3, 162.7, 163.4 → 160.8, 160.8, 161.0 | 163.3 → 160.8 (−1.5 %) | yes |
 | Normal mode, CUDA and CPU: C-RADIO and MoGe run only on a window's new frames; the frames it shares with the window before take that window's features (batch 4 instead of 8 at 8/4: byte-identical on CUDA) | 161.2, 162.4, 162.9 → 159.3, 160.0, 159.8 | 162.4 → 159.8 (−1.6 %) | yes |
 | Low-VRAM mode: the blend on its own thread (walking_sitting, 48/24) | 57.9, 57.8, 58.3 → 58.2, 58.0, 58.1 | no change | no: blended in place, as before |
+
+How far each step's figure goes: each is the median of three runs against three, and in each kept step the three runs
+after are all faster than the three before, the smallest separation three runs against three can show. The dev.4
+engine itself drifted over the day (167.1 → 166.4 → 165.7 s, its medians in the series of this section), so the
+steps' gains are not to be added up; the whole pass's figure is its own series (below). Every series ran the older
+engine first in each pair, so a first-run effect falls on the older one (walking_sitting: dev.4's first run 58.1 s
+against 57.5 and 57.6); a median takes one such run out, and from the next series on a discarded warm-up run (or
+ABBA order) removes the question.
 
 The whole pass, the dev.4 engine against this one, alternating (bench totals in s; peaks of the engine's processes):
 
@@ -587,13 +607,25 @@ sharing the memory bus with the card's copies) never made the main thread wait.
 
 What it costs: graphics memory **+0.27 GB** at the 4K peak (11.08 → 11.35 GB, the engine's processes, nvidia-smi),
 measured to come from loading sessions on other threads: with the three loads joined before RVM starts the steady
-windows still sat 0.22 GB higher (a 200 ms nvidia-smi log); still under the window's estimate (11.48 GB) and its
-margin (×1.1 + 0.3 GB). Host memory: about 1 GB more at the 4K peak, most of it the states of one more window while it
+windows still sat 0.22 GB higher (a 200 ms nvidia-smi log; why, is not measured); still under the window's estimate
+(11.48 GB) and its margin (×1.1 + 0.3 GB). The window table doesn't count it, so since the performance review
+(2026-10-29, S4) the loads behind RVM run only when the automatic window was chosen for at least 10 GB
+(`LOADS_BEHIND_MIN_GB`): with less (an 8 GB card's 7.0-7.4 GiB) and with a window set by hand, every network loads on
+the job's thread as in dev.4. Budget cards: not measured. A load behind RVM that fails, out of memory included, ends the
+job with its own error before the windows start; it no longer halves the window (review S5). In the normal mode a job
+that is stopped, or whose window fails, part-way writes one window's final frames fewer than dev.4: they were blended
+on their thread while the next window ran and would go to stage 2 after it (at 8/4, 4 frames). So a window that runs
+out of memory one window later than before still finds nothing written and can be retried. Host memory: about 1 GB more at the 4K peak, most of it the states of one more window while it
 is blended (0.57 GB at 4K 8/4); without `malloc_trim` after the loads behind RVM were taken it was 2.3 GB more (the
 load threads' malloc arenas keep the loading's freed memory, as the low-VRAM loads did before `trim_host_memory`).
 Low-VRAM mode (every TensorRT job, CUDA at HD on a 16 GB card) changes only in that its RVM frames decode while RVM
 loads: walking_sitting the same within noise. Core ML and MIGraphX keep computing every window's foundations (fixed
-batches; a compile per batch size). TensorRT was not measured.
+batches; a compile per batch size). TensorRT (on Linux today, Windows coming) was not measured. Memory on a Mac:
+one run on the Mac mini M6 (16 GB, 2026-10-29, engine f4ad15c), Core ML cpu-gpu, 04_5d_1080 (1920×1080, 12
+frames, EXR float alpha + fg), 4/2 low-memory (the window Core ML takes itself at that size), under `tools/mac_memgate.c`:
+peak footprint **2.74 GB**, no swap growth, pressure normal. An earlier engine (5e0d9e9, 2026-10-27) peaked at 3.35 GB
+under the same command; dev.4 itself wasn't measured there, so this is not a dev.4 comparison. The normal mode on a Mac
+(a window set by hand) was not measured. Memory on Windows: not measured.
 
 The pipeline's tests (`pipeline/tests`): the three loads behind RVM on their own threads and every window with all
 five loaded; a load that fails behind RVM ends the job with its own error and the next job runs; C-RADIO and MoGe
@@ -601,12 +633,16 @@ once per frame (batches 4, 2, 2, 1 at 4/2 over 9 frames) while stage 1 still get
 stop or a failed window with a blend on its thread ends cleanly (the blend thread is a scoped thread, joined before
 the window's result is used, also on an error); stage 1's and stage 2's inputs and the writers' values the same as
 low-VRAM mode's (unchanged), so the pinned all-loaded digests changed only by the run order and the foundations'
-batches.
+batches (re-pinned on Linux and, 2026-10-29, on the Mac mini M6). Since the review: a load behind RVM that runs out of
+memory is not retried; under 10 GB (and with no automatic budget) all five load on the job's thread; a network's
+output stays readable after its session is dropped (a real ONNX Runtime session on the CPU); an output read in the
+wrong type stops with its cause instead of reading as no values.
 
 ### Second round (2026-10-29, afternoon)
 
 Same machine, clips, outputs and method; every run below byte for byte the same as the round-one engine's (`cmp`,
-240 EXR at 4K, 628 at HD), each change against the commit before it, three alternating runs each.
+240 EXR at 4K, 628 at HD, the result kept in each run's line), each change against the commit before it, three
+alternating runs each. `Data::Out` applies to every provider, TensorRT included; TensorRT was not measured.
 
 | Change | Before → after, totals (s) | Median | Kept |
 |---|---|---|---|
@@ -635,7 +671,10 @@ of every run byte for byte dev.4's, compared directly):
 After that series, one more piece of work removal: the RVM pass resizes its 1/4-size inputs straight from the decoded
 bfloat16 frame instead of a float32 copy of it (106 MB per 4K frame). One exactness run only (04_5h, all 240 EXR
 identical to dev.4's): its RVM phase took 6.1 s against 7.2 s in the run before; not a timing series, so not in the
-totals above. The RVM phase is now decode-bound (4.9 s of EXR decode). Left: TensorRT not measured; x264's thread
+totals above. So the published dev.5 figures (−8.0 % / −2.8 %) are the build before it (4462316); the final build
+(the resize and the review's fixes) was checked byte for byte against a new dev.4 run at HD (walking_sitting 48/24 low-VRAM, 2026-10-29, engine f4ad15c: all 628 EXR and the settings file identical) and, before the
+review's fixes, at 4K (240/240), and not timed. The review's fixes change only when the networks load (S4, S5), checked
+by the unit tests. The RVM phase is now decode-bound (4.9 s of EXR decode). Left: TensorRT not measured; x264's thread
 count (fixed at 2, as the original's; more threads change the video bytes) not measured.
 
 ## Portrait (2026-10-22)
