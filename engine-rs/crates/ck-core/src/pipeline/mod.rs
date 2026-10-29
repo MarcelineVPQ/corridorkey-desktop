@@ -140,8 +140,9 @@ pub struct Pipeline<L: Loader = OrtLoader> {
     /// this job's seconds spent loading sessions, in all and per network
     load_s: f64,
     load_each: BTreeMap<&'static str, f64>,
-    /// low-VRAM phases: the next phase's networks loading on their own thread while this phase runs, with the
-    /// key they are for; `ensure` takes them (waiting if they aren't done)
+    /// networks loading on their own thread while a phase runs (low-VRAM: the next phase's; normal mode on CUDA:
+    /// MoGe, stage 1 and stage 2 behind the RVM pass), with the key they are for; `ensure` takes them (waiting if
+    /// they aren't done)
     pending: Vec<PendingLoad<L::Net>>,
     /// this job's seconds of session loads done ahead on their own thread
     preload_s: f64,
@@ -350,7 +351,7 @@ impl<L: Loader> Pipeline<L> {
         sink.send(json!({"type": "progress", "stage": job_stage}));
         // loop: NOT-WORTH — at most five networks
         for piece in need {
-            // loop: NOT-WORTH — ≤ two pending loads
+            // loop: NOT-WORTH — ≤ three pending loads
             if let Some(i) = self.pending.iter().position(|(p, k, _)| *p == piece && k == key) {
                 // loaded ahead (or still loading): wait for it here
                 let (_, _, h) = self.pending.remove(i);
@@ -502,22 +503,23 @@ impl<L: Loader> Pipeline<L> {
         Ok(ModelKey { coreml: Some(cm), ..base.clone() })
     }
 
-    /// Low-VRAM mode: start loading `pieces` (the next phase's networks) on their own thread while the current
-    /// phase runs; `ensure` takes them. Their memory is within the job's budget by construction: the running
-    /// phase's arena limits already leave room for their weights (`arena_limit`). Measured per load
+    /// Start loading `pieces` on their own thread while the current phase runs; `ensure` takes them. Low-VRAM mode:
+    /// the next phase's networks. Normal mode (CUDA): the networks the RVM pass doesn't use, behind it. Their memory is
+    /// within the job's budget by construction: the running phase's arena limits already leave room for their
+    /// weights (`arena_limit`, the same limits a load on the main thread gets: `low_vram`). Measured per load
     /// (RTX 5080, fp16): C-RADIO 0.75 s, MoGe 0.11 s, stage 1 1.7 s, stage 2 0.55 s. Core ML too (Mac mini M6: every
     /// load was on the main thread, 1.9 s warm / 7.5 s cold per 12-frame job); its footprint is still to be measured
     /// under tools/mac_memgate.c.
-    fn preload(&mut self, key: &ModelKey, pieces: &[&'static str]) {
+    fn preload(&mut self, key: &ModelKey, pieces: &[&'static str], low_vram: bool) {
         // CUDA and Core ML: TensorRT jobs don't stage, and on the CPU provider (tests) a session loaded on another
         // thread left its host memory in that thread's malloc arena (measured: the CPU end-to-end run went from 5.3 GB
         // to past its 8 GB cap)
         if !matches!(key.provider, Provider::Cuda | Provider::CoreMl) {
             return;
         }
-        // loop: NOT-WORTH — at most two networks
+        // loop: NOT-WORTH — at most three networks
         for &piece in pieces {
-            // loop: NOT-WORTH — ≤ two pending loads
+            // loop: NOT-WORTH — ≤ three pending loads
             if self.nets.contains_key(piece) || self.pending.iter().any(|(p, k, _)| *p == piece && k == key) {
                 continue;
             }
@@ -526,10 +528,10 @@ impl<L: Loader> Pipeline<L> {
                 None => self.models.file(piece, key.precision),
             };
             let Some(file) = file else { continue };
-            let cap = self.arena_limit(key, piece, true);
+            let cap = self.arena_limit(key, piece, low_vram);
             self.loader.starting(piece);
             let (loader, prov, prec) = (self.loader.clone(), key.provider, key.precision);
-            // loop: PARALLELIZE — the next low-VRAM phase's network loads while this phase runs (measured: 1.3-1.5 s less per job)
+            // loop: PARALLELIZE — the next phase's network loads while this phase runs (measured: 1.3-1.5 s less per low-VRAM job)
             let started = crate::ahead::spawn_named(&format!("load-{piece}"), move || {
                 let t = Instant::now();
                 let net = loader.load(piece, prov, &file, cap)?;

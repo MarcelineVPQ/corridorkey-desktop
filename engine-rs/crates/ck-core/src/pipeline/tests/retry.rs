@@ -109,15 +109,15 @@ fn a_window_the_request_set_is_not_retried() {
 
 #[test]
 fn out_of_memory_after_frames_were_written_is_not_retried() {
-    // the third window runs out of memory: frames 0-3 are already with the writers, so a smaller window can't
-    // start the job over
+    // the third window runs out of memory: frames 0-1 are already with the writers, so a smaller window can't
+    // start the job over (frames 2-3, blended while the third window ran, would have gone to stage 2 after it)
     let n = std::sync::atomic::AtomicUsize::new(0);
     let fail: FailRun = Arc::new(move |p, _| (p == "stage1" && n.fetch_add(1, Ordering::Relaxed) == 2).then(|| Error::oom("out of memory".into())));
     let mut h = Harness::new(with_fail(fail), 10, options(json!({})));
     let r = h.attempts(4, 2, false);
     assert_eq!(r.out.res.as_ref().unwrap_err().code, ErrorCode::Oom);
     assert_eq!((r.retried.len(), r.plan.chunk), (0, 4));
-    assert_eq!(r.out.frames(), vec![4, 4]);
+    assert_eq!(r.out.frames(), vec![2, 2]);
 }
 
 /// senior Rust review 2026-10-26 S2: an out-of-memory in a phase the window doesn't size (the RVM prepass; the

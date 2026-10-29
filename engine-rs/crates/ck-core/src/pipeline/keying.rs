@@ -7,6 +7,11 @@
 //!  - `stage2_pass` (low-VRAM only): stage 2 over the stored states.
 //!
 //! Low-VRAM mode loads only each phase's networks (the next phase's load ahead on their own threads, CUDA and Core ML).
+//!
+//! Keeping the card busy (the pipelining pass, backlog row 182; every output byte-identical): the RVM pass's frames
+//! decode while the networks load. In normal mode: on CUDA, MoGe, stage 1 and stage 2 load behind the RVM pass; each
+//! window's states are blended on their own thread while the card runs the next window; C-RADIO and MoGe run only on
+//! the frames a window doesn't share with the one before (CUDA and the CPU).
 use super::frames::{FrameSource, HintWindows, WindowReader};
 use super::network::{Loader, Network};
 use super::temps::{F16File, FeatFile, TempPaths};
@@ -77,6 +82,9 @@ struct JobTimes {
     /// host seconds around stage 1: inputs (decode wait, features, hints) and after (carry, blend, hand-off)
     s1_in_s: f64,
     s1_out_s: f64,
+    /// the windows' blends (on the baton-blend thread, but the last) and the main thread's wait for them
+    blend_s: f64,
+    blend_wait_s: f64,
     /// wall seconds per phase (the low-VRAM phases include loading their networks)
     phases: Vec<(&'static str, f64)>,
     phase_t: Instant,
@@ -84,7 +92,17 @@ struct JobTimes {
 
 impl JobTimes {
     fn new(started: Instant) -> JobTimes {
-        JobTimes { started, decode_s: 0.0, render_s: 0.0, s1_in_s: 0.0, s1_out_s: 0.0, phases: Vec::new(), phase_t: Instant::now() }
+        JobTimes {
+            started,
+            decode_s: 0.0,
+            render_s: 0.0,
+            s1_in_s: 0.0,
+            s1_out_s: 0.0,
+            blend_s: 0.0,
+            blend_wait_s: 0.0,
+            phases: Vec::new(),
+            phase_t: Instant::now(),
+        }
     }
     /// The phase `name` ended now.
     fn phase(&mut self, name: &'static str) {
@@ -118,10 +136,67 @@ struct WindowInputs {
     rvm: Vec<half::f16>,
 }
 
+/// One stage-1 window's states waiting to be blended (on the baton-blend thread while the card runs the next window).
+struct PendingBlend {
+    t0: usize,
+    baton: Data<'static>,
+    wts: Vec<f32>,
+    /// the next window's first frame: the frames before it are final once this window is blended
+    next_start: usize,
+}
+
+/// Frames whose blended state is final: (frame, state as float16).
+type Ready = Vec<(usize, Vec<half::f16>)>;
+
+/// Blend a window's states into `blend` (frame by frame in order, the same sums as before) and take the frames it made
+/// final; with the seconds it took.
+fn blend_window(blend: &mut BatonBlend, p: PendingBlend, baton_frame: usize) -> Result<(Ready, f64), Error> {
+    let t = Instant::now();
+    // loop: HOT-PATH-OK — the window's frames; each frame's values blended in parallel, read in stage 1's type
+    for (j, &w) in p.wts.iter().enumerate() {
+        let r = j * baton_frame..(j + 1) * baton_frame;
+        match &p.baton {
+            Data::F16(v) => blend.add(p.t0 + j, &v[r], w),
+            Data::F32(v) => blend.add(p.t0 + j, &v[r], w),
+            Data::Bf16(_) | Data::F16Ref(_) | Data::F32Ref(_) => return Err(Error::engine("stage1: baton not float16 / float32".into())),
+        }
+    }
+    drop(p.baton);
+    let ready = blend.flush_before(p.next_start);
+    Ok((ready, t.elapsed().as_secs_f64()))
+}
+
 /// The window's foundation features (low-VRAM: from the prepass files) or the inputs to compute them.
 enum Found {
     Features(Data<'static>, Data<'static>),
-    Inputs((Vec<f32>, Vec<f32>)),
+    /// the first frame the inputs are for (the frames before it in the window come from the previous window's
+    /// features) and the inputs
+    Inputs(usize, (Vec<f32>, Vec<f32>)),
+}
+
+/// The previous window's foundation features (normal mode): its first frame and C-RADIO's and MoGe's [frames, ...].
+type WindowFeatures = (usize, Data<'static>, Data<'static>);
+
+/// A window's features: `prev`'s frames from `t0` up to `from` (`per` values per frame), then `new` (frames from `from`).
+fn splice_features(prev: Option<(usize, &Data<'static>)>, t0: usize, from: usize, per: usize, new: Data<'static>) -> Result<Data<'static>, Error> {
+    let Some((p0, prev)) = prev.filter(|_| from > t0) else { return Ok(new) };
+    let r = (t0 - p0) * per..(from - p0) * per;
+    match (prev, new) {
+        (Data::F32(p), Data::F32(n)) => Ok(Data::F32([&p[r], &n[..]].concat())),
+        (Data::F16(p), Data::F16(n)) => Ok(Data::F16([&p[r], &n[..]].concat())),
+        _ => Err(Error::engine("foundation features changed type between windows".into())),
+    }
+}
+
+/// A view of owned float data (fed to a graph of its type without a copy).
+fn borrowed<'a>(d: &'a Data<'static>) -> Data<'a> {
+    match d {
+        Data::F32(v) => Data::F32Ref(v),
+        Data::F16(v) => Data::F16Ref(v),
+        Data::Bf16(p) => Data::Bf16(p.clone()),
+        Data::F16Ref(v) => Data::F16Ref(v),
+        Data::F32Ref(v) => Data::F32Ref(v),
+    }
 }
 
 impl<L: Loader> Pipeline<L> {
@@ -217,38 +292,48 @@ impl<L: Loader> Pipeline<L> {
         if plan.low_vram {
             self.unload();
         }
-        let first: &[&'static str] = if plan.low_vram { &["rvm"] } else { &crate::runtime::PIECES };
+        let (he, we) = (sh / 4, sw / 4);
+        // the small frames are made ahead on their own thread (they don't depend on the state); started before the
+        // networks load, so the first frames are decoded by the time RVM can run
+        let mut reader = Prefetch::new("rvm-decode", frames.open(true)?, 8)?;
+        let dec = crate::ahead::Seconds::default();
+        let dec2 = dec.clone();
+        let mut small_frames = Ahead::spawn("rvm-inputs", 4, move || {
+            let Some(f) = reader.next_frame()? else {
+                dec2.set(reader.seconds());
+                return Ok(None);
+            };
+            let mut disp = Vec::with_capacity(f.display.len());
+            bf16_to_f32(&f.display, &mut disp);
+            let mut small = resize_bilinear(&Planar::from_vec(3, sh, sw, disp), he, we);
+            small.map(|v| v.clamp(0.0, 1.0));
+            Ok(Some(small.data))
+        })?;
+        // normal mode on CUDA: C-RADIO (the first load, which reads the card's own overhead, as before) and RVM now,
+        // the other three load behind the RVM pass (`stage1_windows` takes them)
+        let behind = !plan.low_vram && key.provider == Provider::Cuda;
+        let first: &[&'static str] = match (plan.low_vram, behind) {
+            (true, _) => &["rvm"],
+            (false, true) => &["cradio", "rvm"],
+            (false, false) => &crate::runtime::PIECES,
+        };
         self.ensure(key, first, plan.low_vram, ctx.trt, sink, LOAD_STAGE)?;
         if key.provider == Provider::TensorRt {
             self.send_trt_provider(sink);
         }
         if plan.low_vram {
             // the foundations load while RVM runs
-            self.preload(key, &["cradio", "moge"]);
+            self.preload(key, &["cradio", "moge"], true);
+        } else if behind {
+            self.preload(key, &["moge", "stage1", "stage2"], false);
         }
         sink.send(json!({"type": "progress", "stage": "rvm"}));
         let rvm_frame = RVM_CH * h64 * w64;
         let mut rvm_file = F16File::create(&ctx.temps.rvm, rvm_frame)?;
         {
-            let (he, we) = (sh / 4, sw / 4);
             sink.log(&format!("    RVM continuous prepass: T={t_all}, chunk={}, input={we}x{he}, grid={}x{}", plan.chunk.clamp(1, 8), we / 16, he / 16));
             let ntok = 1 + (he / 16) * (we / 16);
             let mut state: Data<'static> = Data::F32(vec![0f32; ntok * RVM_CH]);
-            // the small frames are made ahead on their own thread (they don't depend on the state)
-            let mut reader = Prefetch::new("rvm-decode", frames.open(true)?, 8)?;
-            let dec = crate::ahead::Seconds::default();
-            let dec2 = dec.clone();
-            let mut small_frames = Ahead::spawn("rvm-inputs", 4, move || {
-                let Some(f) = reader.next_frame()? else {
-                    dec2.set(reader.seconds());
-                    return Ok(None);
-                };
-                let mut disp = Vec::with_capacity(f.display.len());
-                bf16_to_f32(&f.display, &mut disp);
-                let mut small = resize_bilinear(&Planar::from_vec(3, sh, sw, disp), he, we);
-                small.map(|v| v.clamp(0.0, 1.0));
-                Ok(Some(small.data))
-            })?;
             let mut t = 0;
             let net = self.net("rvm")?;
             // loop: SERIAL-REQUIRED — RVM is recurrent: each frame's step takes the previous state
@@ -299,7 +384,7 @@ impl<L: Loader> Pipeline<L> {
         self.unload();
         self.ensure(key, &["cradio", "moge"], true, ctx.trt, sink, LOAD_STAGE)?;
         // stage 1 loads while the foundations run
-        self.preload(key, &["stage1"]);
+        self.preload(key, &["stage1"], true);
         sink.send(json!({"type": "progress", "stage": "foundations"}));
         let fchunk = FOUNDATION_CHUNK;
         sink.log(&format!("    frozen VFM prepass: T={t_all}, grid={w64}x{h64}, chunk={fchunk}"));
@@ -364,6 +449,10 @@ impl<L: Loader> Pipeline<L> {
         // stage 1's rgb type, sent once stage 1 is loaded: the input thread decodes the first window meanwhile and
         // converts it when the type arrives
         let (rgb_type_tx, rgb_type_rx) = std::sync::mpsc::sync_channel::<bool>(1);
+        // normal mode: C-RADIO's and MoGe's features of the frames two windows share are computed once and reused
+        // (backlog row 182; measured byte-identical on CUDA). Core ML (fixed batches) and MIGraphX (a compile per
+        // batch size) compute every window's frames, as before.
+        let reuse_found = matches!(key.provider, Provider::Cuda | Provider::Cpu);
         let mut windows = {
             let mut reader = WindowReader::open(frames)?;
             let mut hints = match crate::clip::none_path(job.hint_video.as_deref()) {
@@ -375,6 +464,7 @@ impl<L: Loader> Pipeline<L> {
             let starts = starts.clone();
             let dec = window_decode_s.clone();
             let mut i = 0;
+            let mut found_to = 0;
             let mut rgb_f16: Option<bool> = None;
             Ahead::spawn_abandonable("window-inputs", 0, move |abandoned| {
                 let Some(&t0) = starts.get(i) else {
@@ -388,8 +478,12 @@ impl<L: Loader> Pipeline<L> {
                     Some(hw) => Some(hw.window(t0, t1, abandoned)?),
                     None => None,
                 };
+                // the foundations' inputs only for the frames the previous window didn't have (their features are
+                // reused, `reuse_found`); every frame where they aren't
+                let from = if reuse_found { t0.max(found_to) } else { t0 };
+                found_to = t1;
                 let found = match found_files.as_mut() {
-                    None => Found::Inputs(foundation_inputs(&frames, sh, sw)),
+                    None => Found::Inputs(from, foundation_inputs(&frames[from - t0..], sh, sw)),
                     Some((cf, mf)) => Found::Features(cf.get(t0, t1)?, mf.get(t0, t1)?),
                 };
                 let rvm = rvm_file.get(t0, t1)?;
@@ -410,6 +504,8 @@ impl<L: Loader> Pipeline<L> {
         let baton_frame = BATON_CH * h16 * w16;
         let mut baton_file = if low_vram { Some(F16File::create(&ctx.temps.baton, baton_frame)?) } else { None };
         let mut blend = BatonBlend::default();
+        let mut pending: Option<PendingBlend> = None;
+        let mut feats: Option<WindowFeatures> = None;
         let mut carry: BTreeMap<usize, Vec<f32>> = BTreeMap::new();
         let mut stage2_frames: BTreeMap<usize, Arc<Vec<half::bf16>>> = BTreeMap::new();
         let plane = sh * sw;
@@ -419,6 +515,14 @@ impl<L: Loader> Pipeline<L> {
             // stage 1 loads while the first window's inputs are made
             self.unload();
             self.ensure(key, &["stage1"], true, ctx.trt, sink, LOAD_STAGE)?;
+        } else {
+            // normal mode: the networks loaded behind the RVM pass (waits only for a load not done yet)
+            let behind = !self.pending.is_empty();
+            self.ensure(key, &crate::runtime::PIECES, false, ctx.trt, sink, LOAD_STAGE)?;
+            if behind {
+                // their loading's freed host memory sits in the load threads' malloc arenas: give it back
+                super::trim_host_memory();
+            }
         }
         // the hint is made in the type stage 1 takes; windows without any matte share one all-zero buffer, made the
         // first time one is needed
@@ -482,25 +586,66 @@ impl<L: Loader> Pipeline<L> {
                     stage2_frames.entry(t).or_insert_with(|| frames[j].model.clone());
                 }
             }
-            let (cradio, moge) = match found {
-                Found::Inputs((radio, moge)) => self.foundation_run(tc, radio, moge, sh, sw)?,
-                Found::Features(c, m) => (c, m),
-            };
-            // the frames are done with (stage 1's rgb was made from them on the input thread)
-            drop(frames);
-            times.s1_in_s += tw.elapsed().as_secs_f64();
             if low_vram && i + 1 == starts.len() {
                 // stage 2 loads while the last stage-1 window runs
-                self.preload(key, &["stage2"]);
+                self.preload(key, &["stage2"], true);
             }
-            let outs = self.net("stage1")?.run(vec![
-                ("rgb", vec![1, tc, 3, sh, sw], rgb),
-                ("hint", vec![1, tc, 1, sh, sw], hint),
-                ("hint_quality", vec![1, tc], hq.into()),
-                ("moge", vec![1, tc, MOGE_CH, h64, w64], moge),
-                ("cradio", vec![1, tc, CRADIO_CH, h64, w64], cradio),
-                ("rvm", vec![1, tc, RVM_CH, h64, w64], Data::F16(rvm)),
-            ])?;
+            // normal mode: the card runs this window (its foundations and stage 1) while the previous window's states
+            // are blended on their own thread (backlog row 182: the main thread blended them with the card idle);
+            // the frames that blend makes final go to stage 2 / the states file after this window's stage 1
+            let prev = pending.take();
+            let blend_ref = &mut blend;
+            let (outs, blended) = std::thread::scope(|s| -> Result<_, Error> {
+                let blending = match prev {
+                    // loop: PARALLELIZE — the previous window's blend while the card runs this one [bounded: joined below, inside the scope; finite CPU work on one window's states]
+                    Some(p) => Some(
+                        std::thread::Builder::new()
+                            .name("baton-blend".into())
+                            .spawn_scoped(s, move || blend_window(blend_ref, p, baton_frame))
+                            .map_err(|e| Error::engine(format!("couldn't start the baton-blend thread: {e}")))?,
+                    ),
+                    None => None,
+                };
+                let outs = (|| {
+                    let (cradio, moge) = match found {
+                        Found::Inputs(from, (radio, moge)) => {
+                            // the new frames' features, after the previous window's for the frames it shared
+                            let (c, m) = self.foundation_run(t1 - from, radio, moge, sh, sw)?;
+                            let prev = feats.take();
+                            let per = h64 * w64;
+                            let c = splice_features(prev.as_ref().map(|p| (p.0, &p.1)), t0, from, CRADIO_CH * per, c)?;
+                            let m = splice_features(prev.as_ref().map(|p| (p.0, &p.2)), t0, from, MOGE_CH * per, m)?;
+                            let (_, c, m) = feats.insert((t0, c, m));
+                            (borrowed(c), borrowed(m))
+                        }
+                        Found::Features(c, m) => (c, m),
+                    };
+                    // the frames are done with (stage 1's rgb was made from them on the input thread)
+                    drop(frames);
+                    times.s1_in_s += tw.elapsed().as_secs_f64();
+                    self.net("stage1")?.run(vec![
+                        ("rgb", vec![1, tc, 3, sh, sw], rgb),
+                        ("hint", vec![1, tc, 1, sh, sw], hint),
+                        ("hint_quality", vec![1, tc], hq.into()),
+                        ("moge", vec![1, tc, MOGE_CH, h64, w64], moge),
+                        ("cradio", vec![1, tc, CRADIO_CH, h64, w64], cradio),
+                        ("rvm", vec![1, tc, RVM_CH, h64, w64], Data::F16(rvm)),
+                    ])
+                })();
+                let tj = Instant::now();
+                // loop: SERIAL-REQUIRED — joins the blend thread (also when the card's run failed) [bounded: one window's blend, finite CPU work]
+                let blended = blending
+                    .map(|h| h.join().map_err(|p| Error::engine(format!("the baton-blend thread panicked: {}", crate::panic_message(&*p))))?)
+                    .transpose();
+                times.blend_wait_s += tj.elapsed().as_secs_f64();
+                Ok((outs?, blended?))
+            })?;
+            if let Some((ready, secs)) = blended {
+                times.blend_s += secs;
+                let tr = Instant::now();
+                self.baton_frames(ready, &mut baton_file, &mut stage2_frames, meta, out, sink)?;
+                times.render_s += tr.elapsed().as_secs_f64();
+            }
             let tw = Instant::now();
             // loop: NOT-WORTH — two outputs per window
             let mut it = outs.into_iter();
@@ -530,23 +675,25 @@ impl<L: Loader> Pipeline<L> {
                 carry = carry.split_off(&next_start);
             }
             let wts = taper_weights(tc, overlap, i == 0, i == starts.len() - 1);
-            // loop: HOT-PATH-OK — the window's frames; each frame's values blended in parallel, read in stage 1's type
-            for (j, t) in (t0..t1).enumerate() {
-                let r = j * baton_frame..(j + 1) * baton_frame;
-                match &baton {
-                    Data::F16(v) => blend.add(t, &v[r], wts[j]),
-                    Data::F32(v) => blend.add(t, &v[r], wts[j]),
-                    Data::Bf16(_) | Data::F16Ref(_) | Data::F32Ref(_) => return Err(Error::engine("stage1: baton not float16 / float32".into())),
-                }
+            let p = PendingBlend { t0, baton, wts, next_start };
+            if low_vram {
+                // blended here, as before: on its own thread it measured no faster in low-VRAM mode (walking_sitting
+                // 48/24, three runs each) and held one more window's states in memory
+                let (ready, secs) = blend_window(&mut blend, p, baton_frame)?;
+                times.blend_s += secs;
+                self.baton_frames(ready, &mut baton_file, &mut stage2_frames, meta, out, sink)?;
+            } else {
+                // blended while the card runs the next window (or below, after the last)
+                pending = Some(p);
             }
-            drop(baton);
-            let ready = blend.flush_before(next_start);
             times.s1_out_s += tw.elapsed().as_secs_f64();
-            let tr = Instant::now();
-            self.baton_frames(ready, &mut baton_file, &mut stage2_frames, meta, out, sink)?;
-            times.render_s += tr.elapsed().as_secs_f64();
             sink.log(&format!("      window {}/{} [{t0}:{t1}]", i + 1, starts.len()));
             sink.send(json!({"type": "progress", "stage": "keying", "p": ((i + 1) as f64 / starts.len() as f64 * 1e4).round() / 1e4, "detail": format!("window {}/{} done", i + 1, starts.len())}));
+        }
+        if let Some(p) = pending.take() {
+            let (ready, secs) = blend_window(&mut blend, p, baton_frame)?;
+            times.blend_s += secs;
+            self.baton_frames(ready, &mut baton_file, &mut stage2_frames, meta, out, sink)?;
         }
         let ready = blend.flush_before(t_all + 1);
         self.baton_frames(ready, &mut baton_file, &mut stage2_frames, meta, out, sink)?;
@@ -638,7 +785,10 @@ impl<L: Loader> Pipeline<L> {
                 parts.push(format!("{p} {run_s:.1} s run (first calls {first_s:.1} s) + {convert_s:.1} s convert ({calls} calls)"));
             }
         }
-        parts.push(format!("stage 1 host: inputs {:.1} s, after {:.1} s", times.s1_in_s, times.s1_out_s));
+        parts.push(format!(
+            "stage 1 host: inputs {:.1} s, after {:.1} s, blend {:.1} s (waited {:.1} s)",
+            times.s1_in_s, times.s1_out_s, times.blend_s, times.blend_wait_s
+        ));
         parts.push(format!("stage 2 calls + hand-off in the windows {:.1} s", times.render_s));
         parts.push(format!(
             "stage 2 main thread: inputs {:.1} s, waiting for the render thread {:.1} s; render thread {worker_s:.1} s",

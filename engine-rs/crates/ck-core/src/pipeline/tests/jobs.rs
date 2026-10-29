@@ -248,12 +248,92 @@ fn all_loaded_mode_loads_every_network_first_and_streams_stage_2() {
     // loop: NOT-WORTH — a test job's runs
     let pieces: Vec<&str> = runs.iter().map(|r| r.piece).collect();
     assert!(pieces[..9].iter().all(|p| *p == "rvm"), "the RVM prepass first: {pieces:?}");
-    // each window: C-RADIO, MoGe, stage 1, then stage 2 for the frames no later window covers
-    assert_eq!(pieces[9..13], ["cradio", "moge", "stage1", "stage2"]);
+    // each window: C-RADIO, MoGe, stage 1; the frames the previous window made final (blended on their own thread
+    // meanwhile) go to stage 2 after it
+    assert_eq!(pieces[9..17], ["cradio", "moge", "stage1", "cradio", "moge", "stage1", "stage2", "stage2"]);
     // loop: NOT-WORTH — a test job's runs
     let first_s2 = pieces.iter().position(|p| *p == "stage2").unwrap();
     let last_s1 = pieces.iter().rposition(|p| *p == "stage1").unwrap();
     assert!(first_s2 < last_s1, "stage 2 runs while the windows go on");
+}
+
+#[test]
+fn all_loaded_mode_on_cuda_loads_three_networks_behind_the_rvm_pass() {
+    // the pipelining pass (backlog row 182): C-RADIO (the load that reads the card's overhead) and RVM on the job's
+    // thread, MoGe, stage 1 and stage 2 on their own threads while RVM runs; every window runs with all five loaded
+    let mut h = Harness::new(FakeCfg::new(SHAPE), 9, options(json!({})));
+    let out = within(move || {
+        let out = h.keying(&key(Provider::Cuda), None, 4, 2, false);
+        (h, out)
+    });
+    let (h, out) = out;
+    out.res.as_ref().unwrap();
+    assert_eq!(out.frames(), vec![9, 9]);
+    let threads = h.loader.threads.lock().unwrap().clone();
+    assert_eq!(threads.len(), 5, "each network loaded once: {threads:?}");
+    // loop: NOT-WORTH — five loads
+    for (piece, name) in &threads {
+        let behind = matches!(*piece, "moge" | "stage1" | "stage2");
+        assert_eq!(*name == format!("load-{piece}"), behind, "{piece} loaded on thread {name:?}");
+    }
+    // C-RADIO's load is the job's first (as before the change: its arena limit and the overhead reading stay the same)
+    assert_eq!(threads[0].0, "cradio");
+    let events = h.loader.events();
+    // loop: NOT-WORTH — a test job's runs
+    for (piece, loaded) in loaded_at_each_run(&events) {
+        if piece != "rvm" {
+            assert_eq!(loaded, set(&crate::runtime::PIECES), "while {piece} ran");
+        }
+    }
+    // loop: NOT-WORTH — a test job's runs
+    let pieces: Vec<&str> = h.loader.runs().iter().map(|r| r.piece).collect();
+    assert!(pieces[..9].iter().all(|p| *p == "rvm"), "the RVM prepass first: {pieces:?}");
+    assert_eq!(pieces[9..17], ["cradio", "moge", "stage1", "cradio", "moge", "stage1", "stage2", "stage2"]);
+}
+
+#[test]
+fn all_loaded_mode_runs_the_foundations_once_per_frame() {
+    // backlog row 182: a frame two windows share gets C-RADIO's and MoGe's features once (the second window reuses
+    // them); stage 1 still gets every window's full features (the equivalence and golden tests pin their values)
+    // loop: NOT-WORTH — two providers
+    for p in [Provider::Cpu, Provider::Cuda] {
+        let mut h = Harness::new(FakeCfg::new(SHAPE), 9, options(json!({})));
+        h.keying(&key(p), None, 4, 2, false).res.unwrap();
+        // loop: NOT-WORTH — four windows: 0-4, 2-6, 4-8, 5-9 (the last pinned to the clip's end)
+        let batches = |piece: &str| h.loader.runs_of(piece).iter().map(|r| r.shape("rgb")[0]).collect::<Vec<_>>();
+        assert_eq!(batches("cradio"), vec![4, 2, 2, 1], "{p:?}");
+        assert_eq!(batches("moge"), vec![4, 2, 2, 1], "{p:?}");
+        // loop: NOT-WORTH — four windows
+        let s1: Vec<usize> = h.loader.runs_of("stage1").iter().map(|r| r.shape("cradio")[1]).collect();
+        assert_eq!(s1, vec![4, 4, 4, 4], "{p:?}");
+    }
+}
+
+#[test]
+fn a_load_behind_the_rvm_pass_that_fails_ends_the_job_with_its_error() {
+    // a network loading on its own thread fails: the job fails with that load's error when the windows take it, and
+    // the next job on the same pipeline runs
+    let mut cfg = FakeCfg::new(SHAPE);
+    let n = Arc::new(AtomicUsize::new(0));
+    let n2 = n.clone();
+    cfg.fail_load = Some(Arc::new(move |p, _| (p == "stage2" && n2.fetch_add(1, Ordering::SeqCst) == 0).then(|| Error::assets("stage2 is broken".into()))));
+    let h = Harness::new(cfg, 9, options(json!({})));
+    let (mut h, out) = within(move || {
+        let mut h = h;
+        let out = h.keying(&key(Provider::Cuda), None, 4, 2, false);
+        (h, out)
+    });
+    let e = out.res.as_ref().unwrap_err();
+    assert_eq!((e.code, e.message.as_str()), (crate::ErrorCode::Assets, "stage2 is broken"));
+    assert_eq!(out.frames(), vec![0, 0]);
+    assert!(h.loader.runs_of("stage1").is_empty(), "no window ran without its networks");
+    assert_eq!(h.temp_files(), Vec::<PathBuf>::new());
+    let (_h, again) = within(move || {
+        let out = h.keying(&key(Provider::Cuda), None, 4, 2, false);
+        (h, out)
+    });
+    again.res.as_ref().unwrap();
+    assert_eq!(again.frames(), vec![9, 9]);
 }
 
 #[test]
@@ -389,8 +469,9 @@ fn fail_nth(piece: &'static str, at: usize, code: crate::ErrorCode) -> FailRun {
 #[test]
 fn a_job_stopped_in_the_windows_ends_cleanly() {
     use crate::ErrorCode::Cancelled;
-    // the third window fails: the first two windows' final frames (0-3) were rendered and written
-    stopped_part_way(false, fail_nth("stage1", 2, Cancelled), None, Cancelled, 4);
+    // the third window fails: the first window's final frames (0-1) were rendered and written; the second window's
+    // (2-3) were blended on the baton-blend thread while the third ran, and would go to stage 2 after it (row 182)
+    stopped_part_way(false, fail_nth("stage1", 2, Cancelled), None, Cancelled, 2);
 }
 
 #[test]
