@@ -155,10 +155,10 @@ fn blend_window(blend: &mut BatonBlend, p: PendingBlend, baton_frame: usize) -> 
     // loop: HOT-PATH-OK — the window's frames; each frame's values blended in parallel, read in stage 1's type
     for (j, &w) in p.wts.iter().enumerate() {
         let r = j * baton_frame..(j + 1) * baton_frame;
-        match &p.baton {
-            Data::F16(v) => blend.add(p.t0 + j, &v[r], w),
-            Data::F32(v) => blend.add(p.t0 + j, &v[r], w),
-            Data::Bf16(_) | Data::F16Ref(_) | Data::F32Ref(_) => return Err(Error::engine("stage1: baton not float16 / float32".into())),
+        match p.baton.view() {
+            Data::F16Ref(v) => blend.add(p.t0 + j, &v[r], w),
+            Data::F32Ref(v) => blend.add(p.t0 + j, &v[r], w),
+            _ => return Err(Error::engine("stage1: baton not float16 / float32".into())),
         }
     }
     drop(p.baton);
@@ -181,21 +181,10 @@ type WindowFeatures = (usize, Data<'static>, Data<'static>);
 fn splice_features(prev: Option<(usize, &Data<'static>)>, t0: usize, from: usize, per: usize, new: Data<'static>) -> Result<Data<'static>, Error> {
     let Some((p0, prev)) = prev.filter(|_| from > t0) else { return Ok(new) };
     let r = (t0 - p0) * per..(from - p0) * per;
-    match (prev, new) {
-        (Data::F32(p), Data::F32(n)) => Ok(Data::F32([&p[r], &n[..]].concat())),
-        (Data::F16(p), Data::F16(n)) => Ok(Data::F16([&p[r], &n[..]].concat())),
+    match (prev.view(), new.view()) {
+        (Data::F32Ref(p), Data::F32Ref(n)) => Ok(Data::F32([&p[r], n].concat())),
+        (Data::F16Ref(p), Data::F16Ref(n)) => Ok(Data::F16([&p[r], n].concat())),
         _ => Err(Error::engine("foundation features changed type between windows".into())),
-    }
-}
-
-/// A view of owned float data (fed to a graph of its type without a copy).
-fn borrowed<'a>(d: &'a Data<'static>) -> Data<'a> {
-    match d {
-        Data::F32(v) => Data::F32Ref(v),
-        Data::F16(v) => Data::F16Ref(v),
-        Data::Bf16(p) => Data::Bf16(p.clone()),
-        Data::F16Ref(v) => Data::F16Ref(v),
-        Data::F32Ref(v) => Data::F32Ref(v),
     }
 }
 
@@ -616,7 +605,7 @@ impl<L: Loader> Pipeline<L> {
                             let c = splice_features(prev.as_ref().map(|p| (p.0, &p.1)), t0, from, CRADIO_CH * per, c)?;
                             let m = splice_features(prev.as_ref().map(|p| (p.0, &p.2)), t0, from, MOGE_CH * per, m)?;
                             let (_, c, m) = feats.insert((t0, c, m));
-                            (borrowed(c), borrowed(m))
+                            (c.view(), m.view())
                         }
                         Found::Features(c, m) => (c, m),
                     };
@@ -952,6 +941,13 @@ fn keep_frames(d: Data<'static>, len: usize) -> Result<Data<'static>, Error> {
             v.truncate(len);
             Ok(Data::F16(v))
         }
+        // a network's output in ONNX Runtime's buffer: as it is when it has just these frames, else copied
+        Data::Out(..) if d.len() == len => Ok(d),
+        Data::Out(..) if d.len() > len => Ok(match d.view() {
+            Data::F16Ref(v) => Data::F16(v[..len].to_vec()),
+            Data::F32Ref(v) => Data::F32(v[..len].to_vec()),
+            _ => return Err(Error::engine("a network output not float16 / float32".into())),
+        }),
         other => Err(Error::engine(format!("a network output of {} values, {len} expected", other.len()))),
     }
 }

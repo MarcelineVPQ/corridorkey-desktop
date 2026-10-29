@@ -56,10 +56,10 @@ impl<'a> RenderWorker<'a> {
             for logits in rx {
                 let t = std::time::Instant::now();
                 // read in stage 2's own type (float16 values converted as they are used, off the card's thread)
-                let rendered = match &logits {
-                    Data::F16(v) => render_scaled(&ro, v, geo.shape, geo.crop, geo.model, geo.hw, &checker),
-                    Data::F32(v) => render_scaled(&ro, v, geo.shape, geo.crop, geo.model, geo.hw, &checker),
-                    Data::Bf16(_) | Data::F16Ref(_) | Data::F32Ref(_) => {
+                let rendered = match logits.view() {
+                    Data::F16Ref(v) => render_scaled(&ro, v, geo.shape, geo.crop, geo.model, geo.hw, &checker),
+                    Data::F32Ref(v) => render_scaled(&ro, v, geo.shape, geo.crop, geo.model, geo.hw, &checker),
+                    _ => {
                         res = Err(Error::engine("stage 2 logits as bfloat16".into()));
                         break;
                     }

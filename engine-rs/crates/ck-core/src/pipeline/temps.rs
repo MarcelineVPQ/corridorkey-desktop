@@ -90,10 +90,10 @@ impl FeatFile {
     }
     /// frames from `t` on
     pub(crate) fn put(&mut self, t: usize, v: &Data) -> Result<(), Error> {
-        let (half, bytes): (bool, &[u8]) = match v {
-            Data::F16(x) => (true, bytemuck::cast_slice(x)),
-            Data::F32(x) => (false, bytemuck::cast_slice(x)),
-            Data::Bf16(_) | Data::F16Ref(_) | Data::F32Ref(_) => return Err(Error::engine("foundation features as bfloat16 or borrowed".into())),
+        let (half, bytes): (bool, &[u8]) = match v.view() {
+            Data::F16Ref(x) => (true, bytemuck::cast_slice(x)),
+            Data::F32Ref(x) => (false, bytemuck::cast_slice(x)),
+            _ => return Err(Error::engine("foundation features as bfloat16".into())),
         };
         if *self.half.get_or_insert(half) != half {
             return Err(Error::engine("foundation features changed type".into()));

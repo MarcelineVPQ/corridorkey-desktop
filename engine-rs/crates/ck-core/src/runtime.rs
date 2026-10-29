@@ -646,6 +646,9 @@ pub enum Data<'a> {
     /// window without hints is one buffer for the whole job)
     F16Ref(&'a [half::f16]),
     F32Ref(&'a [f32]),
+    /// a network's output read where ONNX Runtime made it (no copy out of its buffer), float16 (true) or float32
+    /// (checked in `Net::run`)
+    Out(ort::value::DynValue, bool),
 }
 
 impl From<Vec<f32>> for Data<'_> {
@@ -671,6 +674,21 @@ impl Data<'_> {
             Data::Bf16(parts) => parts.iter().map(|p| p.len()).sum(),
             Data::F16Ref(v) => v.len(),
             Data::F32Ref(v) => v.len(),
+            Data::Out(..) => self.view().len(),
+        }
+    }
+
+    /// The values where they are, in their own type (no copy): a network output as a float16 / float32 slice.
+    pub(crate) fn view(&self) -> Data<'_> {
+        match self {
+            Data::F32(v) => Data::F32Ref(v),
+            Data::F16(v) => Data::F16Ref(v),
+            Data::Bf16(p) => Data::Bf16(p.clone()),
+            Data::F16Ref(v) => Data::F16Ref(v),
+            Data::F32Ref(v) => Data::F32Ref(v),
+            // the type was checked when the output was taken (Net::run), so these extractions don't fail
+            Data::Out(v, true) => Data::F16Ref(v.try_extract_tensor::<half::f16>().map_or(&[], |(_, d)| d)),
+            Data::Out(v, false) => Data::F32Ref(v.try_extract_tensor::<f32>().map_or(&[], |(_, d)| d)),
         }
     }
 
@@ -685,6 +703,7 @@ impl Data<'_> {
             Data::F32Ref(v) => v.to_vec(),
             // loop: HOT-PATH-OK — a borrowed float16 input to a float32 graph, one parallel pass
             Data::F16Ref(v) => v.par_iter().with_min_len(PAR_MIN).map(|x| x.to_f32()).collect(),
+            Data::Out(..) => self.view().into_f32(),
         }
     }
 
@@ -699,6 +718,7 @@ impl Data<'_> {
             Data::F16Ref(v) => v.to_vec(),
             // loop: HOT-PATH-OK — a borrowed float32 input to a float16 graph, one parallel pass
             Data::F32Ref(v) => v.par_iter().with_min_len(PAR_MIN).map(|&x| half::f16::from_f32(x)).collect(),
+            Data::Out(..) => self.view().into_f16(),
         }
     }
 
@@ -713,6 +733,7 @@ impl Data<'_> {
             Data::F32Ref(v) => v[range].to_vec(),
             // loop: NOT-WORTH — borrowed inputs only (never an output)
             Data::F16Ref(v) => v[range].iter().map(|x| x.to_f32()).collect(),
+            Data::Out(..) => self.view().range_f32(range),
         }
     }
 }
@@ -803,18 +824,19 @@ impl Net {
         .map_err(|e| Error::ort(piece, e))?;
         let t2 = std::time::Instant::now();
         let mut res = Vec::new();
+        // the outputs stay in ONNX Runtime's buffers (Data::Out, read in place): copying them out (stage 1's states,
+        // 0.57 GB per 4K window) took 4.1 s per 4K job on the main thread (backlog row 182)
         // loop: NOT-WORTH — one or two outputs
-        for (_, v) in outs.iter() {
-            if let Ok((s, d)) = v.try_extract_tensor::<f32>() {
-                // loop: HOT-PATH-OK — the output's shape (≤ 5 dims) + one copy out of ORT's buffer (the session's outputs are freed right after)
-                res.push((s.iter().map(|&x| x as usize).collect(), Data::F32(d.to_vec())));
+        for (_, v) in outs {
+            let (shape, f16): (Vec<usize>, bool) = if let Ok((s, _)) = v.try_extract_tensor::<f32>() {
+                // loop: NOT-WORTH — the output's shape (≤ 5 dims)
+                (s.iter().map(|&x| x as usize).collect(), false)
             } else {
-                let (s, d) = v.try_extract_tensor::<half::f16>().map_err(|e| Error::ort(piece, e))?;
-                // loop: HOT-PATH-OK — the output's shape (≤ 5 dims) + one copy out of ORT's buffer, kept as float16
-                res.push((s.iter().map(|&x| x as usize).collect(), Data::F16(d.to_vec())));
-            }
+                // loop: NOT-WORTH — the output's shape (≤ 5 dims)
+                (v.try_extract_tensor::<half::f16>().map_err(|e| Error::ort(piece, e))?.0.iter().map(|&x| x as usize).collect(), true)
+            };
+            res.push((shape, Data::Out(v, f16)));
         }
-        drop(outs);
         let c = &mut self.counters;
         c.calls += 1;
         c.first_s.get_or_insert((t2 - t1).as_secs_f64());
@@ -827,6 +849,21 @@ impl Net {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_network_output_is_read_in_place_with_the_same_values() {
+        // an output left in ONNX Runtime's buffer (Data::Out) reads as the values copied out of it did
+        let v16: Vec<half::f16> = [0.5f32, -1.25, 3.0, 65504.0].iter().map(|&x| half::f16::from_f32(x)).collect();
+        let out = Data::Out(Tensor::from_array((vec![2usize, 2], v16.clone())).unwrap().into_dyn(), true);
+        assert_eq!(out.len(), 4);
+        assert!(matches!(out.view(), Data::F16Ref(s) if s == &v16[..]));
+        assert_eq!(out.range_f32(1..3), vec![-1.25, 3.0]);
+        assert_eq!(out.into_f16(), v16);
+        let v32 = vec![0.1f32, 0.2, 0.3];
+        let out = Data::Out(Tensor::from_array((vec![3usize], v32.clone())).unwrap().into_dyn(), false);
+        assert!(matches!(out.view(), Data::F32Ref(s) if s == &v32[..]));
+        assert_eq!(out.into_f32(), v32);
+    }
 
     #[test]
     fn arena_shrink_setting() {
