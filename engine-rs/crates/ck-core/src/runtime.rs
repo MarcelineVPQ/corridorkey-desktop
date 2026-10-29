@@ -531,7 +531,7 @@ pub(crate) fn choose(device: Device, cuda: bool, migraphx: bool, coreml_ep: bool
 /// Why no provider runs `device` on system `os` (std::env::consts::OS), given the ONNX Runtime it loaded, whether
 /// the MIGraphX plugin offers an AMD GPU, whether its file was found (`plugin`) and what became of it (`note`): with
 /// the plugin offering a GPU the missing card is an AMD one; Linux names AMD only when the plugin's file is there (the
-/// app's AMD runtime: without the CK_AMD switch the message is dev.3's); a Mac has no NVIDIA card, so its reason
+/// app's AMD runtime: a setup that never installed it gets dev.3's message); a Mac has no NVIDIA card, so its reason
 /// names Core ML (BACKLOG row 58).
 fn no_provider_reason(device: Device, os: &str, ort_version: &str, migraphx_ep: bool, plugin: bool, note: &str) -> String {
     match device {

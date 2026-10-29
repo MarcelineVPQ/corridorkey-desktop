@@ -22,8 +22,8 @@ On, on Linux, with no NVIDIA driver loaded (NVIDIA comes first when a machine ha
   `video` groups. Only the chosen card's device wheel is downloaded. Limit: the engine runs on HIP's device 0 (amd.rs
   matches it by PCI bus id), which the app can't ask for without HIP; on a machine with several AMD GPUs (an iGPU
   turned on next to a Radeon card) HIP's device 0 may be the other one. Then set `HIP_VISIBLE_DEVICES` (ROCm's own
-  variable for the cards HIP sees) to the supported card's HIP device index in the app's environment, or turn the iGPU
-  off in the firmware.
+  variable for the cards HIP sees) to the supported card's HIP device index in the app's environment (its position
+  among the GPU agents `rocminfo` lists, counting from 0), or turn the iGPU off in the firmware.
 - **Runtime download** (install.ts `RUNTIME_AMD`, `ROCM_DEVICE`): the wheels below into
   `runtime/ort-1.31.0-rocm10.1-<gfx>`, in pip's layout (the libraries find each other through `$ORIGIN` RPATHs, and the
   engine finds the plugin next to ONNX Runtime's package): no `LD_LIBRARY_PATH`, nothing system-wide, no engine
@@ -107,7 +107,8 @@ and stage 2 (MultiHeadAttention's `attention_bias` broadcast over the heads); th
 - Errors name the AMD side ("no AMD graphics card ROCm can use", or what became of the plugin), never "NVIDIA" alone:
   with no provider at all on Linux and the MIGraphX plugin's file in place (the AMD runtime) the message names both
   ("CorridorKey needs an NVIDIA graphics card with CUDA, or an AMD graphics card with ROCm and AMD's MIGraphX plugin");
-  without the plugin's file (every setup without the switch) it is the message from before.
+  without the plugin's file (every setup that never installed the AMD runtime) it is the message from before; a
+  setup that installed it and then turned the switch off still has the file, so its message names AMD too.
 
 ## What MIGraphX takes (offline check)
 
