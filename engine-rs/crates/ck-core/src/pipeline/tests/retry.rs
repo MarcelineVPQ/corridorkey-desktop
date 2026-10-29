@@ -14,12 +14,16 @@ struct Retried {
 
 impl Harness {
     fn attempts(&mut self, chunk: usize, stride: usize, low_vram: bool) -> Retried {
+        self.attempts_on(Provider::Cpu, chunk, stride, low_vram)
+    }
+
+    fn attempts_on(&mut self, provider: Provider, chunk: usize, stride: usize, low_vram: bool) -> Retried {
         let meta = self.frames.meta();
         let (mut writers, seen) = self.writers();
         let mut report = FrameReport { total: meta.num_frames, last_sent: None, last_done: None };
         let mut sink = RecSink::default();
         let ctx = JobCtx::new(&self.job, &meta, &self.frames, None, "clip");
-        let mut plan = JobPlan { chunk, stride, low_vram, key: key(Provider::Cpu) };
+        let mut plan = JobPlan { chunk, stride, low_vram, key: key(provider), budget_gb: self.budget_gb };
         let mut retried = Vec::new();
         let res = self.pipe.attempts(&ctx, &mut plan, &mut writers, &mut report, &mut sink, &mut |p, _| retried.push((p.chunk, p.stride)));
         // loop: NOT-WORTH — ≤ four writers
@@ -150,4 +154,24 @@ fn normal_mode_stage2_out_of_memory_in_the_windows_is_retried() {
     r.out.res.as_ref().unwrap();
     assert_eq!(r.retried, vec![(4, 2)]);
     assert_eq!(r.out.frames(), vec![10, 10]);
+}
+
+/// perf review 2026-10-29 S5: a network loading behind the RVM pass (normal mode, CUDA) that runs out of memory fails
+/// the job at once with its own cause: the loads are taken before the windows, so a smaller window isn't tried
+#[test]
+fn out_of_memory_in_a_load_behind_the_rvm_pass_is_not_retried() {
+    let mut cfg = FakeCfg::new(SHAPE);
+    cfg.fail_load = Some(Arc::new(|p, prov| (p == "stage2" && prov == Provider::Cuda).then(|| Error::oom("loading stage2: out of memory".into()))));
+    let mut h = Harness::new(cfg, 10, options(json!({})));
+    let r = h.attempts_on(Provider::Cuda, 8, 4, false);
+    let e = r.out.res.as_ref().unwrap_err();
+    assert_eq!((e.code, e.message.as_str()), (ErrorCode::Oom, "loading stage2: out of memory"));
+    assert!(r.retried.is_empty(), "{:?}", r.retried);
+    assert_eq!(r.plan.chunk, 8);
+    assert_eq!(r.out.sink.of_type("memory").len(), 0);
+    assert!(h.loader.runs_of("stage1").is_empty(), "no window ran");
+    // the loads ran behind the RVM pass (their own threads), and the RVM pass ran once
+    // loop: NOT-WORTH — ≤ five loads
+    assert!(h.loader.threads.lock().unwrap().iter().any(|(p, t)| *p == "stage1" && t == "load-stage1"));
+    assert_eq!(h.loader.runs_of("rvm").len(), 10);
 }

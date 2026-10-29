@@ -108,6 +108,8 @@ struct Harness {
     job: JobConfig,
     /// the job's sink asks it to stop at this stop point (RecSink::stop_at)
     stop_at: Option<usize>,
+    /// the automatic window's budget (JobPlan::budget_gb): the RTX 5080's 13.08 GB unless a test sets another
+    budget_gb: Option<f64>,
     /// the scratch folder (models, temp, out), removed with the harness
     _dir: Dir,
 }
@@ -139,7 +141,7 @@ impl Harness {
         std::fs::create_dir_all(&job.temp_dir).unwrap();
         let loader = FakeLoader::new(cfg);
         let pipe = Pipeline::with_loader(loader.clone(), fake_models(&dir.0), ArenaShrink::Auto);
-        Harness { pipe, loader, frames: FakeFrames { n, first: 0, shape: SHAPE, fail_at: None }, job, stop_at: None, _dir: dir }
+        Harness { pipe, loader, frames: FakeFrames { n, first: 0, shape: SHAPE, fail_at: None }, job, stop_at: None, budget_gb: Some(13.08), _dir: dir }
     }
 
     fn writers(&self) -> (crate::outputs::Writers, Seen) {
@@ -173,7 +175,7 @@ impl Harness {
         let mut report = FrameReport { total: meta.write_range().len(), last_sent: None, last_done: None };
         let mut sink = RecSink { stop_at: self.stop_at, ..RecSink::default() };
         let ctx = JobCtx::new(&self.job, meta, &self.frames, trt, "clip");
-        let plan = JobPlan { chunk, stride, low_vram, key: key.clone() };
+        let plan = JobPlan { chunk, stride, low_vram, key: key.clone(), budget_gb: self.budget_gb };
         let res = self.pipe.keying(&ctx, &plan, &mut writers, &mut report, &mut sink, &mut false);
         // loop: NOT-WORTH — ≤ four writers
         let written = seen.iter().map(|(n, s)| (n.clone(), *s.lock().unwrap())).collect();

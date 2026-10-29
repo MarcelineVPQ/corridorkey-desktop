@@ -318,6 +318,30 @@ fn all_loaded_mode_on_cuda_loads_three_networks_behind_the_rvm_pass() {
     assert_eq!(pieces[9..17], ["cradio", "moge", "stage1", "cradio", "moge", "stage1", "stage2", "stage2"]);
 }
 
+/// perf review 2026-10-29 S4: the loads behind the RVM pass hold about 0.22-0.27 GB more graphics memory (RTX 5080),
+/// which the window table doesn't count, so under `LOADS_BEHIND_MIN_GB` (an 8 GB card's budget) and with a window the
+/// request set, all five load on the job's thread, as in dev.4; at the limit, three load behind
+#[test]
+fn a_small_budget_loads_every_network_on_the_jobs_thread() {
+    // loop: NOT-WORTH — four budgets
+    for (budget, behind) in [(Some(7.4), false), (Some(9.99), false), (None, false), (Some(crate::pipeline::keying::LOADS_BEHIND_MIN_GB), true)] {
+        let mut h = Harness::new(FakeCfg::new(SHAPE), 9, options(json!({})));
+        h.budget_gb = budget;
+        let (h, out) = within(move || {
+            let out = h.keying(&key(Provider::Cuda), None, 4, 2, false);
+            (h, out)
+        });
+        out.res.as_ref().unwrap();
+        assert_eq!(out.frames(), vec![9, 9]);
+        let threads = h.loader.threads.lock().unwrap().clone();
+        assert_eq!(threads.len(), 5, "each network loaded once: {threads:?}");
+        // loop: NOT-WORTH — five loads
+        let mut on_threads: Vec<&str> = threads.iter().filter(|(p, n)| *n == format!("load-{p}")).map(|(p, _)| *p).collect();
+        on_threads.sort();
+        assert_eq!(on_threads, if behind { vec!["moge", "stage1", "stage2"] } else { vec![] }, "budget {budget:?}");
+    }
+}
+
 #[test]
 fn all_loaded_mode_runs_the_foundations_once_per_frame() {
     // backlog row 182: a frame two windows share gets C-RADIO's and MoGe's features once (the second window reuses

@@ -9,7 +9,8 @@
 //! Low-VRAM mode loads only each phase's networks (the next phase's load ahead on their own threads, CUDA and Core ML).
 //!
 //! Keeping the card busy (the pipelining pass, backlog row 182; every output byte-identical): the RVM pass's frames
-//! decode while the networks load. In normal mode: on CUDA, MoGe, stage 1 and stage 2 load behind the RVM pass; each
+//! decode while the networks load. In normal mode: on CUDA with an automatic window's budget of at least
+//! `LOADS_BEHIND_MIN_GB`, MoGe, stage 1 and stage 2 load behind the RVM pass; each
 //! window's states are blended on their own thread while the card runs the next window; C-RADIO and MoGe run only on
 //! the frames a window doesn't share with the one before (CUDA and the CPU).
 use super::frames::{FrameSource, HintWindows, WindowReader};
@@ -37,6 +38,14 @@ use std::time::Instant;
 /// The `progress` stage a network load reports.
 const LOAD_STAGE: &str = "load";
 
+/// Normal mode on CUDA: MoGe, stage 1 and stage 2 load behind the RVM pass only when the automatic window was chosen
+/// for at least this budget (GiB). Measured on the RTX 5080 only (16 GB, 13.08 GB budget): loaded on their own threads
+/// they hold about 0.22 GB more graphics memory through the windows and 0.27 GB more at the 4K 8/4 peak, which the
+/// window table (vram.rs) doesn't count. Under it (an 8 GB card's 7.0-7.4 GiB budgets) every network loads on the
+/// job's thread as in dev.4, so nothing is added to a budget card's peak; a window the request set loads them before
+/// the probe anyway (run_job).
+pub(crate) const LOADS_BEHIND_MIN_GB: f64 = 10.0;
+
 /// What one attempt runs with: the window and staging the job settled on (an out-of-memory retry halves the
 /// window), and the networks' key (provider, precision, TensorRT range, memory budget).
 #[derive(Clone, Debug, PartialEq)]
@@ -45,6 +54,8 @@ pub(crate) struct JobPlan {
     pub(crate) stride: usize,
     pub(crate) low_vram: bool,
     pub(crate) key: ModelKey,
+    /// the budget (GiB) the automatic window was chosen for; None: the request set the window (`LOADS_BEHIND_MIN_GB`)
+    pub(crate) budget_gb: Option<f64>,
 }
 
 /// What every attempt of a job shares: the request, the probed clip, where its frames come from, the TensorRT
@@ -201,7 +212,8 @@ impl<L: Loader> Pipeline<L> {
     /// Steps 2-4 at `plan`'s window (and the low-VRAM staging). Frames go to `writers` (lent to the render thread
     /// while it runs, back when the attempt ends, also on a failure). `in_windows` ends true when the failure came
     /// from the phase the window sizes (stage 1 on the windows; in the normal mode also C-RADIO, MoGe and stage 2
-    /// inside them), false from any other (the RVM prepass, the low-VRAM foundations and stage-2 pass).
+    /// inside them), false from any other (the RVM prepass, the normal mode's network loads, the low-VRAM foundations
+    /// and stage-2 pass).
     pub(super) fn keying(
         &mut self,
         ctx: &JobCtx<'_>,
@@ -243,6 +255,17 @@ impl<L: Loader> Pipeline<L> {
 
         let rvm = self.rvm_pass(ctx, plan, &mut times, sink)?;
         let found = if plan.low_vram { Some(self.foundation_pass(ctx, plan, &mut times, sink)?) } else { None };
+        if !plan.low_vram {
+            // normal mode: the networks loaded behind the RVM pass (waits only for a load not done yet), taken before
+            // the windows: a load's out of memory is its own, a smaller window doesn't change it (perf review
+            // 2026-10-29 S5: inside the windows it halved the window and re-ran the job up to 7 times)
+            let behind = !self.pending.is_empty();
+            self.ensure(&plan.key, &crate::runtime::PIECES, false, ctx.trt, sink, LOAD_STAGE)?;
+            if behind {
+                // their loading's freed host memory sits in the load threads' malloc arenas: give it back
+                super::trim_host_memory();
+            }
+        }
 
         // 3. stage 1 on Hann windows (+ 4. stage 2 streamed, normal mode)
         let starts = window_starts(t_all, plan.chunk, plan.stride);
@@ -305,9 +328,9 @@ impl<L: Loader> Pipeline<L> {
             small.map(|v| v.clamp(0.0, 1.0));
             Ok(Some(small.data))
         })?;
-        // normal mode on CUDA: C-RADIO (the first load, which reads the card's own overhead, as before) and RVM now,
-        // the other three load behind the RVM pass (`stage1_windows` takes them)
-        let behind = !plan.low_vram && key.provider == Provider::Cuda;
+        // normal mode on CUDA with room for it (`LOADS_BEHIND_MIN_GB`): C-RADIO (the first load, which reads the card's
+        // own overhead, as before) and RVM now, the other three load behind the RVM pass (`keying` takes them)
+        let behind = !plan.low_vram && key.provider == Provider::Cuda && plan.budget_gb.is_some_and(|b| b >= LOADS_BEHIND_MIN_GB);
         let first: &[&'static str] = match (plan.low_vram, behind) {
             (true, _) => &["rvm"],
             (false, true) => &["cradio", "rvm"],
@@ -446,7 +469,9 @@ impl<L: Loader> Pipeline<L> {
         // converts it when the type arrives
         let (rgb_type_tx, rgb_type_rx) = std::sync::mpsc::sync_channel::<bool>(1);
         // normal mode: C-RADIO's and MoGe's features of the frames two windows share are computed once and reused
-        // (backlog row 182; measured byte-identical on CUDA). Core ML (fixed batches) and MIGraphX (a compile per
+        // (backlog row 182). That changes their batch size (8 -> 4 at 8/4), so the bytes stay the same only where the
+        // kernels don't depend on it: checked on the RTX 5080 only (CUDA fp16, 4K 8/4 and HD 48/24); other cards,
+        // other windows and the CPU provider are not checked. Core ML (fixed batches) and MIGraphX (a compile per
         // batch size) compute every window's frames, as before.
         let reuse_found = matches!(key.provider, Provider::Cuda | Provider::Cpu);
         let mut windows = {
@@ -508,17 +533,9 @@ impl<L: Loader> Pipeline<L> {
         let hq_full = bf16_round(job.hint_quality as f32);
         let hq_carry = bf16_round(job.carry_hint_quality as f32);
         if low_vram {
-            // stage 1 loads while the first window's inputs are made
+            // stage 1 loads while the first window's inputs are made (normal mode: all five are loaded, `keying`)
             self.unload();
             self.ensure(key, &["stage1"], true, ctx.trt, sink, LOAD_STAGE)?;
-        } else {
-            // normal mode: the networks loaded behind the RVM pass (waits only for a load not done yet)
-            let behind = !self.pending.is_empty();
-            self.ensure(key, &crate::runtime::PIECES, false, ctx.trt, sink, LOAD_STAGE)?;
-            if behind {
-                // their loading's freed host memory sits in the load threads' malloc arenas: give it back
-                super::trim_host_memory();
-            }
         }
         // the hint is made in the type stage 1 takes; windows without any matte share one all-zero buffer, made the
         // first time one is needed

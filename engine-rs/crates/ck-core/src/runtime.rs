@@ -663,6 +663,9 @@ impl From<Vec<half::f16>> for Data<'_> {
     }
 }
 
+/// `Data::Out`'s type flag doesn't match its tensor (it is set from the tensor in `Net::run`).
+const OUT_TYPE: &str = "a network output is read in the type Net::run found it in";
+
 /// Parallel conversions over large tensors: at least this many values per rayon task.
 const PAR_MIN: usize = 1 << 14;
 
@@ -686,9 +689,10 @@ impl Data<'_> {
             Data::Bf16(p) => Data::Bf16(p.clone()),
             Data::F16Ref(v) => Data::F16Ref(v),
             Data::F32Ref(v) => Data::F32Ref(v),
-            // the type was checked when the output was taken (Net::run), so these extractions don't fail
-            Data::Out(v, true) => Data::F16Ref(v.try_extract_tensor::<half::f16>().map_or(&[], |(_, d)| d)),
-            Data::Out(v, false) => Data::F32Ref(v.try_extract_tensor::<f32>().map_or(&[], |(_, d)| d)),
+            // the type was checked when the output was taken (Net::run): a mismatch is a bug, and it stops here with
+            // its cause (the engine's request guard makes the panic that job's error) instead of reading as no values
+            Data::Out(v, true) => Data::F16Ref(v.try_extract_tensor::<half::f16>().map(|(_, d)| d).expect(OUT_TYPE)),
+            Data::Out(v, false) => Data::F32Ref(v.try_extract_tensor::<f32>().map(|(_, d)| d).expect(OUT_TYPE)),
         }
     }
 
@@ -863,6 +867,69 @@ mod tests {
         let out = Data::Out(Tensor::from_array((vec![3usize], v32.clone())).unwrap().into_dyn(), false);
         assert!(matches!(out.view(), Data::F32Ref(s) if s == &v32[..]));
         assert_eq!(out.into_f32(), v32);
+    }
+
+    #[test]
+    #[should_panic(expected = "a network output is read in the type Net::run found it in")]
+    fn an_output_read_in_the_wrong_type_stops_with_its_cause() {
+        // perf review 2026-10-29 N1: a float32 output flagged float16 is a bug; it no longer reads as an empty slice
+        let out = Data::Out(Tensor::from_array((vec![2usize], vec![1f32, 2.0])).unwrap().into_dyn(), true);
+        let _ = out.len();
+    }
+
+    /// A one-node ONNX model, y = -x (float32, any shape), hand-encoded (no ONNX tooling in the tests).
+    fn neg_model() -> Vec<u8> {
+        fn varint(mut v: u64, out: &mut Vec<u8>) {
+            // loop: NOT-WORTH — ≤ 10 bytes of a protobuf varint
+            while v >= 0x80 {
+                out.push((v as u8) | 0x80);
+                v >>= 7;
+            }
+            out.push(v as u8);
+        }
+        fn int(field: u64, v: u64) -> Vec<u8> {
+            let mut out = Vec::new();
+            varint(field << 3, &mut out);
+            varint(v, &mut out);
+            out
+        }
+        fn bytes(field: u64, b: &[u8]) -> Vec<u8> {
+            let mut out = Vec::new();
+            varint((field << 3) | 2, &mut out);
+            varint(b.len() as u64, &mut out);
+            out.extend_from_slice(b);
+            out
+        }
+        // ValueInfoProto: name, type { tensor_type { elem_type FLOAT } }
+        let value = |name: &str| [bytes(1, name.as_bytes()), bytes(2, &bytes(1, &int(1, 1)))].concat();
+        let node = [bytes(1, b"x"), bytes(2, b"y"), bytes(4, b"Neg")].concat();
+        let graph = [bytes(1, &node), bytes(2, b"neg"), bytes(11, &value("x")), bytes(12, &value("y"))].concat();
+        // ModelProto: ir_version 8, graph, opset_import { version 13 }
+        [int(1, 8), bytes(7, &graph), bytes(8, &int(2, 13))].concat()
+    }
+
+    #[test]
+    fn a_network_output_outlives_its_session() {
+        // perf review 2026-10-29 N2: low-VRAM mode unloads a phase's networks (`unload`) while the render thread may
+        // still hold their outputs (Data::Out, read in ONNX Runtime's buffer): the values stay valid after the session
+        // is dropped, also once another session has run and allocated in its place (CPU provider)
+        let rt = Runtime::init(&EngineConfig::default()).unwrap();
+        let file = std::env::temp_dir().join(format!("ck-neg-{}.onnx", std::process::id()));
+        std::fs::write(&file, neg_model()).unwrap();
+        // loop: NOT-WORTH — a test's 4096 values
+        let x: Vec<f32> = (0..4096).map(|i| i as f32 * 0.5).collect();
+        let mut net = Net::load(rt, "neg", Provider::Cpu, &file, None).unwrap();
+        let (shape, out) = net.run(vec![("x", vec![4096], Data::F32Ref(&x))]).unwrap().pop().unwrap();
+        assert!(matches!(out, Data::Out(_, false)));
+        drop(net);
+        let mut other = Net::load(rt, "neg", Provider::Cpu, &file, None).unwrap();
+        let ones = vec![1f32; 4096];
+        let again = other.run(vec![("x", vec![4096], Data::F32Ref(&ones))]).unwrap();
+        drop((other, again));
+        std::fs::remove_file(&file).unwrap();
+        assert_eq!(shape, vec![4096]);
+        // loop: NOT-WORTH — a test's 4096 values
+        assert_eq!(out.into_f32(), x.iter().map(|v| -v).collect::<Vec<_>>());
     }
 
     #[test]

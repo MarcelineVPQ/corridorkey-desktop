@@ -504,7 +504,8 @@ impl<L: Loader> Pipeline<L> {
     }
 
     /// Start loading `pieces` on their own thread while the current phase runs; `ensure` takes them. Low-VRAM mode:
-    /// the next phase's networks. Normal mode (CUDA): the networks the RVM pass doesn't use, behind it. Their memory is
+    /// the next phase's networks. Normal mode (CUDA, a budget of at least `keying::LOADS_BEHIND_MIN_GB`): the networks
+    /// the RVM pass doesn't use, behind it. Their memory is
     /// within the job's budget by construction: the running phase's arena limits already leave room for their
     /// weights (`arena_limit`, the same limits a load on the main thread gets: `low_vram`). Measured per load
     /// (RTX 5080, fp16): C-RADIO 0.75 s, MoGe 0.11 s, stage 1 1.7 s, stage 2 0.55 s. Core ML too (Mac mini M6: every
@@ -796,6 +797,8 @@ impl Pipeline<OrtLoader> {
         let (mut chunk, mut stride, mut low_vram) = (job.hann_chunk, job.hann_stride, job.low_vram);
         // why a `tensorrt_build: false` job skips TensorRT (its range isn't built), decided with the window below
         let mut trt_skip: Option<String> = None;
+        // the budget the automatic window is chosen for (JobPlan::budget_gb)
+        let mut auto_budget: Option<f64> = None;
         if job.manual {
             sink.send(json!({"type": "memory", "hann_chunk": chunk, "hann_stride": stride, "low_vram": low_vram, "auto": false, "provider": provider.name()}));
         }
@@ -833,6 +836,7 @@ impl Pipeline<OrtLoader> {
                 Some(cap) if provider != Provider::Cpu => (seen.min(cap), true),
                 _ => (seen, false),
             };
+            auto_budget = Some(budget);
             // a TensorRT job keeps low-VRAM mode: the table's normal-mode peaks are CUDA's, TensorRT's are
             // unmeasured (row 41; lifted once they are). A later fallback to CUDA runs the low mode, as before.
             let mut tensorrt = job.tensorrt && provider == Provider::Cuda && self.loader.rt.tensorrt_ep;
@@ -1004,7 +1008,7 @@ impl Pipeline<OrtLoader> {
             ctx.color_out = c.output.clone();
             ctx.out_linear = c.output_linear;
         }
-        let mut plan = JobPlan { chunk, stride, low_vram, key };
+        let mut plan = JobPlan { chunk, stride, low_vram, key, budget_gb: auto_budget };
         let res = self.attempts(&ctx, &mut plan, &mut writers, &mut report, sink, &mut |p, sink| write_settings(p.chunk, p.stride, p.low_vram, sink));
         // release every writer (its encoder finishes the file), the first failure wins
         let rel_t = Instant::now();
