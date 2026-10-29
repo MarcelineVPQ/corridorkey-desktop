@@ -32,6 +32,24 @@ import { lowerFirst, NO_RELEASE_CHANNEL } from "../../src/shared/texts";
 import { downloadVerified, type FetchFn } from "./download";
 import { CHECK_EVERY_MS, downloadAllowed, feedSignedBy, FIRST_CHECK_MS, freshUrl, offers, parseFeed, releasePageUrl, STABLE_LINK, staleFiles, type Feed, type FeedSource } from "./updateFeed";
 import { loadUpdatePrefs, saveUpdatePrefs } from "./updatePrefs";
+import { isMac, isWin } from "./platform";
+
+/**
+ * Why this copy can't check for updates (or replace itself), or null: Windows and macOS check from an installed copy
+ * (the notice; Download opens the release page), Linux from the AppImage; a copy run from source never goes online.
+ * updater.ts passes the platform, app.isPackaged and whether APPIMAGE is set.
+ */
+export function unsupportedReason(keys: readonly string[], sys: { platform: NodeJS.Platform; packaged: boolean; appImage: boolean }): string | null {
+  if (isWin(sys.platform) || isMac(sys.platform)) {
+    if (!sys.packaged) return "Update notices come with the installed app; this copy runs from source.";
+  } else {
+    if (sys.platform !== "linux") return "Updates are built for the Linux AppImage only.";
+    if (!sys.packaged) return "Updates come with the AppImage build; this copy runs from source.";
+    if (!sys.appImage) return "Updates work only in the AppImage build; this copy isn't running as an AppImage.";
+  }
+  if (!keys.length) return `${NO_RELEASE_CHANNEL}.`;
+  return null;
+}
 
 export interface FileOps {
   readdir(dir: string): string[];

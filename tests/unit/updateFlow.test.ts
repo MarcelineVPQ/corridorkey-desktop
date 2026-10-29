@@ -10,7 +10,8 @@ import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { downloadVerified } from "../../electron/main/download";
 import { appImageName, feedSource, FIRST_CHECK_MS } from "../../electron/main/updateFeed";
-import { UpdateFlow, type FileOps, type UpdatePlatform } from "../../electron/main/updateFlow";
+import { unsupportedReason, UpdateFlow, type FileOps, type UpdatePlatform } from "../../electron/main/updateFlow";
+import { NO_RELEASE_CHANNEL } from "../../src/shared/texts";
 import type { UpdateChannel } from "../../src/shared/types";
 
 // The test server: path -> body (or a status).
@@ -427,5 +428,29 @@ describe("downloadVerified", () => {
     expect(existsSync(path)).toBe(false);
     slow.closeAllConnections();
     await new Promise<void>((r) => slow.close(() => r()));
+  });
+});
+
+// review N2 + N8: which copies check for updates (updater.ts passes the real platform, app.isPackaged and APPIMAGE)
+describe("unsupportedReason", () => {
+  const keys = ["key"];
+  const installed = { packaged: true, appImage: false };
+
+  it("Windows and macOS: an installed copy checks (no AppImage needed), never unsupported for its platform", () => {
+    expect(unsupportedReason(keys, { platform: "win32", ...installed })).toBeNull();
+    expect(unsupportedReason(keys, { platform: "darwin", ...installed })).toBeNull();
+  });
+
+  it("a copy run from source never goes online, on every system", () => {
+    expect(unsupportedReason(keys, { platform: "win32", packaged: false, appImage: false })).toBe("Update notices come with the installed app; this copy runs from source.");
+    expect(unsupportedReason(keys, { platform: "darwin", packaged: false, appImage: false })).toBe("Update notices come with the installed app; this copy runs from source.");
+    expect(unsupportedReason(keys, { platform: "linux", packaged: false, appImage: true })).toBe("Updates come with the AppImage build; this copy runs from source.");
+  });
+
+  it("Linux needs the AppImage; other systems and a build without a key are unsupported", () => {
+    expect(unsupportedReason(keys, { platform: "linux", packaged: true, appImage: true })).toBeNull();
+    expect(unsupportedReason(keys, { platform: "linux", packaged: true, appImage: false })).toBe("Updates work only in the AppImage build; this copy isn't running as an AppImage.");
+    expect(unsupportedReason(keys, { platform: "freebsd", ...installed })).toBe("Updates are built for the Linux AppImage only.");
+    expect(unsupportedReason([], { platform: "win32", ...installed })).toBe(`${NO_RELEASE_CHANNEL}.`);
   });
 });

@@ -44,8 +44,8 @@ jobs:
       - run: npx -y npm@10.9.2 ci
       # THIRD_PARTY_NOTICES.md exactly as tools/gen_notices.mjs writes it (BACKLOG row 179): a hand edit of the notices
       # passed every push and stopped the dev.3 release, since the check ran only in tools/release.sh. It needs
-      # cargo-about 0.9.2 (release.sh's version), built once into a folder of its own and cached; the crates come from
-      # `cargo fetch`, the npm packages from the `npm ci` above
+      # cargo-about 0.9.2 (release.sh's version), built once into a folder of its own and cached; the crates' sources
+      # are already in cargo's registry from the `cargo build --locked` above, the npm packages from the `npm ci` above
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cargo-about
         with:

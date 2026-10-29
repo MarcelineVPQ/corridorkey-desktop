@@ -11,24 +11,12 @@ import { holdAppImageMountUntilExit } from "./appImageQuit";
 import type { FetchFn } from "./download";
 import { fallbackShell, relaunchArgs, relaunchEnv, shellArgs, systemdRunArgs } from "./relaunch";
 import { feedSource } from "./updateFeed";
-import { UpdateFlow, type FileOps, type UpdatePlatform } from "./updateFlow";
-import { NO_RELEASE_CHANNEL } from "../../src/shared/texts";
+import { unsupportedReason, UpdateFlow, type FileOps, type UpdatePlatform } from "./updateFlow";
 
 const FEED_TIMEOUT_MS = 15_000;
 
 // Windows and macOS: the notice only; Download opens the release page (backlog row 180, updateFlow.ts).
 const OPENS_PAGE = isWin() || isMac();
-
-// Why this copy can't check for updates or replace itself, or null.
-function unsupportedReason(keys: readonly string[]): string | null {
-  if (!OPENS_PAGE) {
-    if (PLATFORM !== "linux") return "Updates are built for the Linux AppImage only.";
-    if (!app.isPackaged) return "Updates come with the AppImage build; this copy runs from source.";
-    if (!process.env.APPIMAGE) return "Updates work only in the AppImage build; this copy isn't running as an AppImage.";
-  }
-  if (!keys.length) return `${NO_RELEASE_CHANNEL}.`;
-  return null;
-}
 
 function runningAppImage(): string | null {
   const raw = process.env.APPIMAGE;
@@ -74,7 +62,7 @@ function relaunch(target: string): void {
   // counted the fallback shell (which becomes the new copy) as ours and held the old mount, and every descriptor
   // it inherited (the DevTools port in tools/update_e2e.sh), for its whole 5 s.
   holdAppImageMountUntilExit();
-  const shell = fallbackShell(existsSync);
+  const fallback = fallbackShell(existsSync);
   let started = false;
   // loop: SERIAL-REQUIRED — retry: the second form only when systemd refused the first (2 tries)
   for (const exitTypeCgroup of [true, false]) {
@@ -83,7 +71,8 @@ function relaunch(target: string): void {
       // session bus without systemd it waits for D-Bus's own 25 s timeout
       // (found by tools/update_e2e.sh: the restart froze the window).
       // loop: SERIAL-REQUIRED — systemd-run for the relaunch, 5 s timeout, at most two tries (with and without ExitType=cgroup), once per restart
-      execFileSync("systemd-run", systemdRunArgs({ target, args, env, unit, exitTypeCgroup, oldPid: process.pid, shell }), { stdio: "ignore", timeout: 5000 });
+      // gate: shell-ok — `shell` is the fallback shell's path the relaunch unit starts the new copy with (relaunch.ts), not a spawn option
+      execFileSync("systemd-run", systemdRunArgs({ target, args, env, unit, exitTypeCgroup, oldPid: process.pid, shell: fallback }), { stdio: "ignore", timeout: 5000 });
       started = true;
       break;
     } catch {
@@ -93,7 +82,7 @@ function relaunch(target: string): void {
   if (!started) {
     try {
       // lifetime: OK — detached and unref'd: the new copy outlives this one on purpose (app.quit next)
-      spawn(shell, shellArgs(process.pid, target, args), { detached: true, stdio: "ignore", env }).unref();
+      spawn(fallback, shellArgs(process.pid, target, args), { detached: true, stdio: "ignore", env }).unref();
     } catch (e) {
       // error: LOGGED-OK — the app quits either way; the next start from the menu runs the new version
       console.error("[updater] could not start the new copy:", e);
@@ -113,7 +102,7 @@ function platform(version: string): UpdatePlatform {
     version,
     source,
     appImage: runningAppImage(),
-    unsupported: unsupportedReason(source.keys),
+    unsupported: unsupportedReason(source.keys, { platform: PLATFORM, packaged: app.isPackaged, appImage: !!process.env.APPIMAGE }),
     prefsFile: join(app.getPath("userData"), "updates.json"),
     fetchText: async (url, fresh) => {
       // no-cache: never Chromium's own cached copy of a feed
@@ -126,7 +115,13 @@ function platform(version: string): UpdatePlatform {
     fs: fileOps,
     relaunch,
     // the browser, as the window's links open (index.ts setWindowOpenHandler); the URL is releasePageUrl's, this repository's only
-    openPage: OPENS_PAGE ? (url) => void shell.openExternal(url) : null,
+    openPage: OPENS_PAGE
+      ? (url) =>
+          void shell.openExternal(url).catch((e: unknown) => {
+            // error: LOGGED-OK — no browser opened; the notice stays, Download can be pressed again
+            console.error(`[updater] could not open ${url}:`, e);
+          })
+      : null,
     now: () => Date.now(),
     log: (m) => console.log(`[updater] ${m}`),
   };
