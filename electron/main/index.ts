@@ -11,7 +11,7 @@ import { Estimator } from "./estimate";
 import { GPU_POLL_MS, gpuReadoutWanted, otherGpuUsers, readAmdGpu, readGpu, untilEnded } from "./gpu";
 import { expandPaths, frameDirLinearFor, probeClip, still, STILL_WIDTH, VIDEO_EXT, HINT_IMAGE_EXT } from "./media";
 import { clearJobTemps, Queue } from "./queue";
-import { checkRustEngine, loadSettings, saveSettings } from "./settings";
+import { applyModelSet, checkRustEngine, loadSettings, saveSettings } from "./settings";
 import { chosenFirst, effectivePath, findCli, findEngineFiles, findTrtBuilder, isInsideApp, modelSetVersion, windowTitle } from "./engineFind";
 import { addToPathList, APP_DIR, appDirs, engineBinName, isMac, isWin, MODELS_DIR, ortLibrary, PLATFORM } from "./platform";
 import { HOMEBREW_DIRS, checkFfmpeg, ffmpegState, installFfmpeg, planFor, readOsRelease, wingetFfmpegDirs } from "./ffmpeg";
@@ -24,7 +24,6 @@ import {
   freeBytes,
   installNeeds,
   modelSetChoices,
-  modelSetsFor,
   runInstall,
   runTrtInstall,
   systemSupport,
@@ -196,9 +195,10 @@ function installIdle(): InstallState {
 }
 let install = installIdle();
 // the opt-in TensorRT parts: what is installed, for the setting's install box; progress while its install runs
+// TensorRT is NVIDIA's: never on an AMD card (the switch on); every TensorRT handler asks this
+const trtAllowed = () => trtSupported(PLATFORM) && !AMD_GFX;
 function trtParts(): Omit<TrtState, "status" | "step" | "done" | "total" | "error" | "built" | "prebuild" | "onDisk"> {
-  // TensorRT is NVIDIA's: never on an AMD card (the switch on)
-  const supported = trtSupported(PLATFORM) && !AMD_GFX;
+  const supported = trtAllowed();
   const need = trtNeeds(enginePlaces().data, existsSync, trtCatalogFor(modelSet()));
   const paths = enginePaths();
   return {
@@ -1008,7 +1008,7 @@ function registerIpc(): void {
     scheduleSend();
   });
   handle(IPC.setTensorrt, (_e, on: unknown) => {
-    if (!trtSupported(PLATFORM)) return;
+    if (!trtAllowed()) return;
     settings = { ...settings, tensorrt: on === true };
     trt = { ...trt, ...trtParts() };
     persist();
@@ -1020,14 +1020,16 @@ function registerIpc(): void {
   // the model set (Engine settings, ONNX Runtime engine; row 168): the setup installs it and Automatic runs it once it is
   // there (the page then starts the setup's download when it isn't); a Models folder chosen by hand goes back to Automatic
   handle(IPC.setModelSet, (_e, name: unknown) => {
-    if (installAbort || typeof name !== "string" || !modelSetsFor(PLATFORM, AMD_GFX).includes(name)) return;
-    settings = { ...settings, modelSet: name, modelsDir: null };
+    const next = applyModelSet(settings, name, { platform: PLATFORM, gfx: AMD_GFX, downloading: installAbort !== null });
+    if (!next) return;
+    settings = next;
     install = installIdle();
     recheckEngines();
     persist();
     scheduleSend();
   });
   handle(IPC.trtPrebuild, (_e, action: unknown) => {
+    if (!trtAllowed()) return;
     if (action === "start") void prebuild.start(true);
     else if (action === "stop") prebuild.stop();
   });
@@ -1035,7 +1037,7 @@ function registerIpc(): void {
   handle(IPC.trtSize, async (_e, actionIn: unknown, sizeIn: unknown) => {
     const size = sanitizeTrtSize(sizeIn);
     const key = size && trtSizeKey(size.width, size.height);
-    if (!trtSupported(PLATFORM) || !size || !key) return;
+    if (!trtAllowed() || !size || !key) return;
     // loop: NOT-WORTH — the few chosen sizes, once per click
     const others = settings.trtSizes.filter((s) => trtSizeKey(s.width, s.height) !== key);
     if (actionIn === "add") {

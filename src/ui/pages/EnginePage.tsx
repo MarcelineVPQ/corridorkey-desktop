@@ -6,7 +6,7 @@
 import { Check, Cpu, Download, Film, FolderOpen, ListChecks, X, Zap } from "lucide-react";
 import type { AppState, EngineFileKind } from "../../shared/types";
 import { installMissing } from "../../shared/tasks";
-import { downloadingStatus, ENGINE_FAILED, NO_VRAM_HELD } from "../../shared/texts";
+import { downloadingStatus, ENGINE_FAILED, NO_VRAM_HELD, TRT_MODEL_SET_NOTE } from "../../shared/texts";
 import { Accordion, Row, Section, type SectionFocus } from "../panel/Section";
 import { MainBlock, SplitView } from "../panel/SplitView";
 import { Stat } from "../JobView";
@@ -146,7 +146,9 @@ export function EnginePage(props: {
     <Row
       label="Model set"
       hint={
-        sets.length > 1 ? "Which version of the CorridorKey models the engine runs. One not on this computer yet downloads when you pick it." : "The version of the CorridorKey models the engine runs."
+        sets.length > 1
+          ? `Which version of the CorridorKey models the engine runs. One not on this computer yet downloads when you pick it.${st.tensorrt ? ` ${TRT_MODEL_SET_NOTE}` : ""}`
+          : "The version of the CorridorKey models the engine runs."
       }
       htmlFor={sets.length > 1 ? "engine-model-set" : undefined}
     >

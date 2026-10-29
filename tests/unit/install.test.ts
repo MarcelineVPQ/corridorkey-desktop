@@ -46,6 +46,7 @@ import {
   type TrtCatalog,
 } from "../../electron/main/install";
 import { unzip } from "../../electron/main/unzip";
+import { TRT_MODEL_SET_NOTE } from "../../src/shared/texts";
 
 /** A minimal zip (deflated entries) as a wheel looks, for the unpacker. */
 // zip64: every size and offset in the Zip64 fields, as Python's zipfile writes them past 2 GiB (NVIDIA's TensorRT wheel)
@@ -247,6 +248,8 @@ describe("choosing the model set", () => {
     expect(four.trtModels.name).toBe("2.0.0-onnx.4-trt");
     expect(five.models).toBe(MODELS_CUDA);
     expect(five.trtModels.name).toBe("2.0.0-onnx.4-trt");
+    // the Engine page's Model set row says so (review S2)
+    expect(TRT_MODEL_SET_NOTE).toContain(four.trtModels.name);
     // onnx.5 copies C-RADIO's TensorRT weights from an installed onnx.4 folder; onnx.4 has them in its own folder
     expect(five.older).toEqual([MODELS_ONNX4]);
     expect(four.older).toEqual([]);

@@ -21,7 +21,7 @@ import { appState, installState, job, settings, updateState } from "./fixtures";
 import { App } from "../../src/ui/App";
 import { dots, tasksOf } from "../../src/shared/tasks";
 import { UpdateBanner } from "../../src/ui/UpdateBanner";
-import { UPDATE_PAGE_BACK_TO_STABLE } from "../../src/shared/texts";
+import { TRT_MODEL_SET_NOTE, UPDATE_PAGE_BACK_TO_STABLE } from "../../src/shared/texts";
 import type { AppState, UpdateState } from "../../src/shared/types";
 import { Cpu } from "lucide-react";
 
@@ -356,6 +356,15 @@ describe("choosing the model set", () => {
     fireEvent.change(select, { target: { value: "2.0.0-onnx.5" } });
     await waitFor(() => expect(ck.setModelSet).toHaveBeenCalledWith("2.0.0-onnx.5"));
     expect(ck.startInstall).not.toHaveBeenCalled();
+  });
+
+  it("review S2: with TensorRT on, the row says TensorRT jobs run 2.0.0-onnx.4-trt with either set", () => {
+    mockCk();
+    page(appState({ install: installState({ modelSets: sets }) }));
+    expect(screen.queryByText(TRT_MODEL_SET_NOTE, { exact: false })).toBeNull();
+    cleanup();
+    page(appState({ settings: settings({ tensorrt: true }), install: installState({ modelSets: sets }) }));
+    expect(screen.getByText(TRT_MODEL_SET_NOTE, { exact: false })).toBeTruthy();
   });
 
   it("can't be changed while a download runs", () => {

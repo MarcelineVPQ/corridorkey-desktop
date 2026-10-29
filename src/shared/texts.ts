@@ -12,6 +12,8 @@ export function lowerFirst(s: string): string {
 export const INSTALL_STEP = "Download the GPU runtime and the CorridorKey models";
 /** TensorRT's parts install on top of the runtime and models (the TensorRT box, and the install's refusal). */
 export const INSTALL_FIRST = "Install the GPU runtime and the CorridorKey models first";
+/** With TensorRT on, both model sets' jobs run the same TensorRT networks (install.ts TRT_SETS): the Model set row. */
+export const TRT_MODEL_SET_NOTE = "With TensorRT on, jobs run the 2.0.0-onnx.4-trt networks with either set until onnx.5's own TensorRT set is measured.";
 /** The engine failed to start: the Engine page's notice and the task's text. */
 export const ENGINE_FAILED = "The engine didn't start";
 /** The idle engine (it quits with the queue): the Engine page's state and the rail's engine line. */

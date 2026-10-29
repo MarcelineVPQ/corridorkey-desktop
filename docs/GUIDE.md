@@ -116,7 +116,9 @@ Runtime library the app uses, each with the copies it found, and lets you pick a
 version of the CorridorKey models: 2.0.0-onnx.5 (the default) or 2.0.0-onnx.4 on Linux and Windows, each marked
 installed or with its download size. One that isn't installed downloads when you pick it (the setup's own download:
 progress, stop and resume, every file checked), next to the set you have, and the models folder's Automatic then
-runs it; a models folder picked by hand goes back to Automatic. TensorRT installs into the chosen set's folder. On a
+runs it; a models folder picked by hand goes back to Automatic. TensorRT installs into the chosen set's folder; with
+TensorRT on, the row says that jobs run the 2.0.0-onnx.4-trt networks with either set (onnx.5's own TensorRT set isn't
+measured yet). On a
 Mac it names the one set, 2.0.0-onnx.5 (the Core ML models exist only for it).
 
 The main view's **Graphics card** is NorthXL's GPU card (Marcy's KDE stats widget; backlog row 171), read only while a
@@ -133,7 +135,7 @@ no nvidia-smi and no such files; its temperatures and power need root).
 | Header "GPU · RTX 5080" (fixed in its source) | Header "Graphics card · <name>" (the card's own name, from the driver) |
 | Usage % bar, heat tint | Usage % bar (the app's progress bar), heat tint mixed from the theme's tokens |
 | VRAM used / total bar | Memory used / total bar, in GiB |
-| Temperature °C, heat tint | Temperature °C, heat tint (40–90 °C, as NorthXL) |
+| Temperature °C, heat tint | Temperature °C, heat tint (40–90 °C, as NorthXL); NVIDIA's `temperature.gpu` is the core sensor, AMD's `temp1_input` the "edge" sensor, so the two vendors' numbers aren't the same spot on the chip |
 | Fan % | Fan % (NVIDIA `fan.speed`; AMD the fan level `pwm1` / `pwm1_max`) |
 | Clock MHz (`clocks.gr`) | Clock MHz (NVIDIA `clocks.gr`, the same field; AMD `freq1_input`) |
 | Power W | Power W (NVIDIA `power.draw`; AMD `power1_average`) |

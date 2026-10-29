@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { checkRustEngine, loadSettings } from "../../electron/main/settings";
+import { applyModelSet, checkRustEngine, loadSettings } from "../../electron/main/settings";
 
 const files = (list: string[]) => {
   const set = new Set(list);
@@ -118,5 +118,27 @@ describe("Rust engine setup", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// review S3: the setModelSet IPC handler's decision (index.ts), as a pure function
+describe("choosing the model set (applyModelSet)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ck-set-"));
+  const base = { ...loadSettings(join(dir, "none.json")), modelsDir: "/my/models" };
+  rmSync(dir, { recursive: true, force: true });
+  const linux = { platform: "linux" as const, gfx: null, downloading: false };
+
+  it("takes a set this system offers and sends the Models folder back to Automatic", () => {
+    expect(applyModelSet(base, "2.0.0-onnx.4", linux)).toEqual({ ...base, modelSet: "2.0.0-onnx.4", modelsDir: null });
+    expect(applyModelSet(base, "2.0.0-onnx.5", { ...linux, platform: "win32" })?.modelSet).toBe("2.0.0-onnx.5");
+  });
+
+  it("refuses an unknown name, a non-string, onnx.4 on macOS or on an AMD card, and any pick during a download", () => {
+    expect(applyModelSet(base, "2.0.0-onnx.9", linux)).toBeNull();
+    expect(applyModelSet(base, 4, linux)).toBeNull();
+    expect(applyModelSet(base, "2.0.0-onnx.4", { ...linux, platform: "darwin" })).toBeNull();
+    expect(applyModelSet(base, "2.0.0-onnx.4", { ...linux, gfx: "gfx1100" })).toBeNull();
+    expect(applyModelSet(base, "2.0.0-onnx.5", { ...linux, gfx: "gfx1100" })?.modelSet).toBe("2.0.0-onnx.5");
+    expect(applyModelSet(base, "2.0.0-onnx.4", { ...linux, downloading: true })).toBeNull();
   });
 });

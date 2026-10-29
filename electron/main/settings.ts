@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import type { CheckoutCheck, Settings } from "../../src/shared/types";
 import { sanitizeAppearance, sanitizeOptions, vramLimit } from "./validate";
 import { sanitizeTrtSizes } from "../../src/shared/trt";
-import { DEFAULT_MODEL_SET, MODEL_SETS } from "./install";
+import { DEFAULT_MODEL_SET, MODEL_SETS, modelSetsFor } from "./install";
 import { READ_ONLY, VALUE_MAX, VAR_NAME } from "../../src/shared/console/vars";
 
 export function loadSettings(file: string): Settings {
@@ -78,6 +78,16 @@ function variables(v: unknown): Record<string, string> {
 
 /** The five networks the Rust engine runs (engine-rs runtime.rs PIECES). */
 export const MODEL_PIECES = ["cradio", "moge", "rvm", "stage1", "stage2"] as const;
+
+/**
+ * The model set picked on the Engine page (row 168; the setModelSet IPC handler): a set this system offers (macOS and an
+ * AMD card have onnx.5 only), never while a download runs; a Models folder chosen by hand goes back to Automatic, which
+ * runs the chosen set. Null: refused, nothing changes.
+ */
+export function applyModelSet(settings: Settings, name: unknown, sys: { platform: NodeJS.Platform; gfx: string | null; downloading: boolean }): Settings | null {
+  if (sys.downloading || typeof name !== "string" || !modelSetsFor(sys.platform, sys.gfx).includes(name)) return null;
+  return { ...settings, modelSet: name, modelsDir: null };
+}
 
 /**
  * The Rust engine: its program and the models folder (one <piece>_….onnx per network, or a models.json).
