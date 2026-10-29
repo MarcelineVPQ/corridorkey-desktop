@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0-dev.5 (draft, unreleased)
+## 1.0.0-dev.5
 
 - **Faster keying, the same mattes.** The engine keeps the graphics card busier and copies less: a clip's first frames
   decode while the models load; in the normal mode on CUDA with the automatic window and at least 10 GB for the job, three of the five models
@@ -21,6 +21,11 @@
   measured. On the Mac mini M6 (16 GB), a 12-frame 1920×1080 Core ML job peaked at 2.74 GB (one run; dev.4 wasn't
   measured there). Windows' memory: not measured. In the normal mode a job that is stopped or fails part-way writes
   one window's frames fewer than dev.4 did (backlog row 182; docs/ENGINE_RUST.md, "The pipelining pass").
+
+- **The README is a short page for artists:** what the app is, how to start, what your computer needs, and the
+  highlights; the speed tables, test machines, methods and "what we got wrong" moved, word for word, to
+  [ENGINEERING.md](ENGINEERING.md) (backlog row 181). The Windows notes now include Edge's "isn't commonly downloaded"
+  warning and how to keep the installer.
 
 ## 1.0.0-dev.4
 
