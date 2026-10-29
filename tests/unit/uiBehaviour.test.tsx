@@ -580,6 +580,12 @@ describe("the Engine page's graphics card (NorthXL's GPU card)", () => {
     // loop: NOT-WORTH — four readings in a test
     expect(screen.getAllByTestId("gpu-reading").map((e) => e.textContent)).toEqual(["43 °C", "Fan 30%", "2662 MHz", "53 W"]);
   });
+  it("keeps the Usage bar in the accent colour at a keying job's ~100 %, never the heat tint (red means an error here)", () => {
+    show({ ...gpu, utilization: 100 });
+    const bar = screen.getByRole("progressbar", { name: "Usage" }).closest(".gpu-bar") as HTMLElement;
+    expect(bar.classList.contains("heat")).toBe(false);
+    expect(bar.style.getPropertyValue("--heat")).toBe("");
+  });
   it("leaves out each reading the card doesn't give", () => {
     show({ ...gpu, tempC: 51, clockMhz: 1470 });
     // loop: NOT-WORTH — two readings in a test

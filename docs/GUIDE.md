@@ -133,7 +133,7 @@ no nvidia-smi and no such files; its temperatures and power need root).
 | NorthXL (GPU card) | CorridorKey (Engine page, Graphics card) |
 | --- | --- |
 | Header "GPU · RTX 5080" (fixed in its source) | Header "Graphics card · <name>" (the card's own name, from the driver) |
-| Usage % bar, heat tint | Usage % bar (the app's progress bar), heat tint mixed from the theme's tokens |
+| Usage % bar, heat tint | Usage % bar (the app's progress bar) in the accent colour, no heat tint: a keying job holds ~100 %, and red means an error in this app (Marcy 2026-10-29) |
 | VRAM used / total bar | Memory used / total bar, in GiB |
 | Temperature °C, heat tint | Temperature °C, heat tint (40–90 °C, as NorthXL); NVIDIA's `temperature.gpu` is the core sensor, AMD's `temp1_input` the "edge" sensor, so the two vendors' numbers aren't the same spot on the chip |
 | Fan % | Fan % (NVIDIA `fan.speed`; AMD the fan level `pwm1` / `pwm1_max`) |

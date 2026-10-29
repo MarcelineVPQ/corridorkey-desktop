@@ -23,9 +23,10 @@ function heatStyle(ratio: number): CSSProperties {
 }
 
 /** NorthXL's Bar: the label left, the value right, the bar under them (the app's one progress bar). */
-function GpuBar({ label, text, value, max, heat }: { label: string; text: string; value: number; max: number; heat?: number }) {
+// the bar stays the accent colour: a keying job holds ~100 % and red means an error here (Marcy 2026-10-29)
+function GpuBar({ label, text, value, max }: { label: string; text: string; value: number; max: number }) {
   return (
-    <div className={`gpu-bar${heat === undefined ? "" : " heat"}`} style={heat === undefined ? undefined : heatStyle(heat)}>
+    <div className="gpu-bar">
       <div className="gpu-bar-head">
         <span>{label}</span>
         <span className="gpu-bar-value">{text}</span>
@@ -225,7 +226,7 @@ export function EnginePage(props: {
         <MainBlock title={g ? `Graphics card · ${g.name}` : "Graphics card"}>
           {g ? (
             <div className="gpu-card">
-              <GpuBar label="Usage" text={`${g.utilization}%`} value={g.utilization} max={100} heat={g.utilization / 100} />
+              <GpuBar label="Usage" text={`${g.utilization}%`} value={g.utilization} max={100} />
               <GpuBar label="Memory" text={`${gib(g.usedMb)} / ${gib(g.totalMb)}`} value={g.usedMb} max={g.totalMb} />
               {readings.length > 0 && (
                 <div className="gpu-readings">

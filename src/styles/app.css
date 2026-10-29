@@ -1525,9 +1525,6 @@ kbd {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-.gpu-bar.heat .bar > span {
-  background: color-mix(in srgb, var(--status-error) var(--heat), var(--accent));
-}
 .gpu-readings {
   display: flex;
   flex-wrap: wrap;
