@@ -12,18 +12,23 @@ import { GPU_POLL_MS, otherGpuUsers, readGpu, untilEnded } from "./gpu";
 import { expandPaths, frameDirLinearFor, probeClip, still, STILL_WIDTH, VIDEO_EXT, HINT_IMAGE_EXT } from "./media";
 import { clearJobTemps, Queue } from "./queue";
 import { checkRustEngine, loadSettings, saveSettings } from "./settings";
-import { effectivePath, findCli, findEngineFiles, findTrtBuilder, isInsideApp, modelSetVersion, windowTitle } from "./engineFind";
-import { addToPathList, APP_DIR, appDirs, engineBinName, isMac, isWin, ortLibrary, PLATFORM } from "./platform";
+import { chosenFirst, effectivePath, findCli, findEngineFiles, findTrtBuilder, isInsideApp, modelSetVersion, windowTitle } from "./engineFind";
+import { addToPathList, APP_DIR, appDirs, engineBinName, isMac, isWin, MODELS_DIR, ortLibrary, PLATFORM } from "./platform";
 import { HOMEBREW_DIRS, checkFfmpeg, ffmpegState, installFfmpeg, planFor, readOsRelease, wingetFfmpegDirs } from "./ffmpeg";
 import { PROGRESS_EVERY_MS } from "./updateFlow";
 import {
   RUNTIME_BYTES,
-  TRT_BYTES,
+  catalogFor,
+  chosenModelSet,
   freeBytes,
   installNeeds,
+  modelSetChoices,
+  modelSetsFor,
   runInstall,
   runTrtInstall,
   systemSupport,
+  trtBytesFor,
+  trtCatalogFor,
   trtNeeds,
   trtReady,
   trtSupported,
@@ -131,7 +136,14 @@ function enginePlaces() {
     data: appFolders.data,
   };
 }
-let engineFiles = findEngineFiles(enginePlaces());
+/** The model set chosen in Engine settings, as this system runs it (install.ts chosenModelSet; row 168). */
+const modelSet = () => chosenModelSet(settings.modelSet);
+/** What the lists offer: the chosen model set first when installed, so Automatic runs it. */
+function findFiles() {
+  const f = findEngineFiles(enginePlaces());
+  return { ...f, models: chosenFirst(f.models, join(enginePlaces().data, MODELS_DIR, modelSet())) };
+}
+let engineFiles = findFiles();
 /** The engine settings' keys, one per Engine-page list. */
 const RUST_KEYS = { binary: "engineBinary", models: "modelsDir", ort: "ortLibrary" } as const;
 const isRustWhat = (w: unknown): w is keyof typeof RUST_KEYS => w === "binary" || w === "models" || w === "ort";
@@ -152,7 +164,7 @@ let rustEngine = checkRustEngine(null, null);
 let ffmpeg: FfmpegState = { checked: false, ok: false, problem: null, command: "", canInstall: false, runHint: "", note: null, installing: false, installError: null };
 // the first-run install: what is missing, and its progress while it runs
 function installIdle(): InstallState {
-  const need = installNeeds(enginePlaces().data);
+  const need = installNeeds(enginePlaces().data, existsSync, catalogFor(modelSet()));
   const sys = systemSupport(PLATFORM, process.arch, existsSync, process.env);
   return {
     dir: enginePlaces().data,
@@ -165,6 +177,7 @@ function installIdle(): InstallState {
     gpuOk: sys.ok,
     gpuProblem: sys.problem,
     runtimeWhat: sys.runtime,
+    modelSets: modelSetChoices(enginePlaces().data),
     status: "idle",
     step: null,
     done: 0,
@@ -176,7 +189,7 @@ let install = installIdle();
 // the opt-in TensorRT parts: what is installed, for the setting's install box; progress while its install runs
 function trtParts(): Omit<TrtState, "status" | "step" | "done" | "total" | "error" | "built" | "prebuild" | "onDisk"> {
   const supported = trtSupported(PLATFORM);
-  const need = trtNeeds(enginePlaces().data);
+  const need = trtNeeds(enginePlaces().data, existsSync, trtCatalogFor(modelSet()));
   const paths = enginePaths();
   return {
     supported,
@@ -186,7 +199,7 @@ function trtParts(): Omit<TrtState, "status" | "step" | "done" | "total" | "erro
     needProvider: need.provider,
     needModels: need.models,
     bytes: need.bytes,
-    fullBytes: TRT_BYTES,
+    fullBytes: trtBytesFor(modelSet()),
   };
 }
 const trtIdle = (): Omit<TrtState, "built" | "prebuild" | "onDisk"> => ({ ...trtParts(), status: "idle", step: null, done: 0, total: 0, error: null });
@@ -212,7 +225,7 @@ async function recheckFfmpeg(): Promise<void> {
 }
 /** Re-check the engine's files (after a setting changed, or before the queue starts). */
 function recheckEngines(): void {
-  engineFiles = findEngineFiles(enginePlaces());
+  engineFiles = findFiles();
   const paths = enginePaths();
   rustEngine = checkRustEngine(paths.binary, paths.models, paths.ort);
   // the TensorRT parts follow the engine's files (a running install keeps its progress)
@@ -728,7 +741,7 @@ let storageReads = 0;
 async function measureStorage(): Promise<void> {
   await checkCacheDrive();
   const n = ++storageReads;
-  const items = await storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort);
+  const items = await storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort, PLATFORM, trtCatalogFor(modelSet()));
   const info = await cacheInfo(cacheDir, appFolders.cache, queue.jobs, mediaFile);
   if (n !== storageReads) return;
   storage = items;
@@ -969,7 +982,7 @@ function registerIpc(): void {
     };
     let error: string | null = null;
     try {
-      await (isTrt ? runTrtInstall(enginePlaces().data, deps) : runInstall(enginePlaces().data, deps));
+      await (isTrt ? runTrtInstall(enginePlaces().data, deps, trtCatalogFor(modelSet())) : runInstall(enginePlaces().data, deps, catalogFor(modelSet())));
     } catch (e) {
       // error: SHOWN — the install box (Engine page) and its task; a retry resumes the downloads
       // a stop is not an error: what arrived is kept and the next start resumes
@@ -991,6 +1004,16 @@ function registerIpc(): void {
     // switched on with its parts there: the background build; switched off: it stops
     if (settings.tensorrt) void prebuild.start(false);
     else prebuild.stop();
+    scheduleSend();
+  });
+  // the model set (Engine settings, ONNX Runtime engine; row 168): the setup installs it and Automatic runs it once it is
+  // there (the page then starts the setup's download when it isn't); a Models folder chosen by hand goes back to Automatic
+  handle(IPC.setModelSet, (_e, name: unknown) => {
+    if (installAbort || typeof name !== "string" || !modelSetsFor(PLATFORM).includes(name)) return;
+    settings = { ...settings, modelSet: name, modelsDir: null };
+    install = installIdle();
+    recheckEngines();
+    persist();
     scheduleSend();
   });
   handle(IPC.trtPrebuild, (_e, action: unknown) => {
@@ -1055,7 +1078,8 @@ function registerIpc(): void {
   });
   handle(IPC.openStorageFolder, async (_e, idIn: unknown) => {
     // only the app's own folders: the cache folder, or one Storage lists
-    const items = idIn === "cache-root" ? [] : await storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort);
+    const items =
+      idIn === "cache-root" ? [] : await storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort, PLATFORM, trtCatalogFor(modelSet()));
     // loop: NOT-WORTH — four items, once per click
     const p = idIn === "cache-root" ? cacheDir : items.find((i) => i.id === idIn)?.path;
     // loop: NOT-WORTH — one async stat per click
@@ -1074,7 +1098,9 @@ function registerIpc(): void {
   });
   handle(IPC.removeStorage, async (_e, idIn: unknown) => {
     // loop: NOT-WORTH — three items, once per click
-    const item = (await storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort)).find((i) => i.id === idIn);
+    const item = (await storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort, PLATFORM, trtCatalogFor(modelSet()))).find(
+      (i) => i.id === idIn,
+    );
     if (!item || !mainWindow || cacheMoving) return;
     // the queue, a download or the Console's corridorkey use these files
     const busy = () => queue.running || installAbort !== null || consoleGpu;
@@ -1107,7 +1133,7 @@ function registerIpc(): void {
     estimator.stop();
     const resumeBuild = prebuild.suspend();
     try {
-      await removeStorage(item, enginePlaces().data, cacheDir);
+      await removeStorage(item, enginePlaces().data, cacheDir, trtCatalogFor(modelSet()));
       await measureStorage();
       install = installIdle();
       trt = trtIdle();

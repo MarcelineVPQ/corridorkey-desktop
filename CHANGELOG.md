@@ -5,6 +5,13 @@
 - Windows and macOS: the app now tells you when a new version is out, like on Linux: the same signed check, channels
   and "1.0.0 Dev N is available" notice with **Not now**. **Download** opens that version's release page on GitHub in
   your browser; nothing is downloaded or installed by the app there (backlog row 180).
+- Choose the model set: Engine settings, ONNX Runtime engine, **Model set** offers 2.0.0-onnx.5 (the default, as
+  before) or 2.0.0-onnx.4 on Linux and Windows, each marked installed or with its download size. Picking one that isn't
+  on the computer downloads it with the setup's own checked, resumable download, next to the one you have; from then on
+  the Models folder's **Automatic** runs it (a Models folder chosen by hand goes back to Automatic when you pick a set).
+  TensorRT installs into the chosen set's folder: onnx.4 gets its own 2.0.0-onnx.4-trt, and onnx.5 keeps
+  2.0.0-onnx.4-trt as in dev.2 and dev.3 (onnx.5's own TensorRT set isn't measured yet). macOS names its one set,
+  2.0.0-onnx.5 with its Core ML set (there is no onnx.4 Core ML set) (backlog row 168).
 
 ## 1.0.0-dev.3
 

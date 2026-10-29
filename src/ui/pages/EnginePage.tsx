@@ -10,7 +10,7 @@ import { downloadingStatus, ENGINE_FAILED, NO_VRAM_HELD } from "../../shared/tex
 import { Accordion, Row, Section, type SectionFocus } from "../panel/Section";
 import { MainBlock, SplitView } from "../panel/SplitView";
 import { Stat } from "../JobView";
-import { gib } from "../format";
+import { gbBytes, gib } from "../format";
 import { buildSteps } from "../../shared/trt";
 import { FfmpegBox, InstallBox, installPct, TrtBox } from "../setup/SetupParts";
 import { PathText } from "../PathText";
@@ -100,6 +100,42 @@ export function EnginePage(props: {
       </Row>
     );
   };
+
+  // the model set (row 168): each one installed or its download; one not installed downloads with the setup's own download.
+  // A single set (macOS: no onnx.4 Core ML set) is named as text, not offered as a one-choice list.
+  const sets = inst.modelSets;
+  // loop: NOT-WORTH — one or two sets per render
+  const chosenSet = sets.find((x) => x.name === st.modelSet) ?? sets[0];
+  // loop: NOT-WORTH — as above
+  const setText = (x: (typeof sets)[number]) => `${x.name}${x === sets[0] ? " (default)" : ""} · ${x.installed ? "installed" : `${gbBytes(x.bytes)} download`}`;
+  const chooseSet = (name: string) => {
+    // loop: NOT-WORTH — as above
+    const x = sets.find((y) => y.name === name);
+    void window.ck.setModelSet(name).then(() => (x && !x.installed ? window.ck.startInstall() : undefined));
+  };
+  const downloading = inst.status === "running" || trt.status === "running";
+  const modelSetRow = (
+    <Row
+      label="Model set"
+      hint={
+        sets.length > 1 ? "Which version of the CorridorKey models the engine runs. One not on this computer yet downloads when you pick it." : "The version of the CorridorKey models the engine runs."
+      }
+      htmlFor={sets.length > 1 ? "engine-model-set" : undefined}
+    >
+      {sets.length > 1 ? (
+        <select id="engine-model-set" value={chosenSet.name} disabled={downloading} onChange={(e) => chooseSet(e.target.value)}>
+          {/* loop: NOT-WORTH — two sets per list */}
+          {sets.map((x) => (
+            <option key={x.name} value={x.name}>
+              {setText(x)}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <span>{setText(chosenSet)}</span>
+      )}
+    </Row>
+  );
 
   const main = (
     <div className="page-body">
@@ -207,6 +243,7 @@ export function EnginePage(props: {
         {() => (
           <>
             {pick("binary", "Engine program", st.engineBinary, state.system.engineBin)}
+            {modelSetRow}
             {pick("models", "Models folder", st.modelsDir, "The five CorridorKey ONNX networks (C-RADIO, MoGe, RVM, stage 1, stage 2)")}
             {pick("ort", "ONNX Runtime library", st.ortLibrary, `${state.system.ortLib}, the graphics card build`)}
           </>

@@ -46,6 +46,24 @@ describe("Rust engine setup", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  // BACKLOG row 168: the model set chosen in Engine settings
+  it("keeps the chosen model set, and the default for anything else", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ck-settings-"));
+    try {
+      const f = join(dir, "settings.json");
+      expect(loadSettings(f).modelSet).toBe("2.0.0-onnx.5");
+      writeFileSync(f, JSON.stringify({ modelSet: "2.0.0-onnx.4" }));
+      expect(loadSettings(f).modelSet).toBe("2.0.0-onnx.4");
+      // loop: NOT-WORTH — four bad values
+      for (const bad of ["2.0.0-onnx.3", "", 4, null]) {
+        writeFileSync(f, JSON.stringify({ modelSet: bad }));
+        expect(loadSettings(f).modelSet).toBe("2.0.0-onnx.5");
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("keeps only absolute, distinct Console write folders (SME review M1: validated on load)", () => {
     const dir = mkdtempSync(join(tmpdir(), "ck-settings-"));
     try {

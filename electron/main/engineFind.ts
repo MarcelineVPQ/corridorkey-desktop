@@ -161,6 +161,13 @@ export function windowTitle(modelsVersion: string | null): string {
   return `CorridorKey${v ? ` ${v}` : ""} — Rust + ONNX`;
 }
 
+/** The model sets found, the chosen set's folder first when it is there (Automatic runs it; row 168). */
+export function chosenFirst(found: EngineFileChoice[], dir: string): EngineFileChoice[] {
+  // loop: NOT-WORTH — one or two installed sets
+  const i = found.findIndex((f) => f.path === dir);
+  return i <= 0 ? found : [found[i], ...found.slice(0, i), ...found.slice(i + 1)];
+}
+
 /** What the engine runs with: the chosen path, else (Automatic) the first one found. */
 export function effectivePath(setting: string | null, found: EngineFileChoice[]): string | null {
   return setting ?? found[0]?.path ?? null;

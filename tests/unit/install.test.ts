@@ -7,8 +7,12 @@ import { deflateRawSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { downloadVerified } from "../../electron/main/download";
 import {
+  catalogFor,
+  chosenModelSet,
   COREML,
   coremlFor,
+  modelSetChoices,
+  modelSetsFor,
   installNeeds,
   keepFromWheel,
   keepTensorrt,
@@ -24,6 +28,8 @@ import {
   systemSupport,
   TENSORRT,
   TRT_BYTES,
+  trtBytesFor,
+  trtCatalogFor,
   trtNeeds,
   trtReady,
   trtSupported,
@@ -185,6 +191,74 @@ describe("first-run install", () => {
   });
 });
 
+// BACKLOG row 168: the user picks the model set (Engine settings, ONNX Runtime engine, "Model set")
+describe("choosing the model set", () => {
+  const has = (p: string[]) => (x: string) => p.includes(x);
+  const sum = (d: { size: number }[]) => d.reduce((n, x) => n + x.size, 0);
+
+  it("offers 2.0.0-onnx.5 (the default) and 2.0.0-onnx.4 on Linux and Windows, onnx.5 only on macOS", () => {
+    expect(modelSetsFor("linux")).toEqual(["2.0.0-onnx.5", "2.0.0-onnx.4"]);
+    expect(modelSetsFor("win32")).toEqual(["2.0.0-onnx.5", "2.0.0-onnx.4"]);
+    // there is no onnx.4 Core ML set
+    expect(modelSetsFor("darwin")).toEqual(["2.0.0-onnx.5"]);
+    expect(chosenModelSet("2.0.0-onnx.4", "linux")).toBe("2.0.0-onnx.4");
+    expect(chosenModelSet("2.0.0-onnx.4", "darwin")).toBe("2.0.0-onnx.5");
+    expect(chosenModelSet("2.0.0-onnx.3", "linux")).toBe("2.0.0-onnx.5");
+  });
+
+  it("downloads the chosen set's own files from its own release", () => {
+    expect(catalogFor("2.0.0-onnx.5", "linux")).toEqual({ runtime: RUNTIME, models: MODELS_CUDA, coreml: undefined });
+    expect(catalogFor("2.0.0-onnx.4", "win32")).toEqual({ runtime: RUNTIME_WIN, models: MODELS_ONNX4, coreml: undefined });
+    expect(catalogFor("2.0.0-onnx.4", "darwin")).toEqual({ runtime: RUNTIME_MAC, models: MODELS_CUDA, coreml: COREML });
+    for (const f of MODELS_ONNX4.files) expect(f.url).toBe(`https://github.com/MarcelineVPQ/corridorkey-desktop/releases/download/models-2.0.0-onnx.4/${f.file}`);
+    // the engine finds the set by its models.json (engineFind), the lists' last file
+    expect(MODELS_ONNX4.files.at(-1)?.file).toBe("models.json");
+  });
+
+  it("needs onnx.4 next to an installed onnx.5 (and the other way round), counting only the models", () => {
+    const rt = `/d/runtime/${RUNTIME.name}`;
+    const five = [rt, "/d/models/2.0.0-onnx.5"];
+    expect(installNeeds("/d", has(five), catalogFor("2.0.0-onnx.5", "linux"))).toEqual({ runtime: false, models: false, coreml: false, bytes: 0 });
+    expect(installNeeds("/d", has(five), catalogFor("2.0.0-onnx.4", "linux"))).toEqual({ runtime: false, models: true, coreml: false, bytes: sum(MODELS_ONNX4.files) });
+    expect(installNeeds("/d", has([rt, "/d/models/2.0.0-onnx.4"]), catalogFor("2.0.0-onnx.5", "linux")).bytes).toBe(sum(MODELS_CUDA.files));
+  });
+
+  it("lists each set this system offers as installed or with its download size", () => {
+    expect(modelSetChoices("/d", "linux", has(["/d/models/2.0.0-onnx.5"]))).toEqual([
+      { name: "2.0.0-onnx.5", installed: true, bytes: sum(MODELS_CUDA.files) },
+      { name: "2.0.0-onnx.4", installed: false, bytes: sum(MODELS_ONNX4.files) },
+    ]);
+    // macOS: the set and its Core ML set
+    expect(modelSetChoices("/d", "darwin", has([]))).toEqual([{ name: "2.0.0-onnx.5", installed: false, bytes: sum(MODELS_CUDA.files) + sum(COREML.files) }]);
+  });
+
+  it("installs TensorRT into the chosen set's folder, onnx.4 with 2.0.0-onnx.4-trt (onnx.5 keeps it until onnx.5-trt is measured)", () => {
+    const four = trtCatalogFor("2.0.0-onnx.4", "linux");
+    const five = trtCatalogFor("2.0.0-onnx.5", "linux");
+    expect(four.models).toBe(MODELS_ONNX4);
+    expect(four.trtModels.name).toBe("2.0.0-onnx.4-trt");
+    expect(five.models).toBe(MODELS_CUDA);
+    expect(five.trtModels.name).toBe("2.0.0-onnx.4-trt");
+    // onnx.5 copies C-RADIO's TensorRT weights from an installed onnx.4 folder; onnx.4 has them in its own folder
+    expect(five.older).toEqual([MODELS_ONNX4]);
+    expect(four.older).toEqual([]);
+    const rt = `/d/runtime/${RUNTIME.name}`;
+    const cradio = TENSORRT.models.files.find((f) => f.file === "ck2-cradio-trt-fp16.onnx.data")!;
+    const base = [rt, `${rt}/tensorrt_libs`, `${rt}/onnxruntime/capi/libonnxruntime_providers_tensorrt.so`];
+    expect(trtNeeds("/d", has([...base, "/d/models/2.0.0-onnx.4/ck2-cradio-fp16.onnx.data"]), four)).toEqual({
+      libs: false,
+      provider: false,
+      models: true,
+      bytes: sum(TENSORRT.models.files) - cradio.size,
+    });
+    // a TensorRT install in the other set's folder doesn't count for this one
+    expect(trtNeeds("/d", has([...base, "/d/models/2.0.0-onnx.5/models-tensorrt.json"]), four).models).toBe(true);
+    // the setting's hint: onnx.4's own folder gives the C-RADIO weights
+    expect(trtBytesFor("2.0.0-onnx.5")).toBe(TRT_BYTES);
+    expect(trtBytesFor("2.0.0-onnx.4")).toBe(TRT_BYTES - cradio.size);
+  });
+});
+
 describe("resumable SHA-256 download", () => {
   const body = Buffer.from("x".repeat(1000) + "y".repeat(1000));
   const sha256 = createHash("sha256").update(body).digest("hex");
@@ -278,6 +352,23 @@ describe("runInstall", () => {
     expect(asked).toEqual(["b.onnx"]);
     expect(readFileSync(join(data, "models", "m1", "a.onnx")).equals(files["a.onnx"])).toBe(true);
     expect(existsSync(join(data, "models", ".partial-m1"))).toBe(false);
+    rmSync(data, { recursive: true, force: true });
+  });
+
+  // row 168: a second set picked in Engine settings arrives beside the installed one, which stays as it is
+  it("installs a chosen second set next to the installed one, downloading only its files", async () => {
+    const data = mkdtempSync(join(tmpdir(), "ck-run-"));
+    mkdirSync(join(data, "runtime", "rt"), { recursive: true });
+    mkdirSync(join(data, "models", "m1"), { recursive: true });
+    writeFileSync(join(data, "models", "m1", "a.onnx"), "the installed set's own");
+    const other: Catalog = { ...catalog(), models: { ...catalog().models, name: "m0" } };
+    expect(installNeeds(data, existsSync, other)).toMatchObject({ runtime: false, models: true });
+    asked.length = 0;
+    await runInstall(data, deps(), other);
+    expect(asked).toEqual(["a.onnx", "b.onnx"]);
+    expect(readdirSync(join(data, "models")).sort()).toEqual(["m0", "m1"]);
+    expect(readFileSync(join(data, "models", "m1", "a.onnx"), "utf8")).toBe("the installed set's own");
+    expect(installNeeds(data, existsSync, other).models).toBe(false);
     rmSync(data, { recursive: true, force: true });
   });
 

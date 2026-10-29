@@ -2,13 +2,14 @@
 // (engineFind.ts dataDir) where the Engine page's lists find them. Nothing is hosted for the runtime:
 // ONNX Runtime and NVIDIA's CUDA / cuDNN libraries come from PyPI as published wheels, pinned here by
 // URL, size and SHA-256. The models come from this repository's `models-2.0.0-onnx.5` release on every system (macOS
-// adds its Core ML set, `models-2.0.0-onnx.5-coreml.1` (1280×1080, 1920×1080 and 4K), below; `2.0.0-onnx.4` is only recognised when installed, for the
-// TensorRT set's C-RADIO weights) (converted from Corridor Digital's checkpoint; CorridorKey licence). Every file is
+// adds its Core ML set, `models-2.0.0-onnx.5-coreml.1` (1280×1080, 1920×1080 and 4K), below; Linux and Windows users may
+// choose `2.0.0-onnx.4` instead in Engine settings, backlog row 168) (converted from Corridor Digital's checkpoint; CorridorKey licence). Every file is
 // checked before use.
 // After a Stop or a failure, pressing the button again resumes: finished files are checked offline and kept,
 // a partial one continues where it stopped. A set only appears in the lists once all of it is in place
 // (built in a `.partial-…` folder, then renamed; engineFind skips dot folders).
 import { gbBytes } from "../../src/shared/units";
+import type { ModelSetChoice } from "../../src/shared/types";
 import { lowerFirst, INSTALL_FIRST } from "../../src/shared/texts";
 import { DOWNLOADS_DIR, LIBRARY_FILE, MODELS_DIR, PLATFORM, RUNTIME_DIR } from "./platform";
 import { REPO } from "./updateFeed";
@@ -263,11 +264,11 @@ export const MODELS_CUDA = {
   ],
 };
 
-// 2.0.0-onnx.4, dev.1's set: not downloaded any more; an installed copy gives the TensorRT set its C-RADIO weights
-// (TRT_CATALOG.older below)
+// 2.0.0-onnx.4, dev.1's set: downloaded when a user chooses it (Linux and Windows, row 168); an installed copy also
+// gives onnx.5's TensorRT set its C-RADIO weights (trtCatalogFor's older)
 const OLD_MODEL_SET = "2.0.0-onnx.4";
 const oldModel = inRelease(OLD_MODEL_SET);
-/** 2.0.0-onnx.4's files, to recognise an installed copy. */
+/** 2.0.0-onnx.4's files. */
 export const MODELS_ONNX4 = {
   name: OLD_MODEL_SET,
   files: [
@@ -285,8 +286,17 @@ export const MODELS_ONNX4 = {
     oldModel("models.json", 395, "01f0d8e592d10a9459f72ce23ebfaded0b56168b6d838799a0dad8172fe9ebff"),
   ],
 };
-/** The model set every system downloads (macOS adds its Core ML set). */
+/** The default model set (macOS adds its Core ML set). */
 export const MODELS = MODELS_CUDA;
+
+/** The model sets a user can choose (Engine settings, ONNX Runtime engine, "Model set"; row 168), the default first. */
+export const MODEL_SETS: readonly string[] = [MODEL_SET, OLD_MODEL_SET];
+export const DEFAULT_MODEL_SET = MODEL_SET;
+const SET_FILES: Record<string, { name: string; files: Download[] }> = { [MODEL_SET]: MODELS_CUDA, [OLD_MODEL_SET]: MODELS_ONNX4 };
+/** The sets this system offers: macOS only onnx.5 (Core ML needs its own set, and onnx.4 has none). */
+export const modelSetsFor = (platform: NodeJS.Platform): string[] => (platform === "darwin" ? [MODEL_SET] : [...MODEL_SETS]);
+/** The set this system runs for a setting: one it doesn't offer (a settings file from another system) is the default. */
+export const chosenModelSet = (setting: string, platform: NodeJS.Platform = PLATFORM): string => (modelSetsFor(platform).includes(setting) ? setting : MODEL_SET);
 
 // macOS: the Core ML set (BACKLOG rows 59, 60), fixed-shape copies of the five networks for ONNX Runtime's Core ML provider
 // (engine-rs/export/coreml), one file per network and frame size (1280×1080 and 1920×1080 clips, padded 1152×1280 and
@@ -339,7 +349,20 @@ export interface Catalog {
   models: { name: string; files: Download[] };
   coreml?: { name: string; files: Download[] };
 }
-const CATALOG: Catalog = { runtime: runtimeFor(PLATFORM), models: MODELS, coreml: coremlFor(PLATFORM) };
+/** What the setup installs for the chosen model set. */
+export function catalogFor(set: string, platform: NodeJS.Platform = PLATFORM): Catalog {
+  return { runtime: runtimeFor(platform), models: SET_FILES[chosenModelSet(set, platform)], coreml: coremlFor(platform) };
+}
+const CATALOG: Catalog = catalogFor(MODEL_SET);
+
+/** Each set this system offers: installed (its folder is there), or its download (row 168, Engine settings). */
+export function modelSetChoices(data: string, platform: NodeJS.Platform = PLATFORM, exists: (p: string) => boolean = existsSync): ModelSetChoice[] {
+  // loop: NOT-WORTH — one or two sets, one stat each, per state refresh after an install or a choice
+  return modelSetsFor(platform).map((name) => {
+    const c = catalogFor(name, platform);
+    return { name, installed: exists(join(data, MODELS_DIR, name)), bytes: total(c.models.files) + (c.coreml ? total(c.coreml.files) : 0) };
+  });
+}
 
 /**
  * What is still to install: each set is there once its folder is (the rename is the last step); the Core ML set once
@@ -511,7 +534,8 @@ export const TRT_MODELS_LIST = "models-tensorrt.json";
 /** The wheel's licence folder, kept next to the libraries. */
 export const TRT_DIST_INFO = /^tensorrt_cu\d+_libs-[\d.]+\.dist-info$/;
 // dev.1's TensorRT set, kept for dev.2 (Marcy 2026-10-28): onnx.5's own, 2.0.0-onnx.5-trt, isn't measured against it
-// yet, and the model set picker that lets users choose comes in dev.3 (BACKLOG row 168)
+// yet. Since the model set choice (row 168) it is onnx.4's own TensorRT set, and onnx.5's until onnx.5-trt is measured
+// (trtCatalogFor)
 const TRT_MODEL_SET = "2.0.0-onnx.4-trt";
 const trtModel = inRelease(TRT_MODEL_SET);
 export const TENSORRT = {
@@ -566,8 +590,18 @@ export interface TrtCatalog extends Catalog {
   // earlier model sets whose files a TensorRT file may equal, copied from their folder when it is still installed
   older?: { name: string; files: Download[] }[];
 }
-// 2.0.0-onnx.4 (dev.1's set on Linux): its ck2-cradio-fp16.onnx.data is the TensorRT C-RADIO's weights, 1.72 GB
-const TRT_CATALOG: TrtCatalog = { ...CATALOG, libs: TENSORRT.libs, trtModels: TENSORRT.models, older: [MODELS_ONNX4] };
+// each model set's TensorRT set, installed into that set's folder (row 168): onnx.4 → 2.0.0-onnx.4-trt; onnx.5 keeps
+// it too (Marcy's dev.2 pin above) until 2.0.0-onnx.5-trt is measured
+const TRT_SETS: Record<string, { name: string; files: Download[] }> = { [MODEL_SET]: TENSORRT.models, [OLD_MODEL_SET]: TENSORRT.models };
+/**
+ * What the TensorRT install puts on the chosen set. onnx.5 copies C-RADIO's TensorRT weights (onnx.4's
+ * ck2-cradio-fp16.onnx.data, 1.72 GB) from an installed 2.0.0-onnx.4 folder; onnx.4 has them in its own folder.
+ */
+export function trtCatalogFor(set: string, platform: NodeJS.Platform = PLATFORM): TrtCatalog {
+  const c = catalogFor(set, platform);
+  return { ...c, libs: TENSORRT.libs, trtModels: TRT_SETS[c.models.name], older: c.models.name === MODEL_SET ? [MODELS_ONNX4] : [] };
+}
+const TRT_CATALOG: TrtCatalog = trtCatalogFor(MODEL_SET);
 
 /** Where the TensorRT parts go: into the installed runtime and model set. */
 export function trtPaths(data: string, c: Catalog = TRT_CATALOG) {
@@ -614,10 +648,13 @@ export function trtNeeds(data: string, exists: (p: string) => boolean = existsSy
   return { libs, provider, models, bytes: (libs ? c.libs.size : 0) + (provider ? ortWheel(c).size : 0) + (models ? modelBytes : 0) };
 }
 
-// loop: NOT-WORTH — sixteen model files, once at load
-const TRT_MODEL_DOWNLOAD = TENSORRT.models.files.filter((f) => !localTwins(f, CATALOG, "").length);
-/** The TensorRT download on top of a 1.0 runtime and model set (what the setting's hint names; less where an older set is still installed). */
-export const TRT_BYTES = TENSORRT.libs.size + total(TRT_MODEL_DOWNLOAD);
+/** The TensorRT download on top of a 1.0 runtime and the chosen set (what the setting's hint names; less where an older set is still installed). */
+export function trtBytesFor(set: string): number {
+  const c = trtCatalogFor(set);
+  // loop: NOT-WORTH — sixteen model files, per state refresh (the set's own files only: older sets may be gone)
+  return c.libs.size + total(c.trtModels.files.filter((f) => !localTwins(f, { ...c, older: [] }, "").length));
+}
+export const TRT_BYTES = trtBytesFor(MODEL_SET);
 
 /**
  * The TensorRT parts are there for the files the engine runs with (its ONNX Runtime library and models folder): only

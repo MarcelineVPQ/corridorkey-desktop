@@ -112,7 +112,12 @@ says they are installed. **TensorRT** (Linux, NVIDIA): **Use TensorRT (NVIDIA)**
 TensorRT libraries, ONNX Runtime's TensorRT part and the TensorRT models); until they are installed, jobs run on CUDA.
 Each resolution range is built once, in the background, and listed there. **ffmpeg** says whether ffmpeg is
 installed and offers to install it. **ONNX Runtime engine** shows the engine program, the models folder and the ONNX
-Runtime library the app uses, each with the copies it found, and lets you pick another.
+Runtime library the app uses, each with the copies it found, and lets you pick another. Its **Model set** picks the
+version of the CorridorKey models: 2.0.0-onnx.5 (the default) or 2.0.0-onnx.4 on Linux and Windows, each marked
+installed or with its download size. One that isn't installed downloads when you pick it (the setup's own download:
+progress, stop and resume, every file checked), next to the set you have, and the models folder's Automatic then
+runs it; a models folder picked by hand goes back to Automatic. TensorRT installs into the chosen set's folder. On a
+Mac it names the one set, 2.0.0-onnx.5 (the Core ML models exist only for it).
 
 ## Console
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { effectivePath, findCli, findEngineFiles, findTrtBuilder, isInsideApp, windowTitle } from "../../electron/main/engineFind";
+import { chosenFirst, effectivePath, findCli, findEngineFiles, findTrtBuilder, isInsideApp, windowTitle } from "../../electron/main/engineFind";
 import { addToPathList, appDirs } from "../../electron/main/platform";
 
 const dataDir = (env: NodeJS.ProcessEnv, home: string, platform: NodeJS.Platform) => appDirs(env, home, platform).data;
@@ -45,6 +45,19 @@ describe("finding the engine's files", () => {
       { path: "/d/runtime/ort-1.31.0/onnxruntime/capi/libonnxruntime.so.1.31.0", label: "ONNX Runtime 1.31.0 (graphics card)" },
       { path: "/d/runtime/ort-1.9.0/onnxruntime/capi/libonnxruntime.so.1.9.0", label: "ONNX Runtime 1.9.0 (CPU only)" },
     ]);
+  });
+
+  // BACKLOG row 168: Automatic runs the model set chosen in Engine settings once it is installed
+  it("puts the chosen model set first (Automatic), the others after in their order", () => {
+    const sets = [
+      { path: "/d/models/2.0.0-onnx.5", label: "2.0.0-onnx.5 (fp16)" },
+      { path: "/d/models/2.0.0-onnx.4", label: "2.0.0-onnx.4 (fp16)" },
+      { path: "/d/models/2.0.0-onnx.3", label: "2.0.0-onnx.3 (fp16)" },
+    ];
+    expect(chosenFirst(sets, "/d/models/2.0.0-onnx.4").map((s) => s.path)).toEqual(["/d/models/2.0.0-onnx.4", "/d/models/2.0.0-onnx.5", "/d/models/2.0.0-onnx.3"]);
+    expect(chosenFirst(sets, "/d/models/2.0.0-onnx.5")).toEqual(sets);
+    // not installed (yet): the newest found, as before
+    expect(effectivePath(null, chosenFirst(sets.slice(0, 1), "/d/models/2.0.0-onnx.4"))).toBe("/d/models/2.0.0-onnx.5");
   });
 
   it("never offers an install still in progress (.partial-…)", () => {

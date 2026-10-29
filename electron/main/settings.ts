@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import type { CheckoutCheck, Settings } from "../../src/shared/types";
 import { sanitizeAppearance, sanitizeOptions, vramLimit } from "./validate";
 import { sanitizeTrtSizes } from "../../src/shared/trt";
+import { DEFAULT_MODEL_SET, MODEL_SETS } from "./install";
 import { READ_ONLY, VALUE_MAX, VAR_NAME } from "../../src/shared/console/vars";
 
 export function loadSettings(file: string): Settings {
@@ -26,6 +27,8 @@ export function loadSettings(file: string): Settings {
     engineBinary: path(saved.engineBinary),
     modelsDir: path(saved.modelsDir),
     ortLibrary: path(saved.ortLibrary),
+    // one of the sets install.ts offers (row 168), else the default
+    modelSet: typeof saved.modelSet === "string" && MODEL_SETS.includes(saved.modelSet) ? saved.modelSet : DEFAULT_MODEL_SET,
     tensorrt: saved.tensorrt === true,
     vramLimitGb: vramLimit(saved.vramLimitGb),
     // the sizes TensorRT builds for (row 56); absent: 4K DCI and HD, what the background build always did

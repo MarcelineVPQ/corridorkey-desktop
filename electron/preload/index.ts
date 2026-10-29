@@ -21,6 +21,7 @@ const api: CorridorKeyApi = {
   startInstall: (part) => ipcRenderer.invoke(IPC.startInstall, part),
   stopInstall: () => ipcRenderer.invoke(IPC.stopInstall),
   setTensorrt: (on) => ipcRenderer.invoke(IPC.setTensorrt, on),
+  setModelSet: (name) => ipcRenderer.invoke(IPC.setModelSet, name),
   trtPrebuild: (action) => ipcRenderer.invoke(IPC.trtPrebuild, action),
   trtSize: (action, size) => ipcRenderer.invoke(IPC.trtSize, action, size),
   measureStorage: () => ipcRenderer.invoke(IPC.measureStorage),

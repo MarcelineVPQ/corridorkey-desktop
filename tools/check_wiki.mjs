@@ -294,6 +294,7 @@ export const SETTINGS = {
   outputRoot: { label: "Where results go", page: "Your-First-Key" },
   engineBinary: { label: "Engine program", page: "Troubleshooting" },
   modelsDir: { label: "Models folder", page: "Troubleshooting" },
+  modelSet: { label: "Model set", page: "Your-First-Key" },
   ortLibrary: { label: "ONNX Runtime library", page: "Troubleshooting" },
   tensorrt: { label: "Use TensorRT", page: "TensorRT" },
   vramLimitGb: { label: "Memory limit", page: "Graphics-Memory-and-the-Window" },

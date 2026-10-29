@@ -20,6 +20,10 @@ graphics. Jobs there run on CUDA.
    - ONNX Runtime's TensorRT part, from pypi.org (only if your runtime was installed before 1.0);
    - the TensorRT models: the same CorridorKey networks, prepared for TensorRT, from this project's GitHub releases.
      The largest file is copied from the models you already have instead of being downloaded.
+     They go into the folder of the model set chosen in Engine settings, **Model set**: 2.0.0-onnx.4 gets its own
+     TensorRT set, 2.0.0-onnx.4-trt; 2.0.0-onnx.5 uses the same 2.0.0-onnx.4-trt for now (onnx.5's own TensorRT set
+     isn't measured yet). After switching sets, press **Download and install** again: the TensorRT models go into the
+     new set's folder (the libraries stay), and until then jobs run on CUDA.
 
    Like the first install it shows its progress, can be stopped and resumed, and checks every file's SHA-256. The
    button shows the size; the download and disk sizes are in the README's

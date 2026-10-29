@@ -16,8 +16,9 @@ Your clips, their settings and their results: the rest of this page.
 ### Engine
 
 The CorridorKey engine, its files and the graphics card: the **Engine program**, the **Models folder** and the
-**ONNX Runtime library** in use (each **Automatic**, the newest found, or one you choose), ffmpeg, and on Linux
-[TensorRT](TensorRT). [Troubleshooting](Troubleshooting#the-engine) explains its messages.
+**ONNX Runtime library** in use (each **Automatic**, the newest found, or one you choose), the **Model set** (2.0.0-onnx.5,
+the default, or 2.0.0-onnx.4 on Linux and Windows: one not installed downloads when you pick it, and Automatic then
+runs it; a Mac has only 2.0.0-onnx.5), ffmpeg, and on Linux [TensorRT](TensorRT). [Troubleshooting](Troubleshooting#the-engine) explains its messages.
 
 ### Console
 

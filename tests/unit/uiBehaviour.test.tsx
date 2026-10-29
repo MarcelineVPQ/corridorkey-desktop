@@ -17,7 +17,7 @@ import { EnginePage } from "../../src/ui/pages/EnginePage";
 import { SettingsPage } from "../../src/ui/pages/SettingsPage";
 import { ConsolePage } from "../../src/ui/pages/ConsolePage";
 import { STAGE_TEXT } from "../../src/ui/format";
-import { appState, job, settings, updateState } from "./fixtures";
+import { appState, installState, job, settings, updateState } from "./fixtures";
 import { App } from "../../src/ui/App";
 import { dots, tasksOf } from "../../src/shared/tasks";
 import { UpdateBanner } from "../../src/ui/UpdateBanner";
@@ -310,6 +310,55 @@ describe("readouts", () => {
     expect(screen.getByText("ONNX Runtime (version not reported) · cuda")).toBeTruthy();
     expect(screen.queryByText(/\?/)).toBeNull();
     expect(screen.getByText(/stage1 found by the engine$/)).toBeTruthy();
+  });
+});
+
+// BACKLOG row 168: Engine settings, ONNX Runtime engine, "Model set"
+describe("choosing the model set", () => {
+  const sets = [
+    { name: "2.0.0-onnx.5", installed: true, bytes: 2.5e9 },
+    { name: "2.0.0-onnx.4", installed: false, bytes: 3.3e9 },
+  ];
+  const page = (state: AppState) => {
+    localStorage.setItem("ck.open.engine", JSON.stringify("onnx"));
+    render(<EnginePage state={state} panelShown={true} narrow={false} glass={false} focus={null} sectionTasks={{}} hidePanel={() => {}} openSetup={() => {}} />);
+  };
+
+  it("lists each set as installed or with its download size; picking one not installed downloads it", async () => {
+    const ck = mockCk({ setModelSet: () => Promise.resolve(), startInstall: () => Promise.resolve() });
+    page(appState({ install: installState({ modelSets: sets }) }));
+    const select = screen.getByRole<HTMLSelectElement>("combobox", { name: "Model set" });
+    // loop: NOT-WORTH — two options
+    expect([...select.options].map((o) => o.textContent)).toEqual(["2.0.0-onnx.5 (default) · installed", "2.0.0-onnx.4 · 3.3 GB download"]);
+    expect(select.value).toBe("2.0.0-onnx.5");
+    fireEvent.change(select, { target: { value: "2.0.0-onnx.4" } });
+    expect(ck.setModelSet).toHaveBeenCalledWith("2.0.0-onnx.4");
+    await waitFor(() => expect(ck.startInstall).toHaveBeenCalledWith());
+  });
+
+  it("switches to an installed set without a download", async () => {
+    const ck = mockCk({ setModelSet: () => Promise.resolve() });
+    page(appState({ settings: settings({ modelSet: "2.0.0-onnx.4" }), install: installState({ modelSets: [sets[0], { ...sets[1], installed: true }] }) }));
+    const select = screen.getByRole<HTMLSelectElement>("combobox", { name: "Model set" });
+    expect(select.value).toBe("2.0.0-onnx.4");
+    fireEvent.change(select, { target: { value: "2.0.0-onnx.5" } });
+    await waitFor(() => expect(ck.setModelSet).toHaveBeenCalledWith("2.0.0-onnx.5"));
+    expect(ck.startInstall).not.toHaveBeenCalled();
+  });
+
+  it("can't be changed while a download runs", () => {
+    mockCk();
+    page(appState({ install: installState({ modelSets: sets, status: "running" }) }));
+    expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Model set" }).disabled).toBe(true);
+  });
+
+  it("on macOS names the one set (no onnx.4 Core ML set) as text, not a one-choice list", () => {
+    mockCk();
+    const state = appState({ install: installState({ modelSets: [sets[0]] }) });
+    page({ ...state, system: { ...state.system, platform: "darwin" } });
+    expect(screen.queryByRole("combobox", { name: "Model set" })).toBeNull();
+    expect(screen.getByText("Model set")).toBeTruthy();
+    expect(screen.getByText("2.0.0-onnx.5 (default) · installed")).toBeTruthy();
   });
 });
 

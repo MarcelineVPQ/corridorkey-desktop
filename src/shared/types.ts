@@ -342,6 +342,9 @@ export interface Settings {
   engineBinary: string | null;
   modelsDir: string | null;
   ortLibrary: string | null;
+  // the model set the setup installs and Automatic runs (Engine settings, ONNX Runtime engine, "Model set"; backlog
+  // row 168): install.ts MODEL_SETS, the default when unknown
+  modelSet: string;
   // run jobs on TensorRT (the Rust engine, Linux; off by default): sent to the engine only once its parts are installed
   tensorrt: boolean;
   // the graphics memory limit new clips start with (GiB; null = Auto), backlog row 43
@@ -415,11 +418,21 @@ export interface InstallState {
   gpuProblem: string | null;
   // the runtime download, as the setup page describes it (CUDA libraries, or Core ML on macOS)
   runtimeWhat: string;
+  // the model sets this system offers (the default first): each installed, or its download size (backlog row 168)
+  modelSets: ModelSetChoice[];
   status: InstallStatus;
   step: string | null;
   done: number;
   total: number;
   error: string | null;
+}
+
+/** A model set Engine settings offers (install.ts modelSetChoices). */
+export interface ModelSetChoice {
+  name: string;
+  installed: boolean;
+  // its download (with the Core ML set on macOS)
+  bytes: number;
 }
 
 // The opt-in TensorRT parts (electron/main/install.ts, after "TensorRT"): NVIDIA's libraries, ONNX Runtime's
@@ -711,6 +724,8 @@ export interface CorridorKeyApi {
   stopInstall(): Promise<void>;
   // the TensorRT setting (Linux; ignored elsewhere)
   setTensorrt(on: boolean): Promise<void>;
+  // the model set (one install.ts offers on this system; refused while a download runs); the Models folder goes back to Automatic
+  setModelSet(name: string): Promise<void>;
   // the background TensorRT build (Engine settings, TensorRT): start it (or again), or stop it
   trtPrebuild(action: "start" | "stop"): Promise<void>;
   // choose a size to build for (it builds now), or remove one: its range's built engines are deleted (asked first)
