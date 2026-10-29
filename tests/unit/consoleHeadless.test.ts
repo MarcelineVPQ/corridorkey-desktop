@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { headlessArgs, onStopFile, Printer, refusal, STOP_EVERY_MS, userDataDir } from "../../electron/main/console/headless";
-import { bundledCliPath, headlessLaunch } from "../../electron/main/headlessFlag";
+import { bundledCliPath, headlessLaunch, staleHeadlessSessions } from "../../electron/main/headlessFlag";
 import type { ConsoleBlock } from "../../src/shared/types";
 
 const block = (extra: Partial<ConsoleBlock>): ConsoleBlock => ({
@@ -76,6 +76,15 @@ describe("corridorkey run's script runner", () => {
       ["out", "a.mov  2.0 KiB"],
       ["err", "run nightly.ckcmd: failed (exit 4)"],
     ]);
+  });
+
+  it("sweeps headless session folders left behind (Windows keeps one when Chromium holds it at exit), a day old or more", () => {
+    const day = 24 * 3600 * 1000;
+    const now = 10 * day;
+    const ages: Record<string, number> = { "ck-headless-old": now - 2 * day, "ck-headless-now": now - 60_000, "other-old": now - 9 * day, "ck-headless-day": now - day };
+    expect(staleHeadlessSessions(Object.keys(ages), (n) => ages[n], now)).toEqual(["ck-headless-old", "ck-headless-day"]);
+    // a folder that can't be read (gone meanwhile) is left out
+    expect(staleHeadlessSessions(["ck-headless-gone"], () => null, now)).toEqual([]);
   });
 
   it("stops once when ck-cli's stop file appears (Windows Ctrl+C: the app never read a stdin line there)", () => {

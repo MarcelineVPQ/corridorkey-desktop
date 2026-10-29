@@ -192,9 +192,14 @@ export async function runHeadless(argv: string[], cli: string, pkg: { name: stri
   process.on("SIGINT", () => c.cancel());
   process.on("SIGTERM", () => c.cancel());
   const stopFile = process.env.CK_HEADLESS_STOP?.startsWith("file:") ? process.env.CK_HEADLESS_STOP.slice("file:".length) : "";
-  if (stopFile) onStopFile(stopFile, () => c.cancel());
+  // a stop before the script exists (Ctrl+C in the first second: a cancel then has nothing to stop) waits for it
+  let started = false;
+  let early = false;
+  if (stopFile) onStopFile(stopFile, () => (started ? c.cancel() : (early = true)));
   // loop: NOT-WORTH — starts the script [bounded: its checks; the script itself is waited for below]
   const b = await c.run(`run ${args.keepGoing ? "--keep-going " : ""}${quoteArg(resolve(args.file), { windows: PLATFORM === "win32" })}`);
+  started = true;
+  if (early) c.cancel();
   // loop: NOT-WORTH — waits for the script's block to end [bounded: the script's own end; SIGINT / SIGTERM stop it]
   while (!ended.has(b.id)) await new Promise<void>((r) => (wake = r));
   return statusOf(ended.get(b.id)!);

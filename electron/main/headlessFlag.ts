@@ -45,3 +45,20 @@ export function headlessLaunch(argv: readonly string[], defaultApp: boolean, cli
 export function bundledCliPath(resourcesPath: string, platform: NodeJS.Platform): string {
   return platform === "win32" ? win32.join(resourcesPath, "engine", "corridorkey.exe") : posix.join(resourcesPath, "engine", "corridorkey");
 }
+
+/** The prefix of a headless run's own Chromium folder in the temp folder (boot.ts). */
+export const HEADLESS_SESSION_PREFIX = "ck-headless-";
+
+/**
+ * Headless session folders a day old or more (`mtimeMs`: null when one can't be read): on Windows a run leaves its
+ * folder when Chromium still holds it at exit (boot.ts lets the exit go first), so the next run sweeps them. A day:
+ * never a run still going, which keeps writing into its own.
+ */
+export function staleHeadlessSessions(names: string[], mtimeMs: (name: string) => number | null, now: number): string[] {
+  // loop: NOT-WORTH — the temp folder's entries, once per headless start
+  return names.filter((n) => {
+    if (!n.startsWith(HEADLESS_SESSION_PREFIX)) return false;
+    const t = mtimeMs(n);
+    return t !== null && now - t >= 24 * 3600 * 1000;
+  });
+}

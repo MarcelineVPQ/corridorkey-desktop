@@ -2632,9 +2632,12 @@ describe("SME reviews: structured pipes between the Console's own commands", () 
 
 describe("SME reviews: watch", () => {
   /** a turn of the event loop at a time (setImmediate isn't faked) until `ok`, at most 200 */
+  // by time, not by turns: a slow CI runner's file reads took more than the 200 turns this used to allow, and the
+  // check after it then failed (Linux CI 2026-10-28, three times)
   const until = async (ok: () => boolean) => {
-    // loop: NOT-WORTH — a test's wait [bounded: 200 turns]
-    for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setImmediate(r));
+    const end = Date.now() + 5000;
+    // loop: NOT-WORTH — a test's wait [bounded: 5 s]
+    while (!ok() && Date.now() < end) await new Promise((r) => setImmediate(r));
   };
 
   it("row 128: watch -n 2 dir runs dir again in its one block every 2 s, the newest output in place, until Ctrl+C (which ends the wait at once)", async () => {
@@ -2685,8 +2688,13 @@ describe("SME reviews: watch", () => {
               .join() === lines.join(),
         );
       await ran(1, ["a.1001.exr"]);
-      await vi.advanceTimersByTimeAsync(PUSH_EVERY_MS);
-      const shownLines = () => page.blocks.find((x) => x.id === b.id)!.lines.map((l) => l.text);
+      const shownLines = () => page.blocks.find((x) => x.id === b.id)?.lines.map((l) => l.text) ?? [];
+      // the page gets the block on the pusher's next tick
+      const pushed = async (lines: string[]) => {
+        // loop: NOT-WORTH — a test's wait [bounded: 50 push ticks]
+        for (let i = 0; i < 50 && shownLines().join() !== lines.join(); i++) await vi.advanceTimersByTimeAsync(PUSH_EVERY_MS);
+      };
+      await pushed(["a.1001.exr"]);
       expect(shownLines()).toEqual(["a.1001.exr"]);
       // run 2 prints more lines than run 1, none of them run 1's
       rmSync(join(d, "a.1001.exr"));
@@ -2694,13 +2702,13 @@ describe("SME reviews: watch", () => {
       writeFileSync(join(d, "c.1001.exr"), "x");
       await vi.advanceTimersByTimeAsync(2000);
       await ran(2, ["b.1001.exr", "c.1001.exr"]);
-      await vi.advanceTimersByTimeAsync(PUSH_EVERY_MS);
+      await pushed(["b.1001.exr", "c.1001.exr"]);
       expect(shownLines()).toEqual(["b.1001.exr", "c.1001.exr"]);
       // run 3 prints fewer
       rmSync(join(d, "b.1001.exr"));
       await vi.advanceTimersByTimeAsync(2000);
       await ran(3, ["c.1001.exr"]);
-      await vi.advanceTimersByTimeAsync(PUSH_EVERY_MS);
+      await pushed(["c.1001.exr"]);
       expect(shownLines()).toEqual(["c.1001.exr"]);
       c.cancel();
       await until(() => blocks.get(b.id)!.state !== "running");

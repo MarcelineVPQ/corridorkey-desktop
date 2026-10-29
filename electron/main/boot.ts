@@ -3,10 +3,10 @@
 // the app as Node, so the runAsNode fuse is off). Decided before anything of the window's starts: no single-instance
 // lock, no settings migration, no IPC. The page can't reach this: it is the process's own command line.
 import { app } from "electron";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bundledCliPath, headlessLaunch } from "./headlessFlag";
+import { bundledCliPath, HEADLESS_SESSION_PREFIX, headlessLaunch, staleHeadlessSessions } from "./headlessFlag";
 import { PLATFORM } from "./platform";
 
 /** A path with its links resolved (a CLI started through a link on PATH), else as it is. */
@@ -31,8 +31,25 @@ else {
   // no Dock icon, no graphics card (rule 11), and Chromium's own files in a folder of its own, not the window's
   app.dock?.hide();
   app.disableHardwareAcceleration();
+  // earlier runs' folders Windows kept (Chromium held them at exit): swept, a day old or more (BACKLOG row 175)
+  try {
+    const tmp = tmpdir();
+    // loop: NOT-WORTH — one readdir of the temp folder and a stat per leftover, once per headless start
+    const stale = staleHeadlessSessions(readdirSync(tmp), (n) => statSync(join(tmp, n), { throwIfNoEntry: false })?.mtimeMs ?? null, Date.now());
+    // loop: NOT-WORTH — the few leftovers, removed once
+    for (const n of stale) {
+      try {
+        // loop: NOT-WORTH — one leftover's few files
+        rmSync(join(tmp, n), { recursive: true, force: true });
+      } catch {
+        // error: NOT-WORTH — one still held stays for the next run; the others still go
+      }
+    }
+  } catch {
+    // error: NOT-WORTH — an unreadable temp folder: nothing swept; the script runs either way
+  }
   // loop: NOT-WORTH — one local mkdir at start, before anything else runs
-  const session = mkdtempSync(join(tmpdir(), "ck-headless-"));
+  const session = mkdtempSync(join(tmpdir(), HEADLESS_SESSION_PREFIX));
   app.setPath("sessionData", session);
   const end = (code: number) => {
     try {
