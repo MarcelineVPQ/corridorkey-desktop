@@ -18,8 +18,8 @@ mode and outputs, and watch real progress: frames written, the temporal window t
 chose from your free graphics memory, and stills of the results.
 
 Status: 1.0 is almost ready. The development builds (1.0.0-dev.N, on the Development update channel) key on Linux and
-Windows with an NVIDIA graphics card, and from 1.0.0-dev.2 on Apple Silicon Macs through Core ML, for 1280×1080 and
-1920×1080 clips (macOS, honestly, below).
+Windows with an NVIDIA graphics card, and on Apple Silicon Macs through Core ML: from 1.0.0-dev.2 for 1280×1080 and
+1920×1080 clips, and from 1.0.0-dev.3 at 4K too (macOS, honestly, below).
 
 ## Get started
 
@@ -41,7 +41,10 @@ What your computer needs is under Requirements.
 - **Installs itself, no Python.** One file to download; the app fetches the rest (4.03 GB on Linux, 3.81 GB on
    Windows, 5.74 GB on macOS), every file SHA-256 checked, less than half the original's install (Install size).
 - **One engine, every platform.** Rust on ONNX Runtime: NVIDIA (CUDA) on Linux and Windows, TensorRT on Linux, Core ML
-   on Apple Silicon (from dev.2, 1280×1080 and 1920×1080 clips; 4K from dev.3).
+   on Apple Silicon (1280×1080, 1920×1080 and, from dev.3, 4K clips).
+- **A real Mac app.** From 1.0.0-dev.3, 4K keys on a base 16 GB M6 Mac mini with its mattes within 1/255 of an RTX
+  5080's on every pixel; the disk image and the app are signed and notarized by Apple, and every release is keyed
+  through the installed app on that Mac before it ships (macOS, honestly).
 - **Budget cards welcome.** The memory planner picks the largest temporal window your card holds; measured down to an
    8 GB RTX 2070 SUPER on a 2011 Core i7 (Requirements; Speed, test machines).
 - **Studio outputs.** EXR named the studio way with the matte in alpha, lossless 10-bit H.264 or DNxHR 444, and 10-
@@ -106,11 +109,10 @@ Marcy ([MarcelineVPQ](https://github.com/MarcelineVPQ))
 Everything planned lives in one list, [docs/BACKLOG.md](docs/BACKLOG.md), each item with its status. In short
 (row numbers in brackets):
 
-**Working on now: the Mac (Apple Silicon), after its first build in dev.2.** The Core ML engine keys 1280×1080 and 1920×1080 clips on an M6 Mac mini
-(CPU + GPU, 16 GB; model set onnx.5-coreml: alpha MAE 2.1-2.5e-5 against CUDA's mattes, 0.002 % of pixels over
-1/255 or none, 2026-10-28), and the setup installs the Core ML models. 4K is built for dev.3 [60]: on the same 16 GB mini it
-keys 04_5d at 0.38 fps, its mattes within 1/255 of CUDA's. Next: 4K at 1 fps on that mini [177], and self-update on the Mac
-[57].
+**The Mac, now at 4K (dev.3).** The Core ML engine keys 1280×1080, 1920×1080 and 4K clips on an M6 Mac mini (CPU +
+GPU, 16 GB; mattes within 1/255 of CUDA's, 2026-10-28; 4K at 0.38 fps [60]), the disk image is signed and notarized,
+and every release is keyed through the installed app on that Mac. Next: 4K at 1 fps on that mini [177], and self-update
+on the Mac [57].
 
 **Next, in dev.3:** choosing the model set in Engine settings (onnx.5 or onnx.4, with the matching TensorRT set)
 [168].
@@ -151,7 +153,8 @@ none of them changes what a user sees today.
   supported, and without an NVIDIA card nothing falls back to the CPU: a job stops with "CorridorKey needs an NVIDIA
   graphics card with CUDA." (The engine has a MIGraphX path for AMD cards on Linux, `--device migraphx`: untested on
   real hardware, and the app doesn't offer it; docs/AMD.md.)
-- macOS 14 or newer on Apple Silicon (M1 or newer; the disk image, from 1.0.0-dev.2; 1280×1080 and 1920×1080 clips). Intel
+- macOS 14 or newer on Apple Silicon (M1 or newer; the disk image, from 1.0.0-dev.2; 1280×1080 and 1920×1080 clips, and
+  4K from 1.0.0-dev.3; 16 GB keys 4K, tight). Intel
   Macs aren't supported.
 - Nothing else to set up: the engine comes with the app, and on first start the setup downloads the GPU runtime and
   the CorridorKey models (a 4.03 GB download on Linux, 3.81 GB on Windows, 5.74 GB on macOS, once). If `ffmpeg` is
@@ -199,8 +202,9 @@ instead of CUDA. Where that stands:
   tight: 0.8 GB swapped), mattes within 1/255 of CUDA's on every pixel.
 - **Proven on a real Mac** (row 24): GitHub's runners are virtual Macs without the GPU or the Neural Engine, so Mac
   keying is measured on a real Apple Silicon Mac (an M6 Mac mini, `tools/mac_gate.sh`): mattes within fp16 rounding of
-  CUDA on the same clips, and the speed. macOS is in 1.0 only if that gate passes; otherwise 1.0 is Linux and Windows
-  and the Mac follows in 1.1.
+  CUDA on the same clips, and the speed. From dev.3 every release is also keyed through the installed app's queue on
+  that Mac (`tools/mac_app_gate.sh`: Gatekeeper's verdicts, the setup's download, one clip on Core ML). macOS is in
+  1.0 only if those gates pass; otherwise 1.0 is Linux and Windows and the Mac follows in 1.1.
 - **No TensorRT** (NVIDIA only), video outputs are lossless H.264 (ProRes 4444 XQ comes with the Mac work), and the Mac
   updates from the releases page by hand, not by itself (row 57).
 
