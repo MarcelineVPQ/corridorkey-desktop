@@ -176,10 +176,13 @@ review 2026-10-28 #3). A build that fails gets a fix and a new version: the draf
 (`gh release delete vX.Y.Z… --yes`, nothing public was made).
 
 **Windows Defender** (until the Windows builds are signed): its machine-learning heuristic quarantined the unsigned
-`resources\engine\corridorkey.exe` as `Trojan:Win32/Bearfoos.A!ml` in the 2026-10-27 VM run, a false positive. After
-each `npm run dist:win`, submit the new `release/win-unpacked/resources/engine/corridorkey.exe` and
-`corridorkey-engine.exe` to Microsoft as incorrectly detected (https://www.microsoft.com/en-us/wdsi/filesubmission),
-with their SHA-256, the repository URL and "open source, not yet code-signed".
+`resources\engine\corridorkey.exe` as `Trojan:Win32/Bearfoos.A!ml` in the 2026-10-27 VM run, a false positive. Both
+files submitted on 2026-10-28 came back "no positive detection, no telemetry indicators" (closed), and 1.0.0-dev.4 ran
+clean on 2026-10-29 with real-time protection on and that day's definitions. So the VM run is the trigger, not every
+build (Marcy 2026-10-29): the VM check reads Defender's recent detections (`Get-MpThreatDetection`, no exclusion for
+CorridorKey); only when it flags a file, submit that file to Microsoft as incorrectly detected
+(https://www.microsoft.com/en-us/wdsi/filesubmission) with its SHA-256, the repository URL and "open source, not yet
+code-signed", and hold the release until the verdict.
 
 ### macOS (Apple Silicon)
 
