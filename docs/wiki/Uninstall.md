@@ -13,7 +13,7 @@ chose). Your clips and results are never removed by any of the steps below.
 | Settings (a few KB), and from 1.0.0-dev.2 the Console's history (`console-history.jsonl`, the newest 5000 lines) and its log of `sudo` commands (`console-audit.jsonl`, never pruned) | `~/.config/corridorkey-desktop` | `%APPDATA%\corridorkey-desktop` | `~/Library/Application Support/corridorkey-desktop` (with the data) |
 
 On Linux, `~/.local/share` and `~/.cache` are `$XDG_DATA_HOME` and `$XDG_CACHE_HOME` if you set those. How big each
-part is: the README's [Uninstall](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/README.md#uninstall)
+part is: the engineering notes' [Uninstall](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/ENGINEERING.md#uninstall)
 section, or **App settings → Storage** on your own PC.
 
 If you moved the cache folder (**App settings → Storage → Change…**), the cache is in a `corridorkey-desktop`

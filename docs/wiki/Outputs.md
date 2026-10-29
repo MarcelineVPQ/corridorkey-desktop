@@ -33,8 +33,8 @@ What's inside:
 - **Foreground** and **Checker:** RGB.
 
 This differs on purpose from the original CorridorKey's EXR writer (which numbers from 0, stores the matte as `Y`
-and writes a straight cutout); the matte values themselves are the same. The README explains it in
-[EXR outputs a compositor can read as they are](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/README.md#exr-outputs-a-compositor-can-read-as-they-are-10).
+and writes a straight cutout); the matte values themselves are the same. The engineering notes explain it in
+[EXR outputs a compositor can read as they are](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/ENGINEERING.md#exr-outputs-a-compositor-can-read-as-they-are-10).
 
 For a frame folder input, the app needs to know whether the frames are scene-linear (**Frame folder → Color → Frames
 are scene-linear**). A folder of EXR frames starts with it on, PNG/JPEG with it off; change it if your frames differ
@@ -53,8 +53,8 @@ Pick **Video, 10-bit** for files an editor or a review tool can play. Video outp
 | **DNxHR 444, 10-bit** | `.mov` | Avid's edit and finishing codec. The matte stays within 1.3/255. |
 | **H.264 CRF 12** | `.mp4` | The original CorridorKey's output: small files, but hair edges can be off by up to 21/255. |
 
-How much each codec loses, and how big and fast it is, is measured in the README:
-[Video outputs](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/README.md#video-outputs-lossless-h264-dnxhr-444-or-h264-crf-12-10).
+How much each codec loses, and how big and fast it is, is measured in the engineering notes:
+[Video outputs](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/ENGINEERING.md#video-outputs-lossless-h264-dnxhr-444-or-h264-crf-12-10).
 
 **DNxHR 444 needs a frame of at least 256×120 pixels** (ffmpeg's DNxHR encoder refuses anything smaller). A smaller
 clip is refused before keying starts; use H.264 for it, which takes any size.

@@ -12,9 +12,9 @@ comes inside it, and the first start downloads the rest.
 - A recent NVIDIA driver. The GPU runtime the app downloads is CUDA 13, which needs driver 580 or newer
   ([docs/ENGINE_RUST.md](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/docs/ENGINE_RUST.md#build-and-run)).
 - ffmpeg (the app helps you install it, below).
-- Disk space for the GPU runtime and the models (the sizes are in the README's
-  [Install size](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/README.md#install-size) and
-  [Uninstall](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/README.md#uninstall) sections).
+- Disk space for the GPU runtime and the models (the sizes are in the engineering notes'
+  [Install size](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/ENGINEERING.md#install-size) and
+  [Uninstall](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/ENGINEERING.md#uninstall) sections).
 
 The engine is built to run on any Linux that Electron runs on: Ubuntu 20.04 and newer, Debian 10 and newer, and
 current Fedora and Arch.

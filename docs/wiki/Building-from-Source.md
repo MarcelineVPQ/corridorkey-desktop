@@ -69,8 +69,8 @@ The app runs only its Rust + ONNX Runtime engine; nothing PyTorch ships in it. T
 (PyTorch) stays the benchmark reference through the repository's tools, which run it from its own CorridorKey2.0
 checkout and venv: `tools/vs_original.sh` (the same clips through both: speed and mattes compared) and
 `tools/engine_bench.mjs python` (speed), with `tools/matte_compare.py` and `tools/side_by_side.py`. They're described
-in the README,
-[Test it yourself](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/README.md#test-it-yourself). None of
+in the engineering notes,
+[Test it yourself](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/ENGINEERING.md#test-it-yourself). None of
 it is needed to use or build the app.
 
 ## The command line

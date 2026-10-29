@@ -3,9 +3,9 @@
 TensorRT is NVIDIA's optimizer for its graphics cards. With it on, CorridorKey optimizes its networks for your card,
 once per resolution range, and then keys faster, with the same mattes as CUDA. It's optional and **off by default**.
 
-How much faster, and what it costs in graphics memory, was measured on an RTX 5080 in the README:
-[TensorRT on onnx.4](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/README.md#008-dev-tensorrt-on-onnx4-2026-10-25)
-and [the same-day pair](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/README.md#008-dev-re-measured-the-same-day-pair-on-onnx4-2026-10-26).
+How much faster, and what it costs in graphics memory, was measured on an RTX 5080 in the engineering notes:
+[TensorRT on onnx.4](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/ENGINEERING.md#008-dev-tensorrt-on-onnx4-2026-10-25)
+and [the same-day pair](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/ENGINEERING.md#008-dev-re-measured-the-same-day-pair-on-onnx4-2026-10-26).
 Other cards and sizes weren't measured. It's best on cards with 16 GB.
 
 **Linux only in this version.** On Windows it needs its own engine builder, which comes later; Macs have no NVIDIA
@@ -26,8 +26,8 @@ graphics. Jobs there run on CUDA.
      new set's folder (the libraries stay), and until then jobs run on CUDA.
 
    Like the first install it shows its progress, can be stopped and resumed, and checks every file's SHA-256. The
-   button shows the size; the download and disk sizes are in the README's
-   [Requirements](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/README.md#requirements).
+   button shows the size; the download and disk sizes are in the engineering notes'
+   [Requirements](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/ENGINEERING.md#requirements).
 
 Until the parts are installed, jobs run on CUDA.
 
@@ -48,8 +48,8 @@ for any width × height inside TensorRT's ranges. A waiting clip whose size isn'
 size** in its TensorRT section.
 
 Each range shows what it holds once built: the windows it was built for, its size on disk and how long the build
-took on your card. The build time and disk space per range were measured in the README,
-[TensorRT on onnx.4](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/README.md#008-dev-tensorrt-on-onnx4-2026-10-25).
+took on your card. The build time and disk space per range were measured in the engineering notes,
+[TensorRT on onnx.4](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/ENGINEERING.md#008-dev-tensorrt-on-onnx4-2026-10-25).
 
 The engines are kept in the cache folder (`tensorrt` inside it) and are built again only after a graphics driver,
 TensorRT or model update.

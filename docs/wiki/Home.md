@@ -14,8 +14,8 @@ Huge thanks to Niko, Zachary Harris and the Corridor crew for CorridorKey. If yo
 Effects, Premiere or Blender, Corridor's own app and plugins are at [corridorkey.com](https://corridorkey.com).
 
 How it compares with the original on speed, memory and mattes is measured, with the clips and commands to check it
-yourself, in the README: [Speed](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/README.md#speed) and
-[Quality](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/README.md#quality-the-mattes-against-the-original-and-the-truth).
+yourself, in the engineering notes: [Speed](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/ENGINEERING.md#speed) and
+[Quality](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/ENGINEERING.md#quality-the-mattes-against-the-original-and-the-truth).
 
 ## Who it's for
 
@@ -32,8 +32,8 @@ checker preview, as EXR sequences for compositing or as 10-bit video for the edi
 
 On Linux and Windows an **NVIDIA graphics card is required** (RTX 20-series or newer, 8 GB or more), except that on
 Linux, from 1.0.0-dev.4, an AMD card ROCm 10.1 supports works too: AMD support is new and not yet tested on a real AMD card: we're testing it ourselves next. If it doesn't work on your card, please tell us on [GitHub issues](https://github.com/MarcelineVPQ/corridorkey-desktop/issues). Intel graphics cards aren't
-supported, and nothing falls back to the processor. The details are in the README's
-[Requirements](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/README.md#requirements).
+supported, and nothing falls back to the processor. The details are in the engineering notes,
+[Requirements](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/ENGINEERING.md#requirements).
 
 ## Pages
 

@@ -219,7 +219,7 @@ service. Run `--help` for the rest.
   has free and picks its window from that. `--max-vram GB` limits the engine too (farm export passes the queue's limit
   as both the booking, rounded up, and `--max-vram`).
 - **Where 12 comes from.** These are the measured peaks on an RTX 5080 with model set onnx.4, from
-  [README: The same-day pair on onnx.4](../README.md#008-dev-re-measured-the-same-day-pair-on-onnx4-2026-10-26) and "What we got wrong" 5:
+  [Engineering notes: The same-day pair on onnx.4](../ENGINEERING.md#008-dev-re-measured-the-same-day-pair-on-onnx4-2026-10-26) and "What we got wrong" 5:
 
   | Run | Peak graphics memory |
   |---|---|

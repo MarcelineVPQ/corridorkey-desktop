@@ -14,8 +14,8 @@
 - A recent NVIDIA driver. The GPU runtime the app downloads is CUDA 13, which needs driver 580 or newer
   ([docs/ENGINE_RUST.md](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/docs/ENGINE_RUST.md#build-and-run)).
 - ffmpeg (the app installs it for you with winget, below).
-- Disk space for the GPU runtime and the models (sizes in the README's
-  [Uninstall](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/README.md#uninstall) table).
+- Disk space for the GPU runtime and the models (sizes in the engineering notes'
+  [Uninstall](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/ENGINEERING.md#uninstall) table).
 
 ## 1. Run the installer
 

@@ -748,7 +748,7 @@ describe("TensorRT catalogue and rules", () => {
     expect(/"onnxruntime_min": "([\d.]+)"/.exec(manifest)?.[1]).toBe(ver);
   });
 
-  // hard-coded pass 2026-10-26 S1: the README's and the in-app guide's download sizes are the pinned files' sums
+  // hard-coded pass 2026-10-26 S1: the engineering notes' (README until 2026-10-29) and the in-app guide's download sizes are the pinned files' sums
   it("states each system's setup download as the sum of its pinned files", () => {
     // loop: NOT-WORTH — a dozen sizes per system
     const sum = (d: { size: number }[]) => d.reduce((n, x) => n + x.size, 0);
@@ -757,10 +757,10 @@ describe("TensorRT catalogue and rules", () => {
     const text = `${gb(RUNTIME, MODELS_CUDA.files)} GB download on Linux, ${gb(RUNTIME_WIN, MODELS_CUDA.files)} GB on Windows, ${gb(RUNTIME_MAC, [...MODELS_CUDA.files, ...COREML.files])} GB on macOS, once`;
     expect(text).toBe("4.03 GB download on Linux, 3.81 GB on Windows, 5.74 GB on macOS, once");
     // loop: NOT-WORTH — two documents
-    for (const doc of ["../../README.md", "../../docs/GUIDE.md"]) expect(readFileSync(new URL(doc, import.meta.url), "utf8")).toContain(text);
-    // and the README's Uninstall table, which states the same sizes (it once kept the old ~5.0 / ~5.5 GB)
-    const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
-    expect(readme.split("\n## Uninstall\n")[1]?.split("\n## ")[0]).toContain(text);
+    for (const doc of ["../../ENGINEERING.md", "../../docs/GUIDE.md"]) expect(readFileSync(new URL(doc, import.meta.url), "utf8")).toContain(text);
+    // and the engineering notes' Uninstall table, which states the same sizes (it once kept the old ~5.0 / ~5.5 GB)
+    const notes = readFileSync(new URL("../../ENGINEERING.md", import.meta.url), "utf8");
+    expect(notes.split("\n## Uninstall\n")[1]?.split("\n## ")[0]).toContain(text);
   });
 
   it("keeps the libraries the builder and ONNX Runtime's provider load, for Linux cards, and the licence", () => {

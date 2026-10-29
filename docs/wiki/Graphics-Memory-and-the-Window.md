@@ -15,7 +15,7 @@ The choice comes from the engine's own estimate of each window's peak memory, me
 every measured point. How it was measured, and its limits (other cards, drivers and TensorRT weren't measured, so
 there it's a close guide, not a promise), is in the in-app guide,
 [Graphics memory](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/docs/GUIDE.md#graphics-memory), and
-the README, [What we got wrong](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/README.md#what-we-got-wrong-and-what-were-doing-about-it)
+the engineering notes, [What we got wrong](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/ENGINEERING.md#what-we-got-wrong-and-what-were-doing-about-it)
 (item 5).
 
 ## Manual
