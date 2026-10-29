@@ -553,6 +553,60 @@ Where walking_sitting's 62.4 s go now (engine log): stage 1 29.5 s run, stage 2 
 2.8 s, session loads 3.4 s, stage-1 host inputs 3.3 s, float16 conversions 3.2 s; then the encoders finish
 (0.5 s after the last frame).
 
+## The pipelining pass (2026-10-29, BACKLOG row 182)
+
+Goal: keep the card busy end to end with every output byte-identical. Measured on the RTX 5080 (README's test
+machine), CUDA fp16, model set `2.0.0-onnx.5`, the automatic window (13.1 GB free: 04_5h 4096×2160 EXR, 120 frames,
+8/4 normal mode; walking_sitting 1280×1080, 314 frames, 48/24 low-VRAM), alpha + foreground as float EXR,
+`tools/engine_bench.mjs`. Each change was checked byte for byte (`cmp` of every output EXR against the dev.4
+engine's run at the same settings: all 240 files of 04_5h and 628 of walking_sitting identical in every run below;
+two runs of the dev.4 engine are themselves identical) and timed in alternating back-to-back runs, three each.
+
+Where the card waited at 4K (the dev.4 engine's `timing` line, 04_5h): the RVM phase took 11-12 s for 2.1 s of RVM
+(5 s of session loads on the main thread before any frame was decoded, then EXR decode); between stage-1 windows the
+main thread blended the window's states (2.4 s per job, "after"); C-RADIO and MoGe ran on every frame of every window
+(8.2 + 2.5 s, each frame twice at 8/4).
+
+| Change (each on top of the one before) | Before → after, 04_5h totals (s) | Median | Kept |
+|---|---|---|---|
+| The RVM pass's frames decode while the networks load; normal mode on CUDA: MoGe, stage 1 and stage 2 load on their own threads behind the RVM pass (C-RADIO and RVM first, on the main thread, as before) | 167.1, 167.5, 165.8 → 162.7, 164.4, 165.1 | 167.1 → 164.4 (−1.6 %) | yes |
+| Normal mode: each window's states blended on their own thread (`baton-blend`) while the card runs the next window's foundations and stage 1; its final frames go to stage 2 after that | 163.3, 162.7, 163.4 → 160.8, 160.8, 161.0 | 163.3 → 160.8 (−1.5 %) | yes |
+| Normal mode, CUDA and CPU: C-RADIO and MoGe run only on a window's new frames; the frames it shares with the window before take that window's features (batch 4 instead of 8 at 8/4: byte-identical on CUDA) | 161.2, 162.4, 162.9 → 159.3, 160.0, 159.8 | 162.4 → 159.8 (−1.6 %) | yes |
+| Low-VRAM mode: the blend on its own thread (walking_sitting, 48/24) | 57.9, 57.8, 58.3 → 58.2, 58.0, 58.1 | no change | no: blended in place, as before |
+
+The whole pass, the dev.4 engine against this one, alternating (bench totals in s; peaks of the engine's processes):
+
+| Clip | dev.4 engine | This engine | Median | Graphics memory (GB) | RAM (GB) |
+|---|---|---|---|---|---|
+| 04_5h 4K, 8/4 normal | 165.4, 166.4, 166.9 | 160.1, 159.4, 158.4 | 166.4 → 159.4 (**−4.2 %**, min −4.2 %) | 11.08 → 11.35 | 7.5-7.8 → 8.6-8.8 |
+| walking_sitting HD, 48/24 low-VRAM | 58.8, 58.5, 58.1 | 58.3, 58.0, 58.0 | 58.5 → 58.0 (−0.9 %, inside the runs' spread: no measurable change) | 9.26 → 9.26 | 7.2-7.3 → 7.3-7.4 |
+
+In the 4K job's timing line: the RVM phase 9.5-10.3 → 6.8-7.9 s, C-RADIO + MoGe 10.7 → 6.5 s of `run`, stage 1's
+host time between windows ("after") 2.5 → 0.8 s; the blend's 8.5-9.2 s on its thread (slower than on the main thread,
+sharing the memory bus with the card's copies) never made the main thread wait.
+
+What it costs: graphics memory **+0.27 GB** at the 4K peak (11.08 → 11.35 GB, the engine's processes, nvidia-smi),
+measured to come from loading sessions on other threads: with the three loads joined before RVM starts the steady
+windows still sat 0.22 GB higher (a 200 ms nvidia-smi log); still under the window's estimate (11.48 GB) and its
+margin (×1.1 + 0.3 GB). Host memory: about 1 GB more at the 4K peak, most of it the states of one more window while it
+is blended (0.57 GB at 4K 8/4); without `malloc_trim` after the loads behind RVM were taken it was 2.3 GB more (the
+load threads' malloc arenas keep the loading's freed memory, as the low-VRAM loads did before `trim_host_memory`).
+Low-VRAM mode (every TensorRT job, CUDA at HD on a 16 GB card) changes only in that its RVM frames decode while RVM
+loads: walking_sitting the same within noise. Core ML and MIGraphX keep computing every window's foundations (fixed
+batches; a compile per batch size). TensorRT was not measured.
+
+The pipeline's tests (`pipeline/tests`): the three loads behind RVM on their own threads and every window with all
+five loaded; a load that fails behind RVM ends the job with its own error and the next job runs; C-RADIO and MoGe
+once per frame (batches 4, 2, 2, 1 at 4/2 over 9 frames) while stage 1 still gets each window's full features; a
+stop or a failed window with a blend on its thread ends cleanly (the blend thread is a scoped thread, joined before
+the window's result is used, also on an error); stage 1's and stage 2's inputs and the writers' values the same as
+low-VRAM mode's (unchanged), so the pinned all-loaded digests changed only by the run order and the foundations'
+batches.
+
+Not done here (measured where the time still goes, 04_5h after the pass): stage 1's 0.57 GB of states copied out of
+ONNX Runtime's buffer per window and stage 2's conversions ("convert" 4.1 + 2.3 s per job; I/O binding or handing ORT's
+own output buffer to the blend), the RVM phase still decode-bound on EXR (7 s for 1.4 s of RVM).
+
 ## Portrait (2026-10-22)
 
 Frames taller than wide failed in every C-RADIO export up to onnx.2: the export dropped the position grid's column

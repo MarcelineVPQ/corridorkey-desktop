@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.0-dev.5 (draft, unreleased)
+
+- **Faster keying, the same mattes: the pipelining pass.** The engine keeps the graphics card busier: a clip's first
+  frames decode while the models load, and on CUDA three of the five models load while the first pass runs; each
+  temporal window's results are blended while the card already works on the next window; and C-RADIO and MoGe now
+  run once per frame instead of once per window a frame is in. Every matte and foreground is byte for byte the same as
+  dev.4's at the same settings. On the RTX 5080, a 4K EXR shot (Tears of Steel 04_5h, 120 frames, 8/4 window, CUDA)
+  keys in 159.4 s instead of 166.4 s (−4.2 %, the median of three alternating runs each). HD clips that run in the
+  low-memory mode (1280×1080 on a 16 GB card) are unchanged in speed (−0.9 %, inside the run-to-run spread), and
+  TensorRT jobs, which always run in that mode, gain at most the earlier decode (not measured). The cost: about
+  0.27 GB more graphics memory at the 4K peak (still inside the window's estimate) and about 1 GB more RAM there
+  (backlog row 182; docs/ENGINE_RUST.md, "The pipelining pass").
+
 ## 1.0.0-dev.4
 
 - Windows and macOS: the app now tells you when a new version is out, like on Linux: the same signed check, channels

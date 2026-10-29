@@ -305,6 +305,7 @@ Each engine build on the way is labelled as a dev step:
 | **0.0.7-dev** | 2026-10-24 | TensorRT at 4K: DCI 4K and UHD get their own engine range (results below) |
 | **0.0.8-dev** | 2026-10-25 | model set `onnx.4`: CorridorKey 2.0's precision policy (dev.1's models; results below, with TensorRT on it and a same-day re-measurement against the original on 2026-10-26) |
 | **0.0.9-dev** | 2026-10-28 | model set `onnx.5`: our own stage 1 / stage 2 graphs, C-RADIO's weights stored in fp16, download 3.30 → 2.48 GB; and its Core ML set `onnx.5-coreml` for the Mac (dev.2's models; results below) |
+| **0.0.10-dev** | 2026-10-29 | the pipelining pass: decode while the models load, loads behind the first pass, the blend beside the next window, C-RADIO / MoGe once per frame; same output byte for byte (dev.5; results below) |
 
 The same HD bench, run on different days as the engine improved (totals, seconds; Original = PyTorch):
 
@@ -349,7 +350,7 @@ same job. Each step's own section below has its details and its mattes.
   same day.
 
 <details>
-<summary>How the speed got here: 0.0.4-dev to 0.0.9-dev, measured release by release</summary>
+<summary>How the speed got here: 0.0.4-dev to 0.0.10-dev, measured release by release</summary>
 
 ### 0.0.4-dev: feeding the card faster at 4K
 
@@ -628,6 +629,26 @@ Every pixel of every frame within half a 1/255 step of onnx.4's, and the same si
 
 **TensorRT stays on onnx.4.** dev.2's TensorRT jobs use dev.1's TensorRT set (`2.0.0-onnx.4-trt`), so the TensorRT
 numbers in this README are onnx.4's (0.0.8-dev). onnx.5's own TensorRT set is still being measured.
+
+### 0.0.10-dev: the pipelining pass (2026-10-29)
+
+The engine keeps the card busier with the same output: a clip's first frames decode while the models load; on CUDA
+three of the five models load while the first pass (RVM) runs; in the normal mode each temporal window's results are
+blended while the card already runs the next window, and C-RADIO and MoGe run once per frame instead of once per
+window a frame is in. Method: RTX 5080 (the PC above), CUDA fp16, model set `2.0.0-onnx.5`, the automatic window
+(13.1 GB free), alpha + foreground as float EXR, three runs per engine, alternating back to back
+(`tools/engine_bench.mjs`; dev.4's engine against this one). Every output file of every run is byte for byte the same
+as dev.4's (240 EXR files at 4K, 628 at HD; `cmp`).
+
+| Clip (window) | dev.4 engine, total (s) | 0.0.10-dev, total (s) | Median | Graphics memory (GB) | RAM (GB) |
+| --- | --- | --- | --- | --- | --- |
+| 04_5h 4096×2160 EXR, 120 frames (8/4 normal) | 165.4 · 166.4 · 166.9 | 160.1 · 159.4 · 158.4 | **−4.2 %** | 11.08 → 11.35 | 7.5-7.8 → 8.6-8.8 |
+| walking_sitting 1280×1080, 314 frames (48/24 low-memory) | 58.8 · 58.5 · 58.1 | 58.3 · 58.0 · 58.0 | −0.9 % (within the spread) | 9.26 → 9.26 | 7.2-7.3 → 7.3-7.4 |
+
+Each change was measured on its own at 4K (docs/ENGINE_RUST.md, "The pipelining pass"): the early decode and the
+loads behind RVM −1.6 %, the blend on its own thread −1.5 %, C-RADIO and MoGe once per frame −1.6 % (medians). The
+read-only studies before it estimated +5-9 % at 4K and +3-6 % at HD; measured, the low-memory mode HD clips use gained
+nothing (the blend on its own thread was tried there and dropped), and TensorRT, always in that mode, wasn't measured.
 
 </details>
 
