@@ -114,9 +114,6 @@ GPU, 16 GB; mattes within 1/255 of CUDA's, 2026-10-28; 4K at 0.38 fps [60]), the
 and every release is keyed through the installed app on that Mac. Next: 4K at 1 fps on that mini [177], and self-update
 on the Mac [57].
 
-**Next, in dev.3:** choosing the model set in Engine settings (onnx.5 or onnx.4, with the matching TensorRT set)
-[168].
-
 **Next, toward 1.0:**
 - Keying on a real Windows PC with an NVIDIA card (only tested in a virtual machine so far)
 - Colour management with OpenColorIO / ACES, per clip [29]; EXRs to the studio spec [30]
