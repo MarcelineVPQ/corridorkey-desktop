@@ -3,7 +3,7 @@
 ## 1.0.0-dev.5 (draft, unreleased)
 
 - **Faster keying, the same mattes.** The engine keeps the graphics card busier and copies less: a clip's first frames
-  decode while the models load; in the normal mode on CUDA with at least 10 GB for the job, three of the five models
+  decode while the models load; in the normal mode on CUDA with the automatic window and at least 10 GB for the job, three of the five models
   load while the first pass runs; in the normal mode each temporal window's results are blended while the card already
   works on the next window, and C-RADIO and MoGe run once per frame instead of once per window a frame is in (CUDA and
   CPU); the networks' results are read where ONNX Runtime made them instead of being copied out; in the normal mode

@@ -635,7 +635,7 @@ numbers in this README are onnx.4's (0.0.8-dev). onnx.5's own TensorRT set is st
 
 The engine keeps the card busier with the same output: a clip's first frames decode while the models load; in the
 normal mode on CUDA three of the five models load while the first pass (RVM) runs (since the performance review, only
-with at least 10 GB for the job); in the normal mode each temporal window's results are blended while the card already
+with the automatic window and at least 10 GB for the job); in the normal mode each temporal window's results are blended while the card already
 runs the next window, and C-RADIO and MoGe run once per frame instead of once per window a frame is in. Method: RTX 5080 (the PC above), CUDA fp16, model set `2.0.0-onnx.5`, the automatic window
 (13.1 GB free), alpha + foreground as float EXR, three runs per engine, alternating back to back
 (`tools/engine_bench.mjs`; dev.4's engine against this one). Every output file of every run is byte for byte the same
