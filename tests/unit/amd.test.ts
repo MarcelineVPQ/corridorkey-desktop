@@ -39,6 +39,17 @@ describe("AMD cards (the CK_AMD switch)", () => {
     expect(findAmdCard(sys({ "0": CPU, "1": XTX }, []))?.access).toBe(false);
   });
 
+  it("takes the first supported card: a Ryzen iGPU (gfx1036) listed before an RX 7900 is skipped", () => {
+    const IGPU = "cpu_cores_count 0\nsimd_count 4\ngfx_target_version 100306\nvendor_id 4098\ndrm_render_minor 129\n";
+    const supported = (gfx: string) => gfx === "gfx1100";
+    const nodes = { "0": CPU, "1": IGPU, "2": XTX };
+    expect(findAmdCard(sys(nodes, ["/dev/kfd", "/dev/dri/renderD128", "/dev/dri/renderD129"]), supported)).toEqual({ gfx: "gfx1100", minor: 128, access: true });
+    // no supported card: the first GPU node, so the setup can say its gfx target isn't supported
+    expect(findAmdCard(sys({ "0": CPU, "1": IGPU }), supported)).toEqual({ gfx: "gfx1036", minor: 129, access: false });
+    // without a rule every GPU node counts (the first one)
+    expect(findAmdCard(sys(nodes))?.gfx).toBe("gfx1036");
+  });
+
   it("finds nothing without the KFD driver or a GPU node", () => {
     expect(findAmdCard(sys(null))).toBeNull();
     expect(findAmdCard(sys({ "0": CPU }))).toBeNull();

@@ -148,7 +148,7 @@ none of them changes what a user sees today.
   Speed).
   **On Linux and Windows the NVIDIA card is required**: the engine keys only on CUDA. AMD and Intel graphics cards aren't
   supported, and without an NVIDIA card nothing falls back to the CPU: a job stops with "CorridorKey needs an NVIDIA
-  graphics card with CUDA." (on Linux the message also names AMD's MIGraphX). AMD cards on Linux (ROCm 10.1 and AMD's
+  graphics card with CUDA." (on Linux with the AMD runtime installed, the message also names AMD's MIGraphX). AMD cards on Linux (ROCm 10.1 and AMD's
   MIGraphX, which the setup downloads) are built in behind a switch that is off by default, `CK_AMD=1`, and untested on
   a real AMD card: docs/AMD.md.
 - macOS 14 or newer on Apple Silicon (M1 or newer; the disk image, from 1.0.0-dev.2; 1280×1080 and 1920×1080 clips, and

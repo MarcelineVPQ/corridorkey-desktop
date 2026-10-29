@@ -18,8 +18,8 @@
   your user needs the `render` and `video` groups, and downloads ONNX Runtime with AMD's ROCm 10.1 and MIGraphX
   libraries (1.02 GB for an RX 7900, each wheel pinned by size and SHA-256) and MIGraphX's two extra model files from
   the published onnx.5 TensorRT release (0.61 GB; the mix parses in MIGraphX at four sizes, checked offline). The GPU
-  readout reads the amdgpu driver, a job's first load says it is preparing for the card, and the engine's "no graphics
-  card" message on Linux names AMD too. Without the switch nothing changes on any system (backlog row 166, docs/AMD.md).
+  readout reads the amdgpu driver, a job's first load says it is preparing for the card, and with the AMD runtime installed the engine's
+  "no graphics card" message on Linux names AMD too. Without the switch nothing changes on any system (backlog row 166, docs/AMD.md).
 - The Engine page's **Graphics card** is now laid out like NorthXL's GPU card: the card's name in the header, usage and
   memory as bars, then the card's temperature, fan, clock and power. NVIDIA reads them from nvidia-smi, AMD (behind
   `CK_AMD`, untested on a real card) from the amdgpu driver's files; a reading the card doesn't give is left out, never

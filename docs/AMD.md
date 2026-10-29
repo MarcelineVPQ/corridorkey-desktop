@@ -5,8 +5,8 @@ on Linux, **behind one switch that is off by default**: `CK_AMD=1` in the app's 
 
 Status 2026-10-28: the engine has a MIGraphX provider (`--device migraphx`); the app's setup detects an AMD card,
 downloads ONNX Runtime with AMD's ROCm 10.1 and MIGraphX libraries, and adds a models.json `migraphx-fp16` entry to
-set 2.0.0-onnx.5 (below). Measured offline only, on the Linux PC with AMD's own MIGraphX library; whether the shipped
-release exposes the switch (marked untested) or keeps it hidden is Marcy's call at release.
+set 2.0.0-onnx.5 (below). Measured offline only, on a Linux PC with AMD's own MIGraphX library. The switch stays off
+by default until the AMD path is tested on a real AMD card.
 
 ## The switch: `CK_AMD=1`
 
@@ -15,10 +15,15 @@ NVIDIA, macOS and CPU setups are unchanged, and an AMD card gets the "No NVIDIA 
 On, on Linux, with no NVIDIA driver loaded (NVIDIA comes first when a machine has both, as the engine's `auto` does):
 
 - **Detection** (electron/main/amd.ts, install.ts `amdCardFor` / `systemSupport`): the first GPU node of the KFD
-  topology (`/sys/class/kfd/kfd/topology/nodes/*/properties`: SIMDs and a `gfx_target_version`, the engine's amd.rs
-  rule), and whether `/dev/kfd` and its `/dev/dri/renderD<minor>` open read-write. The setup says why not when there is
-  no AMD card, when its gfx target isn't one ROCm 10.1's MIGraphX supports, or when the user isn't in the `render` /
-  `video` groups. Several cards of different targets: only the first one's device wheel is downloaded.
+  topology (`/sys/class/kfd/kfd/topology/nodes/*/properties`: SIMDs and a `gfx_target_version`, as the engine's amd.rs
+  reads them) whose gfx target ROCm 10.1's MIGraphX supports (a Ryzen iGPU listed before a Radeon card is skipped), and
+  whether `/dev/kfd` and its `/dev/dri/renderD<minor>` open read-write. The setup says why not when there is no AMD
+  card, when no card's gfx target is one ROCm 10.1's MIGraphX supports, or when the user isn't in the `render` /
+  `video` groups. Only the chosen card's device wheel is downloaded. Limit: the engine runs on HIP's device 0 (amd.rs
+  matches it by PCI bus id), which the app can't ask for without HIP; on a machine with several AMD GPUs (an iGPU
+  turned on next to a Radeon card) HIP's device 0 may be the other one. Then set `HIP_VISIBLE_DEVICES` (ROCm's own
+  variable for the cards HIP sees) to the supported card's HIP device index in the app's environment, or turn the iGPU
+  off in the firmware.
 - **Runtime download** (install.ts `RUNTIME_AMD`, `ROCM_DEVICE`): the wheels below into
   `runtime/ort-1.31.0-rocm10.1-<gfx>`, in pip's layout (the libraries find each other through `$ORIGIN` RPATHs, and the
   engine finds the plugin next to ONNX Runtime's package): no `LD_LIBRARY_PATH`, nothing system-wide, no engine
@@ -100,8 +105,9 @@ and stage 2 (MultiHeadAttention's `attention_bias` broadcast over the heads); th
   MIGraphX refuses them). For set 2.0.0-onnx.5 the app's AMD setup writes it (above); `engine-rs/export/migraphx_patch.py`
   is for onnx.4's files only.
 - Errors name the AMD side ("no AMD graphics card ROCm can use", or what became of the plugin), never "NVIDIA" alone:
-  with no provider at all on Linux the message names both ("CorridorKey needs an NVIDIA graphics card with CUDA, or an
-  AMD graphics card with ROCm and AMD's MIGraphX plugin").
+  with no provider at all on Linux and the MIGraphX plugin's file in place (the AMD runtime) the message names both
+  ("CorridorKey needs an NVIDIA graphics card with CUDA, or an AMD graphics card with ROCm and AMD's MIGraphX plugin");
+  without the plugin's file (every setup without the switch) it is the message from before.
 
 ## What MIGraphX takes (offline check)
 
@@ -134,15 +140,21 @@ network with more than 10 unsupported nodes: stage 1 and stage 2 would have run 
 
 ## Open
 
-- A run on a real AMD card (a paid test needs Marcy's go; plan ~/.cache/claude-scratch/ck-amd-dev3/PLAN.md section 3):
-  the app's install, the plugin loading into ONNX Runtime 1.31 (built for 1.29: `onnxruntime~=1.29.0` in its
-  metadata; it negotiates the API version), the kept-file list, every MIGraphX compile (shape and seconds) and its
-  cache, the accuracy against CUDA's matte.
+- A run on a real AMD card (a rented Linux server with a Radeon AI PRO R9700, gfx1201, is the closest to a user's
+  card; nothing is booked yet): the machine's driver, `/dev/kfd` and render-group access and KFD gfx targets first;
+  then the app's own install (AMD detected, the AMD runtime and models downloaded and checked), the plugin loading into
+  ONNX Runtime 1.31 (built for 1.29: `onnxruntime~=1.29.0` in its metadata; it negotiates the API version), the
+  kept-file list, every MIGraphX compile (shape and seconds) and its cache on a second run, the engine's graphics
+  memory against `amd-smi`, and one clip's matte against CUDA's (MAE and the share of pixels off by more than 1/255,
+  as the Core ML gate measures).
 - The plugin's option names (`cache_dir`) are read from its binary.
 - The GPU readout lists no other programs on an AMD card yet (the driver keeps it per process in /proc/<pid>/fdinfo).
 - Storage doesn't list MIGraphX's compiled-program cache (`<cache>/migraphx`) yet.
 - The cloud test kit (`tools/amd_cloud_test.sh`) and the CUDA reference matte are still to be written.
-- Windows AMD: no pip MIGraphX for Windows; Windows ML's MIGraphX provider is the likely route (PLAN.md 2.8).
+- Windows AMD: no pip MIGraphX for Windows (`migraphx-libs` and `onnxruntime-ep-migraphx` are manylinux only);
+  Windows ML's MIGraphX provider (Windows 11 24H2+, RDNA 3 or later) is the likely route, but it bundles ONNX Runtime
+  1.28 while the engine is built on 1.31's API, so whether its plugin registers into the engine's ONNX Runtime is
+  unconfirmed until it runs on a Windows RDNA 3 machine.
 
 Sources: ROCm 10.1 compatibility matrix (rocm.docs.amd.com/en/docs-10.1.0/compatibility/compatibility-matrix.html),
 AMD's ONNX Runtime install page (rocm.docs.amd.com/projects/ai-ecosystem/en/latest/inference/onnxruntime.html), the

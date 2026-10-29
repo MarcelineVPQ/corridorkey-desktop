@@ -65,11 +65,13 @@ const realSys: AmdSys = {
 };
 
 /**
- * The machine's first AMD GPU node (KFD's order, which is HIP's: ROCr enumerates the KFD nodes), or null when there
- * is none (no amdgpu/KFD driver, or no GPU node). With several cards of different gfx targets only the first one's
- * device libraries are downloaded.
+ * The machine's first AMD GPU node whose gfx target `supported` takes (KFD's node order), else its first GPU node (so
+ * the setup can say that card isn't supported), or null when there is none (no amdgpu/KFD driver, or no GPU node):
+ * a Ryzen iGPU listed before a supported card is skipped. Limit: the engine runs on HIP's device 0 (amd.rs, by PCI
+ * bus id), which the app can't ask for without HIP; with several AMD GPUs that may be another card (docs/AMD.md says
+ * how to pick it). Only the chosen card's device libraries are downloaded.
  */
-export function findAmdCard(sys: AmdSys = realSys): AmdCard | null {
+export function findAmdCard(sys: AmdSys = realSys, supported: (gfx: string) => boolean = () => true): AmdCard | null {
   let nodes: string[];
   try {
     nodes = sys.list(KFD_NODES);
@@ -77,6 +79,7 @@ export function findAmdCard(sys: AmdSys = realSys): AmdCard | null {
     // error: NOT-WORTH — no KFD driver: no AMD card ROCm can use (the setup says so)
     return null;
   }
+  let first: AmdCard | null = null;
   // loop: NOT-WORTH — the topology's few nodes (CPU and GPU), once per setup check
   for (const n of [...nodes].sort((a, b) => Number(a) - Number(b))) {
     let p: Map<string, number>;
@@ -89,7 +92,9 @@ export function findAmdCard(sys: AmdSys = realSys): AmdCard | null {
     const gfx = gfxName(p.get("gfx_target_version") ?? 0);
     const minor = p.get("drm_render_minor");
     if (!gfx || !(p.get("simd_count") ?? 0) || minor === undefined) continue;
-    return { gfx, minor, access: sys.canOpen("/dev/kfd") && sys.canOpen(`/dev/dri/renderD${minor}`) };
+    const card = { gfx, minor, access: sys.canOpen("/dev/kfd") && sys.canOpen(`/dev/dri/renderD${minor}`) };
+    if (supported(gfx)) return card;
+    first ??= card;
   }
-  return null;
+  return first;
 }

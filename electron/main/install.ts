@@ -288,7 +288,12 @@ export const AMD_RUNTIME =
  * The AMD card the setup installs for (Linux, the CK_AMD switch on, no NVIDIA driver loaded: NVIDIA comes first, as
  * the engine's `auto` does). Null on every other setup, without reading the system.
  */
-export function amdCardFor(platform: NodeJS.Platform, env: NodeJS.ProcessEnv, exists: (p: string) => boolean, find: () => AmdCard | null = findAmdCard): AmdCard | null {
+export function amdCardFor(
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
+  exists: (p: string) => boolean,
+  find: () => AmdCard | null = () => findAmdCard(undefined, (gfx) => !!ROCM_DEVICE[gfx]),
+): AmdCard | null {
   // loop: NOT-WORTH — one stat of the NVIDIA driver's file, once per app start
   if (platform !== "linux" || !amdSwitchOn(env) || exists(NVIDIA_DRIVER)) return null;
   return find();

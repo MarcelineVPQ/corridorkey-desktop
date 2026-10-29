@@ -269,6 +269,9 @@ pub struct Runtime {
     pub migraphx_ep: bool,
     /// the MIGraphX plugin: where it was looked for or loaded from, and what went wrong (for `unavailable_reason`)
     migraphx_note: String,
+    /// the MIGraphX plugin's file was found (the app's AMD runtime, CK_AMD=1): only then does the Linux "no graphics
+    /// card" message name AMD
+    migraphx_plugin: bool,
     /// `gpu` is the AMD card HIP sees as device 0 (amd.rs), not an NVIDIA card
     amd: bool,
     pub ort_version: String,
@@ -348,6 +351,7 @@ impl Runtime {
                 Ok(()) => format!("the MIGraphX provider plugin {} offers no AMD GPU", p.display()),
             },
         };
+        let migraphx_plugin = mx_lib.is_some();
         let migraphx_ep = env.devices().any(|d| d.ep().is_ok_and(|e| e == MIGRAPHX_EP));
         // the AMD card is read only for the MIGraphX provider: asked for, or `auto` with the MIGraphX plugin offering a GPU
         // and no NVIDIA card CUDA can use (an NVIDIA setup never gets here: it has no MIGraphX plugin)
@@ -362,7 +366,7 @@ impl Runtime {
                 nv => amd_card().map(|a| (Some(a), true)).unwrap_or((nv, false)),
             },
         };
-        Ok(Runtime { env, gpu, cuda_ep, tensorrt_ep, coreml_ep, migraphx_ep, migraphx_note, amd, ort_version: version, cfg: cfg.clone() })
+        Ok(Runtime { env, gpu, cuda_ep, tensorrt_ep, coreml_ep, migraphx_ep, migraphx_note, migraphx_plugin, amd, ort_version: version, cfg: cfg.clone() })
     }
 
     /// The normal provider (`choose`). None: no usable GPU (the protocol's `no-gpu`), or no Core ML / MIGraphX
@@ -383,7 +387,7 @@ impl Runtime {
 
     /// Why `provider()` is None, in words for the job's error.
     pub fn unavailable_reason(&self) -> String {
-        no_provider_reason(self.cfg.device, std::env::consts::OS, &self.ort_version, self.migraphx_ep, &self.migraphx_note)
+        no_provider_reason(self.cfg.device, std::env::consts::OS, &self.ort_version, self.migraphx_ep, self.migraphx_plugin, &self.migraphx_note)
     }
 
     fn builder(&self) -> Result<ort::session::builder::SessionBuilder, String> {
@@ -525,9 +529,11 @@ pub(crate) fn choose(device: Device, cuda: bool, migraphx: bool, coreml_ep: bool
 }
 
 /// Why no provider runs `device` on system `os` (std::env::consts::OS), given the ONNX Runtime it loaded, whether
-/// the MIGraphX plugin offers an AMD GPU and what became of the plugin (`note`): with the plugin in place the missing
-/// card is an AMD one; a Mac has no NVIDIA card, so its reason names Core ML (BACKLOG row 58).
-fn no_provider_reason(device: Device, os: &str, ort_version: &str, migraphx_ep: bool, note: &str) -> String {
+/// the MIGraphX plugin offers an AMD GPU, whether its file was found (`plugin`) and what became of it (`note`): with
+/// the plugin offering a GPU the missing card is an AMD one; Linux names AMD only when the plugin's file is there (the
+/// app's AMD runtime: without the CK_AMD switch the message is dev.3's); a Mac has no NVIDIA card, so its reason
+/// names Core ML (BACKLOG row 58).
+fn no_provider_reason(device: Device, os: &str, ort_version: &str, migraphx_ep: bool, plugin: bool, note: &str) -> String {
     match device {
         Device::CoreMl => format!(
             "--device coreml: this ONNX Runtime ({ort_version}) has no Core ML execution provider (the macOS onnxruntime build has it); nothing runs on the CPU instead"
@@ -537,7 +543,7 @@ fn no_provider_reason(device: Device, os: &str, ort_version: &str, migraphx_ep: 
             "CorridorKey found no AMD graphics card ROCm can use (HIP sees no device, or the amdgpu driver's memory files are missing; check rocminfo).".into()
         }
         _ if os == "macos" => "On a Mac, CorridorKey runs on Apple's Core ML: start the engine with --device coreml (CK_ENGINE_DEVICE=coreml; the app does this).".into(),
-        _ if os == "linux" => {
+        _ if os == "linux" && plugin => {
             "CorridorKey needs an NVIDIA graphics card with CUDA, or an AMD graphics card with ROCm and AMD's MIGraphX plugin (docs/AMD.md).".into()
         }
         _ => "CorridorKey needs an NVIDIA graphics card with CUDA.".into(),
@@ -845,18 +851,26 @@ mod tests {
 
     #[test]
     fn unavailable_says_which_card_is_missing() {
-        // no MIGraphX plugin (the CUDA setup): an NVIDIA card, or on Linux an AMD one with the plugin
+        // no MIGraphX plugin file (every setup without the app's CK_AMD switch): dev.3's message, AMD never named
+        assert_eq!(no_provider_reason(Device::Auto, "linux", "1.31.0", false, false, "no plugin"), "CorridorKey needs an NVIDIA graphics card with CUDA.");
+        // the plugin file is there (the AMD runtime) but offers no GPU: an NVIDIA card, or an AMD one through it
         assert_eq!(
-            no_provider_reason(Device::Auto, "linux", "1.31.0", false, "no plugin"),
+            no_provider_reason(Device::Auto, "linux", "1.31.0", false, true, "offers no AMD GPU"),
             "CorridorKey needs an NVIDIA graphics card with CUDA, or an AMD graphics card with ROCm and AMD's MIGraphX plugin (docs/AMD.md)."
         );
-        // the plugin is there: never "NVIDIA"
-        let amd = no_provider_reason(Device::Auto, "linux", "1.31.0", true, "");
+        // the plugin offers a GPU: never "NVIDIA"
+        let amd = no_provider_reason(Device::Auto, "linux", "1.31.0", true, true, "");
         assert!(amd.contains("no AMD graphics card") && !amd.contains("NVIDIA"), "{amd}");
-        assert_eq!(no_provider_reason(Device::Migraphx, "linux", "1.31.0", true, ""), amd);
+        assert_eq!(no_provider_reason(Device::Migraphx, "linux", "1.31.0", true, true, ""), amd);
         // asked for MIGraphX without a working plugin: what became of it
-        let no_ep =
-            no_provider_reason(Device::Migraphx, "linux", "1.31.0", false, "the MIGraphX provider plugin /x/libmigraphx-ep.so: libamdhip64.so.7: cannot open");
+        let no_ep = no_provider_reason(
+            Device::Migraphx,
+            "linux",
+            "1.31.0",
+            false,
+            true,
+            "the MIGraphX provider plugin /x/libmigraphx-ep.so: libamdhip64.so.7: cannot open",
+        );
         assert!(no_ep.starts_with("--device migraphx: the MIGraphX provider plugin /x/") && no_ep.contains("1.31.0"), "{no_ep}");
     }
 
@@ -896,15 +910,12 @@ mod tests {
     #[test]
     fn no_provider_reason_names_the_systems_real_need() {
         // a Mac has no NVIDIA card: the reason names Core ML, never NVIDIA (BACKLOG row 58)
-        let mac = no_provider_reason(Device::Auto, "macos", "1.31.0", false, "");
+        let mac = no_provider_reason(Device::Auto, "macos", "1.31.0", false, false, "");
         assert!(mac.contains("Core ML") && !mac.contains("NVIDIA"), "{mac}");
-        assert!(no_provider_reason(Device::Cuda, "macos", "1.31.0", false, "").contains("Core ML"));
-        assert!(no_provider_reason(Device::CoreMl, "macos", "1.31.0", false, "").contains("no Core ML execution provider"));
-        assert_eq!(
-            no_provider_reason(Device::Auto, "linux", "1.31.0", false, ""),
-            "CorridorKey needs an NVIDIA graphics card with CUDA, or an AMD graphics card with ROCm and AMD's MIGraphX plugin (docs/AMD.md)."
-        );
-        assert_eq!(no_provider_reason(Device::Auto, "windows", "1.31.0", false, ""), "CorridorKey needs an NVIDIA graphics card with CUDA.");
+        assert!(no_provider_reason(Device::Cuda, "macos", "1.31.0", false, false, "").contains("Core ML"));
+        assert!(no_provider_reason(Device::CoreMl, "macos", "1.31.0", false, false, "").contains("no Core ML execution provider"));
+        assert_eq!(no_provider_reason(Device::Auto, "linux", "1.31.0", false, false, ""), "CorridorKey needs an NVIDIA graphics card with CUDA.");
+        assert_eq!(no_provider_reason(Device::Auto, "windows", "1.31.0", false, false, ""), "CorridorKey needs an NVIDIA graphics card with CUDA.");
     }
 
     #[test]

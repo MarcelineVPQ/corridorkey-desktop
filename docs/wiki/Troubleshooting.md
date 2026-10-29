@@ -105,7 +105,7 @@ it happens again, please open an issue with the log.
 
 > CorridorKey needs an NVIDIA graphics card with CUDA.
 
-On Linux the message is:
+On Linux, with the AMD runtime installed (the `CK_AMD=1` switch below), the message is:
 
 > CorridorKey needs an NVIDIA graphics card with CUDA, or an AMD graphics card with ROCm and AMD's MIGraphX plugin (docs/AMD.md).
 
