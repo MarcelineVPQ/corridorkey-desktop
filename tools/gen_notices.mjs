@@ -207,7 +207,7 @@ const SET_KINDS = {
   OLD_MODEL_SET: "Linux: TensorRT copies its C-RADIO weights from an installed copy",
   COREML_SET: "macOS: Core ML",
   TRT_MODEL_SET: "Linux: the opt-in TensorRT jobs",
-  MIGRAPHX_MODEL_SET: "Linux, AMD cards (CK_AMD switch): MoGe and stage 2 in the form MIGraphX takes",
+  MIGRAPHX_MODEL_SET: "Linux, AMD cards: MoGe and stage 2 in the form MIGraphX takes",
 };
 function downloads() {
   const src = readFileSync(join(APP, "electron/main/install.ts"), "utf8");
@@ -237,7 +237,7 @@ function downloads() {
   return { repo, sets, rows };
 }
 
-// --- ROCm (the AMD runtime behind the CK_AMD switch, install.ts RUNTIME_AMD / ROCM_DEVICE): what the setup keeps ---
+// --- ROCm (the AMD runtime, on by default on Linux, CK_AMD=0 turns it off; install.ts RUNTIME_AMD / ROCM_DEVICE): what the setup keeps ---
 // Sources: AMDMIGraphX, onnxruntime-ep-amdgpu, ROCm/clr (HIP; the same AMD MIT text as hipBLASLt, rocRoller, origami,
 // rocprofiler-register and roctracer), ROCm/rocm-libraries (MIOpen, rocBLAS), ROCm/rocm-kpack, the core wheel's own
 // share/doc (ROCr, comgr), ROCm/llvm-project; the system libraries at TheRock therock-10.1's pinned versions.
@@ -472,7 +472,7 @@ function render() {
   // loop: NOT-WORTH — nine licence files, once per generation
   for (const [name, version, , lic, , file] of OCIO_LIBS) L.push(`#### ${lic}: ${name} ${version}`, "", fence(readFileSync(join(APP, "licenses/ocio", file), "utf8").trimEnd()), "");
   L.push(
-    "### ROCm (AMD cards, downloaded with the CK_AMD switch on)",
+    "### ROCm (AMD cards on Linux, downloaded by the setup)",
     "",
     "AMD's ROCm wheels carry no licence files of their own (the core wheel has a few, kept with its libraries), so the",
     "texts of what the setup keeps are here: from each project's repository, and for the system libraries ROCm builds in",

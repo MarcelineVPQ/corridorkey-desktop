@@ -23,9 +23,9 @@ export function modelSetConsts(src) {
 /** The model sets, in the file's order. */
 export const modelSets = (src) => [...modelSetConsts(src).values()];
 
-// the catalog's parts in the file's order: Linux, Windows, macOS, the AMD runtime (behind the CK_AMD switch) and its
+// the catalog's parts in the file's order: Linux, Windows, macOS, the AMD runtime (on by default on Linux, CK_AMD=0 turns it off) and its
 // per-card device wheels, then the opt-in TensorRT download
-const AMD = "Linux, AMD cards (CK_AMD switch)";
+const AMD = "Linux, AMD cards";
 const PARTS = [
   ["Linux", /export const RUNTIME = \{([\s\S]*?)\n\};/],
   ["Windows", /export const RUNTIME_WIN = \{([\s\S]*?)\n\};/],
