@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-dev.4 (draft, unreleased)
+
+- Windows and macOS: the app now tells you when a new version is out, like on Linux: the same signed check, channels
+  and "1.0.0 Dev N is available" notice with **Not now**. **Download** opens that version's release page on GitHub in
+  your browser; nothing is downloaded or installed by the app there (backlog row 180).
+
 ## 1.0.0-dev.3
 
 The foundation build: the Mac on par with Linux and Windows, and the checks running on every change.

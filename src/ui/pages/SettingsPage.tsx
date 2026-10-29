@@ -7,7 +7,7 @@ import { Download, FolderInput, FolderOpen, FolderOutput, HardDrive, MemoryStick
 import type { Appearance, AppState, CacheInfo, UpdateState } from "../../shared/types";
 import { gibBytes, mbOrGbBytes } from "../../shared/units";
 import { VramLimitRow } from "../JobSettings";
-import { NOT_WHILE_BUSY, versionText } from "../../shared/texts";
+import { NOT_WHILE_BUSY, UPDATE_PAGE_BACK_TO_STABLE, versionText } from "../../shared/texts";
 import { Accordion, Row, Section, Segmented, type SectionFocus } from "../panel/Section";
 import { MainBlock, SplitView } from "../panel/SplitView";
 import { Stat } from "../JobView";
@@ -286,7 +286,7 @@ function Updates({ u, queueRunning }: { u: UpdateState; queueRunning: boolean })
         </div>
       </Row>
       {u.channel === "stable" && /-dev\.\d+$/.test(u.current) && (
-        <Row label="Back to stable" hint="Installs the newest stable release over this dev build">
+        <Row label="Back to stable" hint={u.opensPage ? UPDATE_PAGE_BACK_TO_STABLE : "Installs the newest stable release over this dev build"}>
           <button type="button" className="btn small" disabled={u.status === "checking" || u.status === "downloading"} onClick={() => window.ck.backToStable()}>
             <RotateCcw size={14} /> Back to stable
           </button>

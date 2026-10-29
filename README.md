@@ -206,7 +206,8 @@ instead of CUDA. Where that stands:
   that Mac (`tools/mac_app_gate.sh`: Gatekeeper's verdicts, the setup's download, one clip on Core ML). macOS is in
   1.0 only if those gates pass; otherwise 1.0 is Linux and Windows and the Mac follows in 1.1.
 - **No TensorRT** (NVIDIA only), video outputs are lossless H.264 (ProRes 4444 XQ comes with the Mac work), and the Mac
-  updates from the releases page by hand, not by itself (row 57).
+  doesn't update itself yet (row 57): from dev.4 it says when a new version is out, and Download opens its release page
+  (row 180).
 
 ## Install size
 

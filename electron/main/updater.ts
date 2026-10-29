@@ -3,26 +3,29 @@
 // Updater, shows its `state`, and gates restart() while the queue runs.
 // docs/RELEASING.md says how releases and the signed feeds are made.
 import { isMac, isWin, PLATFORM } from "./platform";
-import { app, net } from "electron";
+import { app, net, shell } from "electron";
 import { execFileSync, spawn } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { holdAppImageMountUntilExit } from "./appImageQuit";
 import type { FetchFn } from "./download";
 import { fallbackShell, relaunchArgs, relaunchEnv, shellArgs, systemdRunArgs } from "./relaunch";
-import { feedSource, REPO } from "./updateFeed";
+import { feedSource } from "./updateFeed";
 import { UpdateFlow, type FileOps, type UpdatePlatform } from "./updateFlow";
 import { NO_RELEASE_CHANNEL } from "../../src/shared/texts";
 
 const FEED_TIMEOUT_MS = 15_000;
 
-// Why this copy can't replace itself, or null.
+// Windows and macOS: the notice only; Download opens the release page (backlog row 180, updateFlow.ts).
+const OPENS_PAGE = isWin() || isMac();
+
+// Why this copy can't check for updates or replace itself, or null.
 function unsupportedReason(keys: readonly string[]): string | null {
-  const system = isWin() ? "Windows" : isMac() ? "macOS" : null;
-  if (system) return `On ${system}, new versions are on GitHub: github.com/${REPO}/releases (self-update is Linux only for now).`;
-  if (PLATFORM !== "linux") return "Updates are built for the Linux AppImage only.";
-  if (!app.isPackaged) return "Updates come with the AppImage build; this copy runs from source.";
-  if (!process.env.APPIMAGE) return "Updates work only in the AppImage build; this copy isn't running as an AppImage.";
+  if (!OPENS_PAGE) {
+    if (PLATFORM !== "linux") return "Updates are built for the Linux AppImage only.";
+    if (!app.isPackaged) return "Updates come with the AppImage build; this copy runs from source.";
+    if (!process.env.APPIMAGE) return "Updates work only in the AppImage build; this copy isn't running as an AppImage.";
+  }
   if (!keys.length) return `${NO_RELEASE_CHANNEL}.`;
   return null;
 }
@@ -122,6 +125,8 @@ function platform(version: string): UpdatePlatform {
     fetch: fetchFn,
     fs: fileOps,
     relaunch,
+    // the browser, as the window's links open (index.ts setWindowOpenHandler); the URL is releasePageUrl's, this repository's only
+    openPage: OPENS_PAGE ? (url) => void shell.openExternal(url) : null,
     now: () => Date.now(),
     log: (m) => console.log(`[updater] ${m}`),
   };

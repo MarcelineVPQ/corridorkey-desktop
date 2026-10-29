@@ -139,6 +139,7 @@ export const updateState = (over: Partial<UpdateState> = {}): UpdateState => ({
   error: null,
   errorFrom: null,
   checkedAt: null,
+  opensPage: false,
   ...over,
 });
 

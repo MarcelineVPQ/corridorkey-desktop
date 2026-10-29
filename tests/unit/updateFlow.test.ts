@@ -98,7 +98,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-function flow(version: string, o: { appImage?: string | null; unsupported?: string | null; env?: Record<string, string> } = {}) {
+function flow(version: string, o: { appImage?: string | null; unsupported?: string | null; env?: Record<string, string>; openPage?: (url: string) => void } = {}) {
   const running = join(dir, "apps", appImageName(version));
   writeFileSync(running, appBytes(version), { mode: 0o755 });
   const p: UpdatePlatform = {
@@ -114,6 +114,7 @@ function flow(version: string, o: { appImage?: string | null; unsupported?: stri
     fetch: (url, init) => fetch(url, init),
     fs: realFs,
     relaunch: (t) => relaunched.push(t),
+    openPage: o.openPage ?? null,
     now: () => Date.now(),
     log: () => undefined,
   };
@@ -344,6 +345,62 @@ describe("update flow", () => {
     await u.download();
     expect(JSON.parse(readFileSync(join(dir, "userData", "updates.json"), "utf8")).installed).toEqual([join(dir, "apps", appImageName("0.2.0"))]);
     u.stop();
+  });
+});
+
+describe("update notice on Windows and macOS (backlog row 180): the signed feed, Download opens the release page", () => {
+  const pageFlow = (version: string, opened: string[]) => flow(version, { appImage: null, openPage: (url) => opened.push(url) });
+
+  it("a check reaches available with the version; Download opens that version's GitHub release page and downloads nothing", async () => {
+    publish("stable", "0.2.0");
+    const opened: string[] = [];
+    const u = pageFlow("0.1.0", opened);
+    expect(u.state).toMatchObject({ status: "idle", opensPage: true, error: null });
+    await u.check(true);
+    // the feed's size is the Linux AppImage's, so none is said here
+    expect(u.state).toMatchObject({ status: "available", latest: "0.2.0", size: null, notes: "What's new in 0.2.0", error: null });
+    requests = [];
+    await u.download();
+    expect(opened).toEqual(["https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/v0.2.0"]);
+    expect(requests).toEqual([]);
+    expect(readdirSync(join(dir, "apps"))).toEqual([appImageName("0.1.0")]);
+    expect(u.state).toMatchObject({ status: "available", latest: "0.2.0" });
+    u.restart();
+    expect(relaunched).toEqual([]);
+  });
+
+  it("the signature is checked first: an unsigned feed offers nothing to open", async () => {
+    publish("stable", "0.2.0", { signer: generateKeyPairSync("ed25519").privateKey });
+    const opened: string[] = [];
+    const u = pageFlow("0.1.0", opened);
+    await u.check(true);
+    expect(u.state).toMatchObject({ status: "error", error: "Couldn't check for updates: update refused: latest.json is not signed by a trusted key" });
+    await u.download();
+    expect(opened).toEqual([]);
+  });
+
+  it("the same channel rules: Development reads latest-dev.json; nothing newer opens nothing", async () => {
+    publish("dev", "0.3.0-dev.2");
+    const opened: string[] = [];
+    const u = pageFlow("0.3.0-dev.1", opened);
+    await u.check(true);
+    expect(u.state).toMatchObject({ status: "available", latest: "0.3.0-dev.2", feed: `${base}latest-dev.json` });
+    await u.download();
+    expect(opened).toEqual(["https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/v0.3.0-dev.2"]);
+    publish("dev", "0.3.0-dev.1");
+    const same = pageFlow("0.3.0-dev.1", opened);
+    await same.check(true);
+    expect(same.state.status).toBe("current");
+    await same.download();
+    expect(opened).toHaveLength(1);
+  });
+
+  it("Linux (no page to open) keeps the self-update: opensPage false, the size said", async () => {
+    publish("stable", "0.2.0");
+    const u = flow("0.1.0");
+    expect(u.state.opensPage).toBe(false);
+    await u.check(true);
+    expect(u.state.size).toBe(appBytes("0.2.0").length);
   });
 });
 

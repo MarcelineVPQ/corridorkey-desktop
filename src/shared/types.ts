@@ -379,6 +379,8 @@ export interface UpdateState {
   // started (also pinned above the page until dismissed: UpdateBanner.tsx)
   errorFrom: "check" | "install" | null;
   checkedAt: number | null;
+  // Windows and macOS (backlog row 180): Download opens the offered version's release page on GitHub; nothing installs
+  opensPage: boolean;
 }
 
 // The Rust engine's files found on this computer (electron/main/engineFind.ts), newest first.

@@ -23,6 +23,13 @@ export const FEED_URLS: Record<UpdateChannel, string> = {
 };
 export const DOWNLOAD_PREFIX = `https://github.com/${REPO}/releases/download/`;
 
+// Windows and macOS (backlog row 180): a version's release page on GitHub, built from the signed feed's
+// version (never a URL from the feed), only for this repository.
+export function releasePageUrl(version: string): string {
+  if (!versionKey(version)) throw new Error(`not a version: ${version}`);
+  return `https://github.com/${REPO}/releases/tag/v${version}`;
+}
+
 // base64 SPKI DER (`openssl pkey -pubout -outform DER | base64`). A list so the
 // key can be rotated: ship the new key in one release, start signing with it in the next.
 export const TRUSTED_KEYS: readonly string[] = [

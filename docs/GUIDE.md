@@ -82,7 +82,10 @@ App settings → Appearance: **System**, **Light**, **Dark** or **Desktop** (you
 
 ## Updates
 
-App settings → **Updates** (the Linux AppImage; other copies say why they can't update themselves): the **Channel**,
+On Windows and macOS the app checks the same signed feed and shows the same "available" notice; there **Download**
+opens that version's release page on GitHub in your browser and nothing is downloaded or installed by the app.
+
+App settings → **Updates** (the Linux AppImage; other Linux copies say why they can't update themselves): the **Channel**,
 **Stable** or **Development** (new features first; may have rough edges), **Check automatically** (at start and every
 few hours), **Check now**, then **Download** the new version and **Restart now** (not while the queue, the Console's
 corridorkey or a download runs: it says which). On the Stable channel a development build offers **Back to stable**,

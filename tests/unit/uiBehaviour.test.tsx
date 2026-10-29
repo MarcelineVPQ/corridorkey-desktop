@@ -21,6 +21,7 @@ import { appState, job, settings, updateState } from "./fixtures";
 import { App } from "../../src/ui/App";
 import { dots, tasksOf } from "../../src/shared/tasks";
 import { UpdateBanner } from "../../src/ui/UpdateBanner";
+import { UPDATE_PAGE_BACK_TO_STABLE } from "../../src/shared/texts";
 import type { AppState, UpdateState } from "../../src/shared/types";
 import { Cpu } from "lucide-react";
 
@@ -387,6 +388,20 @@ describe("the app update notice (pinned above the page) and its task", () => {
     expect(screen.getByRole("status").textContent).toBe("1.0.0 Dev 2 is ready: restart to use it.");
     rerender(banner({ ...offered, latest: "1.0.0-dev.3" }));
     expect(screen.getByRole("status").textContent).toBe("1.0.0 Dev 3 is available, 45.3 MB.");
+  });
+
+  it("Windows and macOS: the same notice without a size; Download asks the main process (it opens the release page); Back to stable says so", () => {
+    const ck = mockCk({ installUpdate: async () => {} });
+    const page = updateState({ status: "available", latest: "1.0.0-dev.2", opensPage: true });
+    render(banner(page));
+    expect(screen.getByRole("status").textContent).toBe("1.0.0 Dev 2 is available.");
+    fireEvent.click(screen.getByRole("button", { name: "Download" }));
+    expect(ck.installUpdate).toHaveBeenCalledTimes(1);
+    cleanup();
+    const state = appState({ update: updateState({ status: "current", current: "1.0.0-dev.2", latest: "1.0.0-dev.2", opensPage: true }) });
+    render(<SettingsPage state={state} panelShown={true} narrow={false} glass={false} focus={{ section: "updates", n: 1 }} sectionTasks={{}} hidePanel={() => {}} />);
+    expect(screen.getByText(UPDATE_PAGE_BACK_TO_STABLE)).toBeTruthy();
+    expect(screen.queryByText("Installs the newest stable release over this dev build")).toBeNull();
   });
 
   it("downloading: the measured share as a bar and a number", () => {

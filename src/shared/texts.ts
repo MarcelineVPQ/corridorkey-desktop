@@ -33,5 +33,7 @@ export function versionText(v: string): string {
 export const updateAvailableText = (version: string, bytes: number | null) => `${versionText(version)} is available${bytes ? `, ${mbOrGbBytes(bytes)}` : ""}`;
 /** An update installed beside this copy (the pinned update notice and its App settings task). */
 export const updateReadyText = (version: string) => `${versionText(version)} is ready: restart to use it`;
+/** App settings → Updates, Back to stable on Windows and macOS (Download opens the release page there). */
+export const UPDATE_PAGE_BACK_TO_STABLE = "Offers the newest stable release; Download opens its page on GitHub";
 /** A build without a release channel (App settings, Updates; and the check's refusal). */
 export const NO_RELEASE_CHANNEL = "No release channel is set up in this build";

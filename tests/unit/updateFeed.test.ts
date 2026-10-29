@@ -13,6 +13,7 @@ import {
   isNewerVersion,
   offers,
   parseFeed,
+  releasePageUrl,
   REPO,
   selectRelease,
   staleFiles,
@@ -138,6 +139,11 @@ describe("sources and URLs", () => {
       expect(feedSource({ CK_UPDATE_MANIFEST: bad, CK_UPDATE_PUBKEY: pub })).toMatchObject({ test: false, keys: TRUSTED_KEYS });
     }
     expect(feedSource({ CK_UPDATE_PUBKEY: pub }).keys).toEqual(TRUSTED_KEYS);
+  });
+  it("the release page (Windows, macOS): built from a valid version, only for this repository", () => {
+    expect(releasePageUrl("1.0.0-dev.4")).toBe("https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/v1.0.0-dev.4");
+    expect(releasePageUrl("1.0.0")).toBe("https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/v1.0.0");
+    for (const bad of ["", "1.0", "1.0.0/../../evil", "1.0.0?x=1", "v1.0.0", "https://example.com"]) expect(() => releasePageUrl(bad)).toThrow();
   });
   it("downloads only from this repository's releases", () => {
     const real = feedSource({});

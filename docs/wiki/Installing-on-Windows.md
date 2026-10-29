@@ -68,5 +68,5 @@ You can bring the setup back at any time from the **Engine** page: **Open the se
 
 - **TensorRT** is Linux-only in this version: on Windows it needs its own engine builder, which comes later. Jobs run
   on CUDA.
-- **Self-update** is Linux-only for now: on Windows, new versions are on the releases page (see
-  [Updates and channels](Updates-and-Channels)).
+- **Self-update** is Linux-only for now: on Windows the app tells you when a new version is out, and **Download**
+  opens its releases page (see [Updates and channels](Updates-and-Channels)).

@@ -112,7 +112,7 @@ spent 29 minutes waiting on a package mirror).
    folder, with `app.log`, `run.out` / `run.err` and a screenshot, is kept on a failure). On Linux this proves only that
    the package starts: Electron checks `app.asar` against its integrity hash on Windows and macOS only;
    writes `SHA256SUMS` / `SHA512SUMS` of the AppImage and the `-Setup.exe`, each signed with the feed key
-   (`SHA256SUMS.sig`, below), uploads them; the update feeds name the AppImage only (Windows updates from the releases page);
+   (`SHA256SUMS.sig`, below), uploads them; the update feeds name the AppImage only (Windows and macOS read the same feeds for the notice, and Download opens the release page there);
    pushes `main`; creates the
    release as a draft on that commit, uploads, checks GitHub's sha256 digest of every upload against the signed
    `SHA256SUMS` (nothing is published on a difference), and **stops with the release a draft**: nothing is public yet.

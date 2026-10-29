@@ -61,15 +61,21 @@ release over the Development build. It's the one way to go to an older version, 
 Updates work only in the AppImage. A copy run from source says "Updates come with the AppImage build; this copy runs
 from source."
 
-## On Windows: from the releases page
+## On Windows and macOS: the app tells you, you install it
 
-Self-update is Linux-only for now. App settings → Updates says so: "On Windows, new versions are on GitHub:
-github.com/MarcelineVPQ/corridorkey-desktop/releases (self-update is Linux only for now)."
+From 1.0.0-dev.4 the app checks the same signed update information as on Linux, on the same channels and schedule
+(App settings → Updates: **Channel**, **Check automatically**, **Check now**), and shows the same notice above every
+page and the dot on **App settings**: "1.0.0 Dev 4 is available." with **Download** and **Not now**. **Download**
+opens that version's page on GitHub in your browser; the app itself downloads and installs nothing there. **Not
+now** hides that version's notice, as on Linux. On a Development build with the channel set to Stable, **Back to
+stable** offers the newest Stable release the same way.
 
-To update, download the new `CorridorKey-Desktop-<version>-Setup.exe` from the
+On Windows, download the new `CorridorKey-Desktop-<version>-Setup.exe` from the
 [releases page](https://github.com/MarcelineVPQ/corridorkey-desktop/releases) and run it. Development builds are
 marked **Pre-release** there. An update keeps your downloaded runtime, models, cache and settings; the uninstaller
 only offers to remove them when you uninstall for good (see [Uninstall](Uninstall)).
+
+On a Mac, download the new disk image from that page and drag the app to Applications over the old one.
 
 What changed in each version is in the [CHANGELOG](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/CHANGELOG.md)
 and on each release's page.

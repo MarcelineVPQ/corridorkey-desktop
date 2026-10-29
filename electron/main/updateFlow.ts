@@ -23,11 +23,14 @@
 //   (recorded in the prefs file) are pruned at start, never a copy the user put there.
 // - Check automatically off = nothing online on its own: no timer, no check
 //   at start, none on a channel switch; only check(true) goes online.
+// - Windows and macOS (openPage set, backlog row 180): the same signed feed, schedule
+//   and channels; Download opens the offered version's release page on GitHub
+//   (releasePageUrl, from the verified version). Nothing downloads or installs.
 import { basename, dirname, join } from "node:path";
 import type { UpdateChannel, UpdateState } from "../../src/shared/types";
 import { lowerFirst, NO_RELEASE_CHANNEL } from "../../src/shared/texts";
 import { downloadVerified, type FetchFn } from "./download";
-import { CHECK_EVERY_MS, downloadAllowed, feedSignedBy, FIRST_CHECK_MS, freshUrl, offers, parseFeed, STABLE_LINK, staleFiles, type Feed, type FeedSource } from "./updateFeed";
+import { CHECK_EVERY_MS, downloadAllowed, feedSignedBy, FIRST_CHECK_MS, freshUrl, offers, parseFeed, releasePageUrl, STABLE_LINK, staleFiles, type Feed, type FeedSource } from "./updateFeed";
 import { loadUpdatePrefs, saveUpdatePrefs } from "./updatePrefs";
 
 export interface FileOps {
@@ -55,6 +58,8 @@ export interface UpdatePlatform {
   fs: FileOps;
   // Start `target` cleanly and quit this copy.
   relaunch(target: string): void;
+  // Windows and macOS: open a release page in the browser instead of installing; null on Linux.
+  openPage: ((url: string) => void) | null;
   now(): number;
   log(message: string): void;
 }
@@ -96,6 +101,7 @@ export class UpdateFlow {
       error: p.unsupported,
       errorFrom: null,
       checkedAt: null,
+      opensPage: p.openPage !== null,
     };
     this.state.feed = this.feedUrl(prefs.channel);
     this.installedFiles = prefs.installed;
@@ -212,7 +218,13 @@ export class UpdateFlow {
       this.offer = feed;
       this.offerChannel = channel;
       const offered = offers(feed.version, this.p.version, returning);
-      this.set({ status: offered ? "available" : "current", latest: feed.version, size: offered ? feed.size : null, notes: offered ? feed.notes || null : null, checkedAt: this.p.now() });
+      this.set({
+        status: offered ? "available" : "current",
+        latest: feed.version,
+        size: offered && !this.p.openPage ? feed.size : null,
+        notes: offered ? feed.notes || null : null,
+        checkedAt: this.p.now(),
+      });
     } catch (e) {
       if (stale()) return;
       const message = e instanceof Error ? e.message : String(e);
@@ -296,7 +308,12 @@ export class UpdateFlow {
 
   async download(): Promise<void> {
     const feed = this.offer;
-    if (this.state.status !== "available" || !feed || this.offerChannel !== this.state.channel || !this.p.appImage) return;
+    if (this.state.status !== "available" || !feed || this.offerChannel !== this.state.channel) return;
+    if (this.p.openPage) {
+      this.p.openPage(releasePageUrl(feed.version));
+      return;
+    }
+    if (!this.p.appImage) return;
     const running = this.p.appImage;
     const version = feed.version;
     this.abort = new AbortController();
