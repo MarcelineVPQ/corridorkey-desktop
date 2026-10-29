@@ -496,11 +496,15 @@ describe("sudo", () => {
     expect(confirms).toHaveLength(1);
     expect([again.elevated, c.session().elevatedUntil]).toEqual([true, t + 5 * 60_000]);
     await finish(spawned[1].child, [], 0);
-    const audit = readFileSync(join(files, "console-audit.jsonl"), "utf8")
-      .trim()
-      .split("\n")
-      .map((l) => JSON.parse(l));
-    expect(audit.map((e) => e.event)).toEqual(["granted", "run", "exit", "run", "exit"]);
+    const read = () =>
+      readFileSync(join(files, "console-audit.jsonl"), "utf8")
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l));
+    // the exit entry is an async append after the close: wait for it (a fixed 5 ms lost the race on a CI runner)
+    // loop: NOT-WORTH — vi.waitFor polls a small file [bounded: vi.waitFor's 1 s default]
+    await vi.waitFor(() => expect(read().map((e) => e.event)).toEqual(["granted", "run", "exit", "run", "exit"]));
+    const audit = read();
     expect(audit[0].targets).toEqual([join(out, "sh010")]);
     expect(audit[2].exit).toBe(0);
   });
@@ -517,8 +521,8 @@ describe("sudo", () => {
     const { c, files } = make();
     const b = await c.run("sudo render shot.mov -o ../out/sh010 --overwrite");
     expect([b.state, b.elevated, spawned.length, c.session().elevatedUntil]).toEqual(["refused", false, 0, null]);
-    await new Promise((r) => setTimeout(r, 5));
-    expect(JSON.parse(readFileSync(join(files, "console-audit.jsonl"), "utf8")).event).toBe("refused");
+    // loop: NOT-WORTH — vi.waitFor polls a small file for the async append [bounded: vi.waitFor's 1 s default]
+    await vi.waitFor(() => expect(JSON.parse(readFileSync(join(files, "console-audit.jsonl"), "utf8")).event).toBe("refused"));
   });
 
   it("never asks for a command the file scope refuses anyway", async () => {
@@ -539,13 +543,15 @@ describe("sudo", () => {
     const monitor = new EventEmitter();
     dropOnLockAndSleep(monitor, (why) => c.dropElevation(why));
     monitor.emit("lock-screen");
-    await new Promise((r) => setTimeout(r, 5));
-    const events = readFileSync(join(files, "console-audit.jsonl"), "utf8")
-      .trim()
-      .split("\n")
-      .map((l) => JSON.parse(l));
-    // loop: NOT-WORTH — a few entries
-    expect(events.filter((e) => e.event === "dropped").map((e) => e.reason)).toEqual(["sudo -k", "the screen was locked"]);
+    // loop: NOT-WORTH — vi.waitFor polls a small file for the async append [bounded: vi.waitFor's 1 s default]
+    await vi.waitFor(() => {
+      const events = readFileSync(join(files, "console-audit.jsonl"), "utf8")
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l));
+      // loop: NOT-WORTH — a few entries
+      expect(events.filter((e) => e.event === "dropped").map((e) => e.reason)).toEqual(["sudo -k", "the screen was locked"]);
+    });
   });
 
   it("runs a non-destructive command under sudo as usual, without asking", async () => {
