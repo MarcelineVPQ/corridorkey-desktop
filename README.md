@@ -4,8 +4,8 @@
   <img src="docs/screenshots/01-results-04_5h-curly-hair.png" alt="CorridorKey Desktop keying curly hair at 4K: the result on a checkerboard, its matte and foreground" width="100%">
 </p>
 
-Download 1.0.0-dev.2 for Linux, Windows or Apple Silicon Macs from the
-[releases page](https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/v1.0.0-dev.2).
+Download 1.0.0-dev.3 for Linux, Windows or Apple Silicon Macs from the
+[releases page](https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/v1.0.0-dev.3).
 
 > **A community project, not made or endorsed by Corridor Digital.** The CorridorKey model is theirs; their official
 > app and plugins are at [corridorkey.com](https://corridorkey.com).
@@ -24,7 +24,7 @@ Windows with an NVIDIA graphics card, and on Apple Silicon Macs through Core ML:
 ## Get started
 
 1. Download the file for your system from the
-   [releases page](https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/v1.0.0-dev.2): the AppImage
+   [releases page](https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/v1.0.0-dev.3): the AppImage
    (Linux), the installer (Windows) or the disk image (Apple Silicon Mac).
 2. Open it. On first start the setup downloads the GPU runtime and the CorridorKey models once (4.03 GB on Linux,
    3.81 GB on Windows, 5.74 GB on macOS) and offers to install ffmpeg if it's missing.
