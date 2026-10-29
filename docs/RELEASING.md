@@ -148,10 +148,14 @@ Links point at the releases page, never `releases/latest`.
 each pinned file there at its size and SHA-256, and the licence files (LICENSE, NOTICE, ATTRIBUTION.md, and the
 base set's LICENSE-* on every derived set).
 
-**Windows CI, every release:** `.github/workflows/windows.yml` (`gh workflow run windows.yml --ref main`) runs the
-engine's checks (cargo fmt, clippy, cargo test) on GitHub's Windows runner, the only place its Windows-only code runs.
-It is started by hand (never on every push) on the release commit, and `tools/release.sh` refuses to tag a commit
-without a green run (step 1). Until a run passes, nothing Windows-only in the engine counts as run on Windows (the
+**CI on every push (BACKLOG row 170):** `.github/workflows/windows.yml`, `macos.yml` and `linux.yml` run by
+themselves on every push to main, and by hand (`gh workflow run <file> --ref main`). Windows runs the engine's checks
+(cargo fmt, clippy, cargo test) on GitHub's Windows runner, the only place its Windows-only code runs, and builds the
+app as a package there: unit tests, the first page, and `corridorkey run` within a time limit. macOS builds, signs,
+installs and starts the app and runs its `corridorkey run`; Linux builds the package and runs its `corridorkey run`.
+Each run is reported the moment it finishes. Measurement runs (speed, TensorRT, matte parity) are never part of CI or
+of a dev build: only when Marcy asks a question that needs one, on one clip, with a time estimate first.
+`tools/release.sh` refuses to tag a commit without a green Windows run (step 1). Until a run passes, nothing Windows-only in the engine counts as run on Windows (the
 CHANGELOG says "not yet run on Windows").
 
 **The Windows installer, once per release, by hand, before `--publish`:** `tools/release.sh` starts only the Linux
@@ -174,7 +178,7 @@ with their SHA-256, the repository URL and "open source, not yet code-signed".
 ### macOS (Apple Silicon)
 
 There is no Mac here and no cross-build from Linux without Apple's SDK, so the macOS disk image is built on
-GitHub's macOS runner (on demand only, never on every push). For a release, build it from the release's tag, once
+GitHub's macOS runner (on every push to main, and by hand). For a release, build it from the release's tag, once
 `tools/release.sh` has published it: `gh workflow run macos.yml --ref vX.Y.Z…` (the workflow refuses a tag that
 isn't package.json's version); any other run, `--ref main`, is a check, not a release file. It runs the
 app's and the engine's checks on macOS, builds the engine for `aarch64-apple-darwin` and the arm64 `.dmg`

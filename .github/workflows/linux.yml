@@ -1,0 +1,68 @@
+name: Linux
+
+# The Linux package, built and started on every push to main (BACKLOG row 170), as tools/release.sh does on Marcy's PC
+# at release time: dev.2's packaging bug (a package.json path beside the bundle broke `corridorkey run` everywhere)
+# surfaced only on release day. The app's unit tests, then the packaged `corridorkey run` with a two-line script, no
+# display and a time limit. The first page stays in release.sh: the app needs a Wayland desktop (tools/isolated.sh's
+# headless KWin), which this runner hasn't. Its engine is a plain cargo build without the GPU features (the release
+# builds for glibc 2.28 with Zig, tools/build_engine.sh): it proves the app, not the shipped engine binary. By hand too
+# (gh workflow run linux.yml).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    name: The packaged app on Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      # the engine and the command line, where electron-builder.yml takes them from (engine-rs/target/dist); TensorRT's
+      # engine builder needs NVIDIA's 3.7 GB wheel (tools/build_trt_builder.sh), so an empty stand-in fills its place
+      - name: Build the engine and corridorkey
+        working-directory: engine-rs
+        run: |
+          rustup toolchain install
+          cargo build --release --locked -p ck-engine -p ck-cli --no-default-features --features ort-dynamic,ocio
+          mkdir -p target/dist
+          cp target/release/corridorkey-engine target/release/corridorkey target/dist/
+          touch target/dist/ck-trt-build
+      # npm 9/10's own peer resolution crashes on this tree; .npmrc sets legacy-peer-deps.
+      - run: npx -y npm@10.9.2 ci
+      - run: npm test
+      - name: Package it (unpacked, no AppImage)
+        run: |
+          node tools/gen_cli_spec.mjs
+          npx electron-vite build
+          npx electron-builder --linux dir --x64 --publish never
+      # Ubuntu 24.04 keeps unprivileged user namespaces from Chromium's sandbox (AppArmor); the desktops the app ships
+      # to allow them, so the runner does too
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # `corridorkey run` starts the packaged app with --ck-headless: it must run the script and exit, with no display,
+      # D-Bus or keyring (release.sh's check), within a time limit
+      - name: The packaged corridorkey run
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          t="$RUNNER_TEMP/run"
+          mkdir -p "$t/home" && mkdir -m 700 "$t/xdg"
+          printf 'version\necho ck-run-check\n' > "$t/check.ckcmd"
+          v="$(node -p 'require("./package.json").version')"
+          out="$(timeout 120 env -i HOME="$t/home" USER="$USER" PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 XDG_RUNTIME_DIR="$t/xdg" \
+            XDG_CONFIG_HOME="$t/home/.config" XDG_CACHE_HOME="$t/home/.cache" XDG_DATA_HOME="$t/home/.local/share" \
+            release/linux-unpacked/resources/engine/corridorkey run "$t/check.ckcmd")"
+          echo "$out"
+          grep -qF "CorridorKey $v " <<< "$out" && grep -qx ck-run-check <<< "$out" || { echo "::error::corridorkey run didn't run its script"; exit 1; }

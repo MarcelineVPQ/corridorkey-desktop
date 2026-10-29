@@ -6,10 +6,16 @@ name: Windows
 # steps (cargo fmt, clippy -D warnings, cargo test; default features: ONNX Runtime linked statically, OpenColorIO
 # built from source) on a real Windows (audit 2026-10-27 row 20). GitHub's runner builds with MSVC, not the MinGW the
 # release uses, and has no graphics card: tests that need one, or ffmpeg, skip. Windows-only tests run here and nowhere
-# else: ck-cli/tests/run_stop_windows.rs (`corridorkey run`'s Ctrl+C / Ctrl+Break stop path with real console events). On demand only (gh workflow run
-# windows.yml, or Actions -> Windows -> Run workflow), never on every push.
+# else: ck-cli/tests/run_stop_windows.rs (`corridorkey run`'s Ctrl+C / Ctrl+Break stop path with real console events).
+# The second job builds the app as a package on Windows and starts it: its unit tests, the first page, and the
+# packaged `corridorkey run` within a time limit (dev.2's Windows hang after a run surfaced only in the release VM
+# check). Its engine is built with MSVC and without the GPU features (the release cross-builds with MinGW): it proves
+# the app, not the shipped engine binary, which the release VM check still starts. On every push to main (BACKLOG row
+# 170) and by hand (gh workflow run windows.yml).
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -34,3 +40,58 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked --no-fail-fast
+
+  app:
+    name: The packaged app on Windows
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      # the engine and the command line, where electron-builder.yml takes them from (engine-rs/target/dist)
+      - name: Build the engine and corridorkey.exe
+        working-directory: engine-rs
+        run: |
+          rustup toolchain install
+          cargo build --release --locked -p ck-engine -p ck-cli --no-default-features --features ort-dynamic,ocio
+          mkdir -p target/dist
+          cp target/release/corridorkey-engine.exe target/release/corridorkey.exe target/dist/
+      # npm 9/10's own peer resolution crashes on this tree; .npmrc sets legacy-peer-deps.
+      - run: npx -y npm@10.9.2 ci
+      - run: npm test
+      - name: Package it (unpacked, no installer)
+        run: |
+          node tools/gen_cli_spec.mjs
+          npx electron-vite build
+          npx electron-builder --win dir --x64 --publish never
+      - name: Start it and reach the first page
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          ./release/win-unpacked/CorridorKey.exe --remote-debugging-port=9334 > "$RUNNER_TEMP/app.log" 2>&1 &
+          node tools/drive.mjs --port 9334 --out "$RUNNER_TEMP/shots" --wait 5000 --shot 01-first-page --close
+      # `corridorkey run` starts the packaged app with --ck-headless: it must run the script and exit (dev.2: it hung on
+      # Windows after the script, a session folder Chromium still held), within a time limit
+      - name: The packaged corridorkey run
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          printf 'version\necho ck-run-check\n' > "$RUNNER_TEMP/check.ckcmd"
+          v="$(node -p 'require("./package.json").version')"
+          out="$(timeout 120 ./release/win-unpacked/resources/engine/corridorkey.exe run "$(cygpath -w "$RUNNER_TEMP/check.ckcmd")" | tr -d '\r')"
+          echo "$out"
+          grep -qF "CorridorKey $v " <<< "$out" && grep -qx ck-run-check <<< "$out" || { echo "::error::corridorkey run didn't run its script"; exit 1; }
+      - name: Upload the first page and the app's log
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-app-smoke
+          path: |
+            ${{ runner.temp }}/shots/
+            ${{ runner.temp }}/app.log
+          retention-days: 14

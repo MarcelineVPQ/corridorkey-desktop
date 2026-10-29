@@ -2,18 +2,21 @@ name: macOS
 
 # We have no Mac: this is where the app is built and run on one (the DS5 configurator's mac-smoke pattern).
 # GitHub's macOS runner is an Apple Silicon Mac with a logged-in desktop, but a virtual one without the GPU or
-# the Neural Engine: it proves the build, the install and the app, not keying speed. Linux and Windows are built
-# on Marcy's PC (tools/release.sh); CI is only for macOS (and Windows checks), so this runs on demand
-# (gh workflow run macos.yml, or Actions -> macOS -> Run workflow), never on every push; a release's image from its tag
+# the Neural Engine: it proves the build, the install and the app, not keying speed. Linux and Windows releases are
+# built on Marcy's PC (tools/release.sh). It runs on every push to main (BACKLOG row 170: dev.2's packaging bugs
+# surfaced only on release day), and by hand (gh workflow run macos.yml); a release's image from its tag
 # (--ref vX.Y.Z…; docs/RELEASING.md "macOS").
 #   1. the app's checks and the engine's checks on macOS
 #   2. the engine for aarch64-apple-darwin and the arm64 disk image, signed (Developer ID), notarized and stapled
 #   3. installed as a user does (a quarantined download, moved to /Applications); what Gatekeeper says is recorded
 #   4. started through LaunchServices (as Finder / the Dock do) and driven over DevTools (tools/drive.mjs) through
 #      every page, one screenshot each
+#   5. the installed app's `corridorkey run` runs a two-line script and exits, within a time limit
 # Screenshots, logs and Gatekeeper's answers are the run's "macos-smoke" artifact; the job summary has the list.
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -167,6 +170,19 @@ jobs:
             --eval "$(go settings)" --wait 1500 --shot 04-app-settings \
             --eval "$(go about)" --wait 1500 --shot 05-about \
             --close
+
+      # `corridorkey run` starts the packaged app with --ck-headless (boot.ts): dev.2's release found it broken
+      # everywhere (a package.json path beside the bundle) only on release day. A time limit: a run that never ends fails.
+      - name: The installed app's corridorkey run
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          cli="/Applications/$APP_NAME.app/Contents/Resources/engine/corridorkey"
+          printf 'version\necho ck-run-check\n' > "$RUNNER_TEMP/check.ckcmd"
+          v="$(node -p 'require("./package.json").version')"
+          out="$(perl -e 'alarm 120; exec @ARGV or die "exec: $!"' "$cli" run "$RUNNER_TEMP/check.ckcmd")"
+          echo "$out"
+          grep -qF "CorridorKey $v " <<< "$out" && grep -qx ck-run-check <<< "$out" || { echo "::error::corridorkey run didn't run its script"; exit 1; }
 
       - name: Job summary
         if: always()
