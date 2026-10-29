@@ -198,6 +198,13 @@ downloads the image from it, refuses one named for another version, adds its lin
 signs them again and uploads the image with them. The runner is a virtual Mac without
 the GPU or the Neural Engine: it proves the build and the app, not keying speed.
 
+**The real Mac, before `--mac` (BACKLOG row 174):** `tools/mac_app_gate.sh --host mac --run <the release's macos.yml run>`
+installs that image on the Mac mini as a download (Gatekeeper's verdicts on the image and the app recorded), runs the
+setup's download when it needs one (over an older Core ML set: only the new files), keys one clip through the
+installed app's queue and passes only when the job finished on Core ML (report in
+`~/.cache/claude-scratch/mac-app-gate/`). First run 2026-10-28 (7588521): image and app accepted as notarized, the
+upgrade from dev.2's set 982.6 MB, 04_5d at 1920×1080 120/120 frames on Core ML in 157 s.
+
 Signing (since 2026-10-24): the image is signed with Marcy's Developer ID Application certificate (team
 FTQ95W942L, valid to 2027-11-23) with the hardened runtime (`build/entitlements.mac.plist`: V8's JIT, and
 disable-library-validation so the engine can load ONNX Runtime's library from PyPI), notarized with an App Store
