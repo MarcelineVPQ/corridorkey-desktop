@@ -86,6 +86,8 @@ pub(crate) struct FakeCfg {
     /// the mixed-precision fp16 set (2.0.0-onnx.4 on, the original's autocast types): float16 only for
     /// `MIXED_F16` (overrides `half`)
     pub(crate) mixed: bool,
+    /// stage 2 takes its rgb as float32 while stage 1 takes float16 (no set does: the all-loaded mode's fallback)
+    pub(crate) stage2_rgb_f32: bool,
     /// stage 1's baton: base_term x (a function of the window's inputs) + window_term x (the window's number)
     pub(crate) base_term: f32,
     pub(crate) window_term: f32,
@@ -95,7 +97,7 @@ pub(crate) struct FakeCfg {
 
 impl FakeCfg {
     pub(crate) fn new(shape: (usize, usize)) -> FakeCfg {
-        FakeCfg { shape, half: true, mixed: false, base_term: 1.0, window_term: 0.125, fail_run: None, fail_load: None }
+        FakeCfg { shape, half: true, mixed: false, stage2_rgb_f32: false, base_term: 1.0, window_term: 0.125, fail_run: None, fail_load: None }
     }
 }
 
@@ -181,7 +183,9 @@ pub(crate) const MIXED_F16: [(&str, &str); 6] =
 
 impl FakeNet {
     fn is_f16(&self, tensor: &str) -> bool {
-        if self.cfg.mixed {
+        if self.cfg.stage2_rgb_f32 && (self.piece, tensor) == ("stage2", "rgb") {
+            false
+        } else if self.cfg.mixed {
             MIXED_F16.contains(&(self.piece, tensor))
         } else {
             self.cfg.half

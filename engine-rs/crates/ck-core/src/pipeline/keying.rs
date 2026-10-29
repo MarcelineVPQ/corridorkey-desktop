@@ -129,11 +129,20 @@ struct WindowsIn {
 /// One stage-1 window's inputs made ahead (`stage1_windows`).
 struct WindowInputs {
     frames: Vec<Prepped>,
-    /// stage 1's rgb, already in the type stage 1 takes (converted on the input thread, not between card calls)
-    rgb: Data<'static>,
+    /// stage 1's rgb, already in the type stage 1 takes (converted on the input thread, not between card calls); in
+    /// normal mode stage 2 reads its frames from it too (`S2Rgb`)
+    rgb: Arc<Data<'static>>,
     hint_video: Option<Vec<Arc<Vec<f32>>>>,
     found: Found,
     rvm: Vec<half::f16>,
+}
+
+/// A frame's rgb for stage 2 in normal mode: its place in a window's stage-1 rgb (frame `.1`), when stage 2 takes the
+/// type stage 1 does (the same values: both are the decoded bfloat16 frame in that type), else the decoded frame,
+/// converted in the run.
+enum S2Rgb {
+    Window(Arc<Data<'static>>, usize),
+    Frame(Arc<Vec<half::bf16>>),
 }
 
 /// One stage-1 window's states waiting to be blended (on the baton-blend thread while the card runs the next window).
@@ -483,7 +492,7 @@ impl<L: Loader> Pipeline<L> {
                 };
                 // loop: HOT-PATH-OK — ≤ 80 slice references; one parallel conversion per window
                 let rgb = Data::Bf16(frames.iter().map(|f| &f.model[..]).collect());
-                let rgb = if f16 { Data::F16(rgb.into_f16()) } else { Data::F32(rgb.into_f32()) };
+                let rgb = Arc::new(if f16 { Data::F16(rgb.into_f16()) } else { Data::F32(rgb.into_f32()) });
                 Ok(Some(WindowInputs { frames, rgb, hint_video, found, rvm }))
             })?
         };
@@ -496,7 +505,7 @@ impl<L: Loader> Pipeline<L> {
         let mut pending: Option<PendingBlend> = None;
         let mut feats: Option<WindowFeatures> = None;
         let mut carry: BTreeMap<usize, Vec<f32>> = BTreeMap::new();
-        let mut stage2_frames: BTreeMap<usize, Arc<Vec<half::bf16>>> = BTreeMap::new();
+        let mut stage2_frames: BTreeMap<usize, S2Rgb> = BTreeMap::new();
         let plane = sh * sw;
         let hq_full = bf16_round(job.hint_quality as f32);
         let hq_carry = bf16_round(job.carry_hint_quality as f32);
@@ -517,7 +526,11 @@ impl<L: Loader> Pipeline<L> {
         // first time one is needed
         let hint_f16 = self.net("stage1")?.wants_f16("hint");
         // the input thread waits for it before converting the first window (it can't fail: the thread holds the receiver)
-        let _ = rgb_type_tx.send(self.net("stage1")?.wants_f16("rgb"));
+        let rgb_f16 = self.net("stage1")?.wants_f16("rgb");
+        let _ = rgb_type_tx.send(rgb_f16);
+        // normal mode: stage 2 reads each frame from the window's stage-1 rgb when it takes the same type (backlog row
+        // 182: converting it again on this thread took 1.9 s per 4K job)
+        let s2_shares = !low_vram && self.net("stage2")?.wants_f16("rgb") == rgb_f16;
         let (zeros16, zeros32) = (std::cell::OnceCell::<Vec<half::f16>>::new(), std::cell::OnceCell::<Vec<f32>>::new());
         let zero_len = chunk.min(t_all) * plane;
         sink.send(json!({"type": "progress", "stage": "keying"}));
@@ -569,10 +582,15 @@ impl<L: Loader> Pipeline<L> {
                 Data::F32(hint_window(&src, plane, |v| v))
             };
             drop(src);
-            if !low_vram {
+            if s2_shares {
+                // loop: HOT-PATH-OK — the window's frames: the newest window's rgb, so an older window's is freed sooner
+                for (j, t) in (t0..t1).enumerate() {
+                    stage2_frames.insert(t, S2Rgb::Window(rgb.clone(), j));
+                }
+            } else if !low_vram {
                 // loop: HOT-PATH-OK — the window's frames
                 for (j, t) in (t0..t1).enumerate() {
-                    stage2_frames.entry(t).or_insert_with(|| frames[j].model.clone());
+                    stage2_frames.entry(t).or_insert_with(|| S2Rgb::Frame(frames[j].model.clone()));
                 }
             }
             if low_vram && i + 1 == starts.len() {
@@ -613,7 +631,7 @@ impl<L: Loader> Pipeline<L> {
                     drop(frames);
                     times.s1_in_s += tw.elapsed().as_secs_f64();
                     self.net("stage1")?.run(vec![
-                        ("rgb", vec![1, tc, 3, sh, sw], rgb),
+                        ("rgb", vec![1, tc, 3, sh, sw], rgb.view()),
                         ("hint", vec![1, tc, 1, sh, sw], hint),
                         ("hint_quality", vec![1, tc], hq.into()),
                         ("moge", vec![1, tc, MOGE_CH, h64, w64], moge),
@@ -821,7 +839,7 @@ impl<L: Loader> Pipeline<L> {
         &mut self,
         ready: Vec<(usize, Vec<half::f16>)>,
         baton_file: &mut Option<F16File>,
-        stage2_frames: &mut BTreeMap<usize, Arc<Vec<half::bf16>>>,
+        stage2_frames: &mut BTreeMap<usize, S2Rgb>,
         meta: &ClipMeta,
         out: &mut Writing<'_, '_>,
         sink: &mut dyn Sink,
@@ -838,9 +856,20 @@ impl<L: Loader> Pipeline<L> {
             match baton_file {
                 Some(f) => f.put(t, &b)?,
                 None => {
-                    let model = stage2_frames.remove(&t).ok_or_else(|| Error::engine(format!("frame {t} not cached for stage 2")))?;
-                    // converted inside the run, once, to the type stage 2 takes
-                    self.stage2_run(Data::Bf16(vec![&model[..]]), Data::F16(b), meta, out, sink)?;
+                    let rgb = stage2_frames.remove(&t).ok_or_else(|| Error::engine(format!("frame {t} not cached for stage 2")))?;
+                    let n = 3 * meta.shape_h * meta.shape_w;
+                    match &rgb {
+                        S2Rgb::Window(w, j) => {
+                            let frame = match w.view() {
+                                Data::F16Ref(v) => Data::F16Ref(&v[j * n..(j + 1) * n]),
+                                Data::F32Ref(v) => Data::F32Ref(&v[j * n..(j + 1) * n]),
+                                _ => return Err(Error::engine("stage 1's rgb not float16 / float32".into())),
+                            };
+                            self.stage2_run(frame, Data::F16(b), meta, out, sink)?;
+                        }
+                        // converted inside the run, once, to the type stage 2 takes
+                        S2Rgb::Frame(model) => self.stage2_run(Data::Bf16(vec![&model[..]]), Data::F16(b), meta, out, sink)?,
+                    }
                 }
             }
         }

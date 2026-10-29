@@ -236,6 +236,33 @@ fn stage_1_rgb_is_converted_on_the_input_thread_in_both_modes() {
 }
 
 #[test]
+fn all_loaded_mode_stage_2_reads_its_frame_from_the_windows_stage_1_rgb() {
+    // backlog row 182: stage 2's frame is a view of the window's stage-1 rgb (converted on the input thread) when
+    // stage 2 takes the same type, not the decoded frame converted again between card calls; another type (no set
+    // has one) converts the decoded frame in the run, as before. Either way its inputs are the low-VRAM mode's.
+    // loop: NOT-WORTH — the shared type and the fallback
+    for s2_f32 in [false, true] {
+        let run = |low_vram: bool| {
+            let mut cfg = FakeCfg::new(SHAPE);
+            cfg.stage2_rgb_f32 = s2_f32;
+            let mut h = Harness::new(cfg, 9, options(json!({"hann_chunk": 4, "hann_stride": 2})));
+            h.keying(&key(Provider::Cpu), None, 4, 2, low_vram).res.unwrap();
+            h.loader.runs_of("stage2")
+        };
+        let (all, low) = (run(false), run(true));
+        assert_eq!(all.len(), 9);
+        // loop: NOT-WORTH — a test job's stage-2 runs
+        assert!(all.iter().all(|r| r.bf16.is_empty() != s2_f32), "stage 2 rgb as bfloat16: {:?} (stage 2 float32: {s2_f32})", all[0].bf16);
+        // loop: NOT-WORTH — a test job's stage-2 runs
+        assert_eq!(
+            all.iter().map(|r| r.hash).collect::<Vec<_>>(),
+            low.iter().map(|r| r.hash).collect::<Vec<_>>(),
+            "stage 2 inputs (stage 2 float32: {s2_f32})"
+        );
+    }
+}
+
+#[test]
 fn all_loaded_mode_loads_every_network_first_and_streams_stage_2() {
     let mut h = Harness::new(FakeCfg::new(SHAPE), 9, options(json!({})));
     h.keying(&key(Provider::Cpu), None, 4, 2, false).res.unwrap();
