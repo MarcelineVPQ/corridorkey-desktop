@@ -8,9 +8,10 @@
 //
 // lifetime: one process per `corridorkey run`, ended by the script's end (SIGINT / SIGTERM stop it as Ctrl+C does; on
 // Windows, where Electron didn't call them (measured as Node, Electron 45.1.0; the --ck-headless start keeps the same
-// way, not yet run there), ck-cli's `stop` line on stdin does: CK_HEADLESS_STOP=stdin).
+// way), ck-cli's stop file does: CK_HEADLESS_STOP=file:<path>, onStopFile; a `stop` line on stdin, the first way,
+// never reached the Windows app).
+import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { createInterface } from "node:readline";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { appDirs, PLATFORM } from "../platform";
@@ -70,15 +71,23 @@ export class Printer {
   }
 }
 
-/** The line ck-cli writes on the runner's stdin for Ctrl+C / Ctrl+Break on Windows (ck-cli headless.rs STOP_LINE). */
-export const STOP_LINE = "stop";
+/** How often the runner looks for ck-cli's stop file (CK_HEADLESS_STOP=file:<path>). */
+export const STOP_EVERY_MS = 250;
 
-/** Calls `stop` for each `stop` line read from `input` (ck-cli's Ctrl+C on Windows); any other line is ignored. */
-export function onStopLines(input: NodeJS.ReadableStream, stop: () => void): void {
-  // lifetime: OK — reads until ck-cli's end of the pipe closes; the process ends with the script
-  createInterface({ input, terminal: false }).on("line", (l) => {
-    if (l.trim() === STOP_LINE) stop();
-  });
+/**
+ * Calls `stop` once when ck-cli's stop file exists (its Ctrl+C / Ctrl+Break on Windows, headless.rs ask_to_stop): a
+ * `stop` line on stdin was never read by the Windows app (VM, dev.3 2026-10-28: sent 3 s in, all three lines of the
+ * script ran). Returns the check's own stop.
+ */
+export function onStopFile(path: string, stop: () => void, exists: (p: string) => boolean = existsSync): () => void {
+  // loop: NOT-WORTH — one stat every STOP_EVERY_MS while a script runs [bounded: cleared at the first stop; unref'd, so it never holds the process]
+  const t = setInterval(() => {
+    if (!exists(path)) return;
+    clearInterval(t);
+    stop();
+  }, STOP_EVERY_MS);
+  t.unref();
+  return () => clearInterval(t);
 }
 
 /** What a refusal says: what was refused, why, and where to run it (the next free version only where it fits). */
@@ -182,7 +191,8 @@ export async function runHeadless(argv: string[], cli: string, pkg: { name: stri
   // lifetime: OK — the process ends with the script
   process.on("SIGINT", () => c.cancel());
   process.on("SIGTERM", () => c.cancel());
-  if (process.env.CK_HEADLESS_STOP === "stdin") onStopLines(process.stdin, () => c.cancel());
+  const stopFile = process.env.CK_HEADLESS_STOP?.startsWith("file:") ? process.env.CK_HEADLESS_STOP.slice("file:".length) : "";
+  if (stopFile) onStopFile(stopFile, () => c.cancel());
   // loop: NOT-WORTH — starts the script [bounded: its checks; the script itself is waited for below]
   const b = await c.run(`run ${args.keepGoing ? "--keep-going " : ""}${quoteArg(resolve(args.file), { windows: PLATFORM === "win32" })}`);
   // loop: NOT-WORTH — waits for the script's block to end [bounded: the script's own end; SIGINT / SIGTERM stop it]

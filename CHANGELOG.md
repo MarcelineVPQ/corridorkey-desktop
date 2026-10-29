@@ -13,6 +13,9 @@ The foundation build: the Mac on par with Linux and Windows, and the checks runn
   app always started it so; backlog row 174).
 - The Mac disk image itself is signed and notarized, its ticket stapled: Gatekeeper accepts the downloaded image
   before it is opened (dev.2's image was unsigned, only the app inside it was; backlog row 174).
+- Windows: Ctrl+C on `corridorkey run` stops the script at once, cleanly ("cancelled", exit 130). Before, the app
+  never read the command line's stop request there, so the script ran on until a second Ctrl+C ended it (backlog
+  row 175).
 - Releases: every release, development builds too, is a full GitHub release marked Latest (the repository page shows
   the newest build); the update feeds tell Stable from Development by the version, as before (backlog row 173).
 - Development: Windows, macOS and Linux CI run on every push to main, each starting the packaged app's

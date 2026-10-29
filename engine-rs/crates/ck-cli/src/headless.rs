@@ -6,8 +6,8 @@
 //! farm's SIGTERM reaches the runner itself, and a death by signal shows as one); on Windows it waits and exits as the
 //! script ended. Windows: Electron didn't call the runner's `process.on("SIGINT" | "SIGBREAK")` (measured
 //! on Electron 45.1.0, VM run 2026-10-27), so this process takes the console's events (signals.rs) and asks the runner
-//! to stop with a `stop` line on its stdin (CK_HEADLESS_STOP=stdin): the runner's own cancel, its "cancelled" report,
-//! exit 130. The runner starts in a process group of its own, which ignores Ctrl+C; Ctrl+Break still reaches every
+//! to stop with a stop file it watches (CK_HEADLESS_STOP=file:<path>; a `stop` line on its stdin, the first way, was
+//! never read by the Windows app: VM, dev.3 2026-10-28): the runner's own cancel, its "cancelled" report, exit 130. The runner starts in a process group of its own, which ignores Ctrl+C; Ctrl+Break still reaches every
 //! process on the console, so when it ends the runner first (0xC000013A) this process says the script stopped and exits
 //! 128 + the signal. A second Ctrl+C / Ctrl+Break ends this process, and the app with it (its job object,
 //! ck_core::proc::children_end_with_me). It needs the app installed next to it (this binary in `resources/engine/`); a
@@ -71,18 +71,18 @@ pub fn run(m: &ArgMatches) -> i32 {
     #[cfg(not(unix))]
     {
         use std::os::windows::process::CommandExt;
-        use std::sync::{Arc, Mutex};
         // CREATE_NEW_PROCESS_GROUP: the console's Ctrl+C doesn't reach the runner (it ignores it); this process asks
-        c.creation_flags(CREATE_NEW_PROCESS_GROUP).env("CK_HEADLESS_STOP", "stdin").stdin(std::process::Stdio::piped());
-        // the first Ctrl+C / Ctrl+Break: a `stop` line to the runner; a second ends this process and the runner with it.
-        // Installed before the runner starts (engine re-review 2026-10-28 #1: installed after, an event in between found
-        // the console's default handler and ended this process); an event before its pipe exists is sent once it does
-        let pipe: Arc<Mutex<StopPipe<std::process::ChildStdin>>> = Arc::new(Mutex::new(StopPipe::default()));
-        let p2 = pipe.clone();
+        let stop_file = std::env::temp_dir().join(format!("corridorkey-run-{}.stop", std::process::id()));
+        // error: NOT-WORTH — a leftover of a reused process id goes; none there is the usual case
+        let _ = std::fs::remove_file(&stop_file);
+        c.creation_flags(CREATE_NEW_PROCESS_GROUP).env("CK_HEADLESS_STOP", format!("file:{}", stop_file.display()));
+        // the first Ctrl+C / Ctrl+Break: the stop file; a second ends this process and the runner with it. Installed
+        // before the runner starts (engine re-review 2026-10-28 #1: installed after, an event in between found the
+        // console's default handler and ended this process); a file made before the runner looks is seen at its first look
+        let sf = stop_file.clone();
         crate::signals::install_with(Box::new(move || {
-            if let Ok(mut p) = p2.lock() {
-                p.stop();
-            }
+            // error: NOT-WORTH — a temp folder that can't take a file: the second Ctrl+C still ends the run
+            let _ = ask_to_stop(&sf);
         }));
         let mut child = match c.spawn() {
             Ok(ch) => ch,
@@ -91,11 +91,11 @@ pub fn run(m: &ArgMatches) -> i32 {
                 return exit::ASSETS;
             }
         };
-        if let (Ok(mut p), Some(w)) = (pipe.lock(), child.stdin.take()) {
-            p.attach(w, crate::signals::stopped_by().is_some());
-        }
-        // loop: NOT-WORTH — one wait for the script [bounded: the script's own end; a `stop` line stops it, a second Ctrl+C ends it]
-        match child.wait() {
+        // loop: NOT-WORTH — one wait for the script [bounded: the script's own end; the stop file stops it, a second Ctrl+C ends it]
+        let waited = child.wait();
+        // error: NOT-WORTH — none made (no Ctrl+C) is the usual case
+        let _ = std::fs::remove_file(&stop_file);
+        match waited {
             // Windows always has an exit code
             Ok(s) => script_status(s.code().unwrap_or(exit::ENGINE), crate::signals::stopped_by()),
             Err(e) => {
@@ -117,9 +117,6 @@ const HEADLESS_SWITCHES: &[&str] = &["--no-sandbox", "--ozone-platform=headless"
 #[cfg(not(target_os = "linux"))]
 const HEADLESS_SWITCHES: &[&str] = &["--log-level=3"];
 
-/// The line the runner reads on its stdin as Ctrl+C (electron/main/console/headless.ts STOP_LINE).
-pub const STOP_LINE: &[u8] = b"stop\n";
-
 /// Windows: a new process group (CreateProcess's CREATE_NEW_PROCESS_GROUP).
 #[cfg(windows)]
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
@@ -127,45 +124,10 @@ const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 /// Windows: the exit code of a process the console's Ctrl+C / Ctrl+Break ended (STATUS_CONTROL_C_EXIT).
 const STATUS_CONTROL_C_EXIT: i32 = 0xC000_013Au32 as i32;
 
-/// The runner's stdin as the console handler sees it: the `stop` line goes once, whether the event comes before the
-/// runner's pipe exists (sent when it is attached) or after.
-pub struct StopPipe<W> {
-    w: Option<W>,
-    asked: bool,
-    sent: bool,
-}
-
-impl<W> Default for StopPipe<W> {
-    fn default() -> Self {
-        StopPipe { w: None, asked: false, sent: false }
-    }
-}
-
-impl<W: std::io::Write> StopPipe<W> {
-    /// The console's first event.
-    pub fn stop(&mut self) {
-        self.asked = true;
-        self.send();
-    }
-    /// The runner's pipe, once it started; `stopped`: an event already came (its handler may have run before `asked`).
-    pub fn attach(&mut self, w: W, stopped: bool) {
-        self.w = Some(w);
-        self.asked |= stopped;
-        self.send();
-    }
-    fn send(&mut self) {
-        if let (true, false, Some(w)) = (self.asked, self.sent, self.w.as_mut()) {
-            self.sent = true;
-            // error: NOT-WORTH — a runner that already ended can't read it; the wait reports its end
-            let _ = ask_to_stop(w);
-        }
-    }
-}
-
-/// Ask the runner to stop: its own cancel, as the Console's Ctrl+C.
-pub fn ask_to_stop(w: &mut impl std::io::Write) -> std::io::Result<()> {
-    w.write_all(STOP_LINE)?;
-    w.flush()
+/// Ask the runner to stop: its own cancel, as the Console's Ctrl+C. The stop file it watches (electron/main/console/
+/// headless.ts onStopFile); asking again leaves it as it is.
+pub fn ask_to_stop(stop_file: &Path) -> std::io::Result<()> {
+    std::fs::OpenOptions::new().write(true).create(true).truncate(false).open(stop_file).map(|_| ())
 }
 
 /// The exit code `run` passes on: the runner's, except when the console's event ended the runner before its own stop
@@ -208,27 +170,15 @@ mod tests {
     }
 
     #[test]
-    fn asks_the_runner_to_stop_with_one_stop_line() {
-        let mut pipe = Vec::new();
-        ask_to_stop(&mut pipe).unwrap();
-        assert_eq!(pipe, b"stop\n");
-    }
-
-    #[test]
-    fn a_stop_before_the_runners_pipe_exists_is_sent_once_it_does() {
-        // engine re-review 2026-10-28 #1: the handler is installed before the runner starts
-        let mut p: StopPipe<Vec<u8>> = StopPipe::default();
-        p.stop();
-        p.attach(Vec::new(), true);
-        p.stop();
-        assert_eq!(p.w.as_deref(), Some(&b"stop\n"[..]), "sent once, when attached");
-        // after: at once, and once
-        let mut p: StopPipe<Vec<u8>> = StopPipe::default();
-        p.attach(Vec::new(), false);
-        assert_eq!(p.w.as_deref(), Some(&b""[..]));
-        p.stop();
-        p.stop();
-        assert_eq!(p.w.as_deref(), Some(&b"stop\n"[..]));
+    fn asks_the_runner_to_stop_with_a_stop_file() {
+        let f = std::env::temp_dir().join(format!("ck-stop-test-{}.stop", std::process::id()));
+        let _ = std::fs::remove_file(&f);
+        ask_to_stop(&f).unwrap();
+        assert!(f.is_file());
+        // again: still there, nothing else
+        ask_to_stop(&f).unwrap();
+        assert!(f.is_file());
+        std::fs::remove_file(&f).unwrap();
     }
 
     #[test]

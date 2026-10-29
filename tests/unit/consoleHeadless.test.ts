@@ -1,9 +1,8 @@
 // `corridorkey run FILE.ckcmd` (SME review 2026-10-27 N12, backlog row 151): the script runner the CLI starts in the
 // app as Node (electron/main/console/headless.ts): where the app's settings are, its arguments, and what it prints.
 import { readFileSync } from "node:fs";
-import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
-import { headlessArgs, onStopLines, Printer, refusal, STOP_LINE, userDataDir } from "../../electron/main/console/headless";
+import { describe, expect, it, vi } from "vitest";
+import { headlessArgs, onStopFile, Printer, refusal, STOP_EVERY_MS, userDataDir } from "../../electron/main/console/headless";
 import { bundledCliPath, headlessLaunch } from "../../electron/main/headlessFlag";
 import type { ConsoleBlock } from "../../src/shared/types";
 
@@ -79,17 +78,27 @@ describe("corridorkey run's script runner", () => {
     ]);
   });
 
-  it("stops on each stop line ck-cli writes on its stdin (Windows Ctrl+C), across chunks; other lines do nothing", async () => {
-    const input = new PassThrough();
-    let stops = 0;
-    onStopLines(input, () => stops++);
-    input.write("hello\nst");
-    input.write("op\r\n");
-    input.write(`${STOP_LINE}\n`);
-    input.end();
-    await new Promise((r) => input.on("end", r));
-    await new Promise((r) => setImmediate(r));
-    expect(stops).toBe(2);
+  it("stops once when ck-cli's stop file appears (Windows Ctrl+C: the app never read a stdin line there)", () => {
+    vi.useFakeTimers();
+    try {
+      let there = false;
+      let stops = 0;
+      onStopFile(
+        "/t/stop",
+        () => stops++,
+        (p) => p === "/t/stop" && there,
+      );
+      vi.advanceTimersByTime(STOP_EVERY_MS * 3);
+      expect(stops).toBe(0);
+      there = true;
+      vi.advanceTimersByTime(STOP_EVERY_MS);
+      expect(stops).toBe(1);
+      // once: the check ends at the first stop
+      vi.advanceTimersByTime(STOP_EVERY_MS * 4);
+      expect(stops).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("refuses in words, with the next free version only where it fits (not for allow)", () => {

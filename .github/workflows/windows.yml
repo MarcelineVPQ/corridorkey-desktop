@@ -87,6 +87,23 @@ jobs:
           out="$(timeout 120 ./release/win-unpacked/resources/engine/corridorkey.exe run "$(cygpath -w "$RUNNER_TEMP/check.ckcmd")" | tr -d '\r')"
           echo "$out"
           grep -qF "CorridorKey $v " <<< "$out" && grep -qx ck-run-check <<< "$out" || { echo "::error::corridorkey run didn't run its script"; exit 1; }
+      # Ctrl+C on Windows reaches the app as ck-cli's stop file (headless.rs ask_to_stop, headless.ts onStopFile): the
+      # app must cancel the script at once, never run its next line (dev.3: the first way, a stdin line, was never read
+      # there; the stop path's console half is tests/run_stop_windows.rs in the engine job)
+      - name: The packaged app stops a script when its stop file appears
+        timeout-minutes: 4
+        run: |
+          set -uo pipefail
+          printf 'du C:\\Windows\necho second-line-ran\ndu C:\\Windows\n' > "$RUNNER_TEMP/long.ckcmd"
+          rm -f "$RUNNER_TEMP/run.stop"
+          app="$PWD/release/win-unpacked"
+          ( sleep 3; : > "$RUNNER_TEMP/run.stop" ) &
+          CK_HEADLESS_CLI="$(cygpath -w "$app/resources/engine/corridorkey.exe")" CK_HEADLESS_STOP="file:$(cygpath -w "$RUNNER_TEMP/run.stop")" \
+            timeout 120 "$app/CorridorKey.exe" --log-level=3 --ck-headless run "$(cygpath -w "$RUNNER_TEMP/long.ckcmd")" > "$RUNNER_TEMP/stop.out" 2>&1
+          code=$?
+          tr -d '\r' < "$RUNNER_TEMP/stop.out"
+          echo "exit $code"
+          [ "$code" = 130 ] && grep -q cancelled "$RUNNER_TEMP/stop.out" && ! grep -q second-line-ran "$RUNNER_TEMP/stop.out" || { echo "::error::the app didn't stop the script when its stop file appeared"; exit 1; }
       - name: Upload the first page and the app's log
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

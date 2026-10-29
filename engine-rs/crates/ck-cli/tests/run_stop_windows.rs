@@ -1,7 +1,7 @@
 //! Windows only: `corridorkey run`'s stop path end to end (final review 2026-10-28 N11; before, only `ask_to_stop` and
 //! `script_status` had tests and the rest was a manual VM run). The real `corridorkey` binary runs a stub script runner
 //! (this test program itself, as `CK_APP`, in stub mode) and gets real console events from GenerateConsoleCtrlEvent:
-//!  - Ctrl+Break to its process group: a `stop` line reaches the runner, which ends as the app's runner does (130);
+//!  - Ctrl+Break to its process group: the stop file reaches the runner, which ends as the app's runner does (130);
 //!  - Ctrl+C in a console of its own (sent by a helper, this program again, attached to that console): the same;
 //!  - a second Ctrl+Break: the CLI exits 143 at once and the runner ends with it (its job object).
 //!
@@ -35,7 +35,7 @@ mod win {
     const CTRL_BREAK_EVENT: u32 = 1;
     const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-    /// stub mode: "obey" (a `stop` line ends it with 130, as the app's runner) or "ignore" (it keeps running)
+    /// stub mode: "obey" (the stop file ends it with 130, as the app's runner) or "ignore" (it keeps running)
     const STUB: &str = "CK_TEST_STUB_RUNNER";
     /// helper mode: the pid whose console gets a Ctrl+C
     const SEND_CTRL_C: &str = "CK_TEST_SEND_CTRL_C";
@@ -62,27 +62,28 @@ mod win {
     }
 
     /// The app's script runner, as far as `corridorkey run` sees it: started with `--ck-headless run FILE` and
-    /// CK_HEADLESS_STOP=stdin, says it is ready, and reads its stdin for the `stop` line.
+    /// CK_HEADLESS_STOP=file:<path>, says it is ready, and looks for the stop file (the app's onStopFile).
     fn stub(mode: &str) -> ! {
         let args: Vec<String> = std::env::args().collect();
         assert!(args.iter().any(|a| a == "run"), "the runner is started to run a script: {args:?}");
-        assert_eq!(std::env::var("CK_HEADLESS_STOP").as_deref(), Ok("stdin"));
+        let stop = std::env::var("CK_HEADLESS_STOP").expect("CK_HEADLESS_STOP");
+        let stop = std::path::PathBuf::from(stop.strip_prefix("file:").expect("CK_HEADLESS_STOP=file:<path>"));
         println!("stub: ready {}", std::process::id());
-        let stdin = std::io::stdin();
-        // loop: SERIAL-REQUIRED — the runner's stdin, a line at a time [bounded: the CLI's pipe closes when it ends]
-        for line in stdin.lock().lines() {
-            if line.as_deref().is_ok_and(|l| l.trim() == "stop") {
+        let mut said = false;
+        // loop: SERIAL-REQUIRED — looks for the stop file as the app does [bounded: 60 s; an ignoring runner stays until its job object ends it]
+        for _ in 0..1200 {
+            if stop.is_file() {
                 if mode == "obey" {
                     eprintln!("stub: cancelled");
                     std::process::exit(130);
                 }
-                println!("stub: stop ignored");
+                if !said {
+                    said = true;
+                    println!("stub: stop ignored");
+                }
             }
-        }
-        // the CLI's end closed the pipe; a runner that ignores stops stays until killed (its job object ends it)
-        if mode == "ignore" {
-            // loop: SERIAL-REQUIRED — stays up so the test sees the job object end it [bounded: 60 s]
-            std::thread::sleep(Duration::from_secs(60));
+            // loop: NOT-WORTH — the look's pause (the loop above is bounded)
+            std::thread::sleep(Duration::from_millis(50));
         }
         std::process::exit(3);
     }
@@ -180,7 +181,7 @@ mod win {
         let code = exit_code(&mut c);
         let err = err.join().unwrap();
         assert_eq!(code, 130, "the runner's own stop code: {err}");
-        assert!(err.contains("stub: cancelled"), "the stop line reached the runner: {err}");
+        assert!(err.contains("stub: cancelled"), "the stop file reached the runner: {err}");
     }
 
     fn ctrl_c_in_its_own_console_asks_the_runner_to_stop() {
