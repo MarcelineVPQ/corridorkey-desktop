@@ -93,7 +93,9 @@ spent 29 minutes waiting on a package mirror).
 2. `tools/release.sh`. It checks the version shape (`X.Y.Z` = Stable, `X.Y.Z-dev.N` = Development), that it isn't
    released yet (no tag, no published release: run before step 1 it refuses), the lock, a
    clean `main` in step with GitHub, the CHANGELOG section (the top one; its header must not say draft or unreleased), the
-   signing key, `node_modules` against the lock and the green Windows CI run; runs the docs-touch gate over the
+   signing key, THIRD_PARTY_NOTICES.md (`tools/gen_notices.mjs --check`, cargo-about 0.9.2 from
+   `~/.local/share/corridorkey-release/cargo-about`; Linux CI runs it on every push too), `node_modules` against the lock
+   and the green Windows CI run; runs the docs-touch gate over the
    commits since the last `v*` tag, `npm run check:engine` (its
    `cargo test` builds `engine-rs/target/debug/corridorkey`), `npm run check` with `CK_CLI_BIN` set to that binary
    (so the Console's CLI-spec drift check runs, never skips) and `tools/check_targets.sh` (the engine's macOS and
@@ -154,7 +156,9 @@ themselves on every push to main, and by hand (`gh workflow run <file> --ref mai
 (cargo fmt, clippy, cargo test) on GitHub's Windows runner, the only place its Windows-only code runs, and builds the
 app as a package there: the first page, and `corridorkey run` within a time limit (the unit tests run on macOS and Linux:
 most were written for POSIX, BACKLOG row 176). macOS builds, signs,
-installs and starts the app and runs its `corridorkey run`; Linux builds the package and runs its `corridorkey run`.
+installs and starts the app and runs its `corridorkey run`; Linux checks THIRD_PARTY_NOTICES.md is exactly what
+`tools/gen_notices.mjs` writes (`--check`, with cargo-about 0.9.2 built on the runner; BACKLOG row 179), then builds the
+package and runs its `corridorkey run`.
 Each run is reported the moment it finishes. Measurement runs (speed, TensorRT, matte parity) are never part of CI or
 of a dev build: only when Marcy asks a question that needs one, on one clip, with a time estimate first.
 `tools/release.sh` refuses to tag a commit without a green Windows run (step 1). Until a run passes, nothing Windows-only in the engine counts as run on Windows (the

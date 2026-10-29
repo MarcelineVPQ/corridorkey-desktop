@@ -2,8 +2,8 @@ name: Linux
 
 # The Linux package, built and started on every push to main (BACKLOG row 170), as tools/release.sh does on Marcy's PC
 # at release time: dev.2's packaging bug (a package.json path beside the bundle broke `corridorkey run` everywhere)
-# surfaced only on release day. The app's unit tests, then the packaged `corridorkey run` with a two-line script, no
-# display and a time limit. The first page stays in release.sh: the app needs a Wayland desktop (tools/isolated.sh's
+# surfaced only on release day. THIRD_PARTY_NOTICES.md against its generator (row 179), the app's unit tests, then the
+# packaged `corridorkey run` with a two-line script, no display and a time limit. The first page stays in release.sh: the app needs a Wayland desktop (tools/isolated.sh's
 # headless KWin), which this runner hasn't. Its engine is a plain cargo build without the GPU features (the release
 # builds for glibc 2.28 with Zig, tools/build_engine.sh): it proves the app, not the shipped engine binary. By hand too
 # (gh workflow run linux.yml).
@@ -42,6 +42,20 @@ jobs:
           touch target/dist/ck-trt-build
       # npm 9/10's own peer resolution crashes on this tree; .npmrc sets legacy-peer-deps.
       - run: npx -y npm@10.9.2 ci
+      # THIRD_PARTY_NOTICES.md exactly as tools/gen_notices.mjs writes it (BACKLOG row 179): a hand edit of the notices
+      # passed every push and stopped the dev.3 release, since the check ran only in tools/release.sh. It needs
+      # cargo-about 0.9.2 (release.sh's version), built once into a folder of its own and cached; the crates come from
+      # `cargo fetch`, the npm packages from the `npm ci` above
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cargo-about
+        with:
+          path: ~/cargo-about
+          key: cargo-about-0.9.2-${{ runner.os }}
+      - name: Install cargo-about 0.9.2
+        if: steps.cargo-about.outputs.cache-hit != 'true'
+        run: cargo install --locked --features cli cargo-about --version 0.9.2 --root ~/cargo-about
+      - name: The notices are current
+        run: CARGO_ABOUT=~/cargo-about/bin/cargo-about node tools/gen_notices.mjs --check
       - run: npm test
       - name: Package it (unpacked, no AppImage)
         run: |
