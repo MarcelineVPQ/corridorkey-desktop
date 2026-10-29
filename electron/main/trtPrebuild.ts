@@ -8,7 +8,7 @@
 // engine is killed, the builder dies with it) and its end resumes it (what was built is kept; a half-built network is
 // built again). Not started by itself while other programs use the graphics card (Sonata); Build now starts it anyway.
 import { access, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { EngineReply } from "./engine";
 import type { EngineHandle } from "./queue";
 import type { PrebuildRange, TrtPrebuild } from "../../src/shared/types";
@@ -22,51 +22,113 @@ const existsAsync = (p: string) =>
   );
 
 /**
+ * The engine's stamp of a TensorRT-ready export (tensorrt.rs source_stamp, written to `<piece>.source` when a network
+ * is built): "<bytes>:<modified, whole seconds>" of the .onnx and of its .onnx.data, "-" for one that can't be read.
+ */
+export async function sourceStamp(onnx: string): Promise<string> {
+  const part = (p: string) =>
+    stat(p, { bigint: true }).then(
+      // whole seconds as Rust's as_secs (floored; a time before 1970 is 0 there too)
+      (m) => `${m.size}:${m.mtimeNs > 0n ? m.mtimeNs / 1_000_000_000n : 0n}`,
+      // error: NOT-WORTH — the engine writes "-" for a file it can't read, so does this
+      () => "-",
+    );
+  // loop: NOT-WORTH — two async stats per network, when the app reads what is built
+  return (await Promise.all([onnx, `${onnx}.data`].map(part))).join(",");
+}
+
+/**
+ * The networks a range needs, with the stamp each must be built from: those with a TensorRT-ready export in the models
+ * folder the engine runs with (runtime.rs trt_file: models.json "tensorrt-fp16", that file in the folder; pipeline
+ * trt_dir_built). Null: no models folder, or a models.json the engine couldn't read (it doesn't start then).
+ */
+export async function trtStamps(models: string | null): Promise<Map<string, string> | null> {
+  if (!models) return null;
+  let manifest: Record<string, Record<string, string> | undefined> = {};
+  try {
+    manifest = JSON.parse(await readFile(join(models, "models.json"), "utf8")) as typeof manifest;
+  } catch (e) {
+    // error: NOT-WORTH — no models.json: the engine reads an empty one; an unreadable one stops the engine
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") return null;
+  }
+  const stamps = new Map<string, string>();
+  // loop: NOT-WORTH — five networks, one or two async stats each
+  for (const p of TRT_PIECES) {
+    const name = manifest["tensorrt-fp16"]?.[p];
+    // Rust's Path::join: a name that is a whole path replaces the folder
+    const f = name ? resolve(models, name) : null;
+    if (f && (await existsAsync(f))) stamps.set(p, await sourceStamp(f));
+  }
+  return stamps;
+}
+
+/**
  * Every range folder in the TensorRT cache (`<root>/<card>/<range>`, engine tensorrt.rs cache_dir) and whether it is
- * built: each network has its engine's stub (`<piece>_ctx.onnx`, written after a build succeeds) or a remembered
- * failed build (`<piece>.failed`, that network runs on CUDA). Async: the cache folder can be on a network share.
+ * built the way the engine decides (pipeline trt_dir_built): each network of `stamps` has its engine, stub and
+ * `<piece>.source` with that stamp (tensorrt.rs built), or a remembered failed build of that stamp (`<piece>.failed`,
+ * that network runs on CUDA). `stale`: not built, but every network has its stub or failed marker, from other model
+ * files (the model set changed): it needs a rebuild. No `stamps` (the storage list, removals): built and stale false.
+ * Async: the cache folder can be on a network share.
  */
 // loop: NOT-WORTH — a few async readdirs and stats of the TensorRT cache, after a build, a job, a move or a removal (never per state push)
-export async function trtRangeDirs(
-  root: string,
-  list: (p: string) => Promise<string[]> = (p) => readdir(p),
-  exists: (p: string) => Promise<boolean> = existsAsync,
-): Promise<{ range: string; dir: string; built: boolean }[]> {
+export async function trtRangeDirs(root: string, stamps: ReadonlyMap<string, string> | null = null): Promise<{ range: string; dir: string; built: boolean; stale: boolean }[]> {
   const dirs = (p: string) =>
-    list(p).catch(
+    readdir(p).catch(
       // error: NOT-WORTH — no TensorRT engines built (the folder isn't there)
       () => [] as string[],
     );
-  const out: { range: string; dir: string; built: boolean }[] = [];
+  const text = (p: string) =>
+    readFile(p, "utf8").then(
+      (s) => s.trim(),
+      // error: NOT-WORTH — no such file: not built from this stamp
+      () => null,
+    );
+  const out: { range: string; dir: string; built: boolean; stale: boolean }[] = [];
   // loop: NOT-WORTH — one folder per card / driver (one or two), when the app reads what is built
   for (const card of await dirs(root)) {
     // loop: NOT-WORTH — a few ranges per card
     for (const range of (await dirs(join(root, card))).filter((n) => /^h\d+-\d+_w\d+-\d+_t/.test(n))) {
       const dir = join(root, card, range);
-      let built = true;
-      // loop: NOT-WORTH — five networks, one or two async stats each
-      for (const p of TRT_PIECES) if (!(await exists(join(dir, p, `${p}_ctx.onnx`))) && !(await exists(join(dir, p, `${p}.failed`)))) built = false;
-      out.push({ range, dir, built });
+      let built = stamps !== null;
+      let present = stamps !== null;
+      // loop: NOT-WORTH — five networks, a few async reads each
+      for (const [p, stamp] of stamps ?? []) {
+        const d = join(dir, p);
+        // tensorrt.rs built: the engine, its stub and the stamp it was built from
+        const ok = (await existsAsync(join(d, `${p}.engine`))) && (await existsAsync(join(d, `${p}_ctx.onnx`))) && (await text(join(d, `${p}.source`))) === stamp;
+        // tensorrt.rs failed_before (any working memory): the stamp, then the working memory's megabytes
+        const failed = ((await text(join(d, `${p}.failed`))) ?? "").split("\n");
+        if (!ok && !(failed[0].trim() === stamp && /^\+?\d+$/.test(failed[1]?.trim() ?? ""))) built = false;
+        if (!(await existsAsync(join(d, `${p}_ctx.onnx`))) && !(await existsAsync(join(d, `${p}.failed`)))) present = false;
+      }
+      out.push({ range, dir, built, stale: !built && present });
     }
   }
   return out;
 }
 
-/** The built ranges' keys (what the waiting clip's line and the Engine page name). */
-export async function builtRanges(root: string): Promise<string[]> {
+/** The built ranges' keys (what the waiting clip's line and the Engine page name), for the stamps of trtStamps. */
+export async function builtRanges(root: string, stamps: ReadonlyMap<string, string> | null): Promise<string[]> {
   // loop: NOT-WORTH — a few ranges, when the app reads what is built
-  return [...new Set((await trtRangeDirs(root)).filter((r) => r.built).map((r) => r.range))].sort();
+  return [...new Set((await trtRangeDirs(root, stamps)).filter((r) => r.built).map((r) => r.range))].sort();
 }
 
 /** The app's record of a range it built (in the range's folder; the engine ignores it): how long the build took here. */
 export const BUILD_RECORD = ".corridorkey-build.json";
 
-/** A built range's size on disk and recorded build time, per range key (a range on two cards: the newest folder). */
+/**
+ * A built or stale range's size on disk and recorded build time, per range key (a range on two cards: the newest
+ * folder). `stale`: built for other model files, it needs a rebuild (trtRangeDirs).
+ */
 // loop: NOT-WORTH — a few range folders' files and one small record each, after a build, a job, a move or a removal
-export async function rangesOnDisk(root: string, bytesOf: (dir: string) => Promise<number>): Promise<{ range: string; bytes: number; buildSeconds: number | null }[]> {
-  const out = new Map<string, { range: string; bytes: number; buildSeconds: number | null; at: number }>();
+export async function rangesOnDisk(
+  root: string,
+  stamps: ReadonlyMap<string, string> | null,
+  bytesOf: (dir: string) => Promise<number>,
+): Promise<{ range: string; bytes: number; buildSeconds: number | null; stale: boolean }[]> {
+  const out = new Map<string, { range: string; bytes: number; buildSeconds: number | null; stale: boolean; at: number }>();
   // loop: NOT-WORTH — a few ranges
-  for (const r of (await trtRangeDirs(root)).filter((x) => x.built)) {
+  for (const r of (await trtRangeDirs(root, stamps)).filter((x) => x.built || x.stale)) {
     let buildSeconds: number | null = null;
     try {
       // loop: NOT-WORTH — one small async file read per range
@@ -78,12 +140,13 @@ export async function rangesOnDisk(root: string, bytesOf: (dir: string) => Promi
     // loop: NOT-WORTH — one async stat per range
     const at = (await stat(r.dir).catch(() => null))?.mtimeMs ?? 0;
     const was = out.get(r.range);
-    if (!was || at > was.at) out.set(r.range, { range: r.range, bytes: await bytesOf(r.dir), buildSeconds, at });
+    // a range built on one card and stale on another: the built one
+    if (!was || (r.built && was.stale) || (r.stale === was.stale && at > was.at)) out.set(r.range, { range: r.range, bytes: await bytesOf(r.dir), buildSeconds, stale: r.stale, at });
   }
   return (
     [...out.values()]
       // loop: NOT-WORTH — as above
-      .map(({ range, bytes, buildSeconds }) => ({ range, bytes, buildSeconds }))
+      .map(({ range, bytes, buildSeconds, stale }) => ({ range, bytes, buildSeconds, stale }))
       // loop: NOT-WORTH — as above
       .sort((a, b) => a.range.localeCompare(b.range))
   );

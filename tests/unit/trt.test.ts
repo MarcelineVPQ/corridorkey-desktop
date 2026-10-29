@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { EngineReply } from "../../electron/main/engine";
 import type { EngineHandle } from "../../electron/main/queue";
-import { BUILD_RECORD, Prebuilder, rangesOnDisk, recordBuild, removeSize, trtRangeDirs } from "../../electron/main/trtPrebuild";
+import { BUILD_RECORD, builtRanges, Prebuilder, rangesOnDisk, recordBuild, removeSize, sourceStamp, trtRangeDirs, trtStamps } from "../../electron/main/trtPrebuild";
 import { tensorrtWhyNot } from "../../electron/main/install";
 import {
   buildSteps,
@@ -84,16 +84,100 @@ const KHD = "trt-h1024-1280_w1792-2176";
 describe("the background TensorRT build", () => {
   it("reads which ranges are built: every network built or remembered as failing, one level under the card", async () => {
     const range = join(ROOT, "rtx-5080__drv615__fp16", "h1792-2176_w3584-4096_t1-8_f1-4");
+    const stamps = new Map(["cradio", "moge", "rvm", "stage1", "stage2"].map((p) => [p, `s-${p}`]));
     // loop: NOT-WORTH — five networks in a test
     for (const p of ["cradio", "moge", "rvm", "stage2"]) {
       mkdirSync(join(range, p), { recursive: true });
-      writeFileSync(join(range, p, `${p}_ctx.onnx`), "");
+      // loop: NOT-WORTH — three files a network
+      for (const [f, text] of [
+        [`${p}.engine`, ""],
+        [`${p}_ctx.onnx`, ""],
+        [`${p}.source`, `s-${p}\n`],
+      ])
+        writeFileSync(join(range, p, f), text);
     }
     mkdirSync(join(range, "stage1"), { recursive: true });
-    expect(await trtRangeDirs(ROOT)).toEqual([{ range: "h1792-2176_w3584-4096_t1-8_f1-4", dir: range, built: false }]);
-    writeFileSync(join(range, "stage1", "stage1.failed"), "stamp\n8192\nno tactic\n");
-    expect((await trtRangeDirs(ROOT))[0].built).toBe(true);
-    expect(await trtRangeDirs(join(ROOT, "missing"))).toEqual([]);
+    expect(await trtRangeDirs(ROOT, stamps)).toEqual([{ range: "h1792-2176_w3584-4096_t1-8_f1-4", dir: range, built: false, stale: false }]);
+    // a failed build is remembered for the export it failed from (tensorrt.rs failed_before): another one builds again
+    writeFileSync(join(range, "stage1", "stage1.failed"), "s-old\n8192\nno tactic\n");
+    expect((await trtRangeDirs(ROOT, stamps))[0]).toMatchObject({ built: false, stale: true });
+    writeFileSync(join(range, "stage1", "stage1.failed"), "s-stage1\n8192\nno tactic\n");
+    expect((await trtRangeDirs(ROOT, stamps))[0]).toMatchObject({ built: true, stale: false });
+    // only the networks the models folder has a TensorRT-ready export of count (runtime.rs trt_file)
+    rmSync(join(range, "stage2"), { recursive: true });
+    expect((await trtRangeDirs(ROOT, stamps))[0].built).toBe(false);
+    stamps.delete("stage2");
+    expect((await trtRangeDirs(ROOT, stamps))[0].built).toBe(true);
+    // no models folder to read: nothing is called built (the storage list and removals only list the folders)
+    expect((await trtRangeDirs(ROOT))[0]).toMatchObject({ built: false, stale: false });
+    expect(await trtRangeDirs(join(ROOT, "missing"), stamps)).toEqual([]);
+    rmSync(join(ROOT, "rtx-5080__drv615__fp16"), { recursive: true });
+  });
+
+  it("2026-10-29: a range built from another model set's TensorRT files is stale, as the engine says, not built", async () => {
+    // Marcy's 4K and HD engines were built from onnx.4's files; the app runs onnx.5, every job said "isn't built yet"
+    const root = join(ROOT, "stale");
+    const set = (name: string, mtime: number) => {
+      const dir = join(root, "models", name);
+      const files: Record<string, string> = {};
+      mkdirSync(dir, { recursive: true });
+      // loop: NOT-WORTH — five networks in a test
+      for (const p of ["cradio", "moge", "rvm", "stage1", "stage2"]) {
+        files[p] = `ck2-${p}-trt-fp16.onnx`;
+        // loop: NOT-WORTH — the export and its weights
+        for (const f of [files[p], `${files[p]}.data`]) {
+          writeFileSync(join(dir, f), "weights");
+          utimesSync(join(dir, f), mtime, mtime);
+        }
+      }
+      writeFileSync(join(dir, "models.json"), JSON.stringify({ "tensorrt-fp16": files }));
+      return dir;
+    };
+    const onnx4 = set("2.0.0-onnx.4", 1792943067);
+    const onnx5 = set("2.0.0-onnx.5", 1793201341);
+    const cache = join(root, "tensorrt");
+    const range = join(cache, "rtx-5080__drv615__fp16", "h1792-2176_w3584-4096_t1-8_f1-4");
+    // built by the engine from onnx.4 (its stamp in each network's .source)
+    const old = (await trtStamps(onnx4))!;
+    // loop: NOT-WORTH — five networks in a test
+    for (const [p, stamp] of old) {
+      mkdirSync(join(range, p), { recursive: true });
+      // loop: NOT-WORTH — three files a network
+      for (const [f, text] of [
+        [`${p}.engine`, "engine"],
+        [`${p}_ctx.onnx`, "stub"],
+        [`${p}.source`, stamp],
+      ])
+        writeFileSync(join(range, p, f), text);
+    }
+    const now = (await trtStamps(onnx5))!;
+    expect(now.get("cradio")).toBe(`7:1793201341,7:1793201341`);
+    expect(await builtRanges(cache, now)).toEqual([]);
+    expect(await rangesOnDisk(cache, now, async () => 2_500_000_000)).toEqual([{ range: "h1792-2176_w3584-4096_t1-8_f1-4", bytes: 2_500_000_000, buildSeconds: null, stale: true }]);
+    // the set it was built from: built
+    expect(await builtRanges(cache, old)).toEqual(["h1792-2176_w3584-4096_t1-8_f1-4"]);
+    expect((await rangesOnDisk(cache, old, async () => 1))[0].stale).toBe(false);
+    // no models folder, or one whose models.json can't be read (the engine doesn't start): nothing built
+    expect(await trtStamps(null)).toBeNull();
+    writeFileSync(join(onnx5, "models.json"), "{");
+    expect(await trtStamps(onnx5)).toBeNull();
+  });
+
+  it("stamps an export as the engine does (tensorrt.rs source_stamp, its test's two strings)", async () => {
+    const dir = join(ROOT, "stamp");
+    mkdirSync(dir, { recursive: true });
+    const onnx = join(dir, "x.onnx");
+    writeFileSync(onnx, "abc");
+    // 0.9 s into the second: floored, as Rust's as_secs
+    utimesSync(onnx, 1792943067.9, 1792943067.9);
+    const noData = await sourceStamp(onnx);
+    writeFileSync(`${onnx}.data`, "hello");
+    utimesSync(`${onnx}.data`, 1792943067.9, 1792943067.9);
+    const withData = await sourceStamp(onnx);
+    expect([noData, withData]).toEqual(["3:1792943067,-", "3:1792943067,5:1792943067"]);
+    const test = rs("tensorrt.rs");
+    expect(test).toContain(`assert_eq!(source_stamp(&onnx), "${noData}");`);
+    expect(test).toContain(`assert_eq!(source_stamp(&onnx), "${withData}");`);
   });
 
   function rig(opts: { others?: string[] | (() => string[] | Promise<string[]>); built?: string[]; sizes?: TrtSize[] } = {}) {
@@ -320,22 +404,29 @@ describe("the background TensorRT build", () => {
       // loop: NOT-WORTH — five networks in a test
       for (const p of ["cradio", "moge", "rvm", "stage1", "stage2"]) {
         mkdirSync(join(dir, p), { recursive: true });
-        writeFileSync(join(dir, p, `${p}_ctx.onnx`), "x");
+        // loop: NOT-WORTH — three files a network
+        for (const [f, text] of [
+          [`${p}.engine`, "x"],
+          [`${p}_ctx.onnx`, "x"],
+          [`${p}.source`, "s"],
+        ])
+          writeFileSync(join(dir, p, f), text);
       }
       return dir;
     };
+    const stamps = new Map([["cradio", "s"]]);
     const hd = make("rtx-5080__drv615", "h1024-1280_w1792-2176_t1-48_f1-4");
     make("rtx-5080__drv615", "h1792-2176_w3584-4096_t1-8_f1-4");
     const bytes = async () => 2_500_000_000;
-    expect(await rangesOnDisk(root, bytes)).toEqual([
-      { range: "h1024-1280_w1792-2176_t1-48_f1-4", bytes: 2_500_000_000, buildSeconds: null },
-      { range: "h1792-2176_w3584-4096_t1-8_f1-4", bytes: 2_500_000_000, buildSeconds: null },
+    expect(await rangesOnDisk(root, stamps, bytes)).toEqual([
+      { range: "h1024-1280_w1792-2176_t1-48_f1-4", bytes: 2_500_000_000, buildSeconds: null, stale: false },
+      { range: "h1792-2176_w3584-4096_t1-8_f1-4", bytes: 2_500_000_000, buildSeconds: null, stale: false },
     ]);
     await recordBuild(root, "h1024-1280_w1792-2176_t1-48_f1-4", 270.7);
     expect(JSON.parse(readFileSync(join(hd, BUILD_RECORD), "utf8")).seconds).toBe(270.7);
-    expect((await rangesOnDisk(root, bytes))[0].buildSeconds).toBe(270.7);
+    expect((await rangesOnDisk(root, stamps, bytes))[0].buildSeconds).toBe(270.7);
     // the record doesn't make an unbuilt folder count as built, and the engine's networks are all it checks
-    expect((await trtRangeDirs(root)).every((d) => d.built)).toBe(true);
+    expect((await trtRangeDirs(root, stamps)).every((d) => d.built)).toBe(true);
     await removeSize(root, "h1024-1280_w1792-2176");
     expect((await trtRangeDirs(root)).map((d) => d.range)).toEqual(["h1792-2176_w3584-4096_t1-8_f1-4"]);
   });

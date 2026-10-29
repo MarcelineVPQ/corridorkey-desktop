@@ -586,6 +586,24 @@ mod tests {
     }
 
     #[test]
+    fn source_stamp_is_bytes_and_whole_seconds() {
+        // the app reads the same stamp to say a range is built (electron/main/trtPrebuild.ts sourceStamp; its test pins
+        // these two strings): bytes and the modified time floored to seconds, the .onnx then its .onnx.data
+        let dir = std::env::temp_dir().join(format!("ck-trt-stamp-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let onnx = dir.join("x.onnx");
+        std::fs::write(&onnx, b"abc").unwrap();
+        let at = std::time::UNIX_EPOCH + std::time::Duration::from_millis(1_792_943_067_900);
+        std::fs::File::options().write(true).open(&onnx).unwrap().set_modified(at).unwrap();
+        assert_eq!(source_stamp(&onnx), "3:1792943067,-");
+        let data = dir.join("x.onnx.data");
+        std::fs::write(&data, b"hello").unwrap();
+        std::fs::File::options().write(true).open(&data).unwrap().set_modified(at).unwrap();
+        assert_eq!(source_stamp(&onnx), "3:1792943067,5:1792943067");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn another_installed_versions_engines_are_kept() {
         // final review 2026-10-28 S2: a stable app and a dev build (or the CLI) with other ORT / TensorRT versions share
         // the cache root; each job deleted the other's engines

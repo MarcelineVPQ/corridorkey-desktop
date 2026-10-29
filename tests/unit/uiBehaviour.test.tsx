@@ -18,7 +18,8 @@ import { SetupPage } from "../../src/ui/pages/SetupPage";
 import { SettingsPage } from "../../src/ui/pages/SettingsPage";
 import { ConsolePage } from "../../src/ui/pages/ConsolePage";
 import { MIGRAPHX_LOAD, STAGE_TEXT } from "../../src/ui/format";
-import { appState, installState, job, settings, updateState } from "./fixtures";
+import { appState, installState, job, settings, trtState, updateState } from "./fixtures";
+import { TrtBox } from "../../src/ui/setup/SetupParts";
 import { App } from "../../src/ui/App";
 import { dots, tasksOf } from "../../src/shared/tasks";
 import { UpdateBanner } from "../../src/ui/UpdateBanner";
@@ -650,5 +651,38 @@ describe("AMD cards: declared untested", () => {
     engine(appState(), "install");
     expect(declarations()).toHaveLength(0);
     expect(screen.queryByRole("link", { name: "GitHub issues" })).toBeNull();
+  });
+});
+
+describe("TensorRT sizes (Engine settings)", () => {
+  it("2026-10-29: a size built for other model files says it needs a rebuild, and Build now and its tick rebuild it", () => {
+    const ck = mockCk({ trtPrebuild: () => Promise.resolve(), trtSize: () => Promise.resolve() });
+    const four = { label: "4K DCI", width: 4096, height: 2160 };
+    const trt = trtState({
+      on: true,
+      ready: true,
+      built: [],
+      prebuild: { status: "idle", ranges: [{ ...four, state: "todo", piece: null, range: null, fallbacks: {}, error: null }], startedAt: null, note: null },
+      onDisk: [
+        { range: "h1792-2176_w3584-4096_t1-8_f1-4", bytes: 2_500_000_000, buildSeconds: 300, stale: true },
+        { range: "h1024-1280_w1792-2176_t1-24_f1-4", bytes: 2_500_000_000, buildSeconds: 300, stale: true },
+      ],
+    });
+    render(<TrtBox trt={trt} inst={installState()} platform="linux" />);
+    // loop: NOT-WORTH — the size notes on one page
+    const notes = screen.getAllByText(/built for other models · needs a rebuild \(the model set changed\)/);
+    expect(notes).toHaveLength(2);
+    expect(screen.queryByText(/· built \(/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Build now/ }));
+    expect(ck.trtPrebuild).toHaveBeenCalledWith("start");
+    // HD isn't chosen: its tick is off, and ticking it builds it
+    // loop: NOT-WORTH — two rows in a test
+    const ticks = notes.map((n) => n.closest("li")!.querySelector("input")!);
+    // loop: NOT-WORTH — as above
+    expect(ticks.map((t) => t.checked).sort()).toEqual([false, true]);
+    // loop: NOT-WORTH — as above
+    const hd = ticks.find((t) => !t.checked)!;
+    fireEvent.click(hd);
+    expect(ck.trtSize).toHaveBeenCalledWith("add", expect.objectContaining({ height: 1080 }));
   });
 });

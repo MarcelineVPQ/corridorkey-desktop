@@ -467,8 +467,9 @@ export interface TrtState {
   // the background build of the chosen sizes (trtPrebuild.ts): jobs never build, they run on CUDA until it's done
   prebuild: TrtPrebuild;
   // each range built on this card: its size on disk (read from the cache) and how long its build took here (recorded
-  // when the app built it; null: built before this was recorded, or by a job)
-  onDisk: { range: string; bytes: number; buildSeconds: number | null }[];
+  // when the app built it; null: built before this was recorded, or by a job); `stale`: built for other model files
+  // (the model set changed), so the engine doesn't use it until it is built again
+  onDisk: { range: string; bytes: number; buildSeconds: number | null; stale: boolean }[];
 }
 
 /** Another program holding this much graphics memory is named before a run, and holds back the background TensorRT

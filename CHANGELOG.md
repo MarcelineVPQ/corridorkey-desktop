@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.0-dev.6 (draft, unreleased)
+
+- **TensorRT no longer says "built" for engines it can't use.** Engine settings, TensorRT called a size built whenever
+  its engine files were there, but the engine only uses engines built from the model files it runs with now. TensorRT
+  engines built before the model set changed (from 2.0.0-onnx.4's files, now running 2.0.0-onnx.5) showed as built
+  while every job of that size said "TensorRT for this resolution range isn't built yet" and ran on CUDA. The app now
+  decides "built" exactly as the engine does, so such a size says **built for other models · needs a rebuild (the
+  model set changed)**, and its tick or Build now rebuilds it: rebuild the size once and its clips run on TensorRT
+  again.
+
 ## 1.0.0-dev.5
 
 - **Faster keying, the same mattes.** The engine keeps the graphics card busier and copies less: a clip's first frames

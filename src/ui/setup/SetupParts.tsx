@@ -239,13 +239,23 @@ function PrebuildBox({ trt }: { trt: TrtState }) {
 /** A size range's state and costs, under its tick: what is built and what it took here, or the measured cost before. */
 function sizeNote(trt: TrtState, key: string): string {
   // loop: HOT-PATH-OK — a few built ranges, per row per render
-  const onDisk = trt.onDisk.filter((d) => d.range.startsWith(`${key}_t`));
+  const all = trt.onDisk.filter((d) => d.range.startsWith(`${key}_t`));
+  // the windows the engine uses (built from the models it runs with); stale ones are built for other model files
+  // loop: NOT-WORTH — a few ranges on disk
+  const onDisk = all.filter((d) => !d.stale);
   // loop: NOT-WORTH — the few chosen sizes
   const r = trt.prebuild.ranges.find((x) => trtSizeKey(x.width, x.height) === key);
   const range = sizeRangeText(key);
   if (r?.state === "building")
     return `${range} · building: ${r.piece ? `${PIECE_NAMES[r.piece] ?? r.piece} (network ${TRT_PIECES.indexOf(r.piece as (typeof TRT_PIECES)[number]) + 1} of ${TRT_PIECES.length})` : "starting"}`;
   if (r?.state === "failed") return `${range} · couldn't be built: ${r.error}`;
+  if (!onDisk.length && all.length) {
+    // built for the model files the engine had before: it runs on CUDA until built again (ticked, the background build
+    // and Build now rebuild it; unticked, ticking it does)
+    // loop: NOT-WORTH — a few ranges on disk
+    const bytes = all.reduce((n, d) => n + d.bytes, 0);
+    return `${range} · built for other models · needs a rebuild (the model set changed) · ${gbBytes(bytes)} on disk`;
+  }
   if (onDisk.length) {
     // loop: NOT-WORTH — a few built ranges
     const bytes = onDisk.reduce((n, d) => n + d.bytes, 0);

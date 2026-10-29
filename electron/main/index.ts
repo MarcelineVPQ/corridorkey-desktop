@@ -37,7 +37,7 @@ import {
   type InstallDeps,
 } from "./install";
 import { folderBytes, pruneCache, removeStorage, storageItems, sweepRemoving, TRT_ENGINES_DIR } from "./storage";
-import { builtRanges, Prebuilder, rangesOnDisk, recordBuild, removeSize } from "./trtPrebuild";
+import { builtRanges, Prebuilder, rangesOnDisk, recordBuild, removeSize, trtStamps } from "./trtPrebuild";
 import { jobLogText, saveJobLog } from "./jobLog";
 import { readDesktopPalette, watchDesktopPalette } from "./desktopTheme";
 import { Updater } from "./updater";
@@ -234,11 +234,15 @@ async function recheckFfmpeg(): Promise<void> {
   ffmpeg = { ...ffmpegState(await checkFfmpeg(), planFor(PLATFORM, readOsRelease())), installing: ffmpeg.installing, installError: ffmpeg.installError };
   scheduleSend();
 }
+// the models folder the TensorRT cache was last read for (undefined: not read yet): what is built follows its files
+let trtReadModels: string | null | undefined;
 /** Re-check the engine's files (after a setting changed, or before the queue starts). */
 function recheckEngines(): void {
   engineFiles = findFiles();
   const paths = enginePaths();
   rustEngine = checkRustEngine(paths.binary, paths.models, paths.ort);
+  // another models folder (the model set changed): its TensorRT files decide what is built
+  if (trtReadModels !== undefined && paths.models !== trtReadModels) void refreshTrtBuilt();
   // the TensorRT parts follow the engine's files (a running install keeps its progress)
   trt = { ...trt, ...trtParts() };
   mainWindow?.setTitle(currentTitle());
@@ -318,8 +322,12 @@ let trtReads = 0;
 async function readTrtCache(): Promise<void> {
   const root = join(cacheDir, TRT_ENGINES_DIR);
   const n = ++trtReads;
-  const built = trtSupported(PLATFORM) ? await builtRanges(root) : [];
-  const onDisk = trtSupported(PLATFORM) ? await rangesOnDisk(root, folderBytes) : [];
+  // built as the engine decides: from the TensorRT files of the models folder it runs with (trtPrebuild.ts trtRangeDirs)
+  const models = enginePaths().models;
+  trtReadModels = models;
+  const stamps = trtSupported(PLATFORM) ? await trtStamps(models) : null;
+  const built = trtSupported(PLATFORM) ? await builtRanges(root, stamps) : [];
+  const onDisk = trtSupported(PLATFORM) ? await rangesOnDisk(root, stamps, folderBytes) : [];
   if (n !== trtReads) return;
   trtBuilt = built;
   trtOnDisk = onDisk;

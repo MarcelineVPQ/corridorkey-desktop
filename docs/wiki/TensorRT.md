@@ -52,7 +52,9 @@ took on your card. The build time and disk space per range were measured in the 
 [TensorRT on onnx.4](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/ENGINEERING.md#008-dev-tensorrt-on-onnx4-2026-10-25).
 
 The engines are kept in the cache folder (`tensorrt` inside it) and are built again only after a graphics driver,
-TensorRT or model update.
+TensorRT or model update. A range built from other model files (after the model set changed) says
+**built for other models · needs a rebuild (the model set changed)**: its clips run on CUDA until it is built again,
+which the background build (or its tick, or **Build now**) does.
 
 ## Sizes TensorRT takes
 
