@@ -29,7 +29,7 @@ describe("IPC sender gate", () => {
     const r = spawnSync(process.execPath, [gate], { cwd: repo, encoding: "utf8", timeout: 30_000 });
     expect(r.stdout + r.stderr).toBe("");
     expect(r.status).toBe(0);
-  });
+  }, 30_000); // the runner's limit matches the gate's own 30 s deadline (a slow CI runner took 8.6 s, 2026-10-29)
 
   it("passes handlers registered through fromAppPageOnly, or with their any-sender reason", () => {
     const ok = [
