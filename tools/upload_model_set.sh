@@ -28,16 +28,16 @@ case "$SET" in
     WHAT="CorridorKey 2.0 prepared for TensorRT, for CorridorKey Desktop's optional TensorRT mode (Linux): model set \`$SET\`, fp16, strongly typed (FP32 islands for weight GEMMs and convolutions; docs/ENGINE_RUST.md \"TensorRT\"). The app downloads these when you switch TensorRT on and checks every file's SHA-256 (listed below). You don't need to download them by hand."
     HOW="\`engine-rs/export/build_trt_models.sh\` (docs/ONNX_EXPORT.md, \"TensorRT set\")"
     ;;
-  *-coreml)
+  *-coreml | *-coreml.[0-9]*)
     # loop: NOT-WORTH — a sorted listing of the set's seven files
     mapfile -t FILES < <(ls ck2-*-fp16-coreml-*.onnx coreml.json 2>/dev/null | sort)
     LIST=coreml.json
-    TITLE="Models ${SET%-coreml} (Core ML, fp16)"
-    WHAT="CorridorKey 2.0 prepared for Apple's Core ML, for CorridorKey Desktop on Macs with Apple Silicon: model set \`$SET\`, fp16, fixed shapes (1280×1080 and 1920×1080 clips, padded to 1152×1280 and 1152×1920; 4K not yet), every node on ONNX Runtime's Core ML provider (docs/ENGINE_RUST.md, \`--device coreml\`). The files keep their weights in model set \`${SET%-coreml}\`'s \`.onnx.data\` files, so they go into that set's folder. The app's setup downloads these on a Mac and checks every file's SHA-256 (listed below). You don't need to download them by hand."
+    TITLE="Models ${SET%%-coreml*} (Core ML, fp16)"
+    WHAT="CorridorKey 2.0 prepared for Apple's Core ML, for CorridorKey Desktop on Macs with Apple Silicon: model set \`$SET\`, fp16, fixed shapes (one file per network and frame size: the sizes listed in coreml.json, e.g. 1280×1080, 1920×1080 and 4096×2160 clips, padded to 1152×1280, 1152×1920 and 2176×4096), every node on ONNX Runtime's Core ML provider (docs/ENGINE_RUST.md, \`--device coreml\`). The files keep their weights in model set \`${SET%%-coreml*}\`'s \`.onnx.data\` files, so they go into that set's folder. The app's setup downloads these on a Mac and checks every file's SHA-256 (listed below). You don't need to download them by hand."
     HOW="\`engine-rs/export/coreml/build_coreml_models.sh\` (docs/ONNX_EXPORT.md, \"Core ML set\")"
     ;;
   *)
-    echo "upload_model_set: SET ends in -trt or -coreml" >&2
+    echo "upload_model_set: SET ends in -trt, -coreml or -coreml.N" >&2
     exit 2
     ;;
 esac

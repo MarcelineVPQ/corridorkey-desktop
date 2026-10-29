@@ -170,14 +170,18 @@ describe("first-run install", () => {
   });
 
   // BACKLOG row 59: on a Mac the Core ML set belongs to the models; a set installed without it still needs it
-  it("on macOS, needs the Core ML set until its coreml.json is in the model set's folder", () => {
+  it("on macOS, needs the Core ML set until every pinned file is in the model set's folder", () => {
     const has = (p: string[]) => (x: string) => p.includes(x);
     const mac: Catalog = { runtime: RUNTIME_MAC, models: MODELS_CUDA, coreml: COREML };
     const set = `/d/models/${MODELS_CUDA.name}`;
     const cmBytes = COREML.files.reduce((n, f) => n + f.size, 0);
     expect(installNeeds("/d", has([`/d/runtime/${RUNTIME_MAC.name}`, set]), mac)).toEqual({ runtime: false, models: false, coreml: true, bytes: cmBytes });
     expect(installNeeds("/d", has([`/d/runtime/${RUNTIME_MAC.name}`]), mac).bytes).toBe(MODELS_CUDA.files.reduce((n, f) => n + f.size, 0) + cmBytes);
-    expect(installNeeds("/d", has([`/d/runtime/${RUNTIME_MAC.name}`, set, `${set}/coreml.json`]), mac)).toEqual({ runtime: false, models: false, coreml: false, bytes: 0 });
+    // coreml.json alone isn't the set (row 174: a newer set adds files to an installed one)
+    expect(installNeeds("/d", has([`/d/runtime/${RUNTIME_MAC.name}`, set, `${set}/coreml.json`]), mac).coreml).toBe(true);
+    // loop: NOT-WORTH — the set's pinned files
+    const all = COREML.files.map((f) => `${set}/${f.file}`);
+    expect(installNeeds("/d", has([`/d/runtime/${RUNTIME_MAC.name}`, set, ...all]), mac)).toEqual({ runtime: false, models: false, coreml: false, bytes: 0 });
   });
 });
 
@@ -353,6 +357,41 @@ describe("runInstall", () => {
     expect(steps.at(-1)).toBe("Downloading the Core ML models (coreml.json)");
     expect(existsSync(join(data, "models", "m1", "c-t4.onnx")) && existsSync(join(data, "models", "m1", "coreml.json"))).toBe(true);
     expect(existsSync(join(data, "models", ".partial-m1-coreml"))).toBe(false);
+    rmSync(data, { recursive: true, force: true });
+  });
+
+  // dev.3's Core ML set adds 4K files to dev.2's (row 174): a Mac with the older set downloads only the new files and a
+  // fresh coreml.json; the older coreml.json (shorter) is never taken as the start of the new one's download
+  it("upgrades an installed Core ML set: only the added files and a fresh coreml.json", async () => {
+    const data = mkdtempSync(join(tmpdir(), "ck-run-"));
+    mkdirSync(join(data, "runtime", "rt"), { recursive: true });
+    mkdirSync(join(data, "models", "m1"), { recursive: true });
+    // loop: NOT-WORTH — two files
+    for (const f of ["a.onnx", "b.onnx"]) writeFileSync(join(data, "models", "m1", f), files[f]);
+    writeFileSync(join(data, "models", "m1", "c-t4.onnx"), "C".repeat(200));
+    writeFileSync(join(data, "models", "m1", "coreml.json"), '{"f":1}');
+    const older = coremlCatalog();
+    const d4 = Buffer.from("D".repeat(300));
+    files["d-t4.onnx"] = d4;
+    const json = Buffer.from('{"format": 1, "sizes": ["c", "d"]}');
+    files["coreml.json"] = json;
+    const newer: Catalog = {
+      ...older,
+      coreml: {
+        name: "m1-coreml.1",
+        files: [
+          older.coreml!.files[0],
+          { file: "d-t4.onnx", url: `${base}/d-t4.onnx`, size: d4.length, sha256: sha(d4) },
+          { file: "coreml.json", url: `${base}/coreml.json`, size: json.length, sha256: sha(json) },
+        ],
+      },
+    };
+    expect(installNeeds(data, existsSync, newer)).toMatchObject({ models: false, coreml: true, bytes: d4.length + json.length });
+    asked.length = 0;
+    await runInstall(data, deps(), newer);
+    expect(asked).toEqual(["d-t4.onnx", "coreml.json"]);
+    expect(readFileSync(join(data, "models", "m1", "coreml.json"), "utf8")).toBe(json.toString());
+    expect(installNeeds(data, existsSync, newer)).toMatchObject({ coreml: false, bytes: 0 });
     rmSync(data, { recursive: true, force: true });
   });
 
@@ -596,7 +635,7 @@ describe("TensorRT catalogue and rules", () => {
     // macOS adds the Core ML set
     const gb = (r: { wheels: { size: number }[] }, models: { size: number }[]) => ((sum(r.wheels) + sum(models)) / 1e9).toFixed(2);
     const text = `${gb(RUNTIME, MODELS_CUDA.files)} GB download on Linux, ${gb(RUNTIME_WIN, MODELS_CUDA.files)} GB on Windows, ${gb(RUNTIME_MAC, [...MODELS_CUDA.files, ...COREML.files])} GB on macOS, once`;
-    expect(text).toBe("4.03 GB download on Linux, 3.81 GB on Windows, 4.76 GB on macOS, once");
+    expect(text).toBe("4.03 GB download on Linux, 3.81 GB on Windows, 5.74 GB on macOS, once");
     // loop: NOT-WORTH — two documents
     for (const doc of ["../../README.md", "../../docs/GUIDE.md"]) expect(readFileSync(new URL(doc, import.meta.url), "utf8")).toContain(text);
     // and the README's Uninstall table, which states the same sizes (it once kept the old ~5.0 / ~5.5 GB)
@@ -649,7 +688,8 @@ describe("TensorRT catalogue and rules", () => {
 describe("Core ML catalogue", () => {
   it("pins the Core ML set's release by URL, size and SHA-256, built from the model set, macOS only", () => {
     // the Core ML files read their weights from the model set's own .onnx.data files
-    expect(COREML.name).toBe(`${MODELS_CUDA.name}-coreml`);
+    // dev.3: `.1`, the set with 4K added (row 174)
+    expect(COREML.name).toBe(`${MODELS_CUDA.name}-coreml.1`);
     expect([MODELS_CUDA.name, MODELS_ONNX4.name]).toEqual(["2.0.0-onnx.5", "2.0.0-onnx.4"]);
     for (const f of COREML.files) {
       expect(f.url).toBe(`https://github.com/MarcelineVPQ/corridorkey-desktop/releases/download/models-${COREML.name}/${f.file}`);
@@ -699,7 +739,7 @@ describe("install.ts's header (review 2026-10-28 #7)", () => {
     const set = /^const MODEL_SET = "([^"]+)";$/m.exec(src)![1];
     const header = src.slice(0, src.indexOf("\nimport "));
     expect(header).toContain(`\`models-${set}\` release on every system`);
-    expect(header).toContain(`\`models-${set}-coreml\``);
-    expect(src).toMatch(/^const COREML_SET = `\$\{MODEL_SET\}-coreml`;$/m);
+    expect(header).toContain(`\`models-${set}-coreml.1\``);
+    expect(src).toMatch(/^const COREML_SET = `\$\{MODEL_SET\}-coreml\.1`;$/m);
   });
 });

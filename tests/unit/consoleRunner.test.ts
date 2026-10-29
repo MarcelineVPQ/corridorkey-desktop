@@ -2674,7 +2674,17 @@ describe("SME reviews: watch", () => {
       writeFileSync(join(d, "a.1001.exr"), "x");
       await c.run(`cd ${d}`);
       const b = await c.run("watch -n 2 dir -1");
-      await until(() => /run 1 /.test(blocks.get(b.id)?.status ?? ""));
+      // each run's status comes as it starts and its listing after (Linux CI 2026-10-28): wait for the listing
+      const ran = (n: number, lines: string[]) =>
+        until(
+          () =>
+            new RegExp(`run ${n} `).test(blocks.get(b.id)?.status ?? "") &&
+            blocks
+              .get(b.id)!
+              .lines.map((l) => l.text)
+              .join() === lines.join(),
+        );
+      await ran(1, ["a.1001.exr"]);
       await vi.advanceTimersByTimeAsync(PUSH_EVERY_MS);
       const shownLines = () => page.blocks.find((x) => x.id === b.id)!.lines.map((l) => l.text);
       expect(shownLines()).toEqual(["a.1001.exr"]);
@@ -2683,13 +2693,13 @@ describe("SME reviews: watch", () => {
       writeFileSync(join(d, "b.1001.exr"), "x");
       writeFileSync(join(d, "c.1001.exr"), "x");
       await vi.advanceTimersByTimeAsync(2000);
-      await until(() => /run 2 /.test(blocks.get(b.id)?.status ?? ""));
+      await ran(2, ["b.1001.exr", "c.1001.exr"]);
       await vi.advanceTimersByTimeAsync(PUSH_EVERY_MS);
       expect(shownLines()).toEqual(["b.1001.exr", "c.1001.exr"]);
       // run 3 prints fewer
       rmSync(join(d, "b.1001.exr"));
       await vi.advanceTimersByTimeAsync(2000);
-      await until(() => /run 3 /.test(blocks.get(b.id)?.status ?? ""));
+      await ran(3, ["c.1001.exr"]);
       await vi.advanceTimersByTimeAsync(PUSH_EVERY_MS);
       expect(shownLines()).toEqual(["c.1001.exr"]);
       c.cancel();

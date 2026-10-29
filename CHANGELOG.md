@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.0-dev.3 (draft, unreleased)
+
+The foundation build: the Mac on par with Linux and Windows, and the checks running on every change.
+
+- **4K on the Mac.** The Core ML model set gains 4096×2160 (padded to 2176×4096), next to 1280×1080 and 1920×1080:
+  model set 2.0.0-onnx.5-coreml.1. On the 16 GB M6 Mac mini, 04_5d at 4K keys at 0.38 fps steady (12 frames, window
+  4/2), peak 9.8 GB (it fits, tight: 0.8 GB swapped), every pixel of every frame within 1/255 of CUDA's matte (alpha
+  MAE 1.32e-5). The Mac setup is 5.74 GB (was 4.76); a Mac with dev.2's set downloads only the 4K files and a new
+  coreml.json, never the rest again (backlog rows 60, 174).
+- Releases: every release, development builds too, is a full GitHub release marked Latest (the repository page shows
+  the newest build); the update feeds tell Stable from Development by the version, as before (backlog row 173).
+- Development: Windows, macOS and Linux CI run on every push to main, each starting the packaged app's
+  `corridorkey run` with a time limit (Windows and macOS also the app's first page), so release day finds nothing new
+  (backlog row 170).
+
 ## 1.0.0-dev.2
 
 The second development build of 1.0: the `corridorkey` command line for render farms and power users, example
