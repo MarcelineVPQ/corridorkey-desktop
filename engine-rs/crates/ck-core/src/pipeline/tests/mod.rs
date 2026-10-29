@@ -273,13 +273,14 @@ fn tensorrt_cache_root_per_system() {
 /// The all-loaded values changed with the pipelining pass (backlog row 182): the run order (a window's final frames
 /// reach stage 2 after the next window's stage 1) and C-RADIO / MoGe running only on a window's new frames (their
 /// batches); stage 1's and stage 2's inputs and the writers' values are the same, as the low-VRAM values (unchanged)
-/// and `low_vram_gives_the_same_stage_inputs_and_outputs_as_all_loaded` show. The macOS all-loaded values are not re-pinned yet (0: not compared; no Mac run for this change): until the
-/// next macOS run pins them (the test prints them), the equivalence test above covers that mode's data there.
+/// and `low_vram_gives_the_same_stage_inputs_and_outputs_as_all_loaded` show. The macOS all-loaded values were re-pinned
+/// on the Mac mini M6 (2026-10-29, engine f4ad15c; the low-VRAM values printed there unchanged).
 #[cfg(target_os = "linux")]
 const GOLDEN: [(bool, bool, u64); 4] =
     [(false, true, 0xdcb370e41e1092f1), (true, true, 0xcfba85519ddc2a58), (false, false, 0xb94d059ac599c7b1), (true, false, 0x3ef929924fac70f3)];
 #[cfg(target_os = "macos")]
-const GOLDEN: [(bool, bool, u64); 4] = [(false, true, 0), (true, true, 0x84a03419b0a788fa), (false, false, 0), (true, false, 0xf3d3acc57d5890b3)];
+const GOLDEN: [(bool, bool, u64); 4] =
+    [(false, true, 0x3f8785637d7d3b43), (true, true, 0x84a03419b0a788fa), (false, false, 0xfc422bd052fb37c5), (true, false, 0xf3d3acc57d5890b3)];
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
@@ -298,9 +299,7 @@ fn a_fake_job_is_pinned_in_both_modes_and_precisions() {
         got.push((low_vram, half, digest(&h.loader, &out)));
     }
     println!("{got:#x?}");
-    // loop: NOT-WORTH — four combinations
-    let want: Vec<_> = GOLDEN.iter().zip(&got).map(|(g, o)| if g.2 == 0 { *o } else { *g }).collect();
-    assert_eq!(got, want);
+    assert_eq!(got, GOLDEN);
 }
 
 #[test]
