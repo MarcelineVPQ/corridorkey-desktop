@@ -86,12 +86,12 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$app"
           codesign -d --entitlements - "$app/Contents/Resources/engine/corridorkey-engine" 2>/dev/null | grep -q disable-library-validation || { echo "::error::the engine lacks disable-library-validation"; exit 1; }
           xcrun stapler validate "$app"
-          spctl --assess --type execute -vvv "$app" 2>&1 | tee /dev/stderr | grep -q "source=Notarized Developer ID" || { echo "::error::Gatekeeper does not accept the app as notarized"; exit 1; }
+          spctl --assess --type execute -vvv "$app" 2>&1 | tee /dev/stderr | grep "source=Notarized Developer ID" > /dev/null || { echo "::error::Gatekeeper does not accept the app as notarized"; exit 1; }
           hdiutil detach "$mnt" > /dev/null
           # and the image itself: signed, its ticket stapled, accepted as a download (dev.2's was "no usable signature")
           codesign --verify --verbose=2 "$dmg"
           xcrun stapler validate "$dmg"
-          spctl --assess --type open --context context:primary-signature -vvv "$dmg" 2>&1 | tee /dev/stderr | grep -q "source=Notarized Developer ID" || { echo "::error::Gatekeeper does not accept the disk image as notarized"; exit 1; }
+          spctl --assess --type open --context context:primary-signature -vvv "$dmg" 2>&1 | tee /dev/stderr | grep "source=Notarized Developer ID" > /dev/null || { echo "::error::Gatekeeper does not accept the disk image as notarized"; exit 1; }
 
       - name: Install it as a user would, and ask Gatekeeper
         timeout-minutes: 8
