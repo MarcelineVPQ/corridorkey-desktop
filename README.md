@@ -4,8 +4,8 @@
   <img src="docs/screenshots/01-results-04_5h-curly-hair.png" alt="CorridorKey Desktop keying curly hair at 4K: the result on a checkerboard, its matte and foreground" width="100%">
 </p>
 
-Download 1.0.0-dev.3 for Linux, Windows or Apple Silicon Macs from the
-[releases page](https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/v1.0.0-dev.3).
+Download 1.0.0-dev.4 for Linux, Windows or Apple Silicon Macs from the
+[releases page](https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/v1.0.0-dev.4).
 
 > **A community project, not made or endorsed by Corridor Digital.** The CorridorKey model is theirs; their official
 > app and plugins are at [corridorkey.com](https://corridorkey.com).
@@ -19,12 +19,13 @@ chose from your free graphics memory, and stills of the results.
 
 Status: 1.0 is almost ready. The development builds (1.0.0-dev.N, on the Development update channel) key on Linux and
 Windows with an NVIDIA graphics card, and on Apple Silicon Macs through Core ML: from 1.0.0-dev.2 for 1280×1080 and
-1920×1080 clips, and from 1.0.0-dev.3 at 4K too (macOS, honestly, below).
+1920×1080 clips, and from 1.0.0-dev.3 at 4K too (macOS, honestly, below). From 1.0.0-dev.4 AMD cards on Linux too: new,
+and not yet tested on a real AMD card (Requirements).
 
 ## Get started
 
 1. Download the file for your system from the
-   [releases page](https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/v1.0.0-dev.3): the AppImage
+   [releases page](https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/v1.0.0-dev.4): the AppImage
    (Linux), the installer (Windows) or the disk image (Apple Silicon Mac).
 2. Open it. On first start the setup downloads the GPU runtime and the CorridorKey models once (4.03 GB on Linux,
    3.81 GB on Windows, 5.74 GB on macOS) and offers to install ffmpeg if it's missing.
@@ -41,7 +42,8 @@ What your computer needs is under Requirements.
 - **Installs itself, no Python.** One file to download; the app fetches the rest (4.03 GB on Linux, 3.81 GB on
    Windows, 5.74 GB on macOS), every file SHA-256 checked, less than half the original's install (Install size).
 - **One engine, every platform.** Rust on ONNX Runtime: NVIDIA (CUDA) on Linux and Windows, TensorRT on Linux, Core ML
-   on Apple Silicon (1280×1080, 1920×1080 and, from dev.3, 4K clips).
+   on Apple Silicon (1280×1080, 1920×1080 and, from dev.3, 4K clips), and from dev.4 AMD cards on Linux through
+   MIGraphX (new, not yet tested on a real AMD card).
 - **A real Mac app.** From 1.0.0-dev.3, 4K keys on a base 16 GB M6 Mac mini with its mattes within 1/255 of an RTX
   5080's on every pixel; the disk image and the app are signed and notarized by Apple, and every release is keyed
   through the installed app on that Mac before it ships (macOS, honestly).
@@ -54,8 +56,9 @@ What your computer needs is under Requirements.
    and scripts; anything that replaces files asks first, `sudo`-style ([wiki: Console](https://github.com/MarcelineVPQ/corridorkey-desktop/wiki/Console)).
 - **Farm-ready.** The `corridorkey` command line, job export for Deadline, OpenCue, Flamenco and OpenJD, and Console
    scripts from cron ([wiki: Render farm](https://github.com/MarcelineVPQ/corridorkey-desktop/wiki/Render-Farm)).
-- **Free, open, measured.** Signed updates, every speed and quality claim measured with its method, including what
-  we got wrong (Quality, "What we got wrong").
+- **Free, open, measured.** Signed updates (self-updating on Linux; from dev.4 Windows and macOS say when a new version
+  is out), every speed and quality claim measured with its method, including what we got wrong (Quality, "What we got
+  wrong").
 
 ## Screenshots
 
