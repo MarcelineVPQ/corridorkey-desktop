@@ -27,7 +27,9 @@ On, on Linux, with no NVIDIA driver loaded (NVIDIA comes first when a machine ha
 - **Models**: set 2.0.0-onnx.5 only (MIGraphX can't load onnx.4's stage 1 and 2), plus MIGraphX's files in the set's
   own `migraphx` folder and the `migraphx-fp16` entry in its models.json (below).
 - **Wording**: the TensorRT setting says TensorRT is NVIDIA's and MIGraphX runs instead; the GPU readout reads the
-  amdgpu driver's sysfs files (`mem_info_vram_total` / `_used`, `gpu_busy_percent`; no per-program list yet); a job's
+  amdgpu driver's sysfs files (`mem_info_vram_total` / `_used`, `gpu_busy_percent`, and from its hwmon folder
+  `temp1_input`, `pwm1` / `pwm1_max`, `freq1_input`, `power1_average` or `power1_input`, each left out where missing;
+  backlog row 171; no per-program list yet); a job's
   load step reads "Preparing for this graphics card (MIGraphX compiles each network the first time at each size)".
 
 Supported gfx targets (AMD's ONNX Runtime page for MIGraphX; each has a pinned device wheel): gfx1100, gfx1101,

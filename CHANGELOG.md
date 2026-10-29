@@ -20,6 +20,11 @@
   the published onnx.5 TensorRT release (0.61 GB; the mix parses in MIGraphX at four sizes, checked offline). The GPU
   readout reads the amdgpu driver, a job's first load says it is preparing for the card, and the engine's "no graphics
   card" message on Linux names AMD too. Without the switch nothing changes on any system (backlog row 166, docs/AMD.md).
+- The Engine page's **Graphics card** is now laid out like NorthXL's GPU card: the card's name in the header, usage and
+  memory as bars, then the card's temperature, fan, clock and power. NVIDIA reads them from nvidia-smi, AMD (behind
+  `CK_AMD`, untested on a real card) from the amdgpu driver's files; a reading the card doesn't give is left out, never
+  shown as 0. As before it is read only while a job runs and the window is shown, and a Mac shows no readout (backlog
+  row 171).
 
 ## 1.0.0-dev.3
 

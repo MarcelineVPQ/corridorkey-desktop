@@ -540,3 +540,50 @@ describe("every task's section header shows its dot", () => {
     expect(screen.getByRole("button", { name: /^Appearance/ }).querySelector(".task")).toBeNull();
   });
 });
+
+// BACKLOG row 171: NorthXL's GPU card on the Engine page (its order: name in the header, Usage bar, memory bar, then
+// temperature, fan, clock, power); a reading the card doesn't give is left out, never shown as 0
+describe("the Engine page's graphics card (NorthXL's GPU card)", () => {
+  const gpu = { name: "NVIDIA GeForce RTX 5080", totalMb: 16303, usedMb: 7628, utilization: 42, processes: [], at: 0 };
+  const show = (g: object, queueRunning = true) => {
+    mockCk();
+    render(
+      <EnginePage
+        state={appState({ queueRunning, gpu: g as AppState["gpu"] })}
+        panelShown={false}
+        narrow={false}
+        glass={false}
+        focus={null}
+        sectionTasks={{}}
+        hidePanel={() => {}}
+        openSetup={() => {}}
+      />,
+    );
+  };
+  it("shows the card in the header, usage and memory as bars, then temperature, fan, clock and power", () => {
+    show({ ...gpu, tempC: 43, fanPct: 30, clockMhz: 2662, powerW: 52.53 });
+    expect(screen.getByRole("heading", { name: "Graphics card · NVIDIA GeForce RTX 5080" })).toBeTruthy();
+    const usage = screen.getByRole("progressbar", { name: "Usage" });
+    expect(usage.getAttribute("aria-valuenow")).toBe("42");
+    expect(screen.getByText("42%")).toBeTruthy();
+    expect(screen.getByRole("progressbar", { name: "Memory" }).getAttribute("aria-valuenow")).toBe("7628");
+    expect(screen.getByText("7.4 GiB / 15.9 GiB")).toBeTruthy();
+    // loop: NOT-WORTH — four readings in a test
+    expect(screen.getAllByTestId("gpu-reading").map((e) => e.textContent)).toEqual(["43 °C", "Fan 30%", "2662 MHz", "53 W"]);
+  });
+  it("leaves out each reading the card doesn't give", () => {
+    show({ ...gpu, tempC: 51, clockMhz: 1470 });
+    // loop: NOT-WORTH — two readings in a test
+    expect(screen.getAllByTestId("gpu-reading").map((e) => e.textContent)).toEqual(["51 °C", "1470 MHz"]);
+    expect(screen.queryByText(/Fan|W$/)).toBeNull();
+    cleanup();
+    show(gpu);
+    expect(screen.queryAllByTestId("gpu-reading")).toEqual([]);
+  });
+  it("rule 11: shows no readings while no job runs (the last reading isn't kept on screen)", () => {
+    show({ ...gpu, tempC: 43 }, false);
+    expect(screen.getByRole("heading", { name: "Graphics card" })).toBeTruthy();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    expect(screen.getByText(/nothing is read while idle/)).toBeTruthy();
+  });
+});

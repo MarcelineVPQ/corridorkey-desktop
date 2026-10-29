@@ -119,6 +119,29 @@ progress, stop and resume, every file checked), next to the set you have, and th
 runs it; a models folder picked by hand goes back to Automatic. TensorRT installs into the chosen set's folder. On a
 Mac it names the one set, 2.0.0-onnx.5 (the Core ML models exist only for it).
 
+The main view's **Graphics card** is NorthXL's GPU card (Marcy's KDE stats widget; backlog row 171), read only while a
+job runs and the window is shown (nothing reads the card while idle or hidden), in NorthXL's order: the card's name in
+the header, **Usage** and **Memory** as bars (Usage warms toward red as it rises, as NorthXL's does), then one row of
+temperature (warming from 40 °C to 90 °C), fan, clock and power, then the programs using the card. A reading the card
+or driver doesn't give is left out, never shown as 0. NVIDIA: nvidia-smi's `temperature.gpu`, `fan.speed`, `clocks.gr`
+and `power.draw` (a laptop has no fan reading). AMD (the `CK_AMD` switch, docs/AMD.md): the amdgpu driver's hwmon files
+`temp1_input`, `pwm1` of `pwm1_max`, `freq1_input` and `power1_average` (or `power1_input`). Mac: no readout (macOS has
+no nvidia-smi and no such files; its temperatures and power need root).
+
+| NorthXL (GPU card) | CorridorKey (Engine page, Graphics card) |
+| --- | --- |
+| Header "GPU · RTX 5080" (fixed in its source) | Header "Graphics card · <name>" (the card's own name, from the driver) |
+| Usage % bar, heat tint | Usage % bar (the app's progress bar), heat tint mixed from the theme's tokens |
+| VRAM used / total bar | Memory used / total bar, in GiB |
+| Temperature °C, heat tint | Temperature °C, heat tint (40–90 °C, as NorthXL) |
+| Fan % | Fan % (NVIDIA `fan.speed`; AMD the fan level `pwm1` / `pwm1_max`) |
+| Clock MHz (`clocks.gr`) | Clock MHz (NVIDIA `clocks.gr`, the same field; AMD `freq1_input`) |
+| Power W | Power W (NVIDIA `power.draw`; AMD `power1_average`) |
+| FPS (MangoHud) | left out: a keying job has no frame rate of a game; the Queue shows the job's own speed |
+| Missing reading shown as 0 | left out instead (rule 1: no number the card didn't give) |
+| Card colours and font (its own literal colours, DejaVu Sans Mono) | the app's theme tokens and type (rule 2: one theme) |
+| (none) | the programs using the card, kept from before |
+
 ## Console
 
 The **Console** (its own icon on the rail) is a command line inside the app for people who live in one: the farm CLI's

@@ -1505,3 +1505,37 @@ kbd {
 .detail-head > div {
   min-width: 0;
 }
+
+/* NorthXL's GPU card on the Engine page (backlog row 171): its Bar (label left, value right, the bar under them) and
+   its row of readings; its heat (a reading warms toward red as it rises) mixes the theme's own tokens by --heat */
+.gpu-card {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+.gpu-bar-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-3);
+  font-size: 13px;
+}
+.gpu-bar-value {
+  color: var(--text-1);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.gpu-bar.heat .bar > span {
+  background: color-mix(in srgb, var(--status-error) var(--heat), var(--accent));
+}
+.gpu-readings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.gpu-readings .heat {
+  color: color-mix(in srgb, var(--status-error) var(--heat), var(--text-2));
+}

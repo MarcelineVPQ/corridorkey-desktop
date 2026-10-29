@@ -8,7 +8,7 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { EngineProcess, rustEngineEnv, type EngineReply } from "./engine";
 import { Estimator } from "./estimate";
-import { GPU_POLL_MS, otherGpuUsers, readAmdGpu, readGpu, untilEnded } from "./gpu";
+import { GPU_POLL_MS, gpuReadoutWanted, otherGpuUsers, readAmdGpu, readGpu, untilEnded } from "./gpu";
 import { expandPaths, frameDirLinearFor, probeClip, still, STILL_WIDTH, VIDEO_EXT, HINT_IMAGE_EXT } from "./media";
 import { clearJobTemps, Queue } from "./queue";
 import { checkRustEngine, loadSettings, saveSettings } from "./settings";
@@ -625,7 +625,7 @@ async function pollGpu(): Promise<void> {
 
 function updateGpuPolling(): void {
   // nvidia-smi comes with NVIDIA's driver: no readout on macOS (Core ML has no such tool)
-  const want = windowShown && queue.running && !IS_MAC;
+  const want = gpuReadoutWanted({ shown: windowShown, running: queue.running, mac: IS_MAC });
   if (want && !gpuTimer) {
     void pollGpu();
     // lifetime: OK — cleared below as soon as the queue stops or the window hides

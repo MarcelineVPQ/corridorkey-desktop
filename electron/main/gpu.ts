@@ -2,7 +2,7 @@
 // process with its name, so the app can say who else is using the card
 // (rule 11). Read on demand only: at queue start and every GPU_POLL_MS while
 // a job runs AND the window is shown. Nothing reads it while idle or hidden.
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { run } from "./run";
 import { OTHER_GPU_USER_MB, type GpuInfo, type GpuProcess } from "../../src/shared/types";
 
@@ -22,14 +22,32 @@ export async function untilEnded(ending: () => boolean, maxMs = GPU_RELEASE_MS, 
   while (ending() && Date.now() < end) await new Promise((r) => setTimeout(r, stepMs));
 }
 
-/** Parse `nvidia-smi --query-gpu=name,memory.total,memory.used,utilization.gpu --format=csv,noheader,nounits`. */
+/** The query: the card, its memory and load, then NorthXL's GPU card readings (backlog row 171). */
+export const GPU_QUERY = "name,memory.total,memory.used,utilization.gpu,temperature.gpu,fan.speed,clocks.gr,power.draw";
+
+/** A reading that is a number, else left out: nvidia-smi says "[N/A]" or "[Not Supported]" for what a card lacks. */
+const num = (s: string | undefined): number | undefined => (s && s.trim() !== "" && Number.isFinite(Number(s)) ? Number(s) : undefined);
+
+/** Only the readings there are: a missing one is left out of the object, never a 0. */
+type Readings = Pick<GpuInfo, "tempC" | "fanPct" | "clockMhz" | "powerW">;
+function present(r: Readings): Readings {
+  // loop: NOT-WORTH — four readings, every GPU_POLL_MS while a job runs and the window is shown
+  return Object.fromEntries(Object.entries(r).filter(([, v]) => v !== undefined));
+}
+
+/** Parse `nvidia-smi --query-gpu=${GPU_QUERY} --format=csv,noheader,nounits` (an older four-field line still reads). */
 export function parseGpuLine(line: string): Omit<GpuInfo, "processes" | "at"> | null {
-  // loop: NOT-WORTH — four fields, every GPU_POLL_MS while a job runs and the window is shown
+  // loop: NOT-WORTH — eight fields, every GPU_POLL_MS while a job runs and the window is shown
   const parts = line.split(",").map((s) => s.trim());
   if (parts.length < 4) return null;
-  const [name, total, used, util] = parts;
+  const [name, total, used, util, temp, fan, clock, power] = parts;
   if (!Number.isFinite(Number(total))) return null;
-  return { name, totalMb: Number(total), usedMb: Number(used), utilization: Number(util) || 0 };
+  return { name, totalMb: Number(total), usedMb: Number(used), utilization: Number(util) || 0, ...present({ tempC: num(temp), fanPct: num(fan), clockMhz: num(clock), powerW: num(power) }) };
+}
+
+/** Rule 11: the card is read only while a job runs AND the window is shown, and never on a Mac (no nvidia-smi there). */
+export function gpuReadoutWanted(s: { shown: boolean; running: boolean; mac: boolean }): boolean {
+  return s.shown && s.running && !s.mac;
 }
 
 /** Parse `--query-compute-apps=pid,process_name,used_memory --format=csv,noheader,nounits` (the name may hold commas). */
@@ -98,7 +116,7 @@ function procStat(pid: number): string {
 export async function readGpu(ourPids: Set<number>): Promise<GpuInfo> {
   const [gpu, apps] = await Promise.all([
     // loop: HOT-PATH-OK — nvidia-smi every 2 s while a job runs and the window is shown; GPU_READ_TIMEOUT_MS 5 s and one read at a time (this pass)
-    run("nvidia-smi", ["--query-gpu=name,memory.total,memory.used,utilization.gpu", "--format=csv,noheader,nounits"], { timeout: GPU_READ_TIMEOUT_MS }),
+    run("nvidia-smi", [`--query-gpu=${GPU_QUERY}`, "--format=csv,noheader,nounits"], { timeout: GPU_READ_TIMEOUT_MS }),
     // loop: HOT-PATH-OK — the same read's second query, same timeout
     run("nvidia-smi", ["--query-compute-apps=pid,process_name,used_memory", "--format=csv,noheader,nounits"], { timeout: GPU_READ_TIMEOUT_MS }),
   ]);
@@ -112,11 +130,14 @@ export async function readGpu(ourPids: Set<number>): Promise<GpuInfo> {
 
 /**
  * AMD (the CK_AMD switch; docs/AMD.md): the card's memory and load from the amdgpu driver's sysfs files (what amd-smi
- * reads: mem_info_vram_total / _used, gpu_busy_percent), its name from product_name where the board has one. No
- * per-program list yet (the driver keeps it per process in /proc/<pid>/fdinfo): `processes` stays empty.
+ * reads: mem_info_vram_total / _used, gpu_busy_percent), its name from product_name where the board has one. NorthXL's
+ * readings (backlog row 171) from the driver's hwmon folder (docs.kernel.org/gpu/amdgpu/thermal.html): temp1_input
+ * (m°C), pwm1 of pwm1_max (the fan level), freq1_input (the gfx clock, Hz), power1_average (µW; power1_input where the
+ * card has no average); each one the card lacks is left out. No per-program list yet (the driver keeps it per process
+ * in /proc/<pid>/fdinfo): `processes` stays empty.
  */
-// loop: HOT-PATH-OK — four small sysfs reads (sync, microseconds), every GPU_POLL_MS only while a job runs and the window is shown
-export function readAmdGpu(card: { gfx: string; minor: number }, read: (p: string) => string = (p) => readFileSync(p, "utf8")): GpuInfo {
+// loop: HOT-PATH-OK — up to eleven small sysfs reads (sync, microseconds), every GPU_POLL_MS only while a job runs and the window is shown
+export function readAmdGpu(card: { gfx: string; minor: number }, read: (p: string) => string = (p) => readFileSync(p, "utf8"), ls: (p: string) => string[] = (p) => readdirSync(p)): GpuInfo {
   const dev = `/sys/class/drm/renderD${card.minor}/device`;
   const mib = (f: string) => {
     // loop: HOT-PATH-OK — one small sysfs read per value, every GPU_POLL_MS only while a job runs and the window is shown
@@ -134,7 +155,39 @@ export function readAmdGpu(card: { gfx: string; minor: number }, read: (p: strin
   }
   // loop: HOT-PATH-OK — as above
   const busy = Number(read(`${dev}/gpu_busy_percent`).trim());
-  return { name, totalMb: mib("mem_info_vram_total"), usedMb: mib("mem_info_vram_used"), utilization: Number.isFinite(busy) ? busy : 0, processes: [], at: Date.now() };
+  return { name, totalMb: mib("mem_info_vram_total"), usedMb: mib("mem_info_vram_used"), utilization: Number.isFinite(busy) ? busy : 0, ...amdSensors(dev, read, ls), processes: [], at: Date.now() };
+}
+
+/** The hwmon readings, each left out where its file isn't there or gives no number. */
+function amdSensors(dev: string, read: (p: string) => string, ls: (p: string) => string[]): Readings {
+  let hw: string | undefined;
+  try {
+    // loop: HOT-PATH-OK — one sysfs folder listing (one entry), every GPU_POLL_MS only while a job runs and the window is shown
+    hw = ls(`${dev}/hwmon`).find((d) => d.startsWith("hwmon"));
+  } catch {
+    // error: NOT-WORTH — no hwmon folder: memory and load only, the other readings left out
+  }
+  if (!hw) return {};
+  const at = (f: string) => {
+    try {
+      // loop: HOT-PATH-OK — one small sysfs read per reading, as above
+      return num(read(`${dev}/hwmon/${hw}/${f}`).trim());
+    } catch {
+      // error: NOT-WORTH — the card has no such sensor: that reading is left out
+      return undefined;
+    }
+  };
+  const temp = at("temp1_input");
+  const pwm = at("pwm1");
+  const pwmMax = at("pwm1_max");
+  const freq = at("freq1_input");
+  const power = at("power1_average") ?? at("power1_input");
+  return present({
+    tempC: temp === undefined ? undefined : temp / 1000,
+    fanPct: pwm === undefined || !pwmMax ? undefined : Math.round((pwm / pwmMax) * 100),
+    clockMhz: freq === undefined ? undefined : Math.round(freq / 1e6),
+    powerW: power === undefined ? undefined : power / 1e6,
+  });
 }
 
 /**

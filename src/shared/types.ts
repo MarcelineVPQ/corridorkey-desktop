@@ -315,6 +315,11 @@ export interface GpuInfo {
   totalMb: number;
   usedMb: number;
   utilization: number;
+  // NorthXL's GPU card readings (backlog row 171); left out (never 0) where the card or driver doesn't give one
+  tempC?: number;
+  fanPct?: number;
+  clockMhz?: number;
+  powerW?: number;
   processes: GpuProcess[];
   at: number;
 }

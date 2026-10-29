@@ -14,6 +14,26 @@ import { gbBytes, gib } from "../format";
 import { buildSteps } from "../../shared/trt";
 import { FfmpegBox, InstallBox, installPct, TrtBox } from "../setup/SetupParts";
 import { PathText } from "../PathText";
+import { ProgressBar } from "../ProgressBar";
+import type { CSSProperties } from "react";
+
+/** NorthXL's heat (Card/Bar: a reading warms toward red as it rises), as a share 0–1 the theme's tokens mix by. */
+function heatStyle(ratio: number): CSSProperties {
+  return { "--heat": `${Math.round(Math.min(1, Math.max(0, ratio)) * 100)}%` } as CSSProperties;
+}
+
+/** NorthXL's Bar: the label left, the value right, the bar under them (the app's one progress bar). */
+function GpuBar({ label, text, value, max, heat }: { label: string; text: string; value: number; max: number; heat?: number }) {
+  return (
+    <div className={`gpu-bar${heat === undefined ? "" : " heat"}`} style={heat === undefined ? undefined : heatStyle(heat)}>
+      <div className="gpu-bar-head">
+        <span>{label}</span>
+        <span className="gpu-bar-value">{text}</span>
+      </div>
+      <ProgressBar label={label} value={value} max={max} />
+    </div>
+  );
+}
 
 export function EnginePage(props: {
   state: AppState;
@@ -56,6 +76,14 @@ export function EnginePage(props: {
                   ? `on · built for ${builtFor}`
                   : "on · no sizes chosen: clips run on CUDA"
                 : "on · not built yet: clips run on CUDA";
+  // the readout shows only while a job runs (rule 11): the last reading isn't kept on screen after the queue ends
+  const g = state.queueRunning ? state.gpu : null;
+  // NorthXL's row, in its order; the temperature takes its heat tint (40 °C cool to 90 °C hot, as NorthXL)
+  const readings: { k: string; text: string; heat?: number }[] = [];
+  if (g?.tempC !== undefined) readings.push({ k: "temp", text: `${Math.round(g.tempC)} °C`, heat: (g.tempC - 40) / 50 });
+  if (g?.fanPct !== undefined) readings.push({ k: "fan", text: `Fan ${Math.round(g.fanPct)}%` });
+  if (g?.clockMhz !== undefined) readings.push({ k: "clock", text: `${Math.round(g.clockMhz)} MHz` });
+  if (g?.powerW !== undefined) readings.push({ k: "power", text: `${Math.round(g.powerW)} W` });
   const checks = (c: { ok: boolean; problems: string[] }, okText: string) =>
     c.ok ? (
       <div className="check-line ok">
@@ -190,23 +218,32 @@ export function EnginePage(props: {
             </ul>
           )}
         </MainBlock>
-        <MainBlock title="Graphics card">
-          {state.gpu && state.queueRunning ? (
-            <>
-              <div className="stats">
-                <Stat k="Card" v={state.gpu.name} />
-                <Stat k="Memory used" v={`${gib(state.gpu.usedMb)} / ${gib(state.gpu.totalMb)}`} />
-                <Stat k="Busy" v={`${state.gpu.utilization}%`} />
-              </div>
+        {/* NorthXL's GPU card (backlog row 171): its order — the card in the header, Usage and memory as bars, then
+            temperature, fan, clock and power; a reading the card doesn't give is left out, never a 0 */}
+        <MainBlock title={g ? `Graphics card · ${g.name}` : "Graphics card"}>
+          {g ? (
+            <div className="gpu-card">
+              <GpuBar label="Usage" text={`${g.utilization}%`} value={g.utilization} max={100} heat={g.utilization / 100} />
+              <GpuBar label="Memory" text={`${gib(g.usedMb)} / ${gib(g.totalMb)}`} value={g.usedMb} max={g.totalMb} />
+              {readings.length > 0 && (
+                <div className="gpu-readings">
+                  {/* loop: NOT-WORTH — up to four readings per render */}
+                  {readings.map((r) => (
+                    <span key={r.k} data-testid="gpu-reading" className={r.heat === undefined ? undefined : "heat"} style={r.heat === undefined ? undefined : heatStyle(r.heat)}>
+                      {r.text}
+                    </span>
+                  ))}
+                </div>
+              )}
               <ul className="gpu-procs">
                 {/* loop: HOT-PATH-OK — a few compute processes per render (GPU readout every 2 s while a job runs) */}
-                {state.gpu.processes.map((g) => (
-                  <li key={g.pid}>
-                    {g.ours ? "CorridorKey engine" : g.name} — {gib(g.usedMb)}
+                {g.processes.map((pr) => (
+                  <li key={pr.pid}>
+                    {pr.ours ? "CorridorKey engine" : pr.name} — {gib(pr.usedMb)}
                   </li>
                 ))}
               </ul>
-            </>
+            </div>
           ) : (
             <p className="hint-text">Read while a job runs and this window is shown (nothing is read while idle).</p>
           )}
