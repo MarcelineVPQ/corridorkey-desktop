@@ -254,8 +254,8 @@ describe("choosing the model set", () => {
     // a TensorRT install in the other set's folder doesn't count for this one
     expect(trtNeeds("/d", has([...base, "/d/models/2.0.0-onnx.5/models-tensorrt.json"]), four).models).toBe(true);
     // the setting's hint: onnx.4's own folder gives the C-RADIO weights
-    expect(trtBytesFor("2.0.0-onnx.5")).toBe(TRT_BYTES);
-    expect(trtBytesFor("2.0.0-onnx.4")).toBe(TRT_BYTES - cradio.size);
+    expect(trtBytesFor("2.0.0-onnx.5", "linux")).toBe(TRT_BYTES);
+    expect(trtBytesFor("2.0.0-onnx.4", "linux")).toBe(TRT_BYTES - cradio.size);
   });
 });
 

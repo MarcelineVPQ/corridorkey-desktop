@@ -649,8 +649,8 @@ export function trtNeeds(data: string, exists: (p: string) => boolean = existsSy
 }
 
 /** The TensorRT download on top of a 1.0 runtime and the chosen set (what the setting's hint names; less where an older set is still installed). */
-export function trtBytesFor(set: string): number {
-  const c = trtCatalogFor(set);
+export function trtBytesFor(set: string, platform: NodeJS.Platform = PLATFORM): number {
+  const c = trtCatalogFor(set, platform);
   // loop: NOT-WORTH — sixteen model files, per state refresh (the set's own files only: older sets may be gone)
   return c.libs.size + total(c.trtModels.files.filter((f) => !localTwins(f, { ...c, older: [] }, "").length));
 }
