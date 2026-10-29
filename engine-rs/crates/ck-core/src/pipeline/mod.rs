@@ -667,7 +667,7 @@ impl Pipeline<OrtLoader> {
         }
         if provider == Provider::Migraphx && !self.models.has_migraphx(precision) {
             sink.log(&format!(
-                "  MIGraphX: {} has no MIGraphX set (models.json \"migraphx-{}\"): MIGraphX refuses MoGe's resize and stage 1 and 2's RMSNormalization (engine-rs/export/migraphx_patch.py, docs/AMD.md)",
+                "  MIGraphX: {} has no MIGraphX set (models.json \"migraphx-{}\"): MIGraphX refuses MoGe's antialiased resize and stage 2's attention (set 2.0.0-onnx.5: the app's AMD setup adds the entry; docs/AMD.md)",
                 self.models.dir.display(),
                 precision.name()
             ));

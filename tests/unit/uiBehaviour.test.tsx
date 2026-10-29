@@ -16,7 +16,7 @@ import { Accordion, Section } from "../../src/ui/panel/Section";
 import { EnginePage } from "../../src/ui/pages/EnginePage";
 import { SettingsPage } from "../../src/ui/pages/SettingsPage";
 import { ConsolePage } from "../../src/ui/pages/ConsolePage";
-import { STAGE_TEXT } from "../../src/ui/format";
+import { MIGRAPHX_LOAD, STAGE_TEXT } from "../../src/ui/format";
 import { appState, installState, job, settings, updateState } from "./fixtures";
 import { App } from "../../src/ui/App";
 import { dots, tasksOf } from "../../src/shared/tasks";
@@ -244,6 +244,18 @@ describe("readouts", () => {
     const bar = screen.getByRole("progressbar", { name: "Frames written" });
     expect(bar.hasAttribute("aria-valuenow")).toBe(false);
     expect(bar.hasAttribute("aria-valuemax")).toBe(false);
+  });
+
+  // backlog row 166: on an AMD card (MIGraphX) the load compiles each network the first time at each size
+  it("says the load prepares for the card when MIGraphX runs the job, and is the plain load otherwise", () => {
+    mockCk();
+    const tech = { provider: "migraphx", precision: "fp16", tensorrtRequested: false, fallbackReason: null, fallbacks: {}, range: null, cache: null, notAsked: null, modelSet: null, modelsDir: null };
+    const { unmount } = render(<JobView job={job("a", { status: "running", stage: "load", stageDetail: "C-RADIO", tech, startedAt: Date.now() })} />);
+    expect(screen.getAllByText(MIGRAPHX_LOAD)).toHaveLength(2);
+    expect(screen.queryByText(STAGE_TEXT.load)).toBeNull();
+    unmount();
+    render(<JobView job={job("b", { status: "running", stage: "load", stageDetail: "C-RADIO", tech: { ...tech, provider: "cuda" }, startedAt: Date.now() })} />);
+    expect(screen.getAllByText(STAGE_TEXT.load)).toHaveLength(2);
   });
 
   it("the Model set tile says the version; its long folder is its own shortened line, never clipped in the tile", () => {

@@ -96,8 +96,10 @@ export function findEngineFiles(places: { bundledBinary: string | null; devBinar
         // loop: NOT-WORTH — as above
         .find(Boolean);
     const version = lib && (o.version(lib) ?? fromDistInfo());
-    // macOS: Core ML (Apple's GPU and Neural Engine) is built into the library
-    const gpu = o.cudaProvider === null || d.exists(join(capi, o.cudaProvider));
+    // macOS: Core ML (Apple's GPU and Neural Engine) is built into the library; AMD (Linux): AMD's MIGraphX plugin
+    // next to ONNX Runtime's package, where the engine finds it (runtime.rs migraphx_lib)
+    // loop: NOT-WORTH — two stats per installed runtime
+    const gpu = o.cudaProvider === null || d.exists(join(capi, o.cudaProvider)) || d.exists(join(runtimeRoot, name, "onnxruntime_ep_migraphx", "libmigraphx-ep.so"));
     if (!lib || !version) continue;
     ort.push({ path: join(capi, lib), label: `ONNX Runtime ${version}${gpu ? " (graphics card)" : " (CPU only)"}`, key: numericVersionKey(version) });
   }

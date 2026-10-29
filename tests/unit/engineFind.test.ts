@@ -47,6 +47,17 @@ describe("finding the engine's files", () => {
     ]);
   });
 
+  // backlog row 166: an AMD runtime (CK_AMD) has no CUDA provider but AMD's MIGraphX plugin next to ONNX Runtime
+  it("lists an AMD runtime with MIGraphX's plugin as a graphics-card runtime", () => {
+    const t = tree({
+      "/d/runtime/ort-1.31.0-rocm10.1-gfx1100/onnxruntime/capi/libonnxruntime.so.1.31.0": "",
+      "/d/runtime/ort-1.31.0-rocm10.1-gfx1100/onnxruntime_ep_migraphx/libmigraphx-ep.so": "",
+    });
+    expect(findEngineFiles({ bundledBinary: null, devBinary: null, data: "/d" }, t, "linux").ort).toEqual([
+      { path: "/d/runtime/ort-1.31.0-rocm10.1-gfx1100/onnxruntime/capi/libonnxruntime.so.1.31.0", label: "ONNX Runtime 1.31.0 (graphics card)" },
+    ]);
+  });
+
   // BACKLOG row 168: Automatic runs the model set chosen in Engine settings once it is installed
   it("puts the chosen model set first (Automatic), the others after in their order", () => {
     const sets = [

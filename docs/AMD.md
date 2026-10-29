@@ -1,31 +1,82 @@
 # AMD graphics cards (MIGraphX)
 
-**Untested on real hardware: nothing here has run on an AMD card.** The app doesn't download an AMD runtime, so the app
-itself still needs an NVIDIA card on Linux and Windows.
+**Untested on real hardware: nothing here has run on an AMD card.** Since 1.0.0-dev.4 the app can set an AMD card up
+on Linux, **behind one switch that is off by default**: `CK_AMD=1` in the app's environment (backlog row 166).
 
-Status 2026-10-27: the engine has a MIGraphX provider (`--device migraphx`); with set 2.0.0-onnx.4 **stage 1 and stage
-2 don't parse in MIGraphX** (below). Set 2.0.0-onnx.5 (the app's set on Linux and Windows from 1.0.0-dev.2) changed
-their export: its TensorRT-form files parse for all five networks at 384×256, 1280×1152, 1920×1152 and 3840×2176
-(docs/ONNX_EXPORT.md "onnx.5"); no models.json `migraphx-fp16` entry points at them yet. Measured offline on the
-Linux PC with AMD's own MIGraphX library.
+Status 2026-10-28: the engine has a MIGraphX provider (`--device migraphx`); the app's setup detects an AMD card,
+downloads ONNX Runtime with AMD's ROCm 10.1 and MIGraphX libraries, and adds a models.json `migraphx-fp16` entry to
+set 2.0.0-onnx.5 (below). Measured offline only, on the Linux PC with AMD's own MIGraphX library; whether the shipped
+release exposes the switch (marked untested) or keeps it hidden is Marcy's call at release.
+
+## The switch: `CK_AMD=1`
+
+Off (unset, or anything but `1`) the app reads nothing of the AMD side and behaves exactly as before on every system:
+NVIDIA, macOS and CPU setups are unchanged, and an AMD card gets the "No NVIDIA graphics driver is loaded" message.
+On, on Linux, with no NVIDIA driver loaded (NVIDIA comes first when a machine has both, as the engine's `auto` does):
+
+- **Detection** (electron/main/amd.ts, install.ts `amdCardFor` / `systemSupport`): the first GPU node of the KFD
+  topology (`/sys/class/kfd/kfd/topology/nodes/*/properties`: SIMDs and a `gfx_target_version`, the engine's amd.rs
+  rule), and whether `/dev/kfd` and its `/dev/dri/renderD<minor>` open read-write. The setup says why not when there is
+  no AMD card, when its gfx target isn't one ROCm 10.1's MIGraphX supports, or when the user isn't in the `render` /
+  `video` groups. Several cards of different targets: only the first one's device wheel is downloaded.
+- **Runtime download** (install.ts `RUNTIME_AMD`, `ROCM_DEVICE`): the wheels below into
+  `runtime/ort-1.31.0-rocm10.1-<gfx>`, in pip's layout (the libraries find each other through `$ORIGIN` RPATHs, and the
+  engine finds the plugin next to ONNX Runtime's package): no `LD_LIBRARY_PATH`, nothing system-wide, no engine
+  setting (the engine's `auto` picks MIGraphX when the plugin offers a GPU and there is no CUDA). The Engine page lists
+  it as "(graphics card)".
+- **Models**: set 2.0.0-onnx.5 only (MIGraphX can't load onnx.4's stage 1 and 2), plus MIGraphX's files in the set's
+  own `migraphx` folder and the `migraphx-fp16` entry in its models.json (below).
+- **Wording**: the TensorRT setting says TensorRT is NVIDIA's and MIGraphX runs instead; the GPU readout reads the
+  amdgpu driver's sysfs files (`mem_info_vram_total` / `_used`, `gpu_busy_percent`; no per-program list yet); a job's
+  load step reads "Preparing for this graphics card (MIGraphX compiles each network the first time at each size)".
+
+Supported gfx targets (AMD's ONNX Runtime page for MIGraphX; each has a pinned device wheel): gfx1100, gfx1101,
+gfx1102 (Radeon RX 7000), gfx1200, gfx1201 (RX 9000, Radeon AI PRO R9700), gfx1150-gfx1153 (Ryzen AI graphics),
+gfx90a, gfx942, gfx950 (Instinct MI200, MI300, MI350).
 
 ## The runtime (ROCm 10.1)
 
-| What | Version | Where |
+The app downloads it from AMD's own repository and PyPI (sizes and SHA-256 checked 2026-10-28 by downloading each wheel
+twice; install.ts pins them):
+
+| Wheel | Size (bytes) | From |
 |---|---|---|
-| ROCm on the machine | 10.1.0 (AMD Developer Cloud image "ROCm 10.1 on Ubuntu 24.04"); HIP 7.16, still `libamdhip64.so.7` | system (`/opt/rocm`) |
-| ONNX Runtime | 1.31 (the app's pin; AMD's matrix lists 1.29, see "Open") | PyPI `onnxruntime` |
-| MIGraphX provider | `onnxruntime-ep-migraphx` 1.0.0+rocm10.1.0: a **plugin** library (`libmigraphx-ep.so`, 1.8 MB) that ONNX Runtime loads at run time | `https://stable.repo.amd.com/rocm/onnxruntime/whl-next/` |
-| MIGraphX | `migraphx-libs` 2.18.0+rocm10.1.0 (83 MB; kernels for gfx90a, gfx942, gfx950, gfx1100-1103, gfx1150-1153, gfx1200/1201) | `https://stable.repo.amd.com/rocm/migraphx/whl-next/` |
+| `onnxruntime` 1.31.0 (plain: the provider is a plugin) | 23,760,984 | pypi.org |
+| `onnxruntime-ep-migraphx` 1.0.0+rocm10.1.0: the MIGraphX provider **plugin** (`libmigraphx-ep.so`) | 1,808,763 | `https://stable.repo.amd.com/rocm/onnxruntime/whl-next/` |
+| `migraphx-libs` 2.18.0+rocm10.1.0 | 82,963,723 | `https://stable.repo.amd.com/rocm/migraphx/whl-next/` |
+| `rocm-sdk-core` 10.1.0 (HIP, ROCr, comgr, LLVM) | 419,364,838 | `https://stable.repo.amd.com/rocm/core/whl-next/` |
+| `rocm-sdk-libraries` 10.1.0 (MIOpen, rocBLAS, hipBLASLt, rocRoller) | 260,814,462 | same |
+| `rocm-sdk-device-<gfx>` 10.1.0: one, the card's kernels | 155,150,763 (gfx1152) to 1,832,820,487 (gfx942); gfx1100 233,374,792 | same |
+
+Download: 1.02 GB for an RX 7900 (gfx1100), 1.13 GB for gfx1201 (the CUDA set is 1.55 GB). Kept after unpacking:
+2.36 GB for gfx1100 (measured with the app's own `keepFromWheel` on the real wheels): what loading the plugin needs
+(its ELF dependencies, all resolved inside the kept files: `ldd` on every kept library, 2026-10-28), LLVM's device
+bitcode and clang headers (HIP's runtime compiler), the card's MIGraphX kernels and the whole device wheel; not the
+debugger, profilers, Python bindings, compiler programs or the ROCm libraries MIGraphX doesn't link. A first cut: a
+file a real card turns out to need (one opened only at run time) is the first thing the card test checks.
+
+Licences: the ROCm wheels carry no licence files (the core wheel keeps a few under `share/doc`, kept), so
+THIRD_PARTY_NOTICES.md carries the texts (licenses/rocm/: AMD's projects, LLVM, and the system libraries ROCm builds
+in at the versions TheRock's therock-10.1 tag pins: elfutils 0.195 libelf LGPL-3.0-or-later, numactl 2.0.19 LGPL-2.1,
+libdrm 2.4.134, bzip2 1.0.8, xz 5.8.1, SQLite 3.51.3, zlib 1.3.2, zstd 1.5.7).
 
 Since ROCm 10 AMD ships the MIGraphX provider as an ONNX Runtime plugin instead of a whole ONNX Runtime build. The
 older route, the `onnxruntime-migraphx` wheel (PyPI 1.27.1, AMD's repo 1.23.2), is a full ONNX Runtime 1.27 built
-against ROCm 7.2.4: the engine (ONNX Runtime API 31) can't load it, and it isn't the AMD cloud image's ROCm.
+against ROCm 7.2.4: the engine (ONNX Runtime API 31) can't load it.
 
 ROCm 10.1's compatibility matrix lists the MI300X (gfx942), the Radeon RX 7900 XTX (gfx1100) and the Radeon AI PRO
-R9700 (gfx1201), Ubuntu 24.04. The plugin's library looks for MIGraphX next to itself (pip's `migraphx_libs`) and for
-HIP/ROCm in pip's ROCm packages or `/opt/rocm/lib`: on the cloud image system ROCm is enough, nothing ROCm ships with
-the app.
+R9700 (gfx1201), Ubuntu 24.04. Unconfirmed: whether a stock distro kernel's amdgpu driver is enough for pip ROCm 10.1
+or `amdgpu-dkms` is needed (the card test checks).
+
+## The models (`migraphx-fp16`)
+
+MIGraphX 2.18 parses set 2.0.0-onnx.5's own C-RADIO, RVM and stage 1 files, and refuses its MoGe (antialiased resize)
+and stage 2 (MultiHeadAttention's `attention_bias` broadcast over the heads); their TensorRT-form files from release
+`models-2.0.0-onnx.5-trt` parse. The app downloads those two (`ck2-moge-trt-fp16.onnx(.data)`,
+`ck2-stage2-trt-fp16.onnx(.data)`, 0.61 GB, install.ts `MIGRAPHX`) into the set's `migraphx` folder and merges
+`migraphx-fp16` into its models.json (`MIGRAPHX_KEY`): cradio, rvm, stage1 the set's own files, moge and stage2
+`migraphx/…`. No new model release: every file is already published. That exact mix parses at 384×256, 1280×1152,
+1920×1152 and 3840×2176, 4 frames (`tools/migraphx_ops.py --set migraphx-fp16`, 2026-10-28).
 
 ## The engine
 
@@ -35,7 +86,7 @@ the app.
   found where pip puts it next to `onnxruntime/capi/libonnxruntime.so` (runtime.rs `migraphx_lib`). Registered with
   ONNX Runtime's plugin API (`RegisterExecutionProviderLibrary`), sessions made on its first GPU device.
 - Compiled programs: MIGraphX compiles per input shape (minutes for a large network), cached in
-  `CK_ENGINE_MIGRAPHX_CACHE` (default `migraphx` next to the TensorRT cache root), one folder per ONNX Runtime
+  `CK_ENGINE_MIGRAPHX_CACHE` (default `migraphx` next to the TensorRT cache root: the app's `<cache>/migraphx`), one folder per ONNX Runtime
   version, gfx target and network file (size + time: MIGraphX's own cache key follows the graph's structure, not its
   weights). Plugin option `cache_dir`.
 - Memory (automatic window, `estimate`): the amdgpu driver's `mem_info_vram_total` / `mem_info_vram_used` (what
@@ -44,8 +95,11 @@ the app.
   (`drm-resident-vram`). No arena limit: the plugin has none; the budget still sizes the window (amd.rs).
 - Precision: the sets are fp16 where they should be; no MIGraphX quantisation is asked for.
 - Models: models.json's `migraphx-fp16` entry when the folder has one (else the plain files, and the job log says
-  MIGraphX refuses them). `engine-rs/export/migraphx_patch.py` makes it from the TensorRT-ready exports.
-- Errors name the AMD side ("no AMD graphics card ROCm can use", or what became of the plugin), never "NVIDIA".
+  MIGraphX refuses them). For set 2.0.0-onnx.5 the app's AMD setup writes it (above); `engine-rs/export/migraphx_patch.py`
+  is for onnx.4's files only.
+- Errors name the AMD side ("no AMD graphics card ROCm can use", or what became of the plugin), never "NVIDIA" alone:
+  with no provider at all on Linux the message names both ("CorridorKey needs an NVIDIA graphics card with CUDA, or an
+  AMD graphics card with ROCm and AMD's MIGraphX plugin").
 
 ## What MIGraphX takes (offline check)
 
@@ -78,11 +132,15 @@ network with more than 10 unsupported nodes: stage 1 and stage 2 would have run 
 
 ## Open
 
-- Stage 1 / stage 2 MIGraphX-friendly export: done in set 2.0.0-onnx.5 (backlog row 165; parsing checked offline only). Still open: a models.json `migraphx-fp16` entry for its TensorRT-form files, and a run on a real AMD card (a paid test needs Marcy's go).
-- ONNX Runtime 1.31 with the plugin built for 1.29 (`onnxruntime~=1.29.0` in its metadata; it negotiates the API
-  version, "requires ORT API >= …"): expected to load, unproven until a card runs it.
-- The plugin's option names (`cache_dir`) are read from its binary; its source isn't public.
-- The cloud test kit (`tools/amd_cloud_test.sh`) and the CUDA reference mattes are still to be written.
+- A run on a real AMD card (a paid test needs Marcy's go; plan ~/.cache/claude-scratch/ck-amd-dev3/PLAN.md section 3):
+  the app's install, the plugin loading into ONNX Runtime 1.31 (built for 1.29: `onnxruntime~=1.29.0` in its
+  metadata; it negotiates the API version), the kept-file list, every MIGraphX compile (shape and seconds) and its
+  cache, the accuracy against CUDA's matte.
+- The plugin's option names (`cache_dir`) are read from its binary.
+- The GPU readout lists no other programs on an AMD card yet (the driver keeps it per process in /proc/<pid>/fdinfo).
+- Storage doesn't list MIGraphX's compiled-program cache (`<cache>/migraphx`) yet.
+- The cloud test kit (`tools/amd_cloud_test.sh`) and the CUDA reference matte are still to be written.
+- Windows AMD: no pip MIGraphX for Windows; Windows ML's MIGraphX provider is the likely route (PLAN.md 2.8).
 
 Sources: ROCm 10.1 compatibility matrix (rocm.docs.amd.com/en/docs-10.1.0/compatibility/compatibility-matrix.html),
 AMD's ONNX Runtime install page (rocm.docs.amd.com/projects/ai-ecosystem/en/latest/inference/onnxruntime.html), the

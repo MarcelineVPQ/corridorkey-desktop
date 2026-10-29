@@ -30,6 +30,13 @@ const INSTALL = [
   "export const RUNTIME_MAC = {",
   wheel("onnxruntime-1.23.2-cp312-cp312-macosx_13_0_universal2.whl"),
   "};",
+  "export const RUNTIME_AMD = {",
+  wheel("onnxruntime_ep_migraphx-1.0.0+rocm10.1.0-cp312-cp312-manylinux_2_28_x86_64.whl"),
+  "};",
+  "const rocmDevice = (gfx: string): Download => ({ file: `rocm_sdk_device_${gfx}-10.1.0-py3-none-linux_x86_64.whl` });",
+  "export const ROCM_DEVICE: Record<string, Download> = {",
+  '  gfx1100: rocmDevice("gfx1100", 1, ""),',
+  "};",
   "export const TENSORRT = {",
   '  libs: { file: "tensorrt_cu13_libs-10.16.1.11-py2.py3-none-manylinux_2_28_x86_64.whl" } as Download,',
   "};",
@@ -40,6 +47,8 @@ const NOTICES = [
   "| onnxruntime | 1.23.2 | macOS | MIT |",
   "| onnxruntime-gpu | 1.23.2 | Linux, Windows | MIT |",
   "| tensorrt-cu13-libs | 10.16.1.11 | Linux, opt-in TensorRT | NVIDIA |",
+  "| onnxruntime-ep-migraphx | 1.0.0+rocm10.1.0 | Linux, AMD cards (CK_AMD switch) | MIT |",
+  "| rocm-sdk-device-gfx1100 | 10.1.0 | Linux, AMD cards (CK_AMD switch) | MIT |",
   "- `2.0.0-onnx.5` (Linux, Windows, macOS)",
   "- `2.0.0-onnx.4` (Linux: TensorRT copies its C-RADIO weights from an installed copy)",
   "- `2.0.0-onnx.5-coreml` (macOS: Core ML)",
@@ -84,6 +93,12 @@ describe("notices gate (first-run downloads)", () => {
     expect(r.code).toBe(1);
     expect(r.out).toContain("wheel tensorrt-cu13-libs 10.16.1.11");
     expect(runGate(INSTALL, NOTICES.replace("| onnxruntime | 1.23.2 | macOS | MIT |\n", "")).out).toContain("wheel onnxruntime 1.23.2");
+  });
+
+  // backlog row 166: the AMD runtime's wheels (a version with a local part, "+rocm10.1.0") and each card's device wheel
+  it("fails on an AMD wheel or a ROCm device wheel the notices don't name", () => {
+    expect(runGate(INSTALL, NOTICES.replace("| onnxruntime-ep-migraphx | 1.0.0+rocm10.1.0 |", "| x |")).out).toContain("wheel onnxruntime-ep-migraphx 1.0.0+rocm10.1.0");
+    expect(runGate(INSTALL, NOTICES.replace("| rocm-sdk-device-gfx1100 | 10.1.0 |", "| x |")).out).toContain("wheel rocm-sdk-device-gfx1100 10.1.0");
   });
 
   it("fails on a model release pinned past the set constants", () => {

@@ -12,6 +12,14 @@
   TensorRT installs into the chosen set's folder: onnx.4 gets its own 2.0.0-onnx.4-trt, and onnx.5 keeps
   2.0.0-onnx.4-trt as in dev.2 and dev.3 (onnx.5's own TensorRT set isn't measured yet). macOS names its one set,
   2.0.0-onnx.5 with its Core ML set (there is no onnx.4 Core ML set) (backlog row 168).
+- AMD cards on Linux, built in behind a switch that is **off by default** and **untested on a real AMD card**: with
+  `CK_AMD=1` in the app's environment and no NVIDIA driver loaded, the setup finds an AMD card ROCm 10.1's MIGraphX
+  supports (Radeon RX 7000 and 9000, Radeon AI PRO R9700, Ryzen AI graphics, Instinct MI200/MI300/MI350), says when
+  your user needs the `render` and `video` groups, and downloads ONNX Runtime with AMD's ROCm 10.1 and MIGraphX
+  libraries (1.02 GB for an RX 7900, each wheel pinned by size and SHA-256) and MIGraphX's two extra model files from
+  the published onnx.5 TensorRT release (0.61 GB; the mix parses in MIGraphX at four sizes, checked offline). The GPU
+  readout reads the amdgpu driver, a job's first load says it is preparing for the card, and the engine's "no graphics
+  card" message on Linux names AMD too. Without the switch nothing changes on any system (backlog row 166, docs/AMD.md).
 
 ## 1.0.0-dev.3
 

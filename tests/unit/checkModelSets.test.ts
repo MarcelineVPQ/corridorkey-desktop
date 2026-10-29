@@ -18,6 +18,8 @@ describe("the model-set gate (online at release; these checks are offline)", () 
     expect(sets.map((s) => [s.set, s.base])).toEqual([
       ["2.0.0-onnx.5", null],
       ["2.0.0-onnx.4", null],
+      // AMD (CK_AMD): MIGraphX's MoGe and stage 2 from onnx.5's TensorRT release (backlog row 166)
+      ["2.0.0-onnx.5-trt", "2.0.0-onnx.5"],
       ["2.0.0-onnx.5-coreml.1", "2.0.0-onnx.5"],
       ["2.0.0-onnx.4-trt", "2.0.0-onnx.4"],
     ]);

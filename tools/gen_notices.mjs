@@ -188,6 +188,14 @@ const WHEEL_LICENCES = [
   [/^nvidia_cudnn_cu\d+$/, "NVIDIA proprietary licence, the [cuDNN Software License Agreement](https://docs.nvidia.com/deeplearning/cudnn/latest/reference/eula.html)"],
   [/^nvidia_(cublas|cuda_nvrtc|cuda_runtime|cufft|curand|nvjitlink)$/, CUDA_EULA],
   [/^tensorrt_cu\d+_libs$/, "NVIDIA proprietary licence (the wheel's LICENSE.txt), the [TensorRT Software License Agreement](https://docs.nvidia.com/deeplearning/tensorrt/latest/reference/sla.html)"],
+  [/^onnxruntime_ep_migraphx$/, "MIT (AMD; the wheel's metadata), text under Licence texts (ROCm)"],
+  [/^migraphx_libs$/, "MIT (AMD MIGraphX), text under Licence texts (ROCm)"],
+  [
+    /^rocm_sdk_core$/,
+    "AMD ROCm 10.1 (the wheel names none): MIT (HIP, rocprofiler-register, roctx, rocm-kpack), NCSA (ROCr), Apache-2.0 WITH LLVM-exception (comgr, LLVM) and its system libraries' (LGPL-3.0-or-later elfutils libelf, LGPL-2.1 libnuma, MIT libdrm, bzip2, 0BSD xz, public-domain SQLite, Zlib, BSD-3-Clause zstd); texts under Licence texts (ROCm)",
+  ],
+  [/^rocm_sdk_libraries$/, "AMD ROCm 10.1 (the wheel names none): MIT and others (MIOpen, rocBLAS, hipBLASLt, rocRoller, origami); texts under Licence texts (ROCm)"],
+  [/^rocm_sdk_device_gfx\w+$/, "AMD ROCm 10.1's kernels and databases for one card (MIT: rocBLAS, hipBLASLt, MIOpen), texts under Licence texts (ROCm)"],
   [
     /^msvc_runtime$/,
     "Microsoft proprietary licence (PyPI: Proprietary): Microsoft's redistributable Visual C++ runtime, [its licence terms](https://visualstudio.microsoft.com/license-terms/vs2022-cruntime/)",
@@ -199,6 +207,7 @@ const SET_KINDS = {
   OLD_MODEL_SET: "Linux: TensorRT copies its C-RADIO weights from an installed copy",
   COREML_SET: "macOS: Core ML",
   TRT_MODEL_SET: "Linux: the opt-in TensorRT jobs",
+  MIGRAPHX_MODEL_SET: "Linux, AMD cards (CK_AMD switch): MoGe and stage 2 in the form MIGraphX takes",
 };
 function downloads() {
   const src = readFileSync(join(APP, "electron/main/install.ts"), "utf8");
@@ -217,13 +226,41 @@ function downloads() {
     .map((w) => {
       // loop: NOT-WORTH — five licence rules per wheel
       const lic = WHEEL_LICENCES.find(([re]) => re.test(w.name))?.[1] ?? "licence not determined";
-      const host = w.name.startsWith("tensorrt_") ? "pypi.nvidia.com" : "pypi.org";
+      const amd = /^(onnxruntime_ep_migraphx|migraphx_libs|rocm_sdk_)/.test(w.name);
+      const host = w.name.startsWith("tensorrt_") ? "pypi.nvidia.com" : amd ? "repo.amd.com" : "pypi.org";
       const project = w.name.replace(/_/g, "-");
-      const page = host === "pypi.org" ? `https://pypi.org/project/${project}/${w.version}/` : `https://pypi.nvidia.com/${project}/`;
+      // AMD's repository: each package's index folder (install.ts's URLs)
+      const amdIndex = w.name.startsWith("rocm_sdk_") ? `core/whl-next/${project}` : w.name === "migraphx_libs" ? `migraphx/whl-next/${project}` : `onnxruntime/whl-next/${project}`;
+      const page = host === "pypi.org" ? `https://pypi.org/project/${project}/${w.version}/` : amd ? `https://stable.repo.amd.com/rocm/${amdIndex}/` : `https://pypi.nvidia.com/${project}/`;
       return `| ${project} | ${w.version} | ${w.platforms.join(", ")} | ${lic} | [${host}](${page}) |`;
     });
   return { repo, sets, rows };
 }
+
+// --- ROCm (the AMD runtime behind the CK_AMD switch, install.ts RUNTIME_AMD / ROCM_DEVICE): what the setup keeps ---
+// Sources: AMDMIGraphX, onnxruntime-ep-amdgpu, ROCm/clr (HIP; the same AMD MIT text as hipBLASLt, rocRoller, origami,
+// rocprofiler-register and roctracer), ROCm/rocm-libraries (MIOpen, rocBLAS), ROCm/rocm-kpack, the core wheel's own
+// share/doc (ROCr, comgr), ROCm/llvm-project; the system libraries at TheRock therock-10.1's pinned versions.
+const ROCM_LICENCES = [
+  ["MIT: AMD's MIGraphX provider plugin for ONNX Runtime (onnxruntime-ep-migraphx)", "onnxruntime-ep-amdgpu-MIT.txt"],
+  ["MIT: AMD MIGraphX 2.18", "AMDMIGraphX-MIT.txt"],
+  ["MIT: HIP (libamdhip64, hiprtc), hipBLASLt, rocRoller, origami, rocprofiler-register, roctx (Advanced Micro Devices, Inc.)", "AMD-MIT.txt"],
+  ["MIT and others: MIOpen", "MIOpen.txt"],
+  ["MIT and others: rocBLAS", "rocBLAS.txt"],
+  ["MIT: rocm-kpack", "rocm-kpack-MIT.txt"],
+  ["NCSA: ROCr (libhsa-runtime64)", "ROCR-Runtime-NCSA.txt"],
+  ["Apache-2.0 WITH LLVM-exception: comgr (libamd_comgr)", "comgr-Apache-2.0-LLVM-exception.txt"],
+  ["Apache-2.0 WITH LLVM-exception: LLVM and clang (libLLVM, libclang-cpp, device bitcode, clang headers)", "LLVM-Apache-2.0-LLVM-exception.txt"],
+  ["bzip2 licence: bzip2 1.0.8 (rocm_sysdeps)", "bzip2-1.0.8.txt"],
+  ["LGPL-3.0-or-later (or GPL-2.0-or-later): elfutils 0.195 libelf (rocm_sysdeps)", "elfutils-0.195-LGPL-3.0.txt"],
+  ["GPL-3.0 (the licence LGPL-3.0 adds to): elfutils 0.195 libelf (rocm_sysdeps)", "elfutils-0.195-GPL-3.0.txt"],
+  ["MIT: libdrm 2.4.134 and libdrm_amdgpu (rocm_sysdeps)", "libdrm-2.4.134-MIT.txt"],
+  ["LGPL-2.1: numactl 2.0.19 libnuma (rocm_sysdeps)", "numactl-2.0.19-LGPL-2.1.txt"],
+  ["0BSD: xz 5.8.1 liblzma (rocm_sysdeps)", "xz-5.8.1-0BSD.txt"],
+  ["Public domain: SQLite 3.51.3 (rocm_sysdeps)", "sqlite-3.51.3.txt"],
+  ["Zlib: zlib 1.3.2 (rocm_sysdeps)", "zlib-1.3.2.txt"],
+  ["BSD-3-Clause: zstd 1.5.7 (rocm_sysdeps)", "zstd-1.5.7-BSD.txt"],
+];
 
 // --- OpenColorIO and the C++ libraries its bundled build links into the engine (ocio-sys 0.3.0, engine-rs/vendor) ---
 // Versions: OpenColorIO's CMakeLists.txt project() and each library's own source as vendored in
@@ -434,6 +471,16 @@ function render() {
   L.push("### OpenColorIO and its bundled libraries", "");
   // loop: NOT-WORTH — nine licence files, once per generation
   for (const [name, version, , lic, , file] of OCIO_LIBS) L.push(`#### ${lic}: ${name} ${version}`, "", fence(readFileSync(join(APP, "licenses/ocio", file), "utf8").trimEnd()), "");
+  L.push(
+    "### ROCm (AMD cards, downloaded with the CK_AMD switch on)",
+    "",
+    "AMD's ROCm wheels carry no licence files of their own (the core wheel has a few, kept with its libraries), so the",
+    "texts of what the setup keeps are here: from each project's repository, and for the system libraries ROCm builds in",
+    "(rocm_sysdeps) at the versions ROCm/TheRock's therock-10.1 tag pins.",
+    "",
+  );
+  // loop: NOT-WORTH — the ROCm licence files, once per generation
+  for (const [title, file] of ROCM_LICENCES) L.push(`#### ${title}`, "", fence(readFileSync(join(APP, "licenses/rocm", file), "utf8").trimEnd()), "");
   L.push("### npm packages", "");
   // loop: NOT-WORTH — ~100 texts
   for (const g of npm.texts) L.push(`#### ${g.id}: ${users(g)}`, "", fence(g.text), "");

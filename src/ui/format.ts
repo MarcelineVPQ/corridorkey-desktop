@@ -31,6 +31,15 @@ export const STAGE_TEXT: Record<Stage, string> = {
   keying: "Keying",
 };
 
+/**
+ * A stage's words for this job: on an AMD card (MIGraphX) loading also compiles each network for the card, the first
+ * time at each size (minutes; cached after), so the load says so instead of looking stuck.
+ */
+export const MIGRAPHX_LOAD = "Preparing for this graphics card (MIGraphX compiles each network the first time at each size: minutes)";
+export function stageText(job: Pick<Job, "tech">, s: Stage): string {
+  return s === "load" && job.tech?.provider === "migraphx" ? MIGRAPHX_LOAD : STAGE_TEXT[s];
+}
+
 export const STAGE_ORDER: Stage[] = ["start", "load", "probe", "optimize", "rvm", "foundations", "keying"];
 
 export function statusText(job: Job): string {
@@ -39,7 +48,7 @@ export function statusText(job: Job): string {
       return job.clip.probeError ? CANT_READ_CLIP : "Waiting";
     case "running":
       if (job.stage === "keying" && job.framesTotal) return `${job.framesDone} / ${job.framesTotal} frames`;
-      return job.stage ? STAGE_TEXT[job.stage] : "Starting";
+      return job.stage ? stageText(job, job.stage) : "Starting";
     case "done": {
       const ran = providerName(job.tech?.provider ?? null);
       const done = job.startedAt && job.finishedAt ? `Done in ${duration((job.finishedAt - job.startedAt) / 1000)}` : "Done";

@@ -105,7 +105,13 @@ it happens again, please open an issue with the log.
 
 > CorridorKey needs an NVIDIA graphics card with CUDA.
 
-**Cause:** the engine found no NVIDIA card it can use with CUDA. **Fix:** see
+On Linux the message is:
+
+> CorridorKey needs an NVIDIA graphics card with CUDA, or an AMD graphics card with ROCm and AMD's MIGraphX plugin (docs/AMD.md).
+
+**Cause:** the engine found no NVIDIA card it can use with CUDA (and, on Linux, no AMD card through AMD's MIGraphX
+plugin: the app sets AMD cards up only behind a switch that is off by default, untested on a real AMD card so far:
+[docs/AMD.md](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/docs/AMD.md)). **Fix:** see
 [No NVIDIA graphics driver is loaded](#no-nvidia-graphics-driver-is-loaded). Nothing runs on the processor instead.
 
 On a Mac the message is:

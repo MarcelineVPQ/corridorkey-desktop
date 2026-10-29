@@ -23,11 +23,15 @@ export function modelSetConsts(src) {
 /** The model sets, in the file's order. */
 export const modelSets = (src) => [...modelSetConsts(src).values()];
 
-// the catalog's parts in the file's order: Linux, Windows, macOS, then the opt-in TensorRT download
+// the catalog's parts in the file's order: Linux, Windows, macOS, the AMD runtime (behind the CK_AMD switch) and its
+// per-card device wheels, then the opt-in TensorRT download
+const AMD = "Linux, AMD cards (CK_AMD switch)";
 const PARTS = [
   ["Linux", /export const RUNTIME = \{([\s\S]*?)\n\};/],
   ["Windows", /export const RUNTIME_WIN = \{([\s\S]*?)\n\};/],
   ["macOS", /export const RUNTIME_MAC = \{([\s\S]*?)\n\};/],
+  [AMD, /export const RUNTIME_AMD = \{([\s\S]*?)\n\};/],
+  [AMD, /export const ROCM_DEVICE: Record<string, Download> = \{([\s\S]*?)\n\};/],
   ["Linux, opt-in TensorRT", /export const TENSORRT = \{\s*libs: \{([\s\S]*?)\} as Download/],
 ];
 
@@ -38,11 +42,22 @@ export function wheels(src) {
   for (const [platform, re] of PARTS) {
     const body = src.match(re)?.[1];
     if (!body) throw new Error(`install.ts's ${platform} download list was not found`);
-    // loop: NOT-WORTH — a part's wheels (≤ 9)
-    for (const [, , name, version] of body.matchAll(/file: "(([A-Za-z0-9_]+)-([0-9][0-9A-Za-z.]*)-[^"]+\.whl)"/g)) {
+    // ROCm's device wheels are pinned through rocmDevice("gfx…", size, sha256): the file name comes from its template
+    const device = src.match(/file: `(rocm_sdk_device)_\$\{gfx\}-([0-9][0-9A-Za-z.+]*)-[^`]+\.whl`/);
+    const pins = [
+      // loop: NOT-WORTH — a part's wheels (≤ 9)
+      ...[...body.matchAll(/file: "(([A-Za-z0-9_]+)-([0-9][0-9A-Za-z.+]*)-[^"]+\.whl)"/g)].map((m) => [m[2], m[3]]),
+      // loop: NOT-WORTH — the dozen device wheels
+      ...[...body.matchAll(/rocmDevice\("(\w+)"/g)].map((m) => {
+        if (!device) throw new Error("install.ts's rocmDevice file name was not found");
+        return [`${device[1]}_${m[1]}`, device[2]];
+      }),
+    ];
+    // loop: NOT-WORTH — as above
+    for (const [name, version] of pins) {
       const key = `${name} ${version}`;
       const w = out.get(key) ?? { name, version, platforms: [] };
-      w.platforms.push(platform);
+      if (!w.platforms.includes(platform)) w.platforms.push(platform);
       out.set(key, w);
     }
   }

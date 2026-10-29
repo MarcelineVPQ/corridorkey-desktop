@@ -6,7 +6,7 @@ import { ProgressBar } from "./ProgressBar";
 import { FolderOpen, RotateCcw } from "lucide-react";
 import { LOG_SHOWN, type Job, type TrtPrebuild } from "../shared/types";
 import { buildSteps, prebuildStep, TRT_NOT_BUILT } from "../shared/trt";
-import { duration, ranOnText, STAGE_ORDER, STAGE_TEXT, trtJobText } from "./format";
+import { duration, ranOnText, STAGE_ORDER, stageText, trtJobText } from "./format";
 import { MainBlock } from "./panel/SplitView";
 import { PathText } from "./PathText";
 
@@ -43,7 +43,7 @@ export function JobView({ job, prebuild }: { job: Job; prebuild?: TrtPrebuild })
               const i = STAGE_ORDER.indexOf(s);
               return (
                 <span key={s} className={`stage ${i === nowIdx ? "now" : i < nowIdx ? "past" : ""}`}>
-                  {STAGE_TEXT[s]}
+                  {stageText(job, s)}
                 </span>
               );
             })}
@@ -53,7 +53,7 @@ export function JobView({ job, prebuild }: { job: Job; prebuild?: TrtPrebuild })
             <Stat k="Frames written" v={job.framesTotal ? `${job.framesDone} / ${job.framesTotal}` : String(job.framesDone)} />
             <Stat k="Speed (measured)" v={job.framesPerSecond ? `${job.framesPerSecond.toFixed(2)} fps` : "measuring…"} />
             <Stat k="Elapsed" v={elapsed !== null ? duration(elapsed) : "—"} />
-            {job.stageDetail && <Stat k={job.stage ? STAGE_TEXT[job.stage] : "Detail"} v={job.stageDetail} />}
+            {job.stageDetail && <Stat k={job.stage ? stageText(job, job.stage) : "Detail"} v={job.stageDetail} />}
           </div>
         </MainBlock>
       )}

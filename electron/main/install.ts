@@ -4,7 +4,9 @@
 // URL, size and SHA-256. The models come from this repository's `models-2.0.0-onnx.5` release on every system (macOS
 // adds its Core ML set, `models-2.0.0-onnx.5-coreml.1` (1280×1080, 1920×1080 and 4K), below; Linux and Windows users may
 // choose `2.0.0-onnx.4` instead in Engine settings, backlog row 168) (converted from Corridor Digital's checkpoint; CorridorKey licence). Every file is
-// checked before use.
+// checked before use. AMD cards on Linux, behind the CK_AMD switch (amd.ts; off by default, untested on a real AMD
+// card): ONNX Runtime with AMD's ROCm 10.1 and MIGraphX wheels from repo.amd.com, and MIGraphX's MoGe and stage 2
+// from `models-2.0.0-onnx.5-trt` (RUNTIME_AMD, MIGRAPHX below).
 // After a Stop or a failure, pressing the button again resumes: finished files are checked offline and kept,
 // a partial one continues where it stopped. A set only appears in the lists once all of it is in place
 // (built in a `.partial-…` folder, then renamed; engineFind skips dot folders).
@@ -16,6 +18,7 @@ import { REPO } from "./updateFeed";
 import { constants, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { copyFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { amdSwitchOn, findAmdCard, type AmdCard } from "./amd";
 import { downloadVerified, type FetchFn } from "./download";
 import { unzip } from "./unzip";
 
@@ -181,8 +184,87 @@ export const RUNTIME_MAC = {
   ] as Download[],
 };
 
-/** The runtime this system downloads. */
-export function runtimeFor(platform: NodeJS.Platform) {
+// Linux with an AMD card, behind the CK_AMD switch (amd.ts; docs/AMD.md; untested on a real AMD card): the plain
+// onnxruntime wheel (the provider is a plugin, so no GPU build) with AMD's MIGraphX provider plugin, MIGraphX and
+// ROCm 10.1's pip packages from AMD's repository, plus one device wheel for the card (ROCM_DEVICE). Unpacked in pip's
+// layout: the libraries find each other through $ORIGIN-relative RPATHs, and the engine finds the plugin next to
+// ONNX Runtime's package (runtime.rs migraphx_lib). Sizes and SHA-256 checked 2026-10-28 (two downloads each).
+const AMD_REPO = "https://stable.repo.amd.com/rocm";
+export const RUNTIME_AMD = {
+  name: "ort-1.31.0-rocm10.1",
+  wheels: [
+    {
+      label: "ONNX Runtime",
+      file: "onnxruntime-1.31.0-cp312-cp312-manylinux_2_28_x86_64.whl",
+      url: `${PYPI}/6c/44/1e9e762b95b7da0a8424913a1ed7c38cdaf88624a3c41ddba24ebac88bc9/onnxruntime-1.31.0-cp312-cp312-manylinux_2_28_x86_64.whl`,
+      size: 23760984,
+      sha256: "5e129d6c56abd53e659cb70f00a108d6824086470ff99c2e47a82e5786563db3",
+    },
+    {
+      label: "AMD's MIGraphX provider for ONNX Runtime",
+      file: "onnxruntime_ep_migraphx-1.0.0+rocm10.1.0-cp312-cp312-manylinux_2_28_x86_64.whl",
+      url: `${AMD_REPO}/onnxruntime/whl-next/onnxruntime-ep-migraphx/onnxruntime_ep_migraphx-1.0.0%2Brocm10.1.0-cp312-cp312-manylinux_2_28_x86_64.whl`,
+      size: 1808763,
+      sha256: "f43aafe7581fc7f82f94518424c86418371cdcc31c2cb399cec14e7d5c8cd19c",
+    },
+    {
+      label: "AMD MIGraphX",
+      file: "migraphx_libs-2.18.0+rocm10.1.0-py3-none-manylinux_2_28_x86_64.whl",
+      url: `${AMD_REPO}/migraphx/whl-next/migraphx-libs/migraphx_libs-2.18.0%2Brocm10.1.0-py3-none-manylinux_2_28_x86_64.whl`,
+      size: 82963723,
+      sha256: "0a625d0fc835db4727af8b6199a0a85bcaa0578cc2a873f6fbbe36b70d84713b",
+    },
+    {
+      label: "AMD ROCm (core)",
+      file: "rocm_sdk_core-10.1.0-py3-none-linux_x86_64.whl",
+      url: `${AMD_REPO}/core/whl-next/rocm-sdk-core/rocm_sdk_core-10.1.0-py3-none-linux_x86_64.whl`,
+      size: 419364838,
+      sha256: "a1a2433334ac61a526c6bae2f58f6bbc9b525f5a9e008e76a1a48d07f64f0703",
+    },
+    {
+      label: "AMD ROCm (libraries)",
+      file: "rocm_sdk_libraries-10.1.0-py3-none-linux_x86_64.whl",
+      url: `${AMD_REPO}/core/whl-next/rocm-sdk-libraries/rocm_sdk_libraries-10.1.0-py3-none-linux_x86_64.whl`,
+      size: 260814462,
+      sha256: "ffb36d5e1d97e96c191052a10c39a1a7a4ddb4da4a88d3166ab4bf7bfdb94cf6",
+    },
+  ] as Download[],
+};
+const rocmDevice = (gfx: string, size: number, sha256: string): Download => ({
+  label: `AMD ROCm (${gfx} kernels)`,
+  file: `rocm_sdk_device_${gfx}-10.1.0-py3-none-linux_x86_64.whl`,
+  url: `${AMD_REPO}/core/whl-next/rocm-sdk-device-${gfx}/rocm_sdk_device_${gfx}-10.1.0-py3-none-linux_x86_64.whl`,
+  size,
+  sha256,
+});
+/**
+ * ROCm 10.1's device wheel per card: the targets AMD's ONNX Runtime page lists for MIGraphX (Radeon RX 7000:
+ * gfx1100-1102; RX 9000 and AI PRO R9700: gfx1200/1201; Ryzen AI graphics: gfx1150-1153; Instinct MI200/MI300/MI350:
+ * gfx90a, gfx942, gfx950). Another AMD card is refused with a reason (systemSupport), never run on the CPU.
+ */
+export const ROCM_DEVICE: Record<string, Download> = {
+  gfx1100: rocmDevice("gfx1100", 233374792, "55fc9d7505c78178060d11bc8dc44b52b3e715f319bd61dd7e7f37c5bec2a94d"),
+  gfx1101: rocmDevice("gfx1101", 227269260, "518834a7706da3f448a780d6ec0f96c2d3b4246b6e2b7cc503a5ee219c786b13"),
+  gfx1102: rocmDevice("gfx1102", 225388997, "c621497b31bba1551f725e9ae0d39406355163852a56add2e5c73ce9ea295abe"),
+  gfx1150: rocmDevice("gfx1150", 155303000, "aee780f79922bc2cc21803ef6fe528b1882523fcc4a27bde5d389df09b9b7529"),
+  gfx1151: rocmDevice("gfx1151", 177774184, "e4e4d9b9a5020d0b971aec956f024514ced3ba80857aad7c42ef57bee9ebba5f"),
+  gfx1152: rocmDevice("gfx1152", 155150763, "e070fe1682572d32f60afca8220329636929a6c1d3c2638266a06be449fd20fb"),
+  gfx1153: rocmDevice("gfx1153", 155302956, "5ee81c972a4314a8c8ba0e492dfe0f4a7bd760dc20515d535b7bd7df5a696b1c"),
+  gfx1200: rocmDevice("gfx1200", 405199317, "60433865c41a1a0cf25f1ecf850b8109c11385d8fdb16b229efbc314f77906b1"),
+  gfx1201: rocmDevice("gfx1201", 343467033, "78e4360ff25872598563acf4bccaab2360e9f837601c74cf273640ad395cbe01"),
+  gfx90a: rocmDevice("gfx90a", 473990744, "3431dc66149ec4e4034c519ac47e3b1c03554a93419a96f45d19b7cde1275419"),
+  gfx942: rocmDevice("gfx942", 1832820487, "b755b4f472384eabbcc7603edd1d81c1164d220fb64d7e96bae5f44736418461"),
+  gfx950: rocmDevice("gfx950", 703085527, "3009a3cc877beff557b29282e20f379588666861807b78137c5484c40c14b020"),
+};
+/** The AMD runtime for a card ROCm 10.1 supports, else null. */
+export function amdRuntime(gfx: string | null): { name: string; wheels: Download[]; gfx: string } | null {
+  const device = gfx ? ROCM_DEVICE[gfx] : undefined;
+  return gfx && device ? { name: `${RUNTIME_AMD.name}-${gfx}`, wheels: [...RUNTIME_AMD.wheels, device], gfx } : null;
+}
+
+/** The runtime this system downloads (`gfx`: the AMD card amdCardFor found, null on every other setup). */
+export function runtimeFor(platform: NodeJS.Platform, gfx: string | null = null): Catalog["runtime"] {
+  if (platform === "linux") return amdRuntime(gfx) ?? RUNTIME;
   return platform === "win32" ? RUNTIME_WIN : platform === "darwin" ? RUNTIME_MAC : RUNTIME;
 }
 
@@ -198,12 +280,53 @@ export interface SystemSupport {
 }
 
 const NVIDIA_RUNTIME = "ONNX Runtime (Microsoft, MIT licence) and NVIDIA's CUDA and cuDNN libraries (NVIDIA licence), from pypi.org";
+const NVIDIA_DRIVER = "/proc/driver/nvidia/version";
+export const AMD_RUNTIME =
+  "ONNX Runtime (Microsoft, MIT licence) and AMD's ROCm 10.1 and MIGraphX libraries (AMD; MIT and others, in the app's third-party notices), from pypi.org and repo.amd.com. AMD cards are new here: not yet tested on a real AMD card";
 
 /**
- * Linux: the NVIDIA driver's proc file; Windows: its NVML library in System32; macOS: Apple Silicon (Core ML runs
- * on its GPU and Neural Engine; there is no Intel Mac build).
+ * The AMD card the setup installs for (Linux, the CK_AMD switch on, no NVIDIA driver loaded: NVIDIA comes first, as
+ * the engine's `auto` does). Null on every other setup, without reading the system.
  */
-export function systemSupport(platform: NodeJS.Platform, arch: string, exists: (p: string) => boolean, env: NodeJS.ProcessEnv): SystemSupport {
+export function amdCardFor(platform: NodeJS.Platform, env: NodeJS.ProcessEnv, exists: (p: string) => boolean, find: () => AmdCard | null = findAmdCard): AmdCard | null {
+  // loop: NOT-WORTH — one stat of the NVIDIA driver's file, once per app start
+  if (platform !== "linux" || !amdSwitchOn(env) || exists(NVIDIA_DRIVER)) return null;
+  return find();
+}
+
+/** The AMD side of systemSupport: the card ROCm 10.1 supports and this user may open, else why not. */
+function amdSupport(amd: AmdCard | null): SystemSupport {
+  const short = "ONNX Runtime, ROCm, MIGraphX";
+  if (!amd)
+    return {
+      ok: false,
+      problem: "No NVIDIA graphics driver is loaded and no AMD graphics card was found (no ROCm KFD device). CorridorKey Desktop runs on NVIDIA graphics cards, and on AMD cards ROCm 10.1 supports.",
+      runtime: AMD_RUNTIME,
+      runtimeShort: short,
+    };
+  if (!ROCM_DEVICE[amd.gfx])
+    return {
+      ok: false,
+      problem: `This AMD graphics card (${amd.gfx}) isn't one ROCm 10.1's MIGraphX supports: Radeon RX 7000 and RX 9000, Radeon AI PRO R9700, Ryzen AI graphics and Instinct MI200, MI300 and MI350 cards are.`,
+      runtime: AMD_RUNTIME,
+      runtimeShort: short,
+    };
+  if (!amd.access)
+    return {
+      ok: false,
+      problem: `This AMD graphics card (${amd.gfx}) can't be opened by your user: add yourself to the render and video groups (sudo usermod -aG render,video $USER), then log out and back in.`,
+      runtime: AMD_RUNTIME,
+      runtimeShort: short,
+    };
+  return { ok: true, problem: null, runtime: AMD_RUNTIME, runtimeShort: short };
+}
+
+/**
+ * Linux: the NVIDIA driver's proc file (with the CK_AMD switch on and no NVIDIA driver: the AMD card, `amd` from
+ * amdCardFor); Windows: its NVML library in System32; macOS: Apple Silicon (Core ML runs on its GPU and Neural
+ * Engine; there is no Intel Mac build).
+ */
+export function systemSupport(platform: NodeJS.Platform, arch: string, exists: (p: string) => boolean, env: NodeJS.ProcessEnv, amd: AmdCard | null = null): SystemSupport {
   if (platform === "darwin") {
     const ok = arch === "arm64";
     return {
@@ -214,12 +337,16 @@ export function systemSupport(platform: NodeJS.Platform, arch: string, exists: (
     };
   }
   // loop: NOT-WORTH — one stat of the NVIDIA driver's file per check
-  const ok = platform === "win32" ? exists(join(env.SystemRoot || "C:\\Windows", "System32", "nvml.dll")) : exists("/proc/driver/nvidia/version");
+  const ok = platform === "win32" ? exists(join(env.SystemRoot || "C:\\Windows", "System32", "nvml.dll")) : exists(NVIDIA_DRIVER);
+  if (!ok && platform === "linux" && amdSwitchOn(env)) return amdSupport(amd);
   return { ok, problem: ok ? null : "No NVIDIA graphics driver is loaded. CorridorKey Desktop runs on NVIDIA graphics cards.", runtime: NVIDIA_RUNTIME, runtimeShort: "ONNX Runtime, CUDA, cuDNN" };
 }
 
-/** What to keep from a wheel: ONNX Runtime's libraries, NVIDIA's libraries, and every licence file. */
-export function keepFromWheel(name: string): boolean {
+/**
+ * What to keep from a wheel: ONNX Runtime's libraries, NVIDIA's libraries (AMD's with the CK_AMD switch), and every
+ * licence file. `gfx`: an AMD runtime's card, whose MIGraphX kernels alone are kept (each target's are in the wheel).
+ */
+export function keepFromWheel(name: string, gfx?: string): boolean {
   // Linux also keeps ONNX Runtime's TensorRT provider (1 MB, in the wheel already downloaded): the opt-in TensorRT
   // install then needs only NVIDIA's TensorRT libraries and the TensorRT models (installs from before 1.0 fetch it then)
   if (/^onnxruntime\/capi\/libonnxruntime(\.so\.|_providers_(cuda|shared|tensorrt)\.so$)/.test(name)) return true;
@@ -233,6 +360,19 @@ export function keepFromWheel(name: string): boolean {
   if (/^msvc_runtime-[\d.]+\.data\/data\/Scripts\/(msvcp140[^/]*|vcruntime140[^/]*)\.dll$/.test(name)) return true;
   // macOS: libonnxruntime.1.31.0.dylib
   if (/^onnxruntime\/capi\/libonnxruntime\.[\d.]+\.dylib$/.test(name)) return true;
+  // Linux AMD (RUNTIME_AMD): what loading AMD's MIGraphX plugin needs (its ELF dependencies, read with ldd from the
+  // unpacked wheels 2026-10-28), what HIP's runtime compiler reads (LLVM's device bitcode and clang headers), and every
+  // device wheel's kernels and databases; the debugger, profilers, Python bindings, compilers' programs and the
+  // ROCm libraries MIGraphX doesn't link (rocsparse, rocfft, rpp, ...) stay out. A first cut, to confirm on a real card.
+  if (name === "onnxruntime_ep_migraphx/libmigraphx-ep.so") return true;
+  if (/^migraphx_libs\/libmigraphx(_c|_onnx|_tf|_gpu|_device)?\.so\.[^/]+$/.test(name)) return !gfx || !/--gfx\w+$/.test(name) || name.endsWith(`--${gfx}`);
+  if (/^_rocm_sdk_core\/lib\/lib(amdhip64|amd_comgr|hiprtc|hiprtc-builtins|hsa-runtime64|rocprofiler-register|rocm_kpack|roctx64)\.so\.\d+$/.test(name)) return true;
+  if (/^_rocm_sdk_core\/lib\/rocm_sysdeps\/lib\/librocm_sysdeps_(bz2|drm|drm_amdgpu|elf|liblzma|numa|sqlite3|z|zstd)\.so[.\d]*$/.test(name)) return true;
+  if (/^_rocm_sdk_core\/lib\/llvm\/(lib\/lib(LLVM|clang-cpp)\.so\.[^/]+|amdgcn\/bitcode\/[^/]+\.bc|lib\/clang\/\d+\/include\/.+)$/.test(name)) return true;
+  if (/^_rocm_sdk_libraries\/lib\/lib(MIOpen|rocblas|hipblaslt|rocroller|origami)\.so\.\d+$/.test(name)) return true;
+  if (/^_rocm_sdk_libraries\/(lib\/libMIOpenCKGroupedConv_gfx[0-9a-f]+\.so|lib\/(rocblas|hipblaslt)\/.+|share\/miopen\/.+|\.kpack\/.+|\.devel_links\/.+)$/.test(name)) return true;
+  // the ROCm licence texts the core wheel has (the others carry none: THIRD_PARTY_NOTICES.md has them, licenses/rocm)
+  if (/^_rocm_sdk_core\/share\/doc\/[^/]+\/(LICENSE|License)[^/]*$/.test(name)) return true;
   // ONNX Runtime's own licence and third-party notices (the macOS wheel keeps them in the package folder)
   if (/^onnxruntime\/(LICENSE|ThirdPartyNotices\.txt)$/.test(name)) return true;
   return /\.dist-info\/(licenses\/.+|LICENSE[^/]*)$/i.test(name);
@@ -286,6 +426,34 @@ export const MODELS_ONNX4 = {
     oldModel("models.json", 395, "01f0d8e592d10a9459f72ce23ebfaded0b56168b6d838799a0dad8172fe9ebff"),
   ],
 };
+// AMD (CK_AMD; docs/AMD.md): MIGraphX 2.18 takes onnx.5's own C-RADIO, RVM and stage 1, and refuses its MoGe
+// (antialiased resize) and stage 2 (attention_bias broadcast over the heads): those two come in their TensorRT form
+// from onnx.5's TensorRT release. That mix parses at 384×256, 1280×1152, 1920×1152 and 3840×2176 (MIGraphX's own
+// parser, offline: tools/migraphx_ops.py, 2026-10-28); never run on a card yet. The files go into the set's own
+// MIGRAPHX_DIR folder (no name shared with the TensorRT install's), and models.json gets MIGRAPHX_KEY.
+const MIGRAPHX_MODEL_SET = `${MODEL_SET}-trt`;
+const mxModel = inRelease(MIGRAPHX_MODEL_SET);
+export const MIGRAPHX_DIR = "migraphx";
+export const MIGRAPHX = {
+  name: MIGRAPHX_MODEL_SET,
+  files: [
+    mxModel("ck2-moge-trt-fp16.onnx", 425292, "0c94de749d02f1982c26f72f96c5392a0396b6b1c6a27ae2917ffc61776d4eff"),
+    mxModel("ck2-moge-trt-fp16.onnx.data", 181014528, "067bcdbfca7cf91d434dc9709451c264eaef747848ac63d5b043912315d59796"),
+    mxModel("ck2-stage2-trt-fp16.onnx", 1112602, "dceba38fc853cf93bb35d73d5791b8654d082324efe28519d89e3d9a29b6f006"),
+    mxModel("ck2-stage2-trt-fp16.onnx.data", 425429504, "ab6eae0f8c68a5056514f1e4a542a0bdefacc58ba9ef9bd9727f9577e1e38668"),
+  ],
+};
+/** The engine's MIGraphX entry (runtime.rs migraphx_file), merged into the set's models.json. */
+export const MIGRAPHX_KEY = {
+  "migraphx-fp16": {
+    cradio: "ck2-cradio-fp16.onnx",
+    moge: `${MIGRAPHX_DIR}/ck2-moge-trt-fp16.onnx`,
+    rvm: "ck2-rvm-fp16.onnx",
+    stage1: "ck2-stage1-fp16.onnx",
+    stage2: `${MIGRAPHX_DIR}/ck2-stage2-trt-fp16.onnx`,
+  },
+};
+
 /** The default model set (macOS adds its Core ML set). */
 export const MODELS = MODELS_CUDA;
 
@@ -293,10 +461,13 @@ export const MODELS = MODELS_CUDA;
 export const MODEL_SETS: readonly string[] = [MODEL_SET, OLD_MODEL_SET];
 export const DEFAULT_MODEL_SET = MODEL_SET;
 const SET_FILES: Record<string, { name: string; files: Download[] }> = { [MODEL_SET]: MODELS_CUDA, [OLD_MODEL_SET]: MODELS_ONNX4 };
-/** The sets this system offers: macOS only onnx.5 (Core ML needs its own set, and onnx.4 has none). */
-export const modelSetsFor = (platform: NodeJS.Platform): string[] => (platform === "darwin" ? [MODEL_SET] : [...MODEL_SETS]);
+/**
+ * The sets this system offers: macOS only onnx.5 (Core ML needs its own set, and onnx.4 has none); an AMD card (`gfx`)
+ * only onnx.5 too (MIGraphX can't load onnx.4's stage 1 and 2).
+ */
+export const modelSetsFor = (platform: NodeJS.Platform, gfx: string | null = null): string[] => (platform === "darwin" || (platform === "linux" && amdRuntime(gfx)) ? [MODEL_SET] : [...MODEL_SETS]);
 /** The set this system runs for a setting: one it doesn't offer (a settings file from another system) is the default. */
-export const chosenModelSet = (setting: string, platform: NodeJS.Platform = PLATFORM): string => (modelSetsFor(platform).includes(setting) ? setting : MODEL_SET);
+export const chosenModelSet = (setting: string, platform: NodeJS.Platform = PLATFORM, gfx: string | null = null): string => (modelSetsFor(platform, gfx).includes(setting) ? setting : MODEL_SET);
 
 // macOS: the Core ML set (BACKLOG rows 59, 60), fixed-shape copies of the five networks for ONNX Runtime's Core ML provider
 // (engine-rs/export/coreml), one file per network and frame size (1280×1080 and 1920×1080 clips, padded 1152×1280 and
@@ -341,26 +512,30 @@ const noLibraries = (file: string) => new Error(`${file} had none of the expecte
 /** The bytes of a download a stopped install already has at `path` (they need no room again; resume keeps them). */
 // loop: NOT-WORTH — one stat per planned file, once per install start
 const already = (path: string, size: number) => Math.min(size, statSync(path, { throwIfNoEntry: false })?.size ?? 0);
-export const RUNTIME_BYTES = total(runtimeFor(PLATFORM).wheels);
 
 /** What gets installed: the pinned runtime and model set, and on macOS the Core ML set (tests pass a small one). */
 export interface Catalog {
-  runtime: { name: string; wheels: Download[] };
+  // gfx: an AMD runtime's card (keepFromWheel)
+  runtime: { name: string; wheels: Download[]; gfx?: string };
   models: { name: string; files: Download[] };
   coreml?: { name: string; files: Download[] };
+  // AMD (CK_AMD): MIGraphX's files, in the model set's MIGRAPHX_DIR folder, and their models.json key
+  migraphx?: { name: string; files: Download[] };
 }
-/** What the setup installs for the chosen model set. */
-export function catalogFor(set: string, platform: NodeJS.Platform = PLATFORM): Catalog {
-  return { runtime: runtimeFor(platform), models: SET_FILES[chosenModelSet(set, platform)], coreml: coremlFor(platform) };
+/** What the setup installs for the chosen model set (`gfx`: the AMD card, amdCardFor; MIGraphX's files then come too). */
+export function catalogFor(set: string, platform: NodeJS.Platform = PLATFORM, gfx: string | null = null): Catalog {
+  const runtime = runtimeFor(platform, gfx);
+  const c: Catalog = { runtime, models: SET_FILES[chosenModelSet(set, platform, gfx)], coreml: coremlFor(platform) };
+  return runtime.gfx ? { ...c, migraphx: MIGRAPHX } : c;
 }
 const CATALOG: Catalog = catalogFor(MODEL_SET);
 
 /** Each set this system offers: installed (its folder is there), or its download (row 168, Engine settings). */
-export function modelSetChoices(data: string, platform: NodeJS.Platform = PLATFORM, exists: (p: string) => boolean = existsSync): ModelSetChoice[] {
+export function modelSetChoices(data: string, platform: NodeJS.Platform = PLATFORM, exists: (p: string) => boolean = existsSync, gfx: string | null = null): ModelSetChoice[] {
   // loop: NOT-WORTH — one or two sets, one stat each, per state refresh after an install or a choice
-  return modelSetsFor(platform).map((name) => {
-    const c = catalogFor(name, platform);
-    return { name, installed: exists(join(data, MODELS_DIR, name)), bytes: total(c.models.files) + (c.coreml ? total(c.coreml.files) : 0) };
+  return modelSetsFor(platform, gfx).map((name) => {
+    const c = catalogFor(name, platform, gfx);
+    return { name, installed: exists(join(data, MODELS_DIR, name)), bytes: total(c.models.files) + (c.coreml ? total(c.coreml.files) : 0) + (c.migraphx ? total(c.migraphx.files) : 0) };
   });
 }
 
@@ -369,18 +544,26 @@ export function modelSetChoices(data: string, platform: NodeJS.Platform = PLATFO
  * every pinned file is in the model set's folder (a newer set adds sizes, row 174: a Mac with the older one still
  * needs the new files, and a fresh coreml.json, which replaces the older one).
  */
-export function installNeeds(data: string, exists: (p: string) => boolean = existsSync, c: Catalog = CATALOG): { runtime: boolean; models: boolean; coreml: boolean; bytes: number } {
+export function installNeeds(
+  data: string,
+  exists: (p: string) => boolean = existsSync,
+  c: Catalog = CATALOG,
+): { runtime: boolean; models: boolean; coreml: boolean; migraphx: boolean; bytes: number } {
   const runtime = !exists(join(data, RUNTIME_DIR, c.runtime.name));
   const models = !exists(join(data, MODELS_DIR, c.models.name));
   // loop: NOT-WORTH — one stat per pinned Core ML file (a few dozen), per setup check
   const cmMissing = c.coreml ? c.coreml.files.filter((f) => f.file === "coreml.json" || !exists(join(data, MODELS_DIR, c.models.name, f.file))) : [];
   // coreml.json alone missing nothing else: only when it isn't there itself
   const coreml = cmMissing.length > 1 || (cmMissing.length === 1 && !exists(join(data, MODELS_DIR, c.models.name, "coreml.json")));
+  // AMD: MIGraphX's files are there once their folder is (its rename is their last step)
+  // loop: NOT-WORTH — one stat per setup check
+  const migraphx = !!c.migraphx && !exists(join(data, MODELS_DIR, c.models.name, MIGRAPHX_DIR));
   return {
     runtime,
     models,
     coreml,
-    bytes: (runtime ? total(c.runtime.wheels) : 0) + (models ? total(c.models.files) : 0) + (coreml ? total(cmMissing) : 0),
+    migraphx,
+    bytes: (runtime ? total(c.runtime.wheels) : 0) + (models ? total(c.models.files) : 0) + (coreml ? total(cmMissing) : 0) + (migraphx ? total(c.migraphx!.files) : 0),
   };
 }
 
@@ -451,8 +634,15 @@ export async function runInstall(data: string, deps: InstallDeps, c: Catalog = C
     // loop: NOT-WORTH — as above
     (need.models ? MODELS.files.reduce((n, f) => n + already(join(data, MODELS_DIR, `.partial-${MODELS.name}`, f.file), f.size), 0) : 0) +
     // loop: NOT-WORTH — as above
-    (need.coreml && c.coreml ? c.coreml.files.reduce((n, f) => n + coremlHas(f), 0) : 0);
-  const needRoom = (need.runtime ? total(RUNTIME.wheels) * 2.5 : 0) + (need.models ? total(MODELS.files) : 0) + (need.coreml && c.coreml ? total(c.coreml.files) : 0) - have;
+    (need.coreml && c.coreml ? c.coreml.files.reduce((n, f) => n + coremlHas(f), 0) : 0) +
+    // loop: NOT-WORTH — four MIGraphX files, once per install start
+    (need.migraphx && c.migraphx ? c.migraphx.files.reduce((n, f) => n + already(join(data, MODELS_DIR, MODELS.name, `.partial-${MIGRAPHX_DIR}`, f.file), f.size), 0) : 0);
+  const needRoom =
+    (need.runtime ? total(RUNTIME.wheels) * 2.5 : 0) +
+    (need.models ? total(MODELS.files) : 0) +
+    (need.coreml && c.coreml ? total(c.coreml.files) : 0) +
+    (need.migraphx && c.migraphx ? total(c.migraphx.files) : 0) -
+    have;
   if (room !== null && room < needRoom) throw noRoom(needRoom, data, room);
   // loop: NOT-WORTH — one mkdir per install
   mkdirSync(downloads, { recursive: true });
@@ -469,7 +659,7 @@ export async function runInstall(data: string, deps: InstallDeps, c: Catalog = C
       await fetchOne(w, `Downloading ${label}`);
       deps.progress(done(), need.bytes, `Unpacking ${label}`);
       // loop: SERIAL-REQUIRED — unpacks one wheel [bounded: its size]
-      const unpacked = await unzip(join(downloads, w.file), partial, keepFromWheel, deps.abort);
+      const unpacked = await unzip(join(downloads, w.file), partial, (n) => keepFromWheel(n, RUNTIME.gfx), deps.abort);
       // licence files alone don't count: a wheel must give at least one library
       // loop: NOT-WORTH — the few names one wheel unpacked
       if (!unpacked.some((n) => LIBRARY_FILE.test(n))) throw noLibraries(w.file);
@@ -513,6 +703,20 @@ export async function runInstall(data: string, deps: InstallDeps, c: Catalog = C
     for (const f of c.coreml.files) renameSync(join(partial, f.file), join(set, f.file));
     // loop: NOT-WORTH — removes the emptied folder
     rmSync(partial, { recursive: true, force: true });
+  }
+  // AMD: MIGraphX's files into the set's own folder, their key into its models.json, the folder's rename last (the
+  // mark that they are in place; a stop before it resumes with the files already checked)
+  if (need.migraphx && c.migraphx) {
+    const set = join(data, MODELS_DIR, MODELS.name);
+    const partial = join(set, `.partial-${MIGRAPHX_DIR}`);
+    // loop: NOT-WORTH — one mkdir per install
+    mkdirSync(partial, { recursive: true });
+    // loop: SERIAL-REQUIRED — one file at a time, see fetchOne
+    for (const f of c.migraphx.files) await fetchOne(f, `Downloading MIGraphX's models (${f.file})`, join(partial, f.file));
+    const modelsJson = join(set, "models.json");
+    writeAtomic(modelsJson, JSON.stringify({ ...readJson(modelsJson), ...MIGRAPHX_KEY }, null, 2) + "\n");
+    // loop: NOT-WORTH — one rename: MIGraphX's files count as installed from here
+    renameSync(partial, join(set, MIGRAPHX_DIR));
   }
   // loop: NOT-WORTH — one readdir of the (now empty) downloads folder
   if (readdirSync(downloads).length === 0) rmSync(downloads, { recursive: true, force: true });

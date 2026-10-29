@@ -8,7 +8,7 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { EngineProcess, rustEngineEnv, type EngineReply } from "./engine";
 import { Estimator } from "./estimate";
-import { GPU_POLL_MS, otherGpuUsers, readGpu, untilEnded } from "./gpu";
+import { GPU_POLL_MS, otherGpuUsers, readAmdGpu, readGpu, untilEnded } from "./gpu";
 import { expandPaths, frameDirLinearFor, probeClip, still, STILL_WIDTH, VIDEO_EXT, HINT_IMAGE_EXT } from "./media";
 import { clearJobTemps, Queue } from "./queue";
 import { checkRustEngine, loadSettings, saveSettings } from "./settings";
@@ -17,7 +17,8 @@ import { addToPathList, APP_DIR, appDirs, engineBinName, isMac, isWin, MODELS_DI
 import { HOMEBREW_DIRS, checkFfmpeg, ffmpegState, installFfmpeg, planFor, readOsRelease, wingetFfmpegDirs } from "./ffmpeg";
 import { PROGRESS_EVERY_MS } from "./updateFlow";
 import {
-  RUNTIME_BYTES,
+  amdCardFor,
+  amdRuntime,
   catalogFor,
   chosenModelSet,
   freeBytes,
@@ -136,8 +137,13 @@ function enginePlaces() {
     data: appFolders.data,
   };
 }
+// AMD cards (the CK_AMD switch; docs/AMD.md): the card, null on every setup without the switch (nothing below changes
+// there); AMD_GFX: a card ROCm 10.1 supports, which the setup downloads the AMD runtime and MIGraphX's models for
+const AMD = amdCardFor(PLATFORM, process.env, existsSync);
+const AMD_GFX = amdRuntime(AMD?.gfx ?? null)?.gfx ?? null;
+const system = () => systemSupport(PLATFORM, process.arch, existsSync, process.env, AMD);
 /** The model set chosen in Engine settings, as this system runs it (install.ts chosenModelSet; row 168). */
-const modelSet = () => chosenModelSet(settings.modelSet);
+const modelSet = () => chosenModelSet(settings.modelSet, PLATFORM, AMD_GFX);
 /** What the lists offer: the chosen model set first when installed, so Automatic runs it. */
 function findFiles() {
   const f = findEngineFiles(enginePlaces());
@@ -164,20 +170,23 @@ let rustEngine = checkRustEngine(null, null);
 let ffmpeg: FfmpegState = { checked: false, ok: false, problem: null, command: "", canInstall: false, runHint: "", note: null, installing: false, installError: null };
 // the first-run install: what is missing, and its progress while it runs
 function installIdle(): InstallState {
-  const need = installNeeds(enginePlaces().data, existsSync, catalogFor(modelSet()));
-  const sys = systemSupport(PLATFORM, process.arch, existsSync, process.env);
+  const c = catalogFor(modelSet(), PLATFORM, AMD_GFX);
+  const need = installNeeds(enginePlaces().data, existsSync, c);
+  const sys = system();
+  // loop: NOT-WORTH — sums the runtime's few wheel sizes, per state refresh
+  const runtimeBytes = c.runtime.wheels.reduce((n, w) => n + w.size, 0);
   return {
     dir: enginePlaces().data,
     needRuntime: need.runtime,
-    // the Core ML set (macOS) counts as part of the models
-    needModels: need.models || need.coreml,
+    // the Core ML set (macOS) and MIGraphX's files (AMD) count as part of the models
+    needModels: need.models || need.coreml || need.migraphx,
     bytes: need.bytes,
-    runtimeBytes: RUNTIME_BYTES,
-    modelsBytes: need.bytes - (need.runtime ? RUNTIME_BYTES : 0),
+    runtimeBytes,
+    modelsBytes: need.bytes - (need.runtime ? runtimeBytes : 0),
     gpuOk: sys.ok,
     gpuProblem: sys.problem,
     runtimeWhat: sys.runtime,
-    modelSets: modelSetChoices(enginePlaces().data),
+    modelSets: modelSetChoices(enginePlaces().data, PLATFORM, existsSync, AMD_GFX),
     status: "idle",
     step: null,
     done: 0,
@@ -188,7 +197,8 @@ function installIdle(): InstallState {
 let install = installIdle();
 // the opt-in TensorRT parts: what is installed, for the setting's install box; progress while its install runs
 function trtParts(): Omit<TrtState, "status" | "step" | "done" | "total" | "error" | "built" | "prebuild" | "onDisk"> {
-  const supported = trtSupported(PLATFORM);
+  // TensorRT is NVIDIA's: never on an AMD card (the switch on)
+  const supported = trtSupported(PLATFORM) && !AMD_GFX;
   const need = trtNeeds(enginePlaces().data, existsSync, trtCatalogFor(modelSet()));
   const paths = enginePaths();
   return {
@@ -601,7 +611,8 @@ async function pollGpu(): Promise<void> {
   gpuReading = true;
   try {
     const pid = queue.enginePid;
-    gpu = await readGpu(new Set(pid ? [pid] : []));
+    // an AMD card (the CK_AMD switch) has no nvidia-smi: the amdgpu driver's files
+    gpu = AMD_GFX && AMD ? readAmdGpu(AMD) : await readGpu(new Set(pid ? [pid] : []));
     gpuError = null;
   } catch (e) {
     // error: SHOWN — the GPU card says nvidia-smi couldn't be read
@@ -741,7 +752,7 @@ let storageReads = 0;
 async function measureStorage(): Promise<void> {
   await checkCacheDrive();
   const n = ++storageReads;
-  const items = await storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort, PLATFORM, trtCatalogFor(modelSet()));
+  const items = await storageItems(enginePlaces().data, cacheDir, system().runtimeShort, PLATFORM, trtCatalogFor(modelSet()));
   const info = await cacheInfo(cacheDir, appFolders.cache, queue.jobs, mediaFile);
   if (n !== storageReads) return;
   storage = items;
@@ -982,7 +993,7 @@ function registerIpc(): void {
     };
     let error: string | null = null;
     try {
-      await (isTrt ? runTrtInstall(enginePlaces().data, deps, trtCatalogFor(modelSet())) : runInstall(enginePlaces().data, deps, catalogFor(modelSet())));
+      await (isTrt ? runTrtInstall(enginePlaces().data, deps, trtCatalogFor(modelSet())) : runInstall(enginePlaces().data, deps, catalogFor(modelSet(), PLATFORM, AMD_GFX)));
     } catch (e) {
       // error: SHOWN — the install box (Engine page) and its task; a retry resumes the downloads
       // a stop is not an error: what arrived is kept and the next start resumes
@@ -1009,7 +1020,7 @@ function registerIpc(): void {
   // the model set (Engine settings, ONNX Runtime engine; row 168): the setup installs it and Automatic runs it once it is
   // there (the page then starts the setup's download when it isn't); a Models folder chosen by hand goes back to Automatic
   handle(IPC.setModelSet, (_e, name: unknown) => {
-    if (installAbort || typeof name !== "string" || !modelSetsFor(PLATFORM).includes(name)) return;
+    if (installAbort || typeof name !== "string" || !modelSetsFor(PLATFORM, AMD_GFX).includes(name)) return;
     settings = { ...settings, modelSet: name, modelsDir: null };
     install = installIdle();
     recheckEngines();
@@ -1078,8 +1089,7 @@ function registerIpc(): void {
   });
   handle(IPC.openStorageFolder, async (_e, idIn: unknown) => {
     // only the app's own folders: the cache folder, or one Storage lists
-    const items =
-      idIn === "cache-root" ? [] : await storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort, PLATFORM, trtCatalogFor(modelSet()));
+    const items = idIn === "cache-root" ? [] : await storageItems(enginePlaces().data, cacheDir, system().runtimeShort, PLATFORM, trtCatalogFor(modelSet()));
     // loop: NOT-WORTH — four items, once per click
     const p = idIn === "cache-root" ? cacheDir : items.find((i) => i.id === idIn)?.path;
     // loop: NOT-WORTH — one async stat per click
@@ -1098,9 +1108,7 @@ function registerIpc(): void {
   });
   handle(IPC.removeStorage, async (_e, idIn: unknown) => {
     // loop: NOT-WORTH — three items, once per click
-    const item = (await storageItems(enginePlaces().data, cacheDir, systemSupport(PLATFORM, process.arch, existsSync, process.env).runtimeShort, PLATFORM, trtCatalogFor(modelSet()))).find(
-      (i) => i.id === idIn,
-    );
+    const item = (await storageItems(enginePlaces().data, cacheDir, system().runtimeShort, PLATFORM, trtCatalogFor(modelSet()))).find((i) => i.id === idIn);
     if (!item || !mainWindow || cacheMoving) return;
     // the queue, a download or the Console's corridorkey use these files
     const busy = () => queue.running || installAbort !== null || consoleGpu;

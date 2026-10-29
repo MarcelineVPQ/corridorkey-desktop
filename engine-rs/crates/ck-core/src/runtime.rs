@@ -202,17 +202,17 @@ impl ModelSet {
         f.exists().then_some(f)
     }
 
-    /// The MIGraphX set's file for `piece` at `p`: models.json's "migraphx-fp16" / "migraphx-fp32" (the TensorRT-ready
-    /// exports with RMSNormalization written as SimplifiedLayerNormalization, which MIGraphX parses;
-    /// engine-rs/export/migraphx_patch.py, docs/AMD.md). None: no such entry, the plain file is used.
+    /// The MIGraphX set's file for `piece` at `p`: models.json's "migraphx-fp16" / "migraphx-fp32" (set 2.0.0-onnx.5:
+    /// its own files plus the TensorRT-form MoGe and stage 2, which MIGraphX parses; the app's AMD setup writes the
+    /// entry, docs/AMD.md). None: no such entry, the plain file is used.
     pub(crate) fn migraphx_file(&self, piece: &str, p: Precision) -> Option<PathBuf> {
         let name = self.manifest.get(&format!("migraphx-{}", p.name()))?.get(piece)?;
         let f = self.dir.join(name);
         f.exists().then_some(f)
     }
 
-    /// Whether models.json has a MIGraphX set at `p` (without it MIGraphX refuses MoGe's resize and stage 1 and 2's
-    /// RMSNormalization).
+    /// Whether models.json has a MIGraphX set at `p` (without it MIGraphX refuses onnx.5's MoGe resize and stage 2
+    /// attention).
     pub(crate) fn has_migraphx(&self, p: Precision) -> bool {
         self.manifest.contains_key(&format!("migraphx-{}", p.name()))
     }
@@ -537,6 +537,9 @@ fn no_provider_reason(device: Device, os: &str, ort_version: &str, migraphx_ep: 
             "CorridorKey found no AMD graphics card ROCm can use (HIP sees no device, or the amdgpu driver's memory files are missing; check rocminfo).".into()
         }
         _ if os == "macos" => "On a Mac, CorridorKey runs on Apple's Core ML: start the engine with --device coreml (CK_ENGINE_DEVICE=coreml; the app does this).".into(),
+        _ if os == "linux" => {
+            "CorridorKey needs an NVIDIA graphics card with CUDA, or an AMD graphics card with ROCm and AMD's MIGraphX plugin (docs/AMD.md).".into()
+        }
         _ => "CorridorKey needs an NVIDIA graphics card with CUDA.".into(),
     }
 }
@@ -842,8 +845,11 @@ mod tests {
 
     #[test]
     fn unavailable_says_which_card_is_missing() {
-        // no MIGraphX plugin (the CUDA setup): an NVIDIA card, as before
-        assert_eq!(no_provider_reason(Device::Auto, "linux", "1.31.0", false, "no plugin"), "CorridorKey needs an NVIDIA graphics card with CUDA.");
+        // no MIGraphX plugin (the CUDA setup): an NVIDIA card, or on Linux an AMD one with the plugin
+        assert_eq!(
+            no_provider_reason(Device::Auto, "linux", "1.31.0", false, "no plugin"),
+            "CorridorKey needs an NVIDIA graphics card with CUDA, or an AMD graphics card with ROCm and AMD's MIGraphX plugin (docs/AMD.md)."
+        );
         // the plugin is there: never "NVIDIA"
         let amd = no_provider_reason(Device::Auto, "linux", "1.31.0", true, "");
         assert!(amd.contains("no AMD graphics card") && !amd.contains("NVIDIA"), "{amd}");
@@ -894,7 +900,10 @@ mod tests {
         assert!(mac.contains("Core ML") && !mac.contains("NVIDIA"), "{mac}");
         assert!(no_provider_reason(Device::Cuda, "macos", "1.31.0", false, "").contains("Core ML"));
         assert!(no_provider_reason(Device::CoreMl, "macos", "1.31.0", false, "").contains("no Core ML execution provider"));
-        assert_eq!(no_provider_reason(Device::Auto, "linux", "1.31.0", false, ""), "CorridorKey needs an NVIDIA graphics card with CUDA.");
+        assert_eq!(
+            no_provider_reason(Device::Auto, "linux", "1.31.0", false, ""),
+            "CorridorKey needs an NVIDIA graphics card with CUDA, or an AMD graphics card with ROCm and AMD's MIGraphX plugin (docs/AMD.md)."
+        );
         assert_eq!(no_provider_reason(Device::Auto, "windows", "1.31.0", false, ""), "CorridorKey needs an NVIDIA graphics card with CUDA.");
     }
 

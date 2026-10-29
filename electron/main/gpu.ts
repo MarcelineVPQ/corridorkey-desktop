@@ -111,6 +111,33 @@ export async function readGpu(ourPids: Set<number>): Promise<GpuInfo> {
 }
 
 /**
+ * AMD (the CK_AMD switch; docs/AMD.md): the card's memory and load from the amdgpu driver's sysfs files (what amd-smi
+ * reads: mem_info_vram_total / _used, gpu_busy_percent), its name from product_name where the board has one. No
+ * per-program list yet (the driver keeps it per process in /proc/<pid>/fdinfo): `processes` stays empty.
+ */
+// loop: HOT-PATH-OK — four small sysfs reads (sync, microseconds), every GPU_POLL_MS only while a job runs and the window is shown
+export function readAmdGpu(card: { gfx: string; minor: number }, read: (p: string) => string = (p) => readFileSync(p, "utf8")): GpuInfo {
+  const dev = `/sys/class/drm/renderD${card.minor}/device`;
+  const mib = (f: string) => {
+    // loop: HOT-PATH-OK — one small sysfs read per value, every GPU_POLL_MS only while a job runs and the window is shown
+    const n = Number(read(`${dev}/${f}`).trim());
+    if (!Number.isFinite(n)) throw new Error(`the amdgpu driver's ${f} gave no number`);
+    return Math.round(n / 2 ** 20);
+  };
+  let name = `AMD ${card.gfx}`;
+  try {
+    // loop: HOT-PATH-OK — as above
+    const product = read(`${dev}/product_name`).trim();
+    if (product) name = `${product} (${card.gfx})`;
+  } catch {
+    // error: NOT-WORTH — most Radeon boards have no product_name: the gfx target names the card
+  }
+  // loop: HOT-PATH-OK — as above
+  const busy = Number(read(`${dev}/gpu_busy_percent`).trim());
+  return { name, totalMb: mib("mem_info_vram_total"), usedMb: mib("mem_info_vram_used"), utilization: Number.isFinite(busy) ? busy : 0, processes: [], at: Date.now() };
+}
+
+/**
  * The other programs using the card (their names), for the background TensorRT build's start: compute processes holding
  * OTHER_GPU_USER_MB or more that aren't this app's own. The app's own children count as ours: the queue's engine is
  * still quitting (its model in graphics memory) for a few seconds after the queue ends, exactly when a paused build

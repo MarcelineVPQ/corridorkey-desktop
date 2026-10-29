@@ -7,6 +7,9 @@ import { deflateRawSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { downloadVerified } from "../../electron/main/download";
 import {
+  amdCardFor,
+  amdRuntime,
+  AMD_RUNTIME,
   catalogFor,
   chosenModelSet,
   COREML,
@@ -16,14 +19,19 @@ import {
   installNeeds,
   keepFromWheel,
   keepTensorrt,
+  MIGRAPHX,
+  MIGRAPHX_DIR,
+  MIGRAPHX_KEY,
   MODELS_CUDA,
   MODELS_ONNX4,
   removeTensorrt,
   RUNTIME,
+  RUNTIME_AMD,
   RUNTIME_MAC,
   RUNTIME_WIN,
   runInstall,
   runTrtInstall,
+  ROCM_DEVICE,
   runtimeFor,
   systemSupport,
   TENSORRT,
@@ -172,7 +180,7 @@ describe("first-run install", () => {
     const has = (p: string[]) => (x: string) => p.includes(x);
     const linux: Catalog = { runtime: RUNTIME, models: MODELS_CUDA };
     expect(installNeeds("/d", has([]), linux).bytes).toBe(RUNTIME.wheels.reduce((n, w) => n + w.size, 0) + MODELS_CUDA.files.reduce((n, f) => n + f.size, 0));
-    expect(installNeeds("/d", has([`/d/runtime/${RUNTIME.name}`, `/d/models/${MODELS_CUDA.name}`]), linux)).toEqual({ runtime: false, models: false, coreml: false, bytes: 0 });
+    expect(installNeeds("/d", has([`/d/runtime/${RUNTIME.name}`, `/d/models/${MODELS_CUDA.name}`]), linux)).toEqual({ runtime: false, models: false, coreml: false, migraphx: false, bytes: 0 });
   });
 
   // BACKLOG row 59: on a Mac the Core ML set belongs to the models; a set installed without it still needs it
@@ -181,13 +189,13 @@ describe("first-run install", () => {
     const mac: Catalog = { runtime: RUNTIME_MAC, models: MODELS_CUDA, coreml: COREML };
     const set = `/d/models/${MODELS_CUDA.name}`;
     const cmBytes = COREML.files.reduce((n, f) => n + f.size, 0);
-    expect(installNeeds("/d", has([`/d/runtime/${RUNTIME_MAC.name}`, set]), mac)).toEqual({ runtime: false, models: false, coreml: true, bytes: cmBytes });
+    expect(installNeeds("/d", has([`/d/runtime/${RUNTIME_MAC.name}`, set]), mac)).toEqual({ runtime: false, models: false, coreml: true, migraphx: false, bytes: cmBytes });
     expect(installNeeds("/d", has([`/d/runtime/${RUNTIME_MAC.name}`]), mac).bytes).toBe(MODELS_CUDA.files.reduce((n, f) => n + f.size, 0) + cmBytes);
     // coreml.json alone isn't the set (row 174: a newer set adds files to an installed one)
     expect(installNeeds("/d", has([`/d/runtime/${RUNTIME_MAC.name}`, set, `${set}/coreml.json`]), mac).coreml).toBe(true);
     // loop: NOT-WORTH — the set's pinned files
     const all = COREML.files.map((f) => `${set}/${f.file}`);
-    expect(installNeeds("/d", has([`/d/runtime/${RUNTIME_MAC.name}`, set, ...all]), mac)).toEqual({ runtime: false, models: false, coreml: false, bytes: 0 });
+    expect(installNeeds("/d", has([`/d/runtime/${RUNTIME_MAC.name}`, set, ...all]), mac)).toEqual({ runtime: false, models: false, coreml: false, migraphx: false, bytes: 0 });
   });
 });
 
@@ -218,8 +226,8 @@ describe("choosing the model set", () => {
   it("needs onnx.4 next to an installed onnx.5 (and the other way round), counting only the models", () => {
     const rt = `/d/runtime/${RUNTIME.name}`;
     const five = [rt, "/d/models/2.0.0-onnx.5"];
-    expect(installNeeds("/d", has(five), catalogFor("2.0.0-onnx.5", "linux"))).toEqual({ runtime: false, models: false, coreml: false, bytes: 0 });
-    expect(installNeeds("/d", has(five), catalogFor("2.0.0-onnx.4", "linux"))).toEqual({ runtime: false, models: true, coreml: false, bytes: sum(MODELS_ONNX4.files) });
+    expect(installNeeds("/d", has(five), catalogFor("2.0.0-onnx.5", "linux"))).toEqual({ runtime: false, models: false, coreml: false, migraphx: false, bytes: 0 });
+    expect(installNeeds("/d", has(five), catalogFor("2.0.0-onnx.4", "linux"))).toEqual({ runtime: false, models: true, coreml: false, migraphx: false, bytes: sum(MODELS_ONNX4.files) });
     expect(installNeeds("/d", has([rt, "/d/models/2.0.0-onnx.4"]), catalogFor("2.0.0-onnx.5", "linux")).bytes).toBe(sum(MODELS_CUDA.files));
   });
 
@@ -372,6 +380,24 @@ describe("runInstall", () => {
     rmSync(data, { recursive: true, force: true });
   });
 
+  // backlog row 166 (the CK_AMD switch): MIGraphX's files go into the set's own folder, its key into models.json
+  it("adds MIGraphX's files to the model set and its entry to models.json, the folder last", async () => {
+    const data = mkdtempSync(join(tmpdir(), "ck-run-"));
+    mkdirSync(join(data, "runtime", "rt"), { recursive: true });
+    mkdirSync(join(data, "models", "m1"), { recursive: true });
+    writeFileSync(join(data, "models", "m1", "models.json"), JSON.stringify({ fp16: { moge: "ck2-moge-fp16.onnx" } }));
+    const amd: Catalog = { ...catalog(), migraphx: { name: "m1-trt", files: catalog().models.files } };
+    expect(installNeeds(data, existsSync, amd)).toMatchObject({ runtime: false, models: false, migraphx: true, bytes: 800 });
+    asked.length = 0;
+    await runInstall(data, deps(), amd);
+    expect(asked).toEqual(["a.onnx", "b.onnx"]);
+    expect(readFileSync(join(data, "models", "m1", MIGRAPHX_DIR, "a.onnx")).equals(files["a.onnx"])).toBe(true);
+    expect(JSON.parse(readFileSync(join(data, "models", "m1", "models.json"), "utf8"))).toEqual({ fp16: { moge: "ck2-moge-fp16.onnx" }, ...MIGRAPHX_KEY });
+    expect(existsSync(join(data, "models", "m1", `.partial-${MIGRAPHX_DIR}`))).toBe(false);
+    expect(installNeeds(data, existsSync, amd)).toMatchObject({ migraphx: false, bytes: 0 });
+    rmSync(data, { recursive: true, force: true });
+  });
+
   it("installs a macOS runtime (a wheel whose only library is a .dylib)", async () => {
     const wheel = makeZip({ "onnxruntime/capi/libonnxruntime.1.31.0.dylib": "lib", "onnxruntime/LICENSE": "MIT" });
     files["ort-mac.whl"] = wheel;
@@ -429,7 +455,7 @@ describe("runInstall", () => {
     // loop: NOT-WORTH — four files
     for (const f of ["a.onnx", "b.onnx", "c-t4.onnx", "coreml.json"]) expect(existsSync(join(data, "models", "m1", f))).toBe(true);
     expect(readdirSync(join(data, "models"))).toEqual(["m1"]);
-    expect(installNeeds(data, existsSync, coremlCatalog())).toMatchObject({ models: false, coreml: false, bytes: 0 });
+    expect(installNeeds(data, existsSync, coremlCatalog())).toMatchObject({ models: false, coreml: false, migraphx: false, bytes: 0 });
     rmSync(data, { recursive: true, force: true });
   });
 
@@ -482,7 +508,7 @@ describe("runInstall", () => {
     await runInstall(data, deps(), newer);
     expect(asked).toEqual(["d-t4.onnx", "coreml.json"]);
     expect(readFileSync(join(data, "models", "m1", "coreml.json"), "utf8")).toBe(json.toString());
-    expect(installNeeds(data, existsSync, newer)).toMatchObject({ coreml: false, bytes: 0 });
+    expect(installNeeds(data, existsSync, newer)).toMatchObject({ coreml: false, migraphx: false, bytes: 0 });
     rmSync(data, { recursive: true, force: true });
   });
 
@@ -707,9 +733,9 @@ describe("TensorRT catalogue and rules", () => {
   // (Cargo, api-NN) and the model set's manifest (make_manifest.py onnxruntime_min)
   it("pins one ONNX Runtime version in the app, the engine and the model manifest", () => {
     // loop: NOT-WORTH — three systems' runtimes and their few wheels
-    const versions = [RUNTIME, RUNTIME_WIN, RUNTIME_MAC].flatMap((r) => [
+    const versions = [RUNTIME, RUNTIME_WIN, RUNTIME_MAC, RUNTIME_AMD].flatMap((r) => [
       /^ort-(\d+\.\d+\.\d+)-/.exec(r.name)![1],
-      ...r.wheels.filter((w) => /^onnxruntime/.test(w.file)).map((w) => /^onnxruntime(?:_gpu)?-(\d+\.\d+\.\d+)-/.exec(w.file)![1]),
+      ...r.wheels.filter((w) => /^onnxruntime(_gpu)?-/.test(w.file)).map((w) => /^onnxruntime(?:_gpu)?-(\d+\.\d+\.\d+)-/.exec(w.file)![1]),
     ]);
     expect(new Set(versions).size).toBe(1);
     const [ver] = versions;
@@ -821,6 +847,144 @@ describe("each system's runtime and graphics check", () => {
     expect(systemSupport("linux", "x64", () => false, {})).toMatchObject({ ok: false });
     expect(systemSupport("win32", "x64", (p) => p.endsWith("nvml.dll"), { SystemRoot: "C:\\Windows" }).ok).toBe(true);
     expect(systemSupport("win32", "x64", () => false, {}).problem).toContain("NVIDIA");
+  });
+});
+
+// backlog row 166: AMD cards, behind the CK_AMD switch; off, every setup is as before
+describe("AMD cards (the CK_AMD switch)", () => {
+  const none = () => false;
+  const nvidia = (p: string) => p === "/proc/driver/nvidia/version";
+  const card = { gfx: "gfx1100", minor: 128, access: true };
+  const sum = (d: { size: number }[]) => d.reduce((n, x) => n + x.size, 0);
+
+  it("looks for an AMD card only on Linux with the switch on and no NVIDIA driver (NVIDIA first)", () => {
+    let looked = 0;
+    const find = () => {
+      looked++;
+      return card;
+    };
+    expect(amdCardFor("linux", {}, none, find)).toBeNull();
+    expect(amdCardFor("linux", { CK_AMD: "1" }, nvidia, find)).toBeNull();
+    expect(amdCardFor("win32", { CK_AMD: "1" }, none, find)).toBeNull();
+    expect(amdCardFor("darwin", { CK_AMD: "1" }, none, find)).toBeNull();
+    // switched off, the system isn't even read
+    expect(looked).toBe(0);
+    expect(amdCardFor("linux", { CK_AMD: "1" }, none, find)).toEqual(card);
+    expect(looked).toBe(1);
+  });
+
+  it("switched off, an AMD card gets today's answer", () => {
+    expect(systemSupport("linux", "x64", none, {}, card)).toEqual(systemSupport("linux", "x64", none, {}));
+    expect(systemSupport("linux", "x64", none, {}).problem).toBe("No NVIDIA graphics driver is loaded. CorridorKey Desktop runs on NVIDIA graphics cards.");
+    // and an NVIDIA driver wins with the switch on
+    expect(systemSupport("linux", "x64", nvidia, { CK_AMD: "1" }, card)).toEqual(systemSupport("linux", "x64", nvidia, {}));
+  });
+
+  it("switched on: the AMD runtime for a supported card, else why not (no card, unsupported, no access)", () => {
+    const on = { CK_AMD: "1" };
+    expect(systemSupport("linux", "x64", none, on, card)).toEqual({ ok: true, problem: null, runtime: AMD_RUNTIME, runtimeShort: "ONNX Runtime, ROCm, MIGraphX" });
+    expect(AMD_RUNTIME).toContain("not yet tested on a real AMD card");
+    expect(systemSupport("linux", "x64", none, on, null).problem).toContain("no AMD graphics card was found");
+    const old = systemSupport("linux", "x64", none, on, { ...card, gfx: "gfx1030" });
+    expect(old.ok).toBe(false);
+    expect(old.problem).toContain("gfx1030");
+    expect(old.problem).toContain("isn't one ROCm 10.1's MIGraphX supports");
+    const locked = systemSupport("linux", "x64", none, on, { ...card, access: false });
+    expect(locked.ok).toBe(false);
+    expect(locked.problem).toContain("render and video groups");
+    // never "runs on NVIDIA graphics cards" alone with the switch on
+    expect(systemSupport("linux", "x64", none, on, null).problem).toContain("AMD cards ROCm 10.1 supports");
+  });
+
+  it("downloads the AMD runtime with the card's device wheel, and only for a card ROCm 10.1 supports", () => {
+    expect(runtimeFor("linux", null)).toBe(RUNTIME);
+    expect(runtimeFor("linux", "gfx1030")).toBe(RUNTIME);
+    expect(runtimeFor("win32", "gfx1100")).toBe(RUNTIME_WIN);
+    const r = runtimeFor("linux", "gfx1201");
+    expect(r).toEqual({ name: "ort-1.31.0-rocm10.1-gfx1201", wheels: [...RUNTIME_AMD.wheels, ROCM_DEVICE.gfx1201], gfx: "gfx1201" });
+    expect(amdRuntime(null)).toBeNull();
+    // the dozen targets AMD's ONNX Runtime page lists for MIGraphX
+    expect(Object.keys(ROCM_DEVICE).sort()).toEqual(["gfx1100", "gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1152", "gfx1153", "gfx1200", "gfx1201", "gfx90a", "gfx942", "gfx950"]);
+    // about 1.02 GB for an RX 7900 (checked against the wheels 2026-10-28)
+    expect(sum(runtimeFor("linux", "gfx1100").wheels)).toBe(1022087562);
+  });
+
+  it("pins every AMD wheel by URL, size and SHA-256, from pypi.org and AMD's repository", () => {
+    // loop: NOT-WORTH — seventeen pins
+    for (const w of [...RUNTIME_AMD.wheels, ...Object.values(ROCM_DEVICE)]) {
+      expect(w.sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(w.size).toBeGreaterThan(1_000_000);
+      expect(w.url.endsWith(`/${w.file.replace("+", "%2B")}`)).toBe(true);
+      expect(w.url).toMatch(/^https:\/\/(files\.pythonhosted\.org\/packages|stable\.repo\.amd\.com\/rocm)\//);
+    }
+    // loop: NOT-WORTH — the dozen device wheels
+    for (const [gfx, w] of Object.entries(ROCM_DEVICE)) expect(w.file).toBe(`rocm_sdk_device_${gfx}-10.1.0-py3-none-linux_x86_64.whl`);
+    // the plain ONNX Runtime (MIGraphX is a plugin), the same wheel macOS's list names by version
+    expect(RUNTIME_AMD.wheels[0].file).toBe("onnxruntime-1.31.0-cp312-cp312-manylinux_2_28_x86_64.whl");
+  });
+
+  it("offers onnx.5 only and adds MIGraphX's files (onnx.5-trt's MoGe and stage 2) for an AMD card", () => {
+    expect(modelSetsFor("linux", "gfx1100")).toEqual(["2.0.0-onnx.5"]);
+    expect(modelSetsFor("linux", "gfx1030")).toEqual(["2.0.0-onnx.5", "2.0.0-onnx.4"]);
+    expect(chosenModelSet("2.0.0-onnx.4", "linux", "gfx1100")).toBe("2.0.0-onnx.5");
+    const c = catalogFor("2.0.0-onnx.4", "linux", "gfx1100");
+    expect(c.models).toBe(MODELS_CUDA);
+    expect(c.migraphx).toBe(MIGRAPHX);
+    expect(MIGRAPHX.files.map((f) => f.file)).toEqual(["ck2-moge-trt-fp16.onnx", "ck2-moge-trt-fp16.onnx.data", "ck2-stage2-trt-fp16.onnx", "ck2-stage2-trt-fp16.onnx.data"]);
+    // loop: NOT-WORTH — four files
+    for (const f of MIGRAPHX.files) expect(f.url).toBe(`https://github.com/MarcelineVPQ/corridorkey-desktop/releases/download/models-2.0.0-onnx.5-trt/${f.file}`);
+    expect(sum(MIGRAPHX.files)).toBe(607981926);
+    // the entry names onnx.5's own files for the three MIGraphX takes, the set's MIGraphX folder for the other two
+    expect(MIGRAPHX_KEY["migraphx-fp16"]).toEqual({
+      cradio: "ck2-cradio-fp16.onnx",
+      moge: "migraphx/ck2-moge-trt-fp16.onnx",
+      rvm: "ck2-rvm-fp16.onnx",
+      stage1: "ck2-stage1-fp16.onnx",
+      stage2: "migraphx/ck2-stage2-trt-fp16.onnx",
+    });
+    // loop: NOT-WORTH — three plain files
+    for (const piece of ["cradio", "rvm", "stage1"] as const) expect(MODELS_CUDA.files.some((f) => f.file === MIGRAPHX_KEY["migraphx-fp16"][piece])).toBe(true);
+    expect(modelSetChoices("/d", "linux", () => false, "gfx1100")).toEqual([{ name: "2.0.0-onnx.5", installed: false, bytes: sum(MODELS_CUDA.files) + sum(MIGRAPHX.files) }]);
+  });
+
+  it("keeps what MIGraphX's plugin loads and the card's kernels, not the debugger, profilers or other cards' kernels", () => {
+    for (const keep of [
+      "onnxruntime_ep_migraphx/libmigraphx-ep.so",
+      "migraphx_libs/libmigraphx.so.2018000",
+      "migraphx_libs/libmigraphx_c.so.3",
+      "migraphx_libs/libmigraphx_gpu.so.2018000",
+      "migraphx_libs/libmigraphx_device.so.2018000",
+      "migraphx_libs/libmigraphx_device.so.2018000.0.4.hip-amdgcn-amd-amdhsa--gfx1100",
+      "_rocm_sdk_core/lib/libamdhip64.so.7",
+      "_rocm_sdk_core/lib/libamd_comgr.so.3",
+      "_rocm_sdk_core/lib/libhiprtc-builtins.so.7",
+      "_rocm_sdk_core/lib/libhsa-runtime64.so.1",
+      "_rocm_sdk_core/lib/rocm_sysdeps/lib/librocm_sysdeps_elf.so.1",
+      "_rocm_sdk_core/lib/llvm/lib/libLLVM.so.24.0git",
+      "_rocm_sdk_core/lib/llvm/amdgcn/bitcode/ockl.bc",
+      "_rocm_sdk_core/share/doc/rocr/LICENSE.md",
+      "_rocm_sdk_libraries/lib/libMIOpen.so.1",
+      "_rocm_sdk_libraries/lib/librocroller.so.1",
+      "_rocm_sdk_libraries/lib/libMIOpenCKGroupedConv_gfx1100.so",
+      "_rocm_sdk_libraries/lib/rocblas/library/TensileLibrary_lazy_gfx1100.dat",
+      "_rocm_sdk_libraries/.kpack/blas_lib_gfx1100.kpack",
+    ])
+      expect([keep, keepFromWheel(keep, "gfx1100")]).toEqual([keep, true]);
+    for (const drop of [
+      "migraphx_libs/libmigraphx_device.so.2018000.0.4.hip-amdgcn-amd-amdhsa--gfx942",
+      "migraphx_libs/libmigraphx_py_3.12.so",
+      "migraphx_libs/_bin/migraphx-driver",
+      "_rocm_sdk_core/bin/rocgdb-py3.12",
+      "_rocm_sdk_core/lib/librocprofiler-sdk.so.1",
+      "_rocm_sdk_core/lib/libamd_smi_static.a",
+      "_rocm_sdk_core/lib/llvm/lib/libMLIR.so.24.0git",
+      "_rocm_sdk_core/lib/llvm/bin/flang-24",
+      "_rocm_sdk_core/lib/rocm_sysdeps/lib/librocm_sysdeps_gallium_drv_video.so",
+      "_rocm_sdk_libraries/lib/librpp.so.3",
+      "_rocm_sdk_libraries/lib/librocsparse.so.1",
+      "_rocm_sdk_libraries/share/hipblaslt/tensilelite/rocisa/_rocisa.abi3.so",
+    ])
+      expect([drop, keepFromWheel(drop, "gfx1100")]).toEqual([drop, false]);
   });
 });
 

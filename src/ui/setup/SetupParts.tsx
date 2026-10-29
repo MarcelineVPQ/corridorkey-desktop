@@ -99,7 +99,9 @@ export function TrtBox({ trt, inst, platform }: { trt: TrtState; inst: InstallSt
       <p className="hint-text">
         {platform === "darwin"
           ? "TensorRT is NVIDIA's, and Macs have no NVIDIA graphics: CorridorKey runs on Apple's GPU and Neural Engine through Core ML instead."
-          : "TensorRT (NVIDIA's optimizer for its graphics cards) is Linux-only in this version: on Windows it needs its own engine builder, which comes in a later version. Jobs run on CUDA."}
+          : platform === "linux"
+            ? "TensorRT is NVIDIA's: on this AMD graphics card CorridorKey runs through AMD's MIGraphX instead."
+            : "TensorRT (NVIDIA's optimizer for its graphics cards) is Linux-only in this version: on Windows it needs its own engine builder, which comes in a later version. Jobs run on CUDA."}
       </p>
     );
   const baseMissing = installMissing(inst);

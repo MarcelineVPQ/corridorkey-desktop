@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isOurs, otherGpuUsers, parentPid, parseApps, parseGpuLine, processName } from "../../electron/main/gpu";
+import { isOurs, otherGpuUsers, parentPid, parseApps, parseGpuLine, processName, readAmdGpu } from "../../electron/main/gpu";
 
 describe("the app's own GPU processes", () => {
   it("counts the TensorRT builder the engine started as ours, not as another program", () => {
@@ -79,5 +79,24 @@ describe("other programs on the card, for the background TensorRT build", () => 
     };
     expect(await otherGpuUsers(read, 4242)).toEqual(["Sonata's word timing"]);
     expect([...asked!]).toEqual([4242]);
+  });
+});
+
+// backlog row 166 (the CK_AMD switch): an AMD card has no nvidia-smi; the amdgpu driver's sysfs files
+describe("the AMD card's readout", () => {
+  const dev = "/sys/class/drm/renderD128/device";
+  const files = (extra: Record<string, string> = {}) => {
+    const f: Record<string, string> = { [`${dev}/mem_info_vram_total`]: "25753026560\n", [`${dev}/mem_info_vram_used`]: "1073741824\n", [`${dev}/gpu_busy_percent`]: "37\n", ...extra };
+    return (p: string) => {
+      if (!(p in f)) throw new Error("ENOENT");
+      return f[p];
+    };
+  };
+  it("reads memory and load from the driver, names the card by its gfx target or product name", () => {
+    expect(readAmdGpu({ gfx: "gfx1100", minor: 128 }, files())).toMatchObject({ name: "AMD gfx1100", totalMb: 24560, usedMb: 1024, utilization: 37, processes: [] });
+    expect(readAmdGpu({ gfx: "gfx942", minor: 128 }, files({ [`${dev}/product_name`]: "AMD Instinct MI300X\n" })).name).toBe("AMD Instinct MI300X (gfx942)");
+  });
+  it("says so when the driver's files aren't there", () => {
+    expect(() => readAmdGpu({ gfx: "gfx1100", minor: 129 }, files())).toThrow();
   });
 });
