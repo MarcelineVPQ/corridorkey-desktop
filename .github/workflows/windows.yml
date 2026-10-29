@@ -7,7 +7,7 @@ name: Windows
 # built from source) on a real Windows (audit 2026-10-27 row 20). GitHub's runner builds with MSVC, not the MinGW the
 # release uses, and has no graphics card: tests that need one, or ffmpeg, skip. Windows-only tests run here and nowhere
 # else: ck-cli/tests/run_stop_windows.rs (`corridorkey run`'s Ctrl+C / Ctrl+Break stop path with real console events).
-# The second job builds the app as a package on Windows and starts it: its unit tests, the first page, and the
+# The second job builds the app as a package on Windows and starts it: the first page, and the
 # packaged `corridorkey run` within a time limit (dev.2's Windows hang after a run surfaced only in the release VM
 # check). Its engine is built with MSVC and without the GPU features (the release cross-builds with MinGW): it proves
 # the app, not the shipped engine binary, which the release VM check still starts. On every push to main (BACKLOG row
@@ -63,7 +63,8 @@ jobs:
           cp target/release/corridorkey-engine.exe target/release/corridorkey.exe target/dist/
       # npm 9/10's own peer resolution crashes on this tree; .npmrc sets legacy-peer-deps.
       - run: npx -y npm@10.9.2 ci
-      - run: npm test
+      # no unit tests here: 43 of their 72 files are written for POSIX (paths with /, bash scripts), never Windows
+      # (first run 2026-10-28; Marcy: skip them here, BACKLOG row 176); they run on macOS and Linux
       - name: Package it (unpacked, no installer)
         run: |
           node tools/gen_cli_spec.mjs

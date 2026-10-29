@@ -78,7 +78,7 @@ EOF
 if gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
   gh release edit "$TAG" -R "$REPO" --notes-file "$NOTES"
 else
-  gh release create "$TAG" -R "$REPO" --title "$TITLE" --notes-file "$NOTES" --latest=false
+  gh release create "$TAG" -R "$REPO" --title "$TITLE" --notes-file "$NOTES" --prerelease --latest=false
 fi
 
 # GitHub's own record of each asset: name, size and sha256 digest

@@ -113,6 +113,11 @@ describe("selectRelease", () => {
   it("nothing published yet", () => {
     expect(selectRelease([], "stable")).toBeNull();
   });
+  it("a dev build published as a full release (Latest, Marcy 2026-10-28): Development takes it by its tag, Stable never", () => {
+    const full = [rel("v1.0.0-dev.3", false), rel("v0.2.0", false)];
+    expect(selectRelease(full, "dev")?.version).toBe("1.0.0-dev.3");
+    expect(selectRelease(full, "stable")?.version).toBe("0.2.0");
+  });
 });
 
 describe("sources and URLs", () => {

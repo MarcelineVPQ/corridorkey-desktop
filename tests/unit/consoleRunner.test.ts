@@ -2649,7 +2649,8 @@ describe("SME reviews: watch", () => {
       expect(blocks.get(b.id)!.lines.map((l) => l.text)).toEqual([]);
       writeFileSync(join(d, "key.1001.exr"), "x");
       await vi.advanceTimersByTimeAsync(2000);
-      await until(() => /run 2 /.test(blocks.get(b.id)?.status ?? ""));
+      // the status says "run 2" as the run starts; its listing lands after (Linux CI 2026-10-28: checked between the two)
+      await until(() => /run 2 /.test(blocks.get(b.id)?.status ?? "") && blocks.get(b.id)!.lines.length > 0);
       expect(blocks.get(b.id)!.lines.map((l) => l.text)).toEqual(["key.1001.exr"]);
       expect(blocks.get(b.id)!.state).toBe("running");
       // one command at a time: a render waits for it

@@ -30,8 +30,8 @@
 #    moved to this commit with these notes), uploads, checks GitHub's sha256 of every upload against SHA256SUMS, and
 #    stops with the draft unpublished: the Windows installer is started in the win11-test VM first (Electron checks
 #    the asar integrity only on Windows and macOS, so the Linux start can't). Then tools/release.sh --publish checks
-#    the draft is this commit's and the digests again, and publishes it, which makes the tag (Development =
-#    prerelease, never Latest). A failure anywhere here can simply be rerun.
+#    the draft is this commit's and the digests again, and publishes it, which makes the tag (every release, dev builds
+#    too, is a full release marked Latest: Marcy 2026-10-28). A failure anywhere here can simply be rerun.
 # 5. the feeds: tools/build-feed.mjs from the published release, signed here with the key in
 #    ~/.config/corridorkey-release/feed-signing.pem (read into the environment, never printed),
 #    tools/verify-feed.mjs checks them exactly as the app does, then they are committed to main and pushed
@@ -124,14 +124,14 @@ if [ "$mode" = --publish ]; then
   { echo "release: --publish: the draft v$v isn't on this commit: run tools/release.sh again" >&2; exit 1; }
 [ -s release/SHA256SUMS ] || { echo "release: --publish: no release/SHA256SUMS from the first run here: run tools/release.sh again" >&2; exit 1; }
 digests_match
-gh release edit "v$v" --draft=false
+gh release edit "v$v" --draft=false --latest
 git fetch -q origin "refs/tags/v$v:refs/tags/v$v"
 elif [ "$state" != false ]; then
 # a green Windows CI run of this very commit before it's tagged (release review 2026-10-28 #6): the engine's
-# Windows-only code runs nowhere else. Only read here: the run is started by hand once the commit is on GitHub
+# Windows-only code runs nowhere else. Only read here: a push to main starts it (BACKLOG row 170)
 head="$(git rev-parse HEAD)"
 [ "$(gh run list --workflow windows.yml --commit "$head" --status success --limit 1 --json databaseId -q length)" = 1 ] || {
-  echo "release: no green Windows CI run of $head: git push origin main; gh workflow run windows.yml --ref main; gh run watch; then rerun" >&2
+  echo "release: no green Windows CI run of $head: git push origin main (it starts the run), gh run watch, then rerun" >&2
   exit 1
 }
 # the docs-touch gate over this release's commits (npm run check reads origin/main..HEAD: nothing once pushed; S6)
@@ -192,7 +192,9 @@ fi
 
 git push origin main
 flags=(--title "CorridorKey $v" --notes-file release/notes.md)
-if [ "$dev" = true ]; then flags+=(--prerelease --latest=false); else flags+=(--latest); fi
+# every release is a full release marked Latest, dev builds too (Marcy 2026-10-28: the repository page shows the newest
+# build); the feeds tell Stable from Development by the tag (updateFeed.ts selectRelease)
+flags+=(--latest)
 # a draft left by a failed run: moved to this commit with these notes, so the tag, files and notes agree (S5)
 if [ "$state" = true ]; then gh release edit "v$v" --target "$(git rev-parse HEAD)" "${flags[@]}"
 else gh release create "v$v" --draft --target "$(git rev-parse HEAD)" "${flags[@]}"; fi

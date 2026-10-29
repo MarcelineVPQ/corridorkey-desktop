@@ -5,7 +5,7 @@ CorridorKey updates itself from a **signed feed**, the same design as Marcy's DS
 | File (on `main` of [MarcelineVPQ/corridorkey-desktop](https://github.com/MarcelineVPQ/corridorkey-desktop)) | Channel | Lists |
 |---|---|---|
 | `latest.json` + `latest.json.sig` | Stable | the newest published `vX.Y.Z` release |
-| `latest-dev.json` + `latest-dev.json.sig` | Development | the newest of the `vX.Y.Z-dev.N` prereleases and the stable releases |
+| `latest-dev.json` + `latest-dev.json.sig` | Development | the newest of the `vX.Y.Z-dev.N` releases and the stable releases (told apart by the tag) |
 
 The repository is one constant, `REPO` in `electron/main/updateFeed.ts`; every feed and download URL comes from it.
 
@@ -118,8 +118,8 @@ spent 29 minutes waiting on a package mirror).
    `SHA256SUMS` (nothing is published on a difference), and **stops with the release a draft**: nothing is public yet.
 3. Start the Windows installer in the VM (The Windows installer, below). Only when it passes:
    `tools/release.sh --publish`, which checks the draft is on this commit and the digests again, then publishes it,
-   which makes the `vX.Y.Z…` tag (Development as a
-   **prerelease**, never *Latest*; Stable as *Latest*); then `tools/build-feed.mjs` picks the release per channel
+   which makes the `vX.Y.Z…` tag (every release a full release marked *Latest*, dev builds too: Marcy 2026-10-28);
+   then `tools/build-feed.mjs` picks the release per channel
    from GitHub's release list (retried until the released channel names the new version), downloads and hashes
    the AppImage and writes the feed, `tools/sign-feed.mjs` signs it, `tools/verify-feed.mjs` checks it exactly as
    the app does, and the changed feeds are committed to `main` and pushed.
@@ -138,10 +138,11 @@ openssl pkeyutl -verify -pubin -inkey ck-release.pub -rawin -in SHA256SUMS -sigf
 sha256sum --ignore-missing -c SHA256SUMS
 ```
 
-**GitHub's "Latest" badge** sits on a model set's release (`models-2.0.0-onnx.4`) until the first Stable release:
-GitHub gives it to the newest release that isn't a prerelease, and every Development build is one. The first Stable
-release takes it (`--latest`); a new model set is created with `--latest=false` (`tools/upload_model_set.sh` does).
-Links point at the releases page, never `releases/latest`.
+**GitHub's "Latest" badge** is on the newest app release, dev builds included (Marcy 2026-10-28, from 1.0.0-dev.2):
+`tools/release.sh` publishes every release as a full release with `--latest`, and the feeds tell Stable from
+Development by the tag (`updateFeed.ts` `selectRelease`), never by GitHub's prerelease flag. The model-set releases
+(`models-…`) are prereleases, so they never take the badge (`tools/upload_model_set.sh` creates them so). Links
+point at the releases page, never `releases/latest`.
 
 **Release-only gates** (online, so not in `npm run gates`; `tools/release.sh` runs them in step 1):
 `tools/check_model_sets.mjs` checks every model set `install.ts` pins against its GitHub release `models-<set>`:
@@ -151,7 +152,8 @@ base set's LICENSE-* on every derived set).
 **CI on every push (BACKLOG row 170):** `.github/workflows/windows.yml`, `macos.yml` and `linux.yml` run by
 themselves on every push to main, and by hand (`gh workflow run <file> --ref main`). Windows runs the engine's checks
 (cargo fmt, clippy, cargo test) on GitHub's Windows runner, the only place its Windows-only code runs, and builds the
-app as a package there: unit tests, the first page, and `corridorkey run` within a time limit. macOS builds, signs,
+app as a package there: the first page, and `corridorkey run` within a time limit (the unit tests run on macOS and Linux:
+most were written for POSIX, BACKLOG row 176). macOS builds, signs,
 installs and starts the app and runs its `corridorkey run`; Linux builds the package and runs its `corridorkey run`.
 Each run is reported the moment it finishes. Measurement runs (speed, TensorRT, matte parity) are never part of CI or
 of a dev build: only when Marcy asks a question that needs one, on one clip, with a time estimate first.

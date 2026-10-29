@@ -90,7 +90,7 @@ on its own rail icon. Not a system shell: its own commands only, each parsed and
   Core ML): the setup is 4.76 GB, was 5.51. Gated on the Mac mini (M6, 16 GB) against CUDA on both sizes: alpha MAE
   2.1-2.5e-5, 0.002 % of pixels over 1/255 at 1280×1080 and none at 1920×1080 (README, Speed, "Apple Silicon (Core ML)").
 - TensorRT (Linux, opt-in) keeps dev.1's TensorRT set, 2.0.0-onnx.4-trt (onnx.5's own TensorRT set isn't measured
-  yet; choosing the model set comes in dev.3). Its C-RADIO weights (fp32) are no longer in the normal set, so they are
+  yet; choosing the model set comes in dev.4). Its C-RADIO weights (fp32) are no longer in the normal set, so they are
   copied from an installed onnx.4 folder when there is one (5.53 GB in all, as before) and downloaded otherwise
   (7.26 GB).
 - **AMD graphics cards, engine only, untested on real hardware:** the engine can run on an AMD card on Linux through

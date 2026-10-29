@@ -214,7 +214,7 @@ sign() { for f in "$@"; do touch "$f.sig"; done; }`;
     // a draft left by a failed run: edited onto this commit with the new notes, never created again
     const draft = run("true", true);
     expect(draft.status).toBe(0);
-    expect(draft.stdout.trim()).toBe(`release edit v1.0.0-dev.2 --target ${head} ${notes} --prerelease --latest=false`);
+    expect(draft.stdout.trim()).toBe(`release edit v1.0.0-dev.2 --target ${head} ${notes} --latest`);
     // nothing yet: a new draft at this commit
     expect(run("none", false).stdout.trim()).toBe(`release create v1.0.0-dev.2 --draft --target ${head} ${notes} --latest`);
   });
@@ -253,7 +253,7 @@ sign() { for f in "$@"; do touch "$f.sig"; done; }`;
       spawnSync("bash", ["-c", `set -euo pipefail; gh() { echo "$*" > asked; [ "$6" = "${green}" ] && echo 1 || echo 0; }\n${block}\necho passed`], { cwd: repo, encoding: "utf8", timeout: 10_000 });
     const no = run("other");
     expect(no.status).toBe(1);
-    expect(no.stderr).toContain("gh workflow run windows.yml --ref main");
+    expect(no.stderr).toContain("git push origin main (it starts the run)");
     const ok = run(head);
     expect(ok.stdout).toContain("passed");
     expect(readFileSync(join(repo, "asked"), "utf8")).toContain(`--commit ${head} --status success`);

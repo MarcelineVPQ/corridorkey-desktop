@@ -159,7 +159,7 @@ export function feedText(
 
 // From GitHub's release list: the release a channel's feed describes. Stable:
 // the newest published vX.Y.Z. Development: the newest of the vX.Y.Z-dev.N
-// prereleases and the stable releases (Development users get stable releases too).
+// releases (full releases or prereleases) and the stable ones (Development users get stable releases too).
 export interface GithubRelease {
   tag_name: string;
   draft: boolean;
@@ -177,7 +177,9 @@ export function selectRelease(
   // loop: NOT-WORTH — one page of ≤ 50 releases, once per CI run
   for (const r of releases) {
     if (r.draft) continue;
-    const m = !r.prerelease ? /^v(\d+\.\d+\.\d+)$/.exec(r.tag_name) : channel === "dev" ? /^v(\d+\.\d+\.\d+-dev\.\d+)$/.exec(r.tag_name) : null;
+    // by the tag, not GitHub's prerelease flag: dev builds are full releases marked Latest since 1.0.0-dev.2 (Marcy
+    // 2026-10-28), and a stable feed never names a dev build
+    const m = /^v(\d+\.\d+\.\d+)$/.exec(r.tag_name) ?? (channel === "dev" ? /^v(\d+\.\d+\.\d+-dev\.\d+)$/.exec(r.tag_name) : null);
     if (!m) continue;
     // loop: NOT-WORTH — a release's few assets, once per update check
     const asset = (r.assets ?? []).find((a) => a.name === appImageName(m[1]));
