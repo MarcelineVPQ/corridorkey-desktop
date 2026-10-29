@@ -9,6 +9,10 @@ The foundation build: the Mac on par with Linux and Windows, and the checks runn
   4/2), peak 9.8 GB (it fits, tight: 0.8 GB swapped), every pixel of every frame within 1/255 of CUDA's matte (alpha
   MAE 1.32e-5). The Mac setup is 5.74 GB (was 4.76); a Mac with dev.2's set downloads only the 4K files and a new
   coreml.json, never the rest again (backlog rows 60, 174).
+- On a Mac the `corridorkey` command line keys without `--device coreml`: `auto`, the default, is Core ML there (the
+  app always started it so; backlog row 174).
+- The Mac disk image itself is signed and notarized, its ticket stapled: Gatekeeper accepts the downloaded image
+  before it is opened (dev.2's image was unsigned, only the app inside it was; backlog row 174).
 - Releases: every release, development builds too, is a full GitHub release marked Latest (the repository page shows
   the newest build); the update feeds tell Stable from Development by the version, as before (backlog row 173).
 - Development: Windows, macOS and Linux CI run on every push to main, each starting the packaged app's

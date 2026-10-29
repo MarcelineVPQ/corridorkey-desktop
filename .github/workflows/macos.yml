@@ -70,6 +70,11 @@ jobs:
           ( umask 077; printf '%s\n' "$APPLE_API_KEY_P8" > "$APPLE_API_KEY" )
           unset APPLE_API_KEY_P8
           npm run dist:mac
+          # the disk image itself (electron-builder.yml `dmg: sign`, BACKLOG row 174): notarized and stapled too, so a
+          # downloaded image passes Gatekeeper before it is even opened
+          dmg="$(ls release/*.dmg)"
+          xcrun notarytool submit "$dmg" --key "$APPLE_API_KEY" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait
+          xcrun stapler staple "$dmg"
 
       - name: Apple's own checks (signature, notarization ticket, Gatekeeper)
         run: |
@@ -83,6 +88,10 @@ jobs:
           xcrun stapler validate "$app"
           spctl --assess --type execute -vvv "$app" 2>&1 | tee /dev/stderr | grep -q "source=Notarized Developer ID" || { echo "::error::Gatekeeper does not accept the app as notarized"; exit 1; }
           hdiutil detach "$mnt" > /dev/null
+          # and the image itself: signed, its ticket stapled, accepted as a download (dev.2's was "no usable signature")
+          codesign --verify --verbose=2 "$dmg"
+          xcrun stapler validate "$dmg"
+          spctl --assess --type open --context context:primary-signature -vvv "$dmg" 2>&1 | tee /dev/stderr | grep -q "source=Notarized Developer ID" || { echo "::error::Gatekeeper does not accept the disk image as notarized"; exit 1; }
 
       - name: Install it as a user would, and ask Gatekeeper
         timeout-minutes: 8

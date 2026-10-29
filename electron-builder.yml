@@ -107,3 +107,9 @@ mac:
   # the engine and Electron's helpers get the same exceptions (the engine loads ONNX Runtime's library)
   entitlementsInherit: build/entitlements.mac.plist
   notarize: true
+
+# The disk image itself signed with the same Developer ID (BACKLOG row 174: until dev.3 only the app inside was, and
+# Gatekeeper answered "no usable signature" for the downloaded image); .github/workflows/macos.yml then notarizes and
+# staples the image, after this build.
+dmg:
+  sign: true

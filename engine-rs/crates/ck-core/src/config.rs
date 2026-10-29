@@ -211,6 +211,8 @@ impl EngineConfig {
             }
             None => Device::Auto,
         };
+        // a Mac's graphics card is Core ML's: auto means coreml there, as the app always started it (row 174)
+        let device = if device == Device::Auto && os == "macos" { Device::CoreMl } else { device };
         let coreml_units = match var("CK_ENGINE_COREML_UNITS") {
             Some(v) => pick(
                 "CK_ENGINE_COREML_UNITS",
@@ -497,6 +499,11 @@ mod tests {
         assert_eq!(c.to_json()["migraphx_cache"].as_str(), Some("/mx"));
         // empty means unset
         assert_eq!(EngineConfig::parse(&args(&["e"]), &env(&[("CK_ENGINE_DEVICE", ""), ("CK_ENGINE_THREADS", " ")]), "linux").unwrap().device, Device::Auto);
+        // a Mac's graphics card is Core ML's: auto (said or unset) is coreml there, as the app always started it
+        // (BACKLOG row 174: `corridorkey render` on a Mac needed --device coreml)
+        assert_eq!(EngineConfig::parse(&args(&["e"]), &env(&[]), "macos").unwrap().device, Device::CoreMl);
+        assert_eq!(EngineConfig::parse(&args(&["e", "--device", "auto"]), &env(&[]), "macos").unwrap().device, Device::CoreMl);
+        assert_eq!(EngineConfig::parse(&args(&["e", "--device", "cpu"]), &env(&[]), "macos").unwrap().device, Device::Cpu);
         // the arena values
         let s = |v: &'static str| {
             EngineConfig::parse(&args(&["e"]), &move |n: &str| (n == "CK_ENGINE_ARENA_SHRINK").then(|| v.to_string()), "linux").unwrap().arena_shrink

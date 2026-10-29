@@ -97,7 +97,8 @@ The engine runs `ffmpeg` / `ffprobe` from the system: they are not bundled.
 - `--device migraphx` (Linux only): ONNX Runtime's MIGraphX provider plugin on an AMD card (ROCm 10.1); `auto` picks
   it when the plugin offers a GPU and no NVIDIA card has CUDA. Not usable yet: stage 1 and 2 don't parse in MIGraphX
   (docs/AMD.md).
-- `--device coreml` (macOS only; elsewhere the engine stops with an error) runs ONNX Runtime's Core ML provider
+- `--device coreml` (macOS only; elsewhere the engine stops with an error; on a Mac `auto`, the default, is coreml from
+  1.0.0-dev.3) runs ONNX Runtime's Core ML provider
   (BACKLOG row 24, phase 1): ML Program format, fp16, compute units `CK_ENGINE_COREML_UNITS` (all | cpu-gpu |
   cpu-ane | cpu; default cpu-gpu: with the Neural Engine allowed, every load of stage 2 compiled it again for ~145 s
   and its first call passed 9.7 GB on a 16 GB Mac; on CPU + GPU a 1280×1080 job peaks at 1.8-3.4 GB, "Core ML on a 16 GB

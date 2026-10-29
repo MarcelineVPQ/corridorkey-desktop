@@ -112,8 +112,9 @@ On a Mac the message is:
 
 > On a Mac, CorridorKey runs on Apple's Core ML: start the engine with --device coreml (CK_ENGINE_DEVICE=coreml; the app does this).
 
-**Cause:** the engine was started without `--device coreml` (the app always passes it; this comes from the command
-line). **Fix:** pass `--device coreml`, or set `CK_ENGINE_DEVICE=coreml`.
+**Cause:** the engine was asked for another device, such as `--device cuda` (from 1.0.0-dev.3 the default, `auto`,
+is Core ML on a Mac; before it, the command line needed `--device coreml`). **Fix:** leave `--device` out, or pass
+`--device coreml`.
 
 On Linux with AMD's MIGraphX provider plugin installed (an AMD card; untested on a real AMD card so far) the message
 is:

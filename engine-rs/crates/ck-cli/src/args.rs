@@ -92,7 +92,7 @@ fn runtime(c: Command) -> Command {
             Arg::new("device")
                 .long("device")
                 .value_name("auto|cuda|cpu|coreml|migraphx")
-                .help("auto: the graphics card; cuda: NVIDIA; migraphx: AMD (Linux); cpu: ONNX Runtime's CPU provider (slow); coreml: macOS [default: auto]"),
+                .help("auto: the graphics card (Core ML on a Mac); cuda: NVIDIA; migraphx: AMD (Linux); cpu: ONNX Runtime's CPU provider (slow); coreml: macOS [default: auto]"),
         )
         .arg(
             Arg::new("gpu")
