@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0-dev.4 (draft, unreleased)
+## 1.0.0-dev.4
 
 - Windows and macOS: the app now tells you when a new version is out, like on Linux: the same signed check, channels
   and "1.0.0 Dev N is available" notice with **Not now**. **Download** opens that version's release page on GitHub in
