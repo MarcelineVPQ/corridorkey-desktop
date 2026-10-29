@@ -129,7 +129,7 @@ export async function readGpu(ourPids: Set<number>): Promise<GpuInfo> {
 }
 
 /**
- * AMD (the CK_AMD switch; docs/AMD.md): the card's memory and load from the amdgpu driver's sysfs files (what amd-smi
+ * AMD (docs/AMD.md): the card's memory and load from the amdgpu driver's sysfs files (what amd-smi
  * reads: mem_info_vram_total / _used, gpu_busy_percent), its name from product_name where the board has one. NorthXL's
  * readings (backlog row 171) from the driver's hwmon folder (docs.kernel.org/gpu/amdgpu/thermal.html): temp1_input
  * (m°C), pwm1 of pwm1_max (the fan level), freq1_input (the gfx clock, Hz), power1_average (µW; power1_input where the

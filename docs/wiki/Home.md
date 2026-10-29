@@ -26,12 +26,13 @@ checker preview, as EXR sequences for compositing or as 10-bit video for the edi
 
 | System | Status in 1.0.0-dev.2 |
 | --- | --- |
-| Linux (AppImage, x64) | Keys with an NVIDIA graphics card. Optional TensorRT mode. |
+| Linux (AppImage, x64) | Keys with an NVIDIA graphics card. Optional TensorRT mode. AMD cards from 1.0.0-dev.4: **not yet tested on a real AMD card**. |
 | Windows 10/11 (installer, x64) | Installs, sets itself up and runs its pages. **Keying on a real Windows PC with an NVIDIA card hasn't been tested yet**: please tell us how it goes. |
 | macOS (Apple Silicon) | From 1.0.0-dev.2: the disk image, Core ML, 1280×1080 and 1920×1080 clips; 4K from 1.0.0-dev.3. |
 
-On Linux and Windows an **NVIDIA graphics card is required** (RTX 20-series or newer, 8 GB or more). AMD and Intel
-graphics cards aren't supported, and nothing falls back to the processor. The details are in the README's
+On Linux and Windows an **NVIDIA graphics card is required** (RTX 20-series or newer, 8 GB or more), except that on
+Linux, from 1.0.0-dev.4, an AMD card ROCm 10.1 supports works too: AMD support is new and not yet tested on a real AMD card: we're testing it ourselves next. If it doesn't work on your card, please tell us on [GitHub issues](https://github.com/MarcelineVPQ/corridorkey-desktop/issues). Intel graphics cards aren't
+supported, and nothing falls back to the processor. The details are in the README's
 [Requirements](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/README.md#requirements).
 
 ## Pages

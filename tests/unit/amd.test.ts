@@ -21,11 +21,11 @@ function sys(nodes: Record<string, string> | null, open: string[] = ["/dev/kfd",
   };
 }
 
-describe("AMD cards (the CK_AMD switch)", () => {
-  it("is on only with CK_AMD=1", () => {
-    expect(amdSwitchOn({})).toBe(false);
-    expect(amdSwitchOn({ CK_AMD: "0" })).toBe(false);
+describe("AMD cards (on by default; CK_AMD=0 turns them off)", () => {
+  it("is on unless CK_AMD=0", () => {
+    expect(amdSwitchOn({})).toBe(true);
     expect(amdSwitchOn({ CK_AMD: "1" })).toBe(true);
+    expect(amdSwitchOn({ CK_AMD: "0" })).toBe(false);
   });
 
   it("names gfx targets as the engine does (minor and stepping in hex)", () => {

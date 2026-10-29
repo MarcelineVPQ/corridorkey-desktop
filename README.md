@@ -146,11 +146,12 @@ none of them changes what a user sees today.
   16 GB: the speed and quality numbers are the RTX 5080's (Speed), and the RTX 2070 SUPER measured the temporal windows
   that fit an 8 GB card under a graphics-memory limit, docs/ENGINE_RUST.md "Where memory is tight"; both machines in
   Speed).
-  **On Linux and Windows the NVIDIA card is required**: the engine keys only on CUDA. AMD and Intel graphics cards aren't
-  supported, and without an NVIDIA card nothing falls back to the CPU: a job stops with "CorridorKey needs an NVIDIA
+  **On Windows the NVIDIA card is required, and on Linux an NVIDIA or a supported AMD card**: the engine keys on CUDA
+  (and on Linux AMD's MIGraphX). Intel graphics cards aren't supported, and without one nothing falls back to the CPU: a job stops with "CorridorKey needs an NVIDIA
   graphics card with CUDA." (on Linux with the AMD runtime installed, the message also names AMD's MIGraphX). AMD cards on Linux (ROCm 10.1 and AMD's
-  MIGraphX, which the setup downloads) are built in behind a switch that is off by default, `CK_AMD=1`, and untested on
-  a real AMD card: docs/AMD.md.
+  MIGraphX, which the setup downloads) are on from 1.0.0-dev.4, when no NVIDIA driver is loaded. **AMD support is new
+  and not yet tested on a real AMD card: we're testing it ourselves next. If it doesn't work on your card, please tell
+  us on [GitHub issues](https://github.com/MarcelineVPQ/corridorkey-desktop/issues).** `CK_AMD=0` turns it off: docs/AMD.md.
 - macOS 14 or newer on Apple Silicon (M1 or newer; the disk image, from 1.0.0-dev.2; 1280×1080 and 1920×1080 clips, and
   4K from 1.0.0-dev.3; 16 GB keys 4K, tight). Intel
   Macs aren't supported.

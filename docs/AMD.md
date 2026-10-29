@@ -1,25 +1,41 @@
 # AMD graphics cards (MIGraphX)
 
-**Untested on real hardware: nothing here has run on an AMD card.** Since 1.0.0-dev.4 the app can set an AMD card up
-on Linux, **behind one switch that is off by default**: `CK_AMD=1` in the app's environment (backlog row 166).
+**Untested on real hardware: nothing here has run on an AMD card.** Since 1.0.0-dev.4 the app sets an AMD card up on
+Linux **by default**, and says it is untested (backlog row 166; Marcy 2026-10-29: "untested is fine as long as we
+declare that and we are working towards testing it ourself"). `CK_AMD=0` in the app's environment turns it off.
+
+The declaration, word for word, in the setup's step 1 and the Engine page (the Graphics card block, Runtime and
+models, TensorRT) whenever an AMD card is set up (`src/shared/texts.ts` `AMD_UNTESTED`, with a link to the issues):
+
+> AMD support is new and not yet tested on a real AMD card: we're testing it ourselves next. If it doesn't work on
+> your card, please tell us on [GitHub issues](https://github.com/MarcelineVPQ/corridorkey-desktop/issues).
+
+The README, CHANGELOG and the wiki (Home, Installing on Linux, Troubleshooting) say the same. It comes out when the
+real-card test passes (backlog row 184).
 
 Status 2026-10-28: the engine has a MIGraphX provider (`--device migraphx`); the app's setup detects an AMD card,
 downloads ONNX Runtime with AMD's ROCm 10.1 and MIGraphX libraries, and adds a models.json `migraphx-fp16` entry to
-set 2.0.0-onnx.5 (below). Measured offline only, on a Linux PC with AMD's own MIGraphX library. The switch stays off
-by default until the AMD path is tested on a real AMD card.
+set 2.0.0-onnx.5 (below). Measured offline only, on a Linux PC with AMD's own MIGraphX library.
 
-## The switch: `CK_AMD=1`
+## On by default; `CK_AMD=0` turns it off
 
-Off (unset, or anything but `1`) the app reads nothing of the AMD side and behaves exactly as before on every system:
-NVIDIA, macOS and CPU setups are unchanged, and an AMD card gets the "No NVIDIA graphics driver is loaded" message.
-On, on Linux, with no NVIDIA driver loaded (NVIDIA comes first when a machine has both, as the engine's `auto` does):
+On Linux, with no NVIDIA driver loaded (NVIDIA comes first when a machine has both, as the engine's `auto` does), the
+app looks for an AMD card. NVIDIA, Windows and macOS setups never read the AMD side, and a Linux PC where no AMD card
+is found (no KFD driver, no GPU node) gets the "No NVIDIA graphics driver is loaded" message as before.
+
+`CK_AMD=0` in the app's environment (`CK_AMD=0 ./CorridorKey-Desktop-*.AppImage`) turns the AMD path off: the app
+reads nothing of the AMD side and an AMD card gets the "No NVIDIA graphics driver is loaded" message, as before
+1.0.0-dev.4. Any other value, or none, leaves it on. A runtime already installed stays on disk (see the engine's
+message below).
+
+With an AMD card found:
 
 - **Detection** (electron/main/amd.ts, install.ts `amdCardFor` / `systemSupport`): the first GPU node of the KFD
   topology (`/sys/class/kfd/kfd/topology/nodes/*/properties`: SIMDs and a `gfx_target_version`, as the engine's amd.rs
   reads them) whose gfx target ROCm 10.1's MIGraphX supports (a Ryzen iGPU listed before a Radeon card is skipped), and
-  whether `/dev/kfd` and its `/dev/dri/renderD<minor>` open read-write. The setup says why not when there is no AMD
-  card, when no card's gfx target is one ROCm 10.1's MIGraphX supports, or when the user isn't in the `render` /
-  `video` groups. Only the chosen card's device wheel is downloaded. Limit: the engine runs on HIP's device 0 (amd.rs
+  whether `/dev/kfd` and its `/dev/dri/renderD<minor>` open read-write. The setup says why not when no
+  card's gfx target is one ROCm 10.1's MIGraphX supports, or when the user isn't in the `render` /
+  `video` groups, and shows the declaration above. Only the chosen card's device wheel is downloaded. Limit: the engine runs on HIP's device 0 (amd.rs
   matches it by PCI bus id), which the app can't ask for without HIP; on a machine with several AMD GPUs (an iGPU
   turned on next to a Radeon card) HIP's device 0 may be the other one. Then set `HIP_VISIBLE_DEVICES` (ROCm's own
   variable for the cards HIP sees) to the supported card's HIP device index in the app's environment (its position
@@ -108,7 +124,7 @@ and stage 2 (MultiHeadAttention's `attention_bias` broadcast over the heads); th
   with no provider at all on Linux and the MIGraphX plugin's file in place (the AMD runtime) the message names both
   ("CorridorKey needs an NVIDIA graphics card with CUDA, or an AMD graphics card with ROCm and AMD's MIGraphX plugin");
   without the plugin's file (every setup that never installed the AMD runtime) it is the message from before; a
-  setup that installed it and then turned the switch off still has the file, so its message names AMD too.
+  setup that installed it and then turned AMD off (`CK_AMD=0`) still has the file, so its message names AMD too.
 
 ## What MIGraphX takes (offline check)
 
@@ -141,7 +157,7 @@ network with more than 10 unsupported nodes: stage 1 and stage 2 would have run 
 
 ## Open
 
-- A run on a real AMD card (a rented Linux server with a Radeon AI PRO R9700, gfx1201, is the closest to a user's
+- A run on a real AMD card (backlog row 184, dev.5; a rented Linux server with a Radeon AI PRO R9700, gfx1201, is the closest to a user's
   card; nothing is booked yet): the machine's driver, `/dev/kfd` and render-group access and KFD gfx targets first;
   then the app's own install (AMD detected, the AMD runtime and models downloaded and checked), the plugin loading into
   ONNX Runtime 1.31 (built for 1.29: `onnxruntime~=1.29.0` in its metadata; it negotiates the API version), the

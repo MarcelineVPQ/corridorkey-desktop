@@ -14,6 +14,7 @@ import { PathText } from "../../src/ui/PathText";
 import { ProgressBar } from "../../src/ui/ProgressBar";
 import { Accordion, Section } from "../../src/ui/panel/Section";
 import { EnginePage } from "../../src/ui/pages/EnginePage";
+import { SetupPage } from "../../src/ui/pages/SetupPage";
 import { SettingsPage } from "../../src/ui/pages/SettingsPage";
 import { ConsolePage } from "../../src/ui/pages/ConsolePage";
 import { MIGRAPHX_LOAD, STAGE_TEXT } from "../../src/ui/format";
@@ -21,7 +22,7 @@ import { appState, installState, job, settings, updateState } from "./fixtures";
 import { App } from "../../src/ui/App";
 import { dots, tasksOf } from "../../src/shared/tasks";
 import { UpdateBanner } from "../../src/ui/UpdateBanner";
-import { TRT_MODEL_SET_NOTE, UPDATE_PAGE_BACK_TO_STABLE } from "../../src/shared/texts";
+import { AMD_UNTESTED, TRT_MODEL_SET_NOTE, UPDATE_PAGE_BACK_TO_STABLE } from "../../src/shared/texts";
 import type { AppState, UpdateState } from "../../src/shared/types";
 import { Cpu } from "lucide-react";
 
@@ -600,5 +601,54 @@ describe("the Engine page's graphics card (NorthXL's GPU card)", () => {
     expect(screen.getByRole("heading", { name: "Graphics card" })).toBeTruthy();
     expect(screen.queryByRole("progressbar")).toBeNull();
     expect(screen.getByText(/nothing is read while idle/)).toBeTruthy();
+  });
+});
+
+// backlog row 166: AMD is on by default, declared untested on a real AMD card (Marcy 2026-10-29) wherever an AMD user meets it
+describe("AMD cards: declared untested", () => {
+  const ISSUES = "https://github.com/MarcelineVPQ/corridorkey-desktop/issues";
+  const engine = (state: AppState, open: string) => {
+    localStorage.setItem("ck.open.engine", JSON.stringify(open));
+    render(<EnginePage state={state} panelShown={true} narrow={false} glass={false} focus={null} sectionTasks={{}} hidePanel={() => {}} openSetup={() => {}} />);
+  };
+  const declarations = () => screen.queryAllByText(AMD_UNTESTED, { exact: false });
+
+  it("the setup step that offers the AMD runtime says so, with a link to the GitHub issues", () => {
+    mockCk();
+    render(
+      <SetupPage
+        state={appState({ rustEngine: { ok: false, problems: [] }, install: installState({ amd: true, needRuntime: true, needModels: true, bytes: 1e9 }) })}
+        openQueue={() => {}}
+        openGuide={() => {}}
+      />,
+    );
+    expect(declarations()).toHaveLength(1);
+    expect(screen.getByRole("link", { name: "GitHub issues" }).getAttribute("href")).toBe(ISSUES);
+    expect(screen.getByRole("link", { name: "GitHub issues" }).getAttribute("target")).toBe("_blank");
+  });
+
+  it("the Engine page says so by the graphics card, in Runtime and models (installed too) and in TensorRT", () => {
+    mockCk();
+    const state = appState({ install: installState({ amd: true }), tensorrt: { ...appState().tensorrt, supported: false } });
+    engine({ ...state, system: { ...state.system, platform: "linux" } }, "install");
+    // the main area's Graphics card block and the open Runtime and models section
+    expect(declarations()).toHaveLength(2);
+    cleanup();
+    engine({ ...state, system: { ...state.system, platform: "linux" } }, "tensorrt");
+    expect(declarations()).toHaveLength(2);
+    expect(screen.getByText(/on this AMD graphics card CorridorKey runs through AMD's MIGraphX/)).toBeTruthy();
+  });
+
+  it("NVIDIA, Windows, macOS and CPU-only setups show no AMD declaration", () => {
+    mockCk();
+    render(
+      <SetupPage state={appState({ rustEngine: { ok: false, problems: [] }, install: installState({ needRuntime: true, needModels: true, bytes: 1e9 }) })} openQueue={() => {}} openGuide={() => {}} />,
+    );
+    expect(declarations()).toHaveLength(0);
+    expect(screen.getByText(/GPU runtime, /)).toBeTruthy();
+    cleanup();
+    engine(appState(), "install");
+    expect(declarations()).toHaveLength(0);
+    expect(screen.queryByRole("link", { name: "GitHub issues" })).toBeNull();
   });
 });

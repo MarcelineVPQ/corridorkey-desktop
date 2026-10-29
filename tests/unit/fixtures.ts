@@ -65,6 +65,7 @@ export const installState = (over: Partial<InstallState> = {}): InstallState => 
   gpuOk: true,
   gpuProblem: null,
   runtimeWhat: "",
+  amd: false,
   modelSets: [{ name: "2.0.0-onnx.5", installed: true, bytes: 0 }],
   status: "idle",
   step: null,

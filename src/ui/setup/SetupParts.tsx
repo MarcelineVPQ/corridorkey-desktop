@@ -4,7 +4,7 @@ import { Check, Download, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { FfmpegState, InstallState, TrtState } from "../../shared/types";
 import { installMissing } from "../../shared/tasks";
-import { INSTALL_FIRST } from "../../shared/texts";
+import { AMD_UNTESTED, INSTALL_FIRST } from "../../shared/texts";
 import { Row } from "../panel/Section";
 import { duration, gbBytes } from "../format";
 import {
@@ -28,6 +28,22 @@ import { ProgressBar } from "../ProgressBar";
 import { More } from "../More";
 import { PathText } from "../PathText";
 
+// the repository's issues (updateFeed.ts REPO); the link opens in the browser (index.ts setWindowOpenHandler)
+const ISSUES = "https://github.com/MarcelineVPQ/corridorkey-desktop/issues";
+
+/** AMD cards are on by default and untested on a real one: said wherever an AMD user meets them (backlog row 166). */
+export function AmdUntested() {
+  return (
+    <p className="hint-text">
+      {AMD_UNTESTED} on{" "}
+      <a href={ISSUES} target="_blank" rel="noreferrer">
+        GitHub issues
+      </a>
+      .
+    </p>
+  );
+}
+
 export const installPct = (inst: Pick<InstallState, "done" | "total">) => (inst.total ? Math.floor((inst.done / inst.total) * 100) : 0);
 
 /** The GPU runtime and the models: what downloads, the button, real progress, Stop, the error. */
@@ -35,9 +51,12 @@ export function InstallBox({ inst }: { inst: InstallState }) {
   const needInstall = installMissing(inst);
   if (!needInstall)
     return (
-      <div className="check-line ok">
-        <Check size={15} aria-hidden /> The GPU runtime and the CorridorKey models are installed
-      </div>
+      <>
+        <div className="check-line ok">
+          <Check size={15} aria-hidden /> The GPU runtime and the CorridorKey models are installed
+        </div>
+        {inst.amd && <AmdUntested />}
+      </>
     );
   // loop: NOT-WORTH — two parts per render
   const what = [inst.needRuntime && `GPU runtime, ${gbBytes(inst.runtimeBytes)}`, inst.needModels && `CorridorKey models, ${gbBytes(inst.modelsBytes)}`].filter(Boolean).join(" · ");
@@ -53,6 +72,7 @@ export function InstallBox({ inst }: { inst: InstallState }) {
         </ul>
         <p className="hint-text">{CHECKED_AND_RESUMED}</p>
       </More>
+      {inst.amd && <AmdUntested />}
       {inst.gpuProblem && <p className="hint-text">{inst.gpuProblem}</p>}
       <InstallControls p={inst} canStart={inst.gpuOk} start={() => void window.ck.startInstall()} />
     </>
@@ -96,13 +116,16 @@ function InstallControls({ p, canStart, start }: { p: Pick<InstallState, "status
 export function TrtBox({ trt, inst, platform }: { trt: TrtState; inst: InstallState; platform: string }) {
   if (!trt.supported)
     return (
-      <p className="hint-text">
-        {platform === "darwin"
-          ? "TensorRT is NVIDIA's, and Macs have no NVIDIA graphics: CorridorKey runs on Apple's GPU and Neural Engine through Core ML instead."
-          : platform === "linux"
-            ? "TensorRT is NVIDIA's: on this AMD graphics card CorridorKey runs through AMD's MIGraphX instead."
-            : "TensorRT (NVIDIA's optimizer for its graphics cards) is Linux-only in this version: on Windows it needs its own engine builder, which comes in a later version. Jobs run on CUDA."}
-      </p>
+      <>
+        <p className="hint-text">
+          {platform === "darwin"
+            ? "TensorRT is NVIDIA's, and Macs have no NVIDIA graphics: CorridorKey runs on Apple's GPU and Neural Engine through Core ML instead."
+            : platform === "linux"
+              ? "TensorRT is NVIDIA's: on this AMD graphics card CorridorKey runs through AMD's MIGraphX instead."
+              : "TensorRT (NVIDIA's optimizer for its graphics cards) is Linux-only in this version: on Windows it needs its own engine builder, which comes in a later version. Jobs run on CUDA."}
+        </p>
+        {inst.amd && <AmdUntested />}
+      </>
     );
   const baseMissing = installMissing(inst);
   const needParts = trt.needLibs || trt.needProvider || trt.needModels;

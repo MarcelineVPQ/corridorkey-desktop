@@ -423,6 +423,8 @@ export interface InstallState {
   gpuProblem: string | null;
   // the runtime download, as the setup page describes it (CUDA libraries, or Core ML on macOS)
   runtimeWhat: string;
+  // an AMD card is set up (Linux, no NVIDIA driver; amd.ts): the setup and Engine page say AMD is untested on a real card
+  amd: boolean;
   // the model sets this system offers (the default first): each installed, or its download size (backlog row 168)
   modelSets: ModelSetChoice[];
   status: InstallStatus;

@@ -126,7 +126,7 @@ job runs and the window is shown (nothing reads the card while idle or hidden), 
 the header, **Usage** and **Memory** as bars (Usage warms toward red as it rises, as NorthXL's does), then one row of
 temperature (warming from 40 °C to 90 °C), fan, clock and power, then the programs using the card. A reading the card
 or driver doesn't give is left out, never shown as 0. NVIDIA: nvidia-smi's `temperature.gpu`, `fan.speed`, `clocks.gr`
-and `power.draw` (a laptop has no fan reading). AMD (the `CK_AMD` switch, docs/AMD.md): the amdgpu driver's hwmon files
+and `power.draw` (a laptop has no fan reading). AMD (on by default, untested on a real AMD card, docs/AMD.md): the amdgpu driver's hwmon files
 `temp1_input`, `pwm1` of `pwm1_max`, `freq1_input` and `power1_average` (or `power1_input`). Mac: no readout (macOS has
 no nvidia-smi and no such files; its temperatures and power need root).
 

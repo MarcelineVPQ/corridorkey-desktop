@@ -4,8 +4,8 @@
 // URL, size and SHA-256. The models come from this repository's `models-2.0.0-onnx.5` release on every system (macOS
 // adds its Core ML set, `models-2.0.0-onnx.5-coreml.1` (1280×1080, 1920×1080 and 4K), below; Linux and Windows users may
 // choose `2.0.0-onnx.4` instead in Engine settings, backlog row 168) (converted from Corridor Digital's checkpoint; CorridorKey licence). Every file is
-// checked before use. AMD cards on Linux, behind the CK_AMD switch (amd.ts; off by default, untested on a real AMD
-// card): ONNX Runtime with AMD's ROCm 10.1 and MIGraphX wheels from repo.amd.com, and MIGraphX's MoGe and stage 2
+// checked before use. AMD cards on Linux, on by default (amd.ts; CK_AMD=0 turns them off; untested on a real AMD
+// card, and the app says so): ONNX Runtime with AMD's ROCm 10.1 and MIGraphX wheels from repo.amd.com, and MIGraphX's MoGe and stage 2
 // from `models-2.0.0-onnx.5-trt` (RUNTIME_AMD, MIGRAPHX below).
 // After a Stop or a failure, pressing the button again resumes: finished files are checked offline and kept,
 // a partial one continues where it stopped. A set only appears in the lists once all of it is in place
@@ -184,7 +184,7 @@ export const RUNTIME_MAC = {
   ] as Download[],
 };
 
-// Linux with an AMD card, behind the CK_AMD switch (amd.ts; docs/AMD.md; untested on a real AMD card): the plain
+// Linux with an AMD card (amd.ts, CK_AMD=0 turns it off; docs/AMD.md; untested on a real AMD card): the plain
 // onnxruntime wheel (the provider is a plugin, so no GPU build) with AMD's MIGraphX provider plugin, MIGraphX and
 // ROCm 10.1's pip packages from AMD's repository, plus one device wheel for the card (ROCM_DEVICE). Unpacked in pip's
 // layout: the libraries find each other through $ORIGIN-relative RPATHs, and the engine finds the plugin next to
@@ -281,12 +281,11 @@ export interface SystemSupport {
 
 const NVIDIA_RUNTIME = "ONNX Runtime (Microsoft, MIT licence) and NVIDIA's CUDA and cuDNN libraries (NVIDIA licence), from pypi.org";
 const NVIDIA_DRIVER = "/proc/driver/nvidia/version";
-export const AMD_RUNTIME =
-  "ONNX Runtime (Microsoft, MIT licence) and AMD's ROCm 10.1 and MIGraphX libraries (AMD; MIT and others, in the app's third-party notices), from pypi.org and repo.amd.com. AMD cards are new here: not yet tested on a real AMD card";
+export const AMD_RUNTIME = "ONNX Runtime (Microsoft, MIT licence) and AMD's ROCm 10.1 and MIGraphX libraries (AMD; MIT and others, in the app's third-party notices), from pypi.org and repo.amd.com";
 
 /**
- * The AMD card the setup installs for (Linux, the CK_AMD switch on, no NVIDIA driver loaded: NVIDIA comes first, as
- * the engine's `auto` does). Null on every other setup, without reading the system.
+ * The AMD card the setup installs for (Linux, no NVIDIA driver loaded: NVIDIA comes first, as the engine's `auto`
+ * does; not with CK_AMD=0). Null on every other setup, without reading the system, and when no AMD card is found.
  */
 export function amdCardFor(
   platform: NodeJS.Platform,
@@ -300,15 +299,8 @@ export function amdCardFor(
 }
 
 /** The AMD side of systemSupport: the card ROCm 10.1 supports and this user may open, else why not. */
-function amdSupport(amd: AmdCard | null): SystemSupport {
+function amdSupport(amd: AmdCard): SystemSupport {
   const short = "ONNX Runtime, ROCm, MIGraphX";
-  if (!amd)
-    return {
-      ok: false,
-      problem: "No NVIDIA graphics driver is loaded and no AMD graphics card was found (no ROCm KFD device). CorridorKey Desktop runs on NVIDIA graphics cards, and on AMD cards ROCm 10.1 supports.",
-      runtime: AMD_RUNTIME,
-      runtimeShort: short,
-    };
   if (!ROCM_DEVICE[amd.gfx])
     return {
       ok: false,
@@ -327,8 +319,8 @@ function amdSupport(amd: AmdCard | null): SystemSupport {
 }
 
 /**
- * Linux: the NVIDIA driver's proc file (with the CK_AMD switch on and no NVIDIA driver: the AMD card, `amd` from
- * amdCardFor); Windows: its NVML library in System32; macOS: Apple Silicon (Core ML runs on its GPU and Neural
+ * Linux: the NVIDIA driver's proc file (with no NVIDIA driver, the AMD card amdCardFor found, if any; none: the
+ * NVIDIA message, as before AMD support); Windows: its NVML library in System32; macOS: Apple Silicon (Core ML runs on its GPU and Neural
  * Engine; there is no Intel Mac build).
  */
 export function systemSupport(platform: NodeJS.Platform, arch: string, exists: (p: string) => boolean, env: NodeJS.ProcessEnv, amd: AmdCard | null = null): SystemSupport {
@@ -343,12 +335,12 @@ export function systemSupport(platform: NodeJS.Platform, arch: string, exists: (
   }
   // loop: NOT-WORTH — one stat of the NVIDIA driver's file per check
   const ok = platform === "win32" ? exists(join(env.SystemRoot || "C:\\Windows", "System32", "nvml.dll")) : exists(NVIDIA_DRIVER);
-  if (!ok && platform === "linux" && amdSwitchOn(env)) return amdSupport(amd);
+  if (!ok && platform === "linux" && amd) return amdSupport(amd);
   return { ok, problem: ok ? null : "No NVIDIA graphics driver is loaded. CorridorKey Desktop runs on NVIDIA graphics cards.", runtime: NVIDIA_RUNTIME, runtimeShort: "ONNX Runtime, CUDA, cuDNN" };
 }
 
 /**
- * What to keep from a wheel: ONNX Runtime's libraries, NVIDIA's libraries (AMD's with the CK_AMD switch), and every
+ * What to keep from a wheel: ONNX Runtime's libraries, NVIDIA's libraries (AMD's for an AMD card), and every
  * licence file. `gfx`: an AMD runtime's card, whose MIGraphX kernels alone are kept (each target's are in the wheel).
  */
 export function keepFromWheel(name: string, gfx?: string): boolean {
@@ -431,7 +423,7 @@ export const MODELS_ONNX4 = {
     oldModel("models.json", 395, "01f0d8e592d10a9459f72ce23ebfaded0b56168b6d838799a0dad8172fe9ebff"),
   ],
 };
-// AMD (CK_AMD; docs/AMD.md): MIGraphX 2.18 takes onnx.5's own C-RADIO, RVM and stage 1, and refuses its MoGe
+// AMD (docs/AMD.md): MIGraphX 2.18 takes onnx.5's own C-RADIO, RVM and stage 1, and refuses its MoGe
 // (antialiased resize) and stage 2 (attention_bias broadcast over the heads): those two come in their TensorRT form
 // from onnx.5's TensorRT release. That mix parses at 384×256, 1280×1152, 1920×1152 and 3840×2176 (MIGraphX's own
 // parser, offline: tools/migraphx_ops.py, 2026-10-28); never run on a card yet. The files go into the set's own
@@ -524,7 +516,7 @@ export interface Catalog {
   runtime: { name: string; wheels: Download[]; gfx?: string };
   models: { name: string; files: Download[] };
   coreml?: { name: string; files: Download[] };
-  // AMD (CK_AMD): MIGraphX's files, in the model set's MIGRAPHX_DIR folder, and their models.json key
+  // AMD: MIGraphX's files, in the model set's MIGRAPHX_DIR folder, and their models.json key
   migraphx?: { name: string; files: Download[] };
 }
 /** What the setup installs for the chosen model set (`gfx`: the AMD card, amdCardFor; MIGraphX's files then come too). */

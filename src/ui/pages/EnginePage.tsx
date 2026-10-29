@@ -12,7 +12,7 @@ import { MainBlock, SplitView } from "../panel/SplitView";
 import { Stat } from "../JobView";
 import { gbBytes, gib } from "../format";
 import { buildSteps } from "../../shared/trt";
-import { FfmpegBox, InstallBox, installPct, TrtBox } from "../setup/SetupParts";
+import { AmdUntested, FfmpegBox, InstallBox, installPct, TrtBox } from "../setup/SetupParts";
 import { PathText } from "../PathText";
 import { ProgressBar } from "../ProgressBar";
 import type { CSSProperties } from "react";
@@ -251,6 +251,7 @@ export function EnginePage(props: {
             <p className="hint-text">Read while a job runs and this window is shown (nothing is read while idle).</p>
           )}
           {state.gpuError && <p className="hint-text">Graphics card readout: {state.gpuError}</p>}
+          {inst.amd && <AmdUntested />}
         </MainBlock>
       </div>
     </div>

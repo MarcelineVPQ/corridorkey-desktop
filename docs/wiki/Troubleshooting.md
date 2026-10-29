@@ -22,7 +22,10 @@ NVIDIA's driver library in the system folder. The download button stays off, sin
 
 **Fix:** CorridorKey needs an NVIDIA graphics card (RTX 20-series or newer) with NVIDIA's own driver. On Linux, the
 open-source `nouveau` driver isn't enough: install your distribution's NVIDIA driver and restart. The GPU runtime
-needs driver 580 or newer. AMD and Intel graphics aren't supported.
+needs driver 580 or newer. Intel graphics aren't supported. On Linux an AMD card ROCm 10.1 supports gets the AMD setup
+instead of this message (new, and not yet tested on a real AMD card:
+[AMD cards (untested)](Installing-on-Linux#amd-cards-untested)); you see this message on an AMD card only when the app
+found none the kernel's ROCm driver (KFD) lists, or with `CK_AMD=0`.
 
 ### Not enough free disk space
 
@@ -105,12 +108,13 @@ it happens again, please open an issue with the log.
 
 > CorridorKey needs an NVIDIA graphics card with CUDA.
 
-On Linux, with the AMD runtime installed (the `CK_AMD=1` switch below), the message is:
+On Linux, with the AMD runtime installed (an AMD card, below), the message is:
 
 > CorridorKey needs an NVIDIA graphics card with CUDA, or an AMD graphics card with ROCm and AMD's MIGraphX plugin (docs/AMD.md).
 
 **Cause:** the engine found no NVIDIA card it can use with CUDA (and, on Linux, no AMD card through AMD's MIGraphX
-plugin: the app sets AMD cards up only behind a switch that is off by default, untested on a real AMD card so far:
+plugin; AMD support is new and not yet tested on a real AMD card: we're testing it ourselves next, and if it doesn't
+work on your card, please tell us on [GitHub issues](https://github.com/MarcelineVPQ/corridorkey-desktop/issues);
 [docs/AMD.md](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/docs/AMD.md)). **Fix:** see
 [No NVIDIA graphics driver is loaded](#no-nvidia-graphics-driver-is-loaded). Nothing runs on the processor instead.
 
@@ -122,8 +126,8 @@ On a Mac the message is:
 is Core ML on a Mac; before it, the command line needed `--device coreml`). **Fix:** leave `--device` out, or pass
 `--device coreml`.
 
-On Linux with AMD's MIGraphX provider plugin installed (an AMD card; untested on a real AMD card so far) the message
-is:
+On Linux with AMD's MIGraphX provider plugin installed (an AMD card; not yet tested on a real AMD card, so please tell
+us on [GitHub issues](https://github.com/MarcelineVPQ/corridorkey-desktop/issues) if you see this) the message is:
 
 > CorridorKey found no AMD graphics card ROCm can use (HIP sees no device, or the amdgpu driver's memory files are missing; check rocminfo).
 

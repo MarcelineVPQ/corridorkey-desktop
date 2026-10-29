@@ -853,50 +853,56 @@ describe("each system's runtime and graphics check", () => {
   });
 });
 
-// backlog row 166: AMD cards, behind the CK_AMD switch; off, every setup is as before
-describe("AMD cards (the CK_AMD switch)", () => {
+// backlog row 166: AMD cards, on by default (declared untested, Marcy 2026-10-29); CK_AMD=0 turns them off
+describe("AMD cards (on by default; CK_AMD=0 turns them off)", () => {
   const none = () => false;
   const nvidia = (p: string) => p === "/proc/driver/nvidia/version";
   const card = { gfx: "gfx1100", minor: 128, access: true };
   const sum = (d: { size: number }[]) => d.reduce((n, x) => n + x.size, 0);
+  const TODAY = "No NVIDIA graphics driver is loaded. CorridorKey Desktop runs on NVIDIA graphics cards.";
+  const CUDA = "ONNX Runtime (Microsoft, MIT licence) and NVIDIA's CUDA and cuDNN libraries (NVIDIA licence), from pypi.org";
 
-  it("looks for an AMD card only on Linux with the switch on and no NVIDIA driver (NVIDIA first)", () => {
+  it("looks for an AMD card only on Linux with no NVIDIA driver (NVIDIA first) and CK_AMD not 0", () => {
     let looked = 0;
     const find = () => {
       looked++;
       return card;
     };
-    expect(amdCardFor("linux", {}, none, find)).toBeNull();
-    expect(amdCardFor("linux", { CK_AMD: "1" }, nvidia, find)).toBeNull();
-    expect(amdCardFor("win32", { CK_AMD: "1" }, none, find)).toBeNull();
-    expect(amdCardFor("darwin", { CK_AMD: "1" }, none, find)).toBeNull();
-    // switched off, the system isn't even read
+    expect(amdCardFor("linux", { CK_AMD: "0" }, none, find)).toBeNull();
+    expect(amdCardFor("linux", {}, nvidia, find)).toBeNull();
+    expect(amdCardFor("win32", {}, none, find)).toBeNull();
+    expect(amdCardFor("darwin", {}, none, find)).toBeNull();
+    // NVIDIA, Windows, macOS and CK_AMD=0: the system isn't even read
     expect(looked).toBe(0);
-    expect(amdCardFor("linux", { CK_AMD: "1" }, none, find)).toEqual(card);
+    expect(amdCardFor("linux", {}, none, find)).toEqual(card);
     expect(looked).toBe(1);
   });
 
-  it("switched off, an AMD card gets today's answer", () => {
-    expect(systemSupport("linux", "x64", none, {}, card)).toEqual(systemSupport("linux", "x64", none, {}));
-    expect(systemSupport("linux", "x64", none, {}).problem).toBe("No NVIDIA graphics driver is loaded. CorridorKey Desktop runs on NVIDIA graphics cards.");
-    // and an NVIDIA driver wins with the switch on
-    expect(systemSupport("linux", "x64", nvidia, { CK_AMD: "1" }, card)).toEqual(systemSupport("linux", "x64", nvidia, {}));
+  it("CK_AMD=0: an AMD card gets the answer from before AMD support", () => {
+    const off = { CK_AMD: "0" };
+    const amd = amdCardFor("linux", off, none, () => card);
+    expect(amd).toBeNull();
+    expect(systemSupport("linux", "x64", none, off, amd)).toEqual({ ok: false, problem: TODAY, runtime: CUDA, runtimeShort: "ONNX Runtime, CUDA, cuDNN" });
   });
 
-  it("switched on: the AMD runtime for a supported card, else why not (no card, unsupported, no access)", () => {
-    const on = { CK_AMD: "1" };
-    expect(systemSupport("linux", "x64", none, on, card)).toEqual({ ok: true, problem: null, runtime: AMD_RUNTIME, runtimeShort: "ONNX Runtime, ROCm, MIGraphX" });
-    expect(AMD_RUNTIME).toContain("not yet tested on a real AMD card");
-    expect(systemSupport("linux", "x64", none, on, null).problem).toContain("no AMD graphics card was found");
-    const old = systemSupport("linux", "x64", none, on, { ...card, gfx: "gfx1030" });
+  it("NVIDIA, Windows, macOS and a Linux machine with no AMD card are as before", () => {
+    // an NVIDIA driver wins over an AMD card
+    expect(systemSupport("linux", "x64", nvidia, {}, card)).toEqual({ ok: true, problem: null, runtime: CUDA, runtimeShort: "ONNX Runtime, CUDA, cuDNN" });
+    // no NVIDIA driver and no AMD card (CPU only, Intel graphics): today's message, not an AMD one
+    expect(systemSupport("linux", "x64", none, {}, null)).toEqual({ ok: false, problem: TODAY, runtime: CUDA, runtimeShort: "ONNX Runtime, CUDA, cuDNN" });
+    expect(systemSupport("win32", "x64", () => false, {}, card).problem).toBe(TODAY);
+    expect(systemSupport("darwin", "arm64", none, {}, card)).toMatchObject({ ok: true, runtimeShort: "ONNX Runtime with Core ML" });
+  });
+
+  it("an AMD card found: the AMD runtime for a supported card, else why not (unsupported, no access)", () => {
+    expect(systemSupport("linux", "x64", none, {}, card)).toEqual({ ok: true, problem: null, runtime: AMD_RUNTIME, runtimeShort: "ONNX Runtime, ROCm, MIGraphX" });
+    const old = systemSupport("linux", "x64", none, {}, { ...card, gfx: "gfx1030" });
     expect(old.ok).toBe(false);
     expect(old.problem).toContain("gfx1030");
     expect(old.problem).toContain("isn't one ROCm 10.1's MIGraphX supports");
-    const locked = systemSupport("linux", "x64", none, on, { ...card, access: false });
+    const locked = systemSupport("linux", "x64", none, {}, { ...card, access: false });
     expect(locked.ok).toBe(false);
     expect(locked.problem).toContain("render and video groups");
-    // never "runs on NVIDIA graphics cards" alone with the switch on
-    expect(systemSupport("linux", "x64", none, on, null).problem).toContain("AMD cards ROCm 10.1 supports");
   });
 
   it("downloads the AMD runtime with the card's device wheel, and only for a card ROCm 10.1 supports", () => {

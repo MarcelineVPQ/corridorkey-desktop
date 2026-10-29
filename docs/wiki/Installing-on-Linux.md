@@ -6,8 +6,9 @@ comes inside it, and the first start downloads the rest.
 ## What you need
 
 - A 64-bit Linux PC with an **NVIDIA graphics card** (RTX 20-series or newer, 8 GB or more) and NVIDIA's own driver
-  loaded. The engine keys only on CUDA: AMD and Intel graphics aren't supported, and nothing falls back to the
-  processor. (AMD cards: see [AMD cards (untested)](#amd-cards-untested) below.)
+  loaded, or an AMD card ROCm 10.1 supports (new, and not yet tested on a real AMD card: see
+  [AMD cards (untested)](#amd-cards-untested) below). Intel graphics aren't supported, and nothing falls back to the
+  processor.
 - A recent NVIDIA driver. The GPU runtime the app downloads is CUDA 13, which needs driver 580 or newer
   ([docs/ENGINE_RUST.md](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/docs/ENGINE_RUST.md#build-and-run)).
 - ffmpeg (the app helps you install it, below).
@@ -91,17 +92,20 @@ its own download: see [TensorRT](TensorRT).
 
 ## AMD cards (untested)
 
-The app has an AMD path on Linux, **off by default and not yet tested on a real AMD card**. To try it, start the
-AppImage with the switch set:
+**AMD support is new and not yet tested on a real AMD card: we're testing it ourselves next. If it doesn't work on your card, please tell us on [GitHub issues](https://github.com/MarcelineVPQ/corridorkey-desktop/issues).** The setup and the Engine page say so too.
 
-```
-CK_AMD=1 ./CorridorKey-Desktop-*.AppImage
-```
-
-With the switch on and no NVIDIA driver loaded, the setup looks for an AMD card ROCm 10.1's MIGraphX supports (Radeon
+From 1.0.0-dev.4 the AMD path is on by default: with no NVIDIA driver loaded (NVIDIA comes first when a PC has both),
+the setup looks for an AMD card ROCm 10.1's MIGraphX supports (Radeon
 RX 7000 and RX 9000, Radeon AI PRO R9700, Ryzen AI graphics, Instinct MI200, MI300 and MI350) and downloads ONNX
 Runtime, AMD's ROCm 10.1 and MIGraphX libraries (0.94 to 2.6 GB, depending on the card) and MIGraphX's two extra
 model files (0.61 GB). Nothing is installed system-wide. Your user must be in the `render` and `video` groups
 (`sudo usermod -aG render,video $USER`, then log out and back in); the setup says so when it isn't. The first job at
 each size compiles every network for the card ("Preparing for this graphics card"), which can take minutes; later
 jobs reuse it. Details: [docs/AMD.md](https://github.com/MarcelineVPQ/corridorkey-desktop/blob/main/docs/AMD.md).
+
+To turn the AMD path off (the app then treats the PC as before AMD support: "No NVIDIA graphics driver is loaded"),
+start the AppImage with `CK_AMD=0`:
+
+```
+CK_AMD=0 ./CorridorKey-Desktop-*.AppImage
+```

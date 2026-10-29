@@ -269,7 +269,7 @@ command line `--frames` picks the frames.
 | --- | --- | --- |
 | `--models DIR` | `CK_ENGINE_MODELS` | the ONNX model set's folder |
 | `--ort LIB` | `CK_ENGINE_ORT`, `ORT_DYLIB_PATH` | ONNX Runtime's library |
-| `--device auto\|cuda\|cpu\|coreml\|migraphx` | `CK_ENGINE_DEVICE` | the graphics card (default; Core ML on a Mac, from dev.3); the CPU (slow; tests); Core ML (macOS); MIGraphX (an AMD card, Linux; untested on a real AMD card) |
+| `--device auto\|cuda\|cpu\|coreml\|migraphx` | `CK_ENGINE_DEVICE` | the graphics card (default; Core ML on a Mac, from dev.3); the CPU (slow; tests); Core ML (macOS); MIGraphX (an AMD card, Linux; not yet tested on a real AMD card) |
 | `--gpu N\|UUID` | `CUDA_VISIBLE_DEVICES`, `CUE_GPU_CORES` | the card: an index in CUDA's order or a `GPU-…` / `MIG-…` UUID (Nuke's `--gpu`) |
 | `-t`, `--threads N` | `CK_ENGINE_THREADS` | CPU threads per network (0: ONNX Runtime's choice) |
 

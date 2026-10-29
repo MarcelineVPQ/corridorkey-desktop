@@ -136,8 +136,8 @@ function enginePlaces() {
     data: appFolders.data,
   };
 }
-// AMD cards (the CK_AMD switch; docs/AMD.md): the card, null on every setup without the switch (nothing below changes
-// there); AMD_GFX: a card ROCm 10.1 supports, which the setup downloads the AMD runtime and MIGraphX's models for
+// AMD cards (on by default, CK_AMD=0 turns them off; docs/AMD.md): the card, null on every setup without one (nothing
+// below changes there); AMD_GFX: a card ROCm 10.1 supports, which the setup downloads the AMD runtime and MIGraphX's models for
 const AMD = amdCardFor(PLATFORM, process.env, existsSync);
 const AMD_GFX = amdRuntime(AMD?.gfx ?? null)?.gfx ?? null;
 const system = () => systemSupport(PLATFORM, process.arch, existsSync, process.env, AMD);
@@ -185,6 +185,7 @@ function installIdle(): InstallState {
     gpuOk: sys.ok,
     gpuProblem: sys.problem,
     runtimeWhat: sys.runtime,
+    amd: AMD !== null,
     modelSets: modelSetChoices(enginePlaces().data, PLATFORM, existsSync, AMD_GFX),
     status: "idle",
     step: null,
@@ -611,7 +612,7 @@ async function pollGpu(): Promise<void> {
   gpuReading = true;
   try {
     const pid = queue.enginePid;
-    // an AMD card (the CK_AMD switch) has no nvidia-smi: the amdgpu driver's files
+    // an AMD card has no nvidia-smi: the amdgpu driver's files
     gpu = AMD_GFX && AMD ? readAmdGpu(AMD) : await readGpu(new Set(pid ? [pid] : []));
     gpuError = null;
   } catch (e) {

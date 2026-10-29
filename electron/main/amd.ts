@@ -1,15 +1,15 @@
-// AMD graphics cards on Linux (ROCm 10.1 and AMD's MIGraphX provider; docs/AMD.md, backlog row 166), behind one
-// switch: CK_AMD=1 in the app's environment. Off (the default) nothing here reads the system and the app is what it
-// was: an AMD card gets the "no NVIDIA driver" message. Untested on a real AMD card.
+// AMD graphics cards on Linux (ROCm 10.1 and AMD's MIGraphX provider; docs/AMD.md, backlog row 166), on by default
+// since 1.0.0-dev.4 and declared untested on a real AMD card (Marcy 2026-10-29). CK_AMD=0 in the app's environment
+// turns it off: then nothing here reads the system and an AMD card gets the "no NVIDIA driver" message.
 // The card comes from the kernel's KFD topology, the same files and rule as the engine's (engine-rs ck-core amd.rs):
 // a GPU node has SIMDs and a gfx target; /dev/kfd and the node's render device must open for reading and writing
 // (else the user isn't in the render group yet).
 import { accessSync, constants, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-/** The switch: `CK_AMD=1` turns the AMD path on (setup detection, the AMD runtime, MIGraphX's models). */
+/** The off switch: `CK_AMD=0` turns the AMD path (setup detection, the AMD runtime, MIGraphX's models) off. */
 export const AMD_SWITCH = "CK_AMD";
-export const amdSwitchOn = (env: NodeJS.ProcessEnv): boolean => env[AMD_SWITCH] === "1";
+export const amdSwitchOn = (env: NodeJS.ProcessEnv): boolean => env[AMD_SWITCH] !== "0";
 
 export const KFD_NODES = "/sys/class/kfd/kfd/topology/nodes";
 
