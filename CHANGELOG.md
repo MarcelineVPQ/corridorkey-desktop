@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0-dev.6 (draft, unreleased)
+## 1.0.0-dev.6
 
 - **TensorRT no longer says "built" for engines it can't use.** Engine settings, TensorRT called a size built whenever
   its engine files were there, but the engine only uses engines built from the model files it runs with now. TensorRT
