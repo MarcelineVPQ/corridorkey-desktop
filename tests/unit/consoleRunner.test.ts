@@ -661,13 +661,20 @@ describe("built-ins", () => {
     expect(all[1]).toMatch(/✗\s+cd nowhere/);
     expect(await text("history 1")).toEqual([expect.stringMatching(/^ +4 .*history 10/)]);
     expect(await text("history nowhere")).toEqual([expect.stringMatching(/^ +2 .*✗\s+cd nowhere/)]);
-    // the folder is searched too, and kept across a restart with its number and end
-    await new Promise((r) => setTimeout(r, 10));
-    const again = new History(join(files, "console-history.jsonl"));
-    await again.loaded;
+    // the folder is searched too, and kept across a restart with its number and end; the history file is written
+    // asynchronously, so the restart waits for the entries with a deadline (macOS CI 2026-10-29: read after a fixed 10 ms,
+    // one entry was still on its way)
+    const again = await vi.waitFor(
+      async () => {
+        const h = new History(join(files, "console-history.jsonl"));
+        await h.loaded;
+        expect(h.entries(root).length).toBeGreaterThanOrEqual(4);
+        return h;
+      },
+      { timeout: 2000 },
+    );
     // loop: NOT-WORTH — a few entries
     expect(again.entries("cd nowhere").map((e) => [e.n, e.state, e.cwd])).toEqual([[2, "failed", shots]]);
-    expect(again.entries(root).length).toBeGreaterThanOrEqual(4);
   });
 });
 
