@@ -1415,6 +1415,12 @@ app.whenReady().then(() => {
     return;
   }
   void recheckFfmpeg();
+  // every ticked TensorRT size covers this card: any built for shorter windows is built again in the background
+  if (settings.tensorrt && trtAllowed() && settings.trtSizes.length > 0) {
+    // loop: NOT-WORTH — the few ticked sizes, once at start
+    const keys = settings.trtSizes.map((s) => trtSizeKey(s.width, s.height)).filter((k): k is string => k !== null);
+    void readTrtCache().then(() => prebuild.coverCard(keys));
+  }
   // the Console's elevation ends when the screen locks or the computer sleeps (not on the window's blur where the lock
   // can be read: Alt+Tab to Nuke and back is the look-dev loop sudo exists for); powerMonitor works only once the app is
   // ready

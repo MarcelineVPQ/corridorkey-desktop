@@ -5,6 +5,9 @@
 - **TensorRT builds itself.** A clip that ran on CUDA only because TensorRT wasn't built for its size now starts that
   build by itself as soon as the job ends, sized for your graphics card so it covers every job of that size; the next
   run uses TensorRT. No button to press (the tile's Build it now stays for trying again after a failed build).
+- **Every ticked TensorRT size covers your card.** At start the app checks each size in Engine settings → TensorRT; one
+  built for shorter windows only (by an older version, or while the card was busy) is built again in the background, by
+  itself, so it serves every job of that size.
 
 ## 1.0.0-dev.7
 
