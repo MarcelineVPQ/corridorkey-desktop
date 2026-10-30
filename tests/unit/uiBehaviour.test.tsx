@@ -686,7 +686,7 @@ describe("a job that found no TensorRT engine (1.0.0-dev.7)", () => {
     const why =
       "TensorRT for this size is built for up to 15 frames at a time (this size isn't measured yet, so it stays within the nearest measured size's build); this clip runs 24 at a time, so this run used CUDA";
     render(<JobView job={hd(why)} prebuild={idle} trtOn />);
-    expect(screen.getByText("TensorRT isn't set up for clips this long at this size yet, so this run used CUDA")).toBeTruthy();
+    expect(screen.getByText("This clip doesn't fit TensorRT on this graphics card, so it keys on CUDA")).toBeTruthy();
     expect(screen.getByText(`Why: ${why}.`)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Build it/ })).toBeNull();
   });
