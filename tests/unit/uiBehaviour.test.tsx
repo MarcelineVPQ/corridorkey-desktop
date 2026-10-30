@@ -681,6 +681,16 @@ describe("a job that found no TensorRT engine (1.0.0-dev.7)", () => {
     expect(screen.getByText(new RegExp(`Why: ${why}`))).toBeTruthy();
   });
 
+  it("review 2026-10-29 R2-S1: past its size's measured build, a plain main line, the numbers on the quieter line, no button", () => {
+    mockCk();
+    const why =
+      "TensorRT for this size is built for up to 15 frames at a time (this size isn't measured yet, so it stays within the nearest measured size's build); this clip runs 24 at a time, so this run used CUDA";
+    render(<JobView job={hd(why)} prebuild={idle} trtOn />);
+    expect(screen.getByText("TensorRT isn't set up for clips this long at this size yet, so this run used CUDA")).toBeTruthy();
+    expect(screen.getByText(`Why: ${why}.`)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Build it/ })).toBeNull();
+  });
+
   it("review 2026-10-29: no button where a build can't help (a busy card), and none while TensorRT is off (the tile says how to turn it on)", () => {
     mockCk();
     const busy = render(

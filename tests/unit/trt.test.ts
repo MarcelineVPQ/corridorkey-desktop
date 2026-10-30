@@ -17,6 +17,7 @@ import {
   TRT_DIM_RANGES,
   TRT_MAX_AREA,
   TRT_MAX_SIDE,
+  TRT_BUILD_CAP,
   TRT_NOT_BUILT,
   TRT_OTHER_WINDOW,
   trtSizeKey,
@@ -43,6 +44,7 @@ describe("TensorRT ranges as the engine has them", () => {
     expect(Number(/const SHAPE_QUANTUM: usize = (\d+);/.exec(rs("clip.rs"))![1])).toBe(SHAPE_QUANTUM);
     expect(rs("pipeline/mod.rs")).toContain(`const TRT_NOT_BUILT: &str = "${TRT_NOT_BUILT}";`);
     expect(rs("pipeline/mod.rs")).toContain(`format!("${TRT_OTHER_WINDOW} {}`);
+    expect(rs("pipeline/mod.rs")).toContain(`const TRT_BUILD_CAP: &str = "${TRT_BUILD_CAP}";`);
   });
 
   it("puts a clip's size in its range (the engine's keys), or none", () => {

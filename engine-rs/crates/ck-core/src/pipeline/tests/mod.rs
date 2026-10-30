@@ -64,10 +64,22 @@ fn a_build_covers_the_card_not_the_moment() {
     assert_eq!([w(k4, 8.0), w(k4, 16.0), w(k4, 32.0)], [BUILD_4K.0, BUILD_4K.1, BUILD_4K.2]);
     // review 2026-10-29 N-M1: Marcy's 16 GB card builds each measured size's measured window
     assert_eq!([w(mp16, 16.0), w(hd, 16.0), w(k4, 16.0)], [48, 24, 8]);
+    // review 2026-10-29 R2-S2: the known gaps on a free 16 GiB card, pinned, so a change can't widen or hide them: the
+    // clip lengths (1-200 frames) that run more frames at a time than the card's build of their size, so on CUDA with
+    // their reason (trt_serving). 1280x1080: 49-64 frames run all their frames at once, past the measured 48 (65-79 pick
+    // 48: the 80 window doesn't fit). The 1440p-class sizes, never measured, are kept within the 4K build's pixels x
+    // frames (2560x1440 15, 2560x1080 and 1920x1440 19) under the card's window of 24, so every clip longer than that
+    // runs on CUDA until a build of their size is measured (a GPU check with Marcy).
+    let (p1440, uw, p1920) = ((1536, 2560), (1152, 2560), (1536, 1920));
+    let cuda = |shape| -> Vec<usize> { (1..=200).filter(|&f| select_vram_profile(shape, f, 16.0, false, true).chunk.min(f) > w(shape, 16.0)).collect() };
+    let from = |a: usize, b: usize| (a..=b).collect::<Vec<_>>();
+    assert_eq!(cuda(mp16), from(49, 64));
+    assert_eq!((cuda(hd), cuda(k4)), (vec![], vec![]));
+    assert_eq!([w(p1440, 16.0), w(uw, 16.0), w(p1920, 16.0)], [15, 19, 19]);
+    assert_eq!([cuda(p1440), cuda(uw), cuda(p1920)], [from(16, 200), from(20, 200), from(20, 200)]);
     // the frames a job on that card runs per window (its window, capped at a short clip's length), whatever is free
-    // (free + own <= total), are never more: on 8 and 16 GB cards always, but for one known gap (a decision for Marcy):
-    // a short clip that runs all its frames at once, more than its size's measured build (1280x1080 clips of 49-79
-    // frames pick window 80 on 16 GB and run on CUDA, saying so). On 32 GB, past the measured builds (CUDA, trt_serving)
+    // (free + own <= total), are never more: on 8 and 16 GB cards always, but for the 1280x1080 gap above (a decision for
+    // Marcy). On 32 GB, past the measured builds (CUDA, trt_serving)
     // loop: NOT-WORTH — a test's three cards x three sizes x a few budgets and clip lengths
     for total in [8.0, 16.0, 32.0] {
         // loop: NOT-WORTH — as above
@@ -79,7 +91,7 @@ fn a_build_covers_the_card_not_the_moment() {
                 // loop: NOT-WORTH — as above
                 for frames in [3, 12, 30, 50, 1000] {
                     let ran = select_vram_profile(shape, frames, free, false, true).chunk.min(frames);
-                    let gap = ran > measured(shape) && (total > 16.0 || (ran == frames && shape == mp16 && (49..80).contains(&frames)));
+                    let gap = ran > measured(shape) && (total > 16.0 || (ran == frames && shape == mp16 && (49..=64).contains(&frames)));
                     assert!(ran <= built.chunk || gap, "{shape:?} {total} GiB card, {free} GiB free, {frames} frames");
                 }
             }
@@ -132,11 +144,14 @@ fn a_longer_range_is_used_only_when_its_memory_fits() {
     // more frames at a time than any build of the size is made for: CUDA, and no build offered (it would not serve it)
     let long = crate::tensorrt::bucket_for(hd.0, hd.1, 48, true).unwrap();
     let why = trt_serving(&long, &[], all, mp, true, Some((40.0, None))).unwrap_err();
-    assert!(why.contains("up to 24 frames at a time (the most measured to build)") && !why.starts_with(TRT_CARD_BUSY), "{why}");
+    assert!(
+        why.starts_with(&format!("{TRT_BUILD_CAP} 24 frames at a time (the longest build measured at this size)")) && !why.starts_with(TRT_CARD_BUSY),
+        "{why}"
+    );
     // a size never measured says so (1440p: within the 4K build)
     let qhd = crate::tensorrt::bucket_for(1536, 2560, 24, true).unwrap();
     let why = trt_serving(&qhd, &[], all, 1536.0 * 2560.0 / 1e6, true, Some((40.0, None))).unwrap_err();
-    assert!(why.contains("not measured at this size") && why.contains("this clip runs 24 at a time"), "{why}");
+    assert!(why.contains("this size isn't measured yet") && why.contains("this clip runs 24 at a time"), "{why}");
 }
 
 #[test]
@@ -183,8 +198,9 @@ fn a_job_uses_a_built_range_at_any_smaller_window() {
                 for frames in [3, 12, 50, 1000] {
                     let p = select_vram_profile(shape, frames, free, false, true);
                     let need = crate::tensorrt::bucket_for(shape.0, shape.1, p.chunk.min(frames), p.low_vram).unwrap();
-                    // (past the measured builds, CUDA: a 32 GiB card's HD 48, and on 16 GiB only the short-clip gap above)
-                    let short = need.t.1 == frames && shape == (1152, 1280) && (49..80).contains(&frames);
+                    // (past the measured builds, CUDA: a 32 GiB card's HD 48, and on 16 GiB only the 1280x1080 gap of 49-64 frames,
+                    // a_build_covers_the_card_not_the_moment)
+                    let short = need.t.1 == frames && shape == (1152, 1280) && (49..=64).contains(&frames);
                     let served = serving_range(&need, &built, all).is_some() || (need.t.1 > measured(shape) && (total > 16.0 || short));
                     assert!(served, "{shape:?} {total} GiB card, window {}, {frames} frames", p.chunk);
                 }

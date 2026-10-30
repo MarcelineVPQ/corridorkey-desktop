@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { ProgressBar } from "./ProgressBar";
 import { FolderOpen, RotateCcw, Zap } from "lucide-react";
 import { LOG_SHOWN, type Job, type TrtPrebuild } from "../shared/types";
-import { buildSteps, fixedByBuild, prebuildStep, trtSizeKey } from "../shared/trt";
+import { buildSteps, fixedByBuild, prebuildStep, TRT_BUILD_CAP, trtSizeKey } from "../shared/trt";
 import { duration, ranOnText, STAGE_ORDER, stageText, trtJobText } from "./format";
 import { MainBlock } from "./panel/SplitView";
 import { PathText } from "./PathText";
@@ -110,7 +110,7 @@ export function JobView({ job, prebuild, trtOn = false }: { job: Job; prebuild?:
             </div>
           )}
           {offer && !sizeKey && <p className="hint-text">Choose this size in Engine settings → TensorRT to build it in the background; until then clips of this size run on CUDA.</p>}
-          {notBuilt && tech!.fallbackReason && <p className="hint-text">Why: {tech!.fallbackReason}.</p>}
+          {(notBuilt || tech?.fallbackReason?.startsWith(TRT_BUILD_CAP)) && tech!.fallbackReason && <p className="hint-text">Why: {tech!.fallbackReason}.</p>}
           {notBuilt && prebuild?.status === "running" && steps && <ProgressBar label="TensorRT networks built" value={steps.done} max={steps.total} />}
         </MainBlock>
       )}

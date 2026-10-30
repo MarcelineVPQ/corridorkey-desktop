@@ -8,8 +8,10 @@
   the card's total memory: the same every time on one card. Its working memory comes from the card's total too. No
   build goes past what was measured to build for its size: 4K up to 8 frames and HD (1920×1080) up to 24 built and
   ran on an RTX 5080 (16 GB) on 2026-10-25, and 1280×1080 up to 48 built on 2026-10-24, so on that card every clip
-  of those sizes runs on TensorRT, except a 1280×1080 clip of 49 to 79 frames (it runs all its frames at once, more
-  than the 48 measured, so it runs on CUDA and says so). Other sizes stay within the nearest measured build (not measured themselves). A
+  of those sizes runs on TensorRT, except a 1280×1080 clip of 49 to 64 frames (it runs all its frames at once, more
+  than the 48 measured, so it runs on CUDA and says so). Other sizes stay within the nearest measured build (not
+  measured themselves); on a 16 GB card with nothing else on it that means 2560×1440 clips longer than 15 frames, and
+  2560×1080 and 1920×1440 clips longer than 19, run on CUDA (and say so) until a build of their size is measured. A
   clip that runs more frames at a time than its size's build (on any card where its automatic window is longer, such
   as a 32 GB card, which is not measured) runs on CUDA and says so; a job's window is never shortened to fit a build.
   A job uses a size's engines at any window up to the one they were built for, but only when the engines' own memory

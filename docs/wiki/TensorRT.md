@@ -43,9 +43,11 @@ inside a job:
 - **One build per size covers your card.** Each build covers every temporal window a job of that size can pick on
   your card (worked out from the card's total memory, never from what happens to be free while it builds), up to what
   was measured to build for that size: 4K 8 frames and HD (1920×1080) 24, built and run on an RTX 5080 16 GB on
-  2026-10-25, and 1280×1080 48, built on 2026-10-24. On a 16 GB card that is every window those sizes pick, except a 1280×1080 clip of 49 to 79 frames (it runs all
+  2026-10-25, and 1280×1080 48, built on 2026-10-24. On a 16 GB card that is every window those sizes pick, except a 1280×1080 clip of 49 to 64 frames (it runs all
   its frames at once, more than the 48 measured, so it runs on CUDA and says so). Other sizes
-  stay within the nearest measured build, and are not measured themselves. A job's window is never shortened to fit a
+  stay within the nearest measured build, and are not measured themselves: on a 16 GB card with nothing else on it,
+  2560×1440 clips longer than 15 frames, and 2560×1080 and 1920×1440 clips longer than 19, run on CUDA (and say so)
+  until a build of their size is measured. A job's window is never shortened to fit a
   build: a clip that runs more frames at a time than its size's build (a longer automatic window, as on a 32 GB card,
   which is not measured) runs on CUDA and says so.
 - **A busy card runs on CUDA.** A job uses its size's engines only when their own memory need fits what it has;

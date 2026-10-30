@@ -2,7 +2,7 @@
 // isn't known yet the UI says so instead of guessing (rule 1).
 import type { ClipInfo, Job, JobTech, Stage } from "../shared/types";
 import { CANT_READ_CLIP } from "../shared/texts";
-import { fixedByBuild, PIECE_NAMES, rangeText } from "../shared/trt";
+import { fixedByBuild, PIECE_NAMES, rangeText, TRT_BUILD_CAP } from "../shared/trt";
 
 export function clipFacts(c: ClipInfo): string {
   const parts: string[] = [];
@@ -90,6 +90,8 @@ export function trtJobText(t: JobTech): string | null {
   if (!t.tensorrtRequested) return null;
   // one a build fixes, in plain words (the engine's reason goes on the quieter line under it, JobView)
   if (fixedByBuild(t.fallbackReason)) return "TensorRT isn't built for this clip yet, so this run used CUDA";
+  // past its size's measured build: plain words, the numbers on the quieter line (JobView; review 2026-10-29 R2-S1)
+  if (t.fallbackReason?.startsWith(TRT_BUILD_CAP)) return "TensorRT isn't set up for clips this long at this size yet, so this run used CUDA";
   if (t.fallbackReason) return `not used: ${t.fallbackReason}`;
   // loop: NOT-WORTH — at most five networks
   const fell = Object.entries(t.fallbacks).map(([k, why]) => `${PIECE_NAMES[k] ?? k} on CUDA (${why})`);

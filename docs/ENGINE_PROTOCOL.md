@@ -271,8 +271,8 @@ The `corridorkey` command line ([CLI.md](CLI.md)) runs the same jobs without thi
   longer window only when that window's estimated peak fits its budget (its `estimate_gb` is then that window's);
   otherwise CUDA, `fallback_reason` "the graphics card is busy: …", or "this job's graphics memory limit (N GB) is too
   small …" when `vram_budget_gb` is below the free memory. A window longer than its size's build (`build_cap`) runs on
-  CUDA with "TensorRT for this size is built for up to N frames at a time (the most measured to build | not measured
-  at this size: …); this clip runs M at a time, so this run used CUDA"; the window is never shortened to fit. After
+  CUDA with "TensorRT for this size is built for up to N frames at a time (the longest build measured at this size |
+  this size isn't measured yet, …); this clip runs M at a time, so this run used CUDA"; the window is never shortened to fit. After
   the switch to CUDA on an out-of-memory, a `memory` reply gives CUDA's `estimate_gb` at that window.
 - A request the engine can't read is answered with
   `{"type":"error","code":"bad-request","message":"..."}` and the engine keeps

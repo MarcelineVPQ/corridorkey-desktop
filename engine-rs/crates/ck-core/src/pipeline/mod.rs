@@ -210,6 +210,10 @@ pub(crate) const TRT_CARD_BUSY: &str = "the graphics card is busy";
 /// for the engines that would serve it (review 2026-10-29 N-S1): no build fixes that either.
 pub(crate) const TRT_LIMIT_TOO_SMALL: &str = "this job's graphics memory limit";
 
+/// How the `fallback_reason` starts for a job that runs more frames at a time than any build of its size is made for
+/// (tensorrt::build_cap; review 2026-10-29 R2-S1): the app's main line says it in plain words, this on the line under it.
+pub(crate) const TRT_BUILD_CAP: &str = "TensorRT for this size is built for up to";
+
 /// The `fallback_reason` of a TensorRT job that ran out of graphics memory before any frame was written: it goes on
 /// on CUDA at the same window (attempts), once.
 pub(crate) const TRT_OUT_OF_MEMORY: &str = "the graphics card ran out of memory with TensorRT, so this run used CUDA";
@@ -259,11 +263,12 @@ fn trt_serving(
     }
     let (cap, measured) = crate::tensorrt::build_cap(need);
     if need.t.1 > cap {
-        let how = if measured { "the most measured to build" } else { "not measured at this size: kept within the nearest measured build" };
-        return Err(format!(
-            "TensorRT for this size is built for up to {cap} frames at a time ({how}); this clip runs {} at a time, so this run used CUDA",
-            need.t.1
-        ));
+        let how = if measured {
+            "the longest build measured at this size"
+        } else {
+            "this size isn't measured yet, so it stays within the nearest measured size's build"
+        };
+        return Err(format!("{TRT_BUILD_CAP} {cap} frames at a time ({how}); this clip runs {} at a time, so this run used CUDA", need.t.1));
     }
     Ok(None)
 }

@@ -27,6 +27,9 @@ export const TRT_NOT_BUILT = "TensorRT for this resolution range isn't built yet
 // how the engine's `fallback_reason` starts for a job whose size is built only for shorter windows (pipeline/mod.rs
 // trt_other_window; ranges built before builds covered the whole card, 1.0.0-dev.7)
 export const TRT_OTHER_WINDOW = "TensorRT for this resolution is built for a window of";
+// how the engine's `fallback_reason` starts for a job that runs more frames at a time than any build of its size is
+// made for (pipeline/mod.rs TRT_BUILD_CAP): no build fixes it until a longer build is measured (review 2026-10-29 R2-S1)
+export const TRT_BUILD_CAP = "TensorRT for this size is built for up to";
 
 /**
  * Whether building the clip's size fixes a job's TensorRT fallback: its size isn't built, or only for shorter windows,
