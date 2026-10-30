@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0-dev.7 (draft, unreleased)
+## 1.0.0-dev.7
 
 - **One TensorRT build per size now covers your card.** A build used to size itself from the graphics memory free at
   that moment, so a size built while another program used the card covered only short windows, and later clips of

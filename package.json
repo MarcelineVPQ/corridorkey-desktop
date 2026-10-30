@@ -1,7 +1,7 @@
 {
   "name": "corridorkey-desktop",
   "private": true,
-  "version": "1.0.0-dev.6",
+  "version": "1.0.0-dev.7",
   "type": "module",
   "description": "Free desktop app for CorridorKey 2.0, Corridor Digital's AI green-screen keyer (Rust + ONNX Runtime).",
   "main": "out/main/boot.js",
