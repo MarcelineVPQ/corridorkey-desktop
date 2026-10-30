@@ -221,8 +221,7 @@ didn't ask for TensorRT; "not used" means the engine couldn't use it for this jo
 | --- | --- |
 | not asked: TensorRT is off (Engine settings) | Switch it on in Engine settings, TensorRT. |
 | not asked: TensorRT's parts weren't installed when the job started (Engine settings, TensorRT) | Finish TensorRT's download. |
-| not used: TensorRT for this resolution range isn't built yet | Jobs never wait on a build. Let the background build finish, or press **Build for this clip's size**. |
-| not used: TensorRT for this resolution is built for a window of `<n>` frames; this job's automatic window is `<m>` | A range is used only at the window it was built for (see [TensorRT](TensorRT#a-range-is-used-only-at-the-window-it-was-built-for)). A short clip or a memory limit can change the window. |
+| not built for this clip's size yet, so this run used CUDA | Jobs never wait on a build. Press **Build it now** on the clip's page (or let the background build finish); the next run of the clip uses it. The line under it gives the engine's reason: the size isn't built, or it was built by an earlier version for shorter windows only (see [TensorRT](TensorRT#windows)). |
 | not used: `<w>x<h>` is outside the TensorRT ranges (more than 4096 px a side, or a larger frame than 4096x2176, runs on CUDA) | Open gate, 6K and larger frames always run on CUDA. |
 | not used: this ONNX Runtime has no TensorRT provider | Reinstall TensorRT's parts (Engine settings, TensorRT). |
 | not used: the models folder has no TensorRT-ready models | The TensorRT models aren't in the models folder in use; reinstall TensorRT's parts. |

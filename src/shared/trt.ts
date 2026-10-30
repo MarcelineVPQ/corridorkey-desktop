@@ -24,6 +24,21 @@ export const PIECE_NAMES: Record<string, string> = { cradio: "C-RADIO", moge: "M
 
 // the engine's `fallback_reason` for a job whose range isn't built yet (pipeline/mod.rs TRT_NOT_BUILT)
 export const TRT_NOT_BUILT = "TensorRT for this resolution range isn't built yet";
+// how the engine's `fallback_reason` starts for a job whose size is built only for shorter windows (pipeline/mod.rs
+// trt_other_window; ranges built before builds covered the whole card, 1.0.0-dev.7)
+export const TRT_OTHER_WINDOW = "TensorRT for this resolution is built for a window of";
+
+/** Whether building the clip's size fixes a job's TensorRT fallback (its size isn't built, or only for shorter windows). */
+export const fixedByBuild = (reason: string | null): boolean => reason === TRT_NOT_BUILT || (reason?.startsWith(TRT_OTHER_WINDOW) ?? false);
+
+/** A size's build time as measured on this card (the app's record of an earlier build of it), null when none was. */
+export function measuredBuildText(sizeKey: string, onDisk: readonly { range: string; buildSeconds: number | null }[]): string | null {
+  // loop: NOT-WORTH — a few ranges on disk, per render of one clip's page
+  const secs = onDisk.find((d) => d.range.startsWith(`${sizeKey}_t`) && d.buildSeconds !== null)?.buildSeconds;
+  if (!secs) return null;
+  const min = Math.max(1, Math.round(secs / 60));
+  return `about ${min} minute${min === 1 ? "" : "s"}, measured here`;
+}
 
 // The same measurement, in words: one run each on an RTX 5080, model set onnx.4; other cards and sizes weren't measured.
 export const TRT_SPEED = "Measured on an RTX 5080: a clip takes 0.63× CUDA's time at 1280×1080 and 0.76× at 4K, with about 1.5-2 GB more graphics memory.";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gpuReadoutWanted, isOurs, otherGpuUsers, parentPid, parseApps, parseGpuLine, processName, readAmdGpu } from "../../electron/main/gpu";
+import { gpuReadoutWanted, isOurs, otherGpuUsers, ownPids, parentPid, parseApps, parseGpuLine, processName, readAmdGpu } from "../../electron/main/gpu";
 
 describe("the app's own GPU processes", () => {
   it("counts the TensorRT builder the engine started as ours, not as another program", () => {
@@ -13,6 +13,23 @@ describe("the app's own GPU processes", () => {
     expect(isOurs(777, engine, stat)).toBe(false);
     expect(isOurs(888, engine, stat)).toBe(false);
     expect(isOurs(1961206, new Set(), stat)).toBe(false);
+  });
+
+  it("never lists the app's own processes as other programs (1.0.0-dev.7: its Electron GPU process showed as corridorkey-desktop — 0.6 GiB)", () => {
+    // the app 4242 (its parent the AppImage runtime 4000); its GPU process 4300; the engine 50 and its builder 51
+    const parents: Record<number, number> = { 4300: 4242, 50: 4242, 51: 50, 4242: 4000, 4000: 1, 60: 1 };
+    const stat = (pid: number) => (parents[pid] ? `${pid} (x) S ${parents[pid]} ` : "");
+    // by PID: the app itself, the engine, and every process Electron reports for the app (app.getAppMetrics)
+    const ours = ownPids(50, [{ pid: 4242 }, { pid: 4300 }], 4242);
+    expect([...ours].sort((a, b) => a - b)).toEqual([50, 4242, 4300]);
+    expect(ownPids(null, [], 4242)).toEqual(new Set([4242]));
+    // the whole tree below the app counts, not only direct children (Linux; elsewhere Electron's list above)
+    const tree = new Set([4242]);
+    expect(isOurs(4300, tree, stat)).toBe(true);
+    expect(isOurs(51, tree, stat)).toBe(true);
+    // the app's own parent and an unrelated program are not ours
+    expect(isOurs(4000, tree, stat)).toBe(false);
+    expect(isOurs(60, tree, stat)).toBe(false);
   });
 });
 
@@ -97,7 +114,7 @@ describe("other programs on the card, for the background TensorRT build", () => 
         processes: procs.map((p) => ({ pid: p.pid, name: p.name, usedMb: p.usedMb, ours: isOurs(p.pid, ours, () => `${p.pid} (x) S ${p.parent} `) })),
       };
     };
-    expect(await otherGpuUsers(read, 4242)).toEqual(["Sonata's word timing"]);
+    expect(await otherGpuUsers(read, new Set([4242]))).toEqual(["Sonata's word timing"]);
     expect([...asked!]).toEqual([4242]);
   });
 });

@@ -3,14 +3,14 @@
 // (readouts are always shown, never folded).
 import { useEffect, useState } from "react";
 import { ProgressBar } from "./ProgressBar";
-import { FolderOpen, RotateCcw } from "lucide-react";
-import { LOG_SHOWN, type Job, type TrtPrebuild } from "../shared/types";
-import { buildSteps, prebuildStep, TRT_NOT_BUILT } from "../shared/trt";
+import { FolderOpen, RotateCcw, Zap } from "lucide-react";
+import { LOG_SHOWN, type Job, type TrtPrebuild, type TrtState } from "../shared/types";
+import { buildSteps, fixedByBuild, measuredBuildText, prebuildStep, trtSizeKey } from "../shared/trt";
 import { duration, ranOnText, STAGE_ORDER, stageText, trtJobText } from "./format";
 import { MainBlock } from "./panel/SplitView";
 import { PathText } from "./PathText";
 
-export function JobView({ job, prebuild }: { job: Job; prebuild?: TrtPrebuild }) {
+export function JobView({ job, prebuild, onDisk }: { job: Job; prebuild?: TrtPrebuild; onDisk?: TrtState["onDisk"] }) {
   // A 1 s tick for the elapsed clock, only while this job runs and the page is visible (rule 3).
   const [, tick] = useState(0);
   useEffect(() => {
@@ -31,7 +31,18 @@ export function JobView({ job, prebuild }: { job: Job; prebuild?: TrtPrebuild })
   // the tile says the version; its folder goes on its own line, shortened like every path (a full path overflowed the tile)
   const modelSet = tech && (tech.modelSet || tech.modelsDir) ? (tech.modelSet ?? "no version (its folder has no manifest.json)") : null;
   const steps = prebuild ? buildSteps(prebuild.ranges) : null;
-  const notBuilt = tech?.fallbackReason === TRT_NOT_BUILT;
+  // no TensorRT engine served this clip, and building its size fixes that (1.0.0-dev.7: the tile offers it)
+  const notBuilt = Boolean(tech?.tensorrtRequested && fixedByBuild(tech.fallbackReason));
+  const { width, height } = job.clip;
+  const sizeKey = width && height && job.options.modelScale === 1 ? trtSizeKey(width, height) : null;
+  const buildTime = sizeKey ? measuredBuildText(sizeKey, onDisk ?? []) : null;
+  // built by the background build since (this session): the next run uses it
+  // loop: HOT-PATH-OK — the few chosen sizes per render
+  const builtSince = Boolean(sizeKey && prebuild?.ranges.some((r) => trtSizeKey(r.width, r.height) === sizeKey && r.state === "done" && r.range !== null));
+  // asked for while the queue runs: the build waits for the queue (paused)
+  // loop: HOT-PATH-OK — the few chosen sizes per render
+  const queued = Boolean(sizeKey && prebuild?.status === "paused" && prebuild.ranges.some((r) => trtSizeKey(r.width, r.height) === sizeKey && r.state === "todo"));
+  const offer = notBuilt && prebuild?.status !== "running" && !builtSince && !queued;
 
   return (
     <>
@@ -70,13 +81,24 @@ export function JobView({ job, prebuild }: { job: Job; prebuild?: TrtPrebuild })
               Model set folder: <PathText path={tech.modelsDir} />
             </p>
           )}
-          {notBuilt && (
-            <p className="hint-text">
-              {prebuild?.status === "running"
-                ? `It builds in the background now: ${prebuildStep(prebuild.ranges) ?? "starting"}. Clips after it run on TensorRT.`
-                : "Choose this size in Engine settings → TensorRT to build it in the background; until then clips of this size run on CUDA."}
-            </p>
+          {notBuilt && prebuild?.status === "running" && (
+            <p className="hint-text">{`It builds in the background now: ${prebuildStep(prebuild.ranges) ?? "starting"}. Clips after it run on TensorRT.`}</p>
           )}
+          {notBuilt && builtSince && prebuild?.status !== "running" && <p className="hint-text">Built for this size now: the next run of this clip uses TensorRT.</p>}
+          {notBuilt && queued && <p className="hint-text">TensorRT for this size builds in the background once the queue stops.</p>}
+          {offer && sizeKey && width && height && (
+            <div className="gap-top">
+              {/* the same background build as Engine settings → TensorRT, for this clip's size */}
+              <button type="button" className="btn small" onClick={() => void window.ck.trtSize("build", { label: job.clip.name, width, height })}>
+                <Zap size={14} aria-hidden /> Build it now
+              </button>
+              <p className="hint-text">
+                Builds TensorRT for {width}×{height} in the background, once{buildTime ? ` (${buildTime})` : ""}. The next run of this clip uses it.
+              </p>
+            </div>
+          )}
+          {offer && !sizeKey && <p className="hint-text">Choose this size in Engine settings → TensorRT to build it in the background; until then clips of this size run on CUDA.</p>}
+          {notBuilt && <p className="hint-text">Why: {tech!.fallbackReason}.</p>}
           {notBuilt && prebuild?.status === "running" && steps && <ProgressBar label="TensorRT networks built" value={steps.done} max={steps.total} />}
         </MainBlock>
       )}

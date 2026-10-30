@@ -96,7 +96,7 @@ pub(crate) const MARGIN_SCALE: f64 = 1.1;
 pub(crate) const MARGIN_GB: f64 = 0.3;
 /// The windows the automatic choice tries, longest first (the upstream runtime's set), the normal mode only at
 /// AUTO_NORMAL. The table has more windows (16, 56, 64) to bound manual windows and short clips.
-const AUTO_WINDOWS: [usize; 7] = [80, 48, 24, 8, 4, 2, 1];
+pub(crate) const AUTO_WINDOWS: [usize; 7] = [80, 48, 24, 8, 4, 2, 1];
 const AUTO_NORMAL: [usize; 4] = [8, 24, 48, 80];
 
 /// Column `i`'s peak at `megapixels`: the next measured size at or above (the smallest's below them),

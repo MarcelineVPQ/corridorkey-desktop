@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.0-dev.7 (draft, unreleased)
+
+- **One TensorRT build per size now covers your card.** A build used to size itself from the graphics memory free at
+  that moment, so a size built while another program used the card covered only short windows, and later clips of
+  that size ran on CUDA. Each build now covers every window a job of that size can pick on your card, worked out from
+  the card's total memory: the same every time on one card, and more on a card with more memory (on fake 16 GB and
+  32 GB cards in the tests: HD up to 24 and 56 frames, 4K up to 8 and 16). A job now uses a size's engines at any
+  window up to the one they were built for. Sizes built by an earlier version keep working where their window
+  reaches; for the rest, see the next point. TensorRT is on Linux today, Windows coming.
+- **A clip that ran without TensorRT offers to build it.** When no TensorRT engine fits a clip, its page now says
+  "not built for this clip's size yet, so this run used CUDA" with a **Build it now** button: one click starts the
+  same background build Engine settings, TensorRT runs, for that clip's size, with how long it took on this card
+  when the app has measured it. The next run of the clip uses it.
+- **The app no longer lists itself as another program using the graphics card.** The notice showed CorridorKey's own
+  graphics process ("corridorkey-desktop — 0.6 GiB"); the app's own processes are now left out, by process ID.
+
 ## 1.0.0-dev.6
 
 - **TensorRT no longer says "built" for engines it can't use.** Engine settings, TensorRT called a size built whenever

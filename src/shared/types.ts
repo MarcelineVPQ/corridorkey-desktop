@@ -737,7 +737,8 @@ export interface CorridorKeyApi {
   // the background TensorRT build (Engine settings, TensorRT): start it (or again), or stop it
   trtPrebuild(action: "start" | "stop"): Promise<void>;
   // choose a size to build for (it builds now), or remove one: its range's built engines are deleted (asked first)
-  trtSize(action: "add" | "remove", size: TrtSize): Promise<void>;
+  // or build it now from a job's TensorRT tile ("build": as Build now, also where a range of it is built for shorter windows)
+  trtSize(action: "add" | "remove" | "build", size: TrtSize): Promise<void>;
   measureStorage(): Promise<void>;
   // asks for confirmation first (a system dialog); refused while the queue or the install runs
   removeStorage(id: StorageItem["id"]): Promise<void>;

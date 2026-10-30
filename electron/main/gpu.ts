@@ -94,13 +94,30 @@ export function parentPid(stat: string): number | null {
 }
 
 /**
- * Whether a compute process is the app's own: the engine, or a child it started (the TensorRT engine builder,
- * ck-trt-build, holds the card while it builds; Linux reads the parent from /proc, elsewhere the engine alone counts).
+ * The app's own processes by PID (1.0.0-dev.7: its Electron GPU process was listed as another program,
+ * "corridorkey-desktop — 0.6 GiB"): this process, the queue's engine, and every process Electron reports for the app
+ * (`app.getAppMetrics()`: the GPU, renderer and utility processes, on every system).
+ */
+export function ownPids(enginePid: number | null | undefined, appMetrics: readonly { pid: number }[], self: number = process.pid): Set<number> {
+  // loop: NOT-WORTH — the app's few processes, every GPU_POLL_MS only while a job runs and the window is shown
+  return new Set([self, ...(enginePid ? [enginePid] : []), ...appMetrics.map((m) => m.pid)]);
+}
+
+/** How far up isOurs follows a process's parents (the engine's builder sits two below the app). */
+const OURS_DEPTH = 8;
+
+/**
+ * Whether a compute process is the app's own: one of `ourPids`, or anywhere below one (the engine's TensorRT builder,
+ * ck-trt-build, holds the card while it builds; Linux reads the parents from /proc, elsewhere `ourPids` alone counts).
  */
 export function isOurs(pid: number, ourPids: Set<number>, stat: (pid: number) => string = procStat): boolean {
-  if (ourPids.has(pid)) return true;
-  const parent = parentPid(stat(pid));
-  return parent !== null && ourPids.has(parent);
+  let p: number | null = pid;
+  // loop: NOT-WORTH — at most OURS_DEPTH /proc reads per compute process (a few), as procStat's callers
+  for (let i = 0; i <= OURS_DEPTH && p !== null && p > 1; i++) {
+    if (ourPids.has(p)) return true;
+    p = parentPid(stat(p));
+  }
+  return false;
 }
 
 function procStat(pid: number): string {
@@ -197,7 +214,7 @@ function amdSensors(dev: string, read: (p: string) => string, ls: (p: string) =>
  * goes on, and was taken for another program (bug hunt 2026-10-26 P6: "corridorkey-engine is using the graphics card",
  * then a minute's wait).
  */
-export async function otherGpuUsers(read: (ours: Set<number>) => Promise<GpuInfo> = readGpu, appPid: number = process.pid): Promise<string[]> {
+export async function otherGpuUsers(read: (ours: Set<number>) => Promise<GpuInfo> = readGpu, ours: Set<number> = ownPids(null, [])): Promise<string[]> {
   // loop: NOT-WORTH — a few compute processes, once per automatic start
-  return (await read(new Set([appPid]))).processes.filter((p) => !p.ours && p.usedMb >= OTHER_GPU_USER_MB).map((p) => p.name);
+  return (await read(ours)).processes.filter((p) => !p.ours && p.usedMb >= OTHER_GPU_USER_MB).map((p) => p.name);
 }

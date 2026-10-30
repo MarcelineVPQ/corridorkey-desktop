@@ -202,7 +202,8 @@ export interface PrebuildDeps {
 /** A range's id in the engine messages: its size range ("trt-h1024-1280_w1792-2176"), one per chosen size. */
 export const rangeId = (r: { width: number; height: number }) => `trt-${trtSizeKey(r.width, r.height)}`;
 
-const fresh = (built: readonly string[], sizes: readonly TrtSize[]): PrebuildRange[] =>
+// `again`: size keys a job asked to build (buildSize), built even where a range of that size is (for shorter windows)
+const fresh = (built: readonly string[], sizes: readonly TrtSize[], again: ReadonlySet<string> = new Set()): PrebuildRange[] =>
   sizes
     // loop: NOT-WORTH — the few chosen sizes
     .filter((s) => trtSizeKey(s.width, s.height) !== null)
@@ -210,7 +211,7 @@ const fresh = (built: readonly string[], sizes: readonly TrtSize[]): PrebuildRan
     .map((s) => {
       const key = trtSizeKey(s.width, s.height);
       // loop: NOT-WORTH — a few built ranges
-      const done = built.some((k) => k.startsWith(`${key}_t`));
+      const done = !again.has(key!) && built.some((k) => k.startsWith(`${key}_t`));
       return { label: s.label, width: s.width, height: s.height, state: done ? "done" : "todo", piece: null, range: null, fallbacks: {}, error: null };
     });
 
@@ -226,6 +227,8 @@ export class Prebuilder {
   // the next look at the card while another program uses it (blocked)
   private recheck: ReturnType<typeof setTimeout> | null = null;
   private now: () => number;
+  // the sizes a job's Build it now asked for (size keys), until their build ends
+  private again = new Set<string>();
 
   constructor(private readonly deps: PrebuildDeps) {
     this.now = deps.now ?? Date.now;
@@ -248,10 +251,11 @@ export class Prebuilder {
    * only the list changes: a size chosen meanwhile is built after the others, a range built or building keeps its state.
    */
   refresh(): void {
-    const next = fresh(this.deps.built(), this.deps.sizes());
+    const next = fresh(this.deps.built(), this.deps.sizes(), this.again);
     if (this.proc) {
       // loop: NOT-WORTH — the few chosen sizes, and the few in the list
-      const ranges = next.map((n) => this.state.ranges.find((r) => rangeId(r) === rangeId(n) && r.state !== "todo") ?? n);
+      // (a size a job asked to build again, found built in the cache but not built by this run, is built after the others)
+      const ranges = next.map((n) => this.state.ranges.find((r) => rangeId(r) === rangeId(n) && r.state !== "todo" && !(n.state === "todo" && r.state === "done" && r.range === null)) ?? n);
       this.state = { ...this.state, ranges };
       return;
     }
@@ -314,6 +318,17 @@ export class Prebuilder {
       return this.set({ status: "error", startedAt: null, note: `${ENGINE_FAILED}: ${(e as Error).message}` });
     }
     if (this.proc === proc) this.next();
+  }
+
+  /**
+   * A job's Build it now (1.0.0-dev.7): build this size (a chosen one, `sizeKey`) as Build now does, also where a range
+   * of it is built already (for shorter windows, before builds covered the card): the engine builds the range that
+   * covers every window a job on this card picks, or answers at once that it is built.
+   */
+  buildSize(sizeKey: string): Promise<void> {
+    this.again.add(sizeKey);
+    this.refresh();
+    return this.start(true);
   }
 
   /** The queue starts: the build gives way (the engine is killed; it goes on when the queue stops). */
@@ -404,6 +419,7 @@ export class Prebuilder {
       // loop: NOT-WORTH — at most five networks
       for (const [k, why] of Object.entries((m.fallbacks ?? {}) as Record<string, unknown>)) fallbacks[k] = String(why);
       Object.assign(r, { state: "done", piece: null, range: typeof m.range === "string" ? m.range : null, fallbacks });
+      this.again.delete(trtSizeKey(r.width, r.height)!);
       // what the five networks' builds took here, recorded only when this run built all five (a build resumed after a
       // pause, or one that reused networks, isn't the whole time)
       const built = (m.built_s ?? {}) as Record<string, unknown>;
@@ -418,6 +434,7 @@ export class Prebuilder {
     }
     if (m.type === "error") {
       Object.assign(r, { state: "failed", piece: null, error: String(m.message ?? m.code) });
+      this.again.delete(trtSizeKey(r.width, r.height)!);
       return this.next();
     }
   }

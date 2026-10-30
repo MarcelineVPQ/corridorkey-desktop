@@ -170,6 +170,9 @@ struct TrtRange {
     built: bool,
 }
 
+/// A TensorRT job's engines: their folder, whether they are built, and the range they are built for (job_key).
+type TrtJob = (PathBuf, bool, crate::tensorrt::Bucket);
+
 /// The `fallback_reason` of a `tensorrt_build: false` job whose range isn't built yet.
 pub(crate) const TRT_NOT_BUILT: &str = "TensorRT for this resolution range isn't built yet";
 
@@ -197,6 +200,37 @@ fn other_windows(b: &crate::tensorrt::Bucket, names: &[String], built: impl Fn(&
     out.sort_unstable();
     out.dedup();
     out
+}
+
+/// The smallest built range among the folders `names` whose engines run `need`'s shapes (Bucket::serves: a range built
+/// for windows 1..N serves every window up to N), where `built` says a folder is built.
+fn serving_range(need: &crate::tensorrt::Bucket, names: &[String], built: impl Fn(&str) -> bool) -> Option<crate::tensorrt::Bucket> {
+    names
+        .iter()
+        // loop: NOT-WORTH — the few range folders of one card, once per job
+        .filter_map(|n| crate::tensorrt::Bucket::from_key(n).filter(|b| b.serves(need) && built(n)))
+        .min_by_key(|b| (b.t.1, b.f.1))
+}
+
+/// The window a `trt_build` covers (1.0.0-dev.7: the card, not the moment): the longest stage-1 window a TensorRT job
+/// of this size can run on this card, with the card's TOTAL memory as the budget (the most a job can ever see: free
+/// plus its own), so the range serves every window a job of this size picks and every build on one card covers the
+/// same. That is the automatic window at that budget, or longer where a clip shorter than a longer automatic window
+/// runs only its frames and they fit (a 12-frame 4K clip on a 32 GB card picks 24 and runs 12). Never the memory free
+/// while it builds (a build during other GPU use came out at window 2, and jobs at window 4 ran on CUDA). `cap`: a
+/// graphics-memory limit, read as a job reads it (a job under it never picks more).
+pub(crate) fn trt_build_profile(shape: (usize, usize), frames: usize, total_gb: f64, cap: Option<f64>) -> crate::vram::Profile {
+    let budget = cap.map(|c| total_gb.min(c)).unwrap_or(total_gb);
+    let limited = cap.is_some().then_some(budget);
+    let auto = select_vram_profile(shape, frames, budget, cap.is_some(), true);
+    let mp = (shape.0 * shape.1) as f64 / 1e6;
+    let longest = crate::vram::AUTO_WINDOWS[0].min(frames);
+    // loop: NOT-WORTH — at most 80 table lookups, once per build
+    (auto.chunk + 1..=longest)
+        .rev()
+        .map(|t| crate::vram::Profile { chunk: t, stride: (t / 2).max(1), low_vram: true, estimate_gb: estimate_peak_vram_gb(mp, t, true, limited) })
+        .find(|p| p.fits(budget))
+        .unwrap_or(auto)
 }
 
 /// A PNG file's bit depth from its header (IHDR's depth byte), None for anything else or an unreadable file.
@@ -844,7 +878,7 @@ impl Pipeline<OrtLoader> {
             // TensorRT, CUDA's own window included, instead of building inside the job
             if tensorrt && !job.tensorrt_build {
                 let p = select_vram_profile((sh, sw), t_all, budget, limited, true);
-                let why = match self.trt_range((sh, sw), p.chunk, p.low_vram) {
+                let why = match self.trt_range((sh, sw), p.chunk, p.low_vram, t_all) {
                     Ok(r) if r.built => None,
                     Ok(r) => {
                         let other = self.trt_built_windows(&r);
@@ -893,13 +927,14 @@ impl Pipeline<OrtLoader> {
             }
             (self.coreml_key(&base_key, (sh, sw), chunk.min(t_all), low_vram, &self.loader.rt.cfg, sink)?, None)
         } else {
-            self.job_key(job, &base_key, (sh, sw), chunk, low_vram, trt_skip.as_deref(), sink)?
+            self.job_key(job, &base_key, (sh, sw), (chunk, t_all), low_vram, trt_skip.as_deref(), sink)?
         };
         if key.provider == Provider::TensorRt {
             if trt_info.as_ref().is_some_and(|i| !i.1) {
                 sink.log("  TensorRT: optimizing for this resolution range (a one-time build; later clips in this range reuse it)");
             }
-            let bucket = crate::tensorrt::bucket_for(sh, sw, chunk, low_vram).ok_or_else(|| Error::engine("no TensorRT range".into()))?;
+            // the range job_key chose: the job's own, or a built one that serves its windows (trt_range)
+            let bucket = trt_info.as_ref().map(|i| i.2).ok_or_else(|| Error::engine("no TensorRT range".into()))?;
             self.trt_prepare(&key, &bucket, sink)?;
         }
         let trt_dir = key.trt_cache.clone();
@@ -1042,7 +1077,9 @@ impl Pipeline<OrtLoader> {
     /// The TensorRT range a padded shape (H, W) and window fall in, its engines' folder, and whether it is built
     /// (every network with a TensorRT-ready export built, or remembered as failing to build). Err: why TensorRT
     /// can't take it (the `fallback_reason`). Needs the CUDA provider with TensorRT (the caller checks).
-    fn trt_range(&self, (sh, sw): (usize, usize), window: usize, low_vram: bool) -> Result<TrtRange, String> {
+    /// Not built at the job's own window: the smallest built range of the size that serves the windows the job really
+    /// runs (`window` capped at the clip's `frames`; serving_range) is used instead.
+    fn trt_range(&self, (sh, sw): (usize, usize), window: usize, low_vram: bool, frames: usize) -> Result<TrtRange, String> {
         let Some(bucket) = crate::tensorrt::bucket_for(sh, sw, window, low_vram) else {
             return Err(format!(
                 "{sw}x{sh} is outside the TensorRT ranges (more than {} px a side, or a larger frame than 4096x2176, runs on CUDA)",
@@ -1062,8 +1099,18 @@ impl Pipeline<OrtLoader> {
         let root = self.loader.rt.cfg.trt_cache.clone();
         let card_dir = crate::tensorrt::cache_dir(&root, &gpu.name, &gpu.driver, &trt_ver, &self.loader.rt.ort_version, "fp16");
         let dir = card_dir.join(bucket.key());
-        let built = self.trt_dir_built(&dir);
-        Ok(TrtRange { bucket, card_dir, dir, built })
+        if self.trt_dir_built(&dir) {
+            return Ok(TrtRange { bucket, card_dir, dir, built: true });
+        }
+        let need = crate::tensorrt::bucket_for(sh, sw, window.min(frames).max(1), low_vram).unwrap_or(bucket);
+        // loop: NOT-WORTH — the few range folders of one card, once per job
+        let names: Vec<String> =
+            std::fs::read_dir(&card_dir).map(|e| e.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
+        if let Some(b) = serving_range(&need, &names, |n| self.trt_dir_built(&card_dir.join(n))) {
+            let dir = card_dir.join(b.key());
+            return Ok(TrtRange { bucket: b, card_dir, dir, built: true });
+        }
+        Ok(TrtRange { bucket, card_dir, dir, built: false })
     }
 
     /// Whether every network with a TensorRT-ready export is built in `dir` (or remembered as failing to build).
@@ -1115,7 +1162,7 @@ impl Pipeline<OrtLoader> {
     }
 
     /// The networks' key for this job and, for TensorRT, (cache folder, already built). Sends the
-    /// `provider` reply. `shape`: the clip's model shape (H, W); `window`: the job's window; `skip`: why this
+    /// `provider` reply. `shape`: the clip's model shape (H, W); then the job's window and the clip's frames; `skip`: why this
     /// `tensorrt_build: false` job already chose CUDA (its range isn't built).
     #[allow(clippy::too_many_arguments)]
     fn job_key(
@@ -1123,11 +1170,11 @@ impl Pipeline<OrtLoader> {
         job: &JobConfig,
         base: &ModelKey,
         (sh, sw): (usize, usize),
-        window: usize,
+        (window, frames): (usize, usize),
         low_vram: bool,
         skip: Option<&str>,
         sink: &mut dyn Sink,
-    ) -> Result<(ModelKey, Option<(PathBuf, bool)>), Error> {
+    ) -> Result<(ModelKey, Option<TrtJob>), Error> {
         let mut msg = json!({"type": "provider", "provider": base.provider.name(), "precision": base.precision.name(), "tensorrt_requested": job.tensorrt});
         if !job.tensorrt {
             sink.send(msg);
@@ -1140,7 +1187,7 @@ impl Pipeline<OrtLoader> {
         } else if let Some(s) = skip {
             Err(s.to_string())
         } else {
-            self.trt_range((sh, sw), window, low_vram).and_then(|r| trt_job_may_use(r, job.tensorrt_build))
+            self.trt_range((sh, sw), window, low_vram, frames).and_then(|r| trt_job_may_use(r, job.tensorrt_build))
         };
         let r = match why {
             Ok(r) => r,
@@ -1161,7 +1208,7 @@ impl Pipeline<OrtLoader> {
         sink.send(msg);
         Ok((
             ModelKey { provider: Provider::TensorRt, precision: Precision::Fp16, trt_cache: Some(r.dir.clone()), vram_cap: base.vram_cap, coreml: None },
-            Some((r.dir, r.built)),
+            Some((r.dir, r.built, r.bucket)),
         ))
     }
 
@@ -1173,14 +1220,14 @@ impl Pipeline<OrtLoader> {
             return Err(Error::bad_request("trt_build needs the graphics card and ONNX Runtime's TensorRT provider".into()));
         }
         let (sh, sw) = (crate::image::ceil_to_multiple(height, crate::clip::SHAPE_QUANTUM), crate::image::ceil_to_multiple(width, crate::clip::SHAPE_QUANTUM));
-        let seen = self.gpu_budget().unwrap_or(0) as f64 / 1073741824.0;
+        // the card's total memory, never what is free now (trt_build_profile)
+        let total = self.loader.rt.gpu.as_ref().map(|g| g.total).unwrap_or(0) as f64 / 1073741824.0;
         let limit = vram_budget_gb.or(self.loader.rt.cfg.vram_budget_gb);
-        let budget = limit.map(|cap| seen.min(cap)).unwrap_or(seen);
-        // the window a TensorRT job of this size picks (run_job: low-VRAM mode, the same table)
-        let p = select_vram_profile((sh, sw), frames, budget, limit.is_some(), true);
-        let r = self.trt_range((sh, sw), p.chunk, p.low_vram).map_err(Error::bad_request)?;
+        let p = trt_build_profile((sh, sw), frames, total, limit);
+        let r = self.trt_range((sh, sw), p.chunk, p.low_vram, p.chunk).map_err(Error::bad_request)?;
         self.trt_drop_stale(&r.card_dir, sink);
-        sink.log(&format!("  TensorRT build for {width}x{height}: window {}/{} at {} GB available, range {}", p.chunk, p.stride, f1(budget), r.bucket.key()));
+        let of = limit.map(|c| format!("a {} GB limit", f1(c.min(total)))).unwrap_or_else(|| format!("the card's {} GB", f1(total)));
+        sink.log(&format!("  TensorRT build for {width}x{height}: window {}/{} for {of}, range {}", p.chunk, p.stride, r.bucket.key()));
         let cap = limit.map(|g| (g * 1073741824.0) as u64);
         let key = ModelKey { provider: Provider::TensorRt, precision: Precision::Fp16, trt_cache: Some(r.dir.clone()), vram_cap: cap, coreml: None };
         let was_built = r.built;

@@ -64,8 +64,10 @@ gets the same signal.
 ahead of any job (the app's background build, so a job never waits on one). `frames` (default 1000, a long clip) and
 `vram_budget_gb` (as the run option) as a run takes them; either one present but invalid (not a whole number above
 0, not a positive number) is a `bad-request`, never ignored. The engine pads the size as a run does, picks the window a
-TensorRT job of that size picks (the automatic window in low-VRAM mode, against the free memory it reads now), and
-builds every network of that range not built yet with the same builder a job uses (`progress` replies, stage
+TensorRT job of that size can run on this card (1.0.0-dev.7: low-VRAM mode, the longest window whose estimated peak
+fits the card's TOTAL memory, or `vram_budget_gb`, never the memory free at that moment; a clip shorter than its
+automatic window runs only its frames, so that can be longer than the automatic window itself), and builds every
+network of that range not built yet with the same builder a job uses (`progress` replies, stage
 `optimize`, with `piece`; `log` lines). Then `{"type":"trt_built","id":"b1","width":4096,"height":2160,
 "range":"h1792-2176_w3584-4096_t1-8_f1-4","hann_chunk":8,"hann_stride":4,"reused":false,"built_s":{"stage1":139.2,…},
 "fallbacks":{}}` (`reused`: everything was built before; `fallbacks`: networks that couldn't be built, which run on

@@ -51,6 +51,95 @@ fn a_size_built_for_another_window_says_so() {
 }
 
 #[test]
+fn a_build_covers_the_card_not_the_moment() {
+    // 1.0.0-dev.7 item 1: a build made while another program used the card came out "t1-2" and jobs at window 4 ran
+    // on CUDA. The build's window comes from the card's total memory only (no free-memory reading goes in), so it is
+    // the same every time on one card, and a larger card gets the larger window. Fake cards of 8, 16 and 32 GiB.
+    let hd = (1152, 1920);
+    let k4 = (2176, 4096);
+    let w = |shape, total| trt_build_profile(shape, 1000, total, None).chunk;
+    assert_eq!([w(hd, 8.0), w(hd, 16.0), w(hd, 32.0)], [BUILD_HD.0, BUILD_HD.1, BUILD_HD.2]);
+    assert_eq!([w(k4, 8.0), w(k4, 16.0), w(k4, 32.0)], [BUILD_4K.0, BUILD_4K.1, BUILD_4K.2]);
+    // the frames a job on that card runs per window (its window, capped at a short clip's length), whatever is free
+    // (free + own <= total), are never more
+    // loop: NOT-WORTH — a test's three cards x two sizes x a few budgets and clip lengths
+    for total in [8.0, 16.0, 32.0] {
+        // loop: NOT-WORTH — as above
+        for shape in [hd, k4] {
+            let built = trt_build_profile(shape, 1000, total, None);
+            assert!(built.low_vram, "TensorRT builds keep low-VRAM mode");
+            // loop: NOT-WORTH — as above
+            for free in [total * 0.2, total * 0.5, total * 0.9, total] {
+                // loop: NOT-WORTH — as above
+                for frames in [3, 12, 30, 50, 1000] {
+                    let ran = select_vram_profile(shape, frames, free, false, true).chunk.min(frames);
+                    assert!(ran <= built.chunk, "{shape:?} {total} GiB card, {free} GiB free, {frames} frames");
+                }
+            }
+        }
+    }
+    // a graphics-memory limit caps it as it caps a job
+    let capped = trt_build_profile(hd, 1000, 32.0, Some(8.0)).chunk;
+    assert!(capped >= select_vram_profile(hd, 1000, 8.0, true, true).chunk && capped < w(hd, 32.0), "{capped}");
+}
+
+// the build windows the table gives fake 8, 16 and 32 GiB cards (vram.rs, low-VRAM mode): the longest window whose peak
+// fits the card, 16 and 56 included (a short clip whose automatic window is longer runs only its frames)
+const BUILD_HD: (usize, usize, usize) = (8, 24, 56);
+const BUILD_4K: (usize, usize, usize) = (2, 8, 16);
+
+#[test]
+fn a_job_uses_a_built_range_at_any_smaller_window() {
+    // a range built for windows 1..N serves every window up to N (same size; the foundations' batch inside it too)
+    let names: Vec<String> = [
+        "h1792-2176_w3584-4096_t1-8_f1-4",
+        "h1024-1280_w1792-2176_t1-24_f1-4",
+        "h1024-1280_w1792-2176_t1-48_f1-4",
+        "h1024-1280_w1792-2176_t1-80_f1-4",
+        "not-a-range",
+    ]
+    .map(String::from)
+    .to_vec();
+    let all = |_: &str| true;
+    let key =
+        |shape: (usize, usize), window, low| serving_range(&crate::tensorrt::bucket_for(shape.0, shape.1, window, low).unwrap(), &names, all).map(|b| b.key());
+    // loop: NOT-WORTH — a test's eight windows
+    for window in 1..=8 {
+        assert_eq!(key((2176, 4096), window, true).as_deref(), Some("h1792-2176_w3584-4096_t1-8_f1-4"), "4K window {window}");
+    }
+    assert_eq!(key((2176, 4096), 16, true), None, "a longer window than any built");
+    // the smallest that serves (the least memory); one not built doesn't count
+    assert_eq!(key((1152, 1920), 8, true).as_deref(), Some("h1024-1280_w1792-2176_t1-24_f1-4"));
+    assert_eq!(key((1152, 1920), 40, true).as_deref(), Some("h1024-1280_w1792-2176_t1-48_f1-4"));
+    let need = crate::tensorrt::bucket_for(1152, 1920, 40, true).unwrap();
+    assert_eq!(serving_range(&need, &names, |n| !n.contains("_t1-48_")).map(|b| b.key()).as_deref(), Some("h1024-1280_w1792-2176_t1-80_f1-4"));
+    // the normal mode runs the foundations over the whole window: a low-VRAM range (batches of 4) serves it only up to 4
+    assert_eq!(key((1152, 1920), 8, false), None);
+    assert_eq!(key((1152, 1920), 4, false).as_deref(), Some("h1024-1280_w1792-2176_t1-24_f1-4"));
+    // another size's range never serves
+    assert_eq!(key((768, 1024), 4, true), None);
+    // the card's own build serves every window a job on that card picks (as trt_range asks: the window capped at the
+    // clip's frames), for each fake card, whatever is free and however long the clip
+    // loop: NOT-WORTH — a test's three cards x two sizes x a few budgets and clip lengths
+    for total in [8.0, 16.0, 32.0] {
+        // loop: NOT-WORTH — as above
+        for shape in [(1152, 1920), (2176, 4096)] {
+            let b = trt_build_profile(shape, 1000, total, None);
+            let built = vec![crate::tensorrt::bucket_for(shape.0, shape.1, b.chunk, b.low_vram).unwrap().key()];
+            // loop: NOT-WORTH — as above
+            for free in [total * 0.3, total * 0.6, total] {
+                // loop: NOT-WORTH — as above
+                for frames in [3, 12, 50, 1000] {
+                    let p = select_vram_profile(shape, frames, free, false, true);
+                    let need = crate::tensorrt::bucket_for(shape.0, shape.1, p.chunk.min(frames), p.low_vram).unwrap();
+                    assert!(serving_range(&need, &built, all).is_some(), "{shape:?} {total} GiB card, window {}, {frames} frames", p.chunk);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn a_png_says_its_bit_depth() {
     // bug hunt 2026-10-26 I11: a 16-bit PNG folder now says at which depth it is read, as a deep video does
     let d = scratch("png-depth");

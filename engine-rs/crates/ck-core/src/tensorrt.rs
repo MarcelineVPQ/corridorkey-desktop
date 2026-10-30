@@ -63,6 +63,23 @@ impl Bucket {
     pub(crate) fn key(&self) -> String {
         format!("h{}-{}_w{}-{}_t{}-{}_f{}-{}", self.h.0, self.h.1, self.w.0, self.w.1, self.t.0, self.t.1, self.f.0, self.f.1)
     }
+
+    /// The bucket a range folder's name (`key`) stands for; None for any other name.
+    pub(crate) fn from_key(name: &str) -> Option<Bucket> {
+        let mut parts = name.split('_');
+        let mut pair = |tag: char| -> Option<(usize, usize)> {
+            let (a, b) = parts.next()?.strip_prefix(tag)?.split_once('-')?;
+            Some((a.parse().ok()?, b.parse().ok()?))
+        };
+        let b = Bucket { h: pair('h')?, w: pair('w')?, t: pair('t')?, f: pair('f')? };
+        (parts.next().is_none() && b.key() == name).then_some(b)
+    }
+
+    /// Whether this range's engines run `need`'s shapes: the same height and width ranges, and stage-1 windows and a
+    /// foundation batch reaching `need`'s (an engine built for windows 1..N takes every window up to N).
+    pub(crate) fn serves(&self, need: &Bucket) -> bool {
+        self.h == need.h && self.w == need.w && self.t.0 <= need.t.0 && self.t.1 >= need.t.1 && self.f.0 <= need.f.0 && self.f.1 >= need.f.1
+    }
 }
 
 /// Channel counts of the exported networks (scripts/onnx_spike/wrappers.py).

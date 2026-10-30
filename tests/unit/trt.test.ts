@@ -18,6 +18,7 @@ import {
   TRT_MAX_AREA,
   TRT_MAX_SIDE,
   TRT_NOT_BUILT,
+  TRT_OTHER_WINDOW,
   trtSizeKey,
   trtSizeRows,
   type TrtSize,
@@ -41,6 +42,7 @@ describe("TensorRT ranges as the engine has them", () => {
     ).toBe(TRT_MAX_AREA);
     expect(Number(/const SHAPE_QUANTUM: usize = (\d+);/.exec(rs("clip.rs"))![1])).toBe(SHAPE_QUANTUM);
     expect(rs("pipeline/mod.rs")).toContain(`const TRT_NOT_BUILT: &str = "${TRT_NOT_BUILT}";`);
+    expect(rs("pipeline/mod.rs")).toContain(`format!("${TRT_OTHER_WINDOW} {}`);
   });
 
   it("puts a clip's size in its range (the engine's keys), or none", () => {
@@ -251,6 +253,22 @@ describe("the background TensorRT build", () => {
     expect(r.b.engineEnding).toBe(true);
     r.engine()!.running = false;
     expect(r.b.engineEnding).toBe(false);
+  });
+
+  it("1.0.0-dev.7: a job's Build it now builds its size now, even where a range of that size is built (for shorter windows only)", async () => {
+    // HD was built at window 2 during other GPU use; a job at window 4 ran on CUDA and offered to build it
+    const r = rig({ built: ["h1792-2176_w3584-4096_t1-8_f1-4", "h1024-1280_w1792-2176_t1-2_f1-2"], others: ["Sonata"] });
+    await r.b.start(false);
+    expect(r.sent).toEqual([]);
+    // the button: started as the user's own Build now (another program on the card doesn't hold it back)
+    await r.b.buildSize("h1024-1280_w1792-2176");
+    expect(r.sent).toEqual([{ cmd: "trt_build", id: KHD, width: 1920, height: 1080 }]);
+    r.reply({ type: "trt_built", id: KHD, range: "h1024-1280_w1792-2176_t1-24_f1-4", fallbacks: {} });
+    expect(r.b.state.status).toBe("done");
+    // once built, it is done again: the next start doesn't build it a second time
+    r.b.refresh();
+    await r.b.start(true);
+    expect(r.sent).toHaveLength(1);
   });
 
   it("gives way to the queue and goes on after it; never starts by itself while another program uses the card", async () => {

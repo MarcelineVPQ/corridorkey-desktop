@@ -8,7 +8,7 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { EngineProcess, rustEngineEnv, type EngineReply } from "./engine";
 import { Estimator } from "./estimate";
-import { GPU_POLL_MS, gpuReadoutWanted, otherGpuUsers, readAmdGpu, readGpu, untilEnded } from "./gpu";
+import { GPU_POLL_MS, gpuReadoutWanted, otherGpuUsers, ownPids, readAmdGpu, readGpu, untilEnded } from "./gpu";
 import { expandPaths, frameDirLinearFor, probeClip, still, STILL_WIDTH, VIDEO_EXT, HINT_IMAGE_EXT } from "./media";
 import { clearJobTemps, Queue } from "./queue";
 import { applyModelSet, checkRustEngine, loadSettings, saveSettings } from "./settings";
@@ -354,7 +354,7 @@ const prebuild: Prebuilder = new Prebuilder({
   queueRunning: () => queue.running || queue.engineEnding || consoleGpu,
   othersOnGpu: async () => {
     try {
-      return await otherGpuUsers();
+      return await otherGpuUsers(readGpu, ownPids(queue.enginePid, app.getAppMetrics()));
     } catch {
       // error: NOT-WORTH — no reading (nvidia-smi missing or stuck): nothing known to wait for
       return [];
@@ -621,7 +621,8 @@ async function pollGpu(): Promise<void> {
   try {
     const pid = queue.enginePid;
     // an AMD card has no nvidia-smi: the amdgpu driver's files
-    gpu = AMD_GFX && AMD ? readAmdGpu(AMD) : await readGpu(new Set(pid ? [pid] : []));
+    // the app's own processes by PID (its Electron GPU process too), never listed as other programs
+    gpu = AMD_GFX && AMD ? readAmdGpu(AMD) : await readGpu(ownPids(pid, app.getAppMetrics()));
     gpuError = null;
   } catch (e) {
     // error: SHOWN — the GPU card says nvidia-smi couldn't be read
@@ -1049,13 +1050,15 @@ function registerIpc(): void {
     if (!trtAllowed() || !size || !key) return;
     // loop: NOT-WORTH — the few chosen sizes, once per click
     const others = settings.trtSizes.filter((s) => trtSizeKey(s.width, s.height) !== key);
-    if (actionIn === "add") {
+    if (actionIn === "add" || actionIn === "build") {
       // one size per range: the newest choice is the size it is built for
       settings = { ...settings, trtSizes: [...others, size] };
       persist();
       prebuild.refresh();
-      // it builds now, or after the queue; while another program uses the card (Sonata) it waits for it (Marcy 2026-10-25)
-      void prebuild.start(false);
+      // it builds now, or after the queue; while another program uses the card (Sonata) it waits for it (Marcy 2026-10-25).
+      // A job's Build it now (1.0.0-dev.7) starts as Build now does, and builds where only shorter windows are built
+      if (actionIn === "build") void prebuild.buildSize(key);
+      else void prebuild.start(false);
       return scheduleSend();
     }
     if (actionIn !== "remove" || !mainWindow || cacheMoving) return;

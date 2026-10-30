@@ -4,7 +4,7 @@ import { memo, useEffect, useState } from "react";
 import { ProgressBar } from "../ProgressBar";
 import { Check, ClipboardCopy, FolderPlus, Play, Plus, Square, SquareTerminal, Trash2 } from "lucide-react";
 import { jobCommand } from "../../shared/console/jobCommand";
-import { OTHER_GPU_USER_MB, type AppState, type Job, type TrtPrebuild } from "../../shared/types";
+import { OTHER_GPU_USER_MB, type AppState, type Job, type TrtPrebuild, type TrtState } from "../../shared/types";
 import { missingInput, startBlocked } from "../../shared/tasks";
 import { AS_USED, CANT_READ_CLIP } from "../../shared/texts";
 import { JobSettings } from "../JobSettings";
@@ -78,7 +78,11 @@ export function QueuePage(props: {
           )}
         </nav>
         <section className="detail">
-          {job ? <Detail job={job} prebuild={state.tensorrt.prebuild} windows={state.system.platform === "win32"} /> : <div className="detail-empty">Add a clip to start.</div>}
+          {job ? (
+            <Detail job={job} prebuild={state.tensorrt.prebuild} onDisk={state.tensorrt.onDisk} windows={state.system.platform === "win32"} />
+          ) : (
+            <div className="detail-empty">Add a clip to start.</div>
+          )}
         </section>
       </div>
     </div>
@@ -158,7 +162,7 @@ function JobRowView({ job, selected, onSelect }: { job: Job; selected: boolean; 
   );
 }
 
-function Detail({ job, prebuild, windows }: { job: Job; prebuild: TrtPrebuild; windows: boolean }) {
+function Detail({ job, prebuild, onDisk, windows }: { job: Job; prebuild: TrtPrebuild; onDisk: TrtState["onDisk"]; windows: boolean }) {
   return (
     <>
       <div className="detail-head">
@@ -183,7 +187,7 @@ function Detail({ job, prebuild, windows }: { job: Job; prebuild: TrtPrebuild; w
           <div>{job.clip.probeError}</div>
         </section>
       )}
-      <JobView job={job} prebuild={prebuild} />
+      <JobView job={job} prebuild={prebuild} onDisk={onDisk} />
     </>
   );
 }
