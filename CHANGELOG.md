@@ -6,19 +6,25 @@
   that moment, so a size built while another program used the card covered only short windows, and later clips of
   that size ran on CUDA. Each build now covers every window a job of that size can pick on your card, worked out from
   the card's total memory: the same every time on one card. Its working memory comes from the card's total too. No
-  build goes past the longest measured to build: 4K up to 8 frames and HD up to 24 were built and run on an RTX 5080
-  (16 GB) on 2026-10-25. On a larger card, a clip whose window is longer than that runs on CUDA and says so, until
-  longer builds are measured. A job uses a size's engines at any window up to the one they were built for, but only
-  when the engines' own memory need fits what the card has free: on a busy card the clip runs on CUDA and its page
-  says "the graphics card is busy" (a TensorRT run that still runs out of memory goes on on CUDA at once, saying so).
+  build goes past what was measured to build for its size: 4K up to 8 frames and HD (1920×1080) up to 24 built and
+  ran on an RTX 5080 (16 GB) on 2026-10-25, and 1280×1080 up to 48 built on 2026-10-24, so on that card every clip
+  of those sizes runs on TensorRT, except a 1280×1080 clip of 49 to 79 frames (it runs all its frames at once, more
+  than the 48 measured, so it runs on CUDA and says so). Other sizes stay within the nearest measured build (not measured themselves). A
+  clip that runs more frames at a time than its size's build (on any card where its automatic window is longer, such
+  as a 32 GB card, which is not measured) runs on CUDA and says so; a job's window is never shortened to fit a build.
+  A job uses a size's engines at any window up to the one they were built for, but only when the engines' own memory
+  need fits what it has: on a busy card the clip runs on CUDA and its page says "the graphics card is busy", and
+  under a memory limit too small for them it says the limit is (a TensorRT run that still runs out of memory goes on
+  on CUDA at once, saying so).
   Whether a shorter window on longer engines gives exactly CUDA's mattes is not measured yet. Sizes built by an earlier
   version keep working where their window reaches; for the rest, see the next point. TensorRT is on Linux today,
   Windows coming.
 - **A clip that ran without TensorRT offers to build it.** When no TensorRT engine fits a clip, its page now says
   "TensorRT isn't built for this clip yet, so this run used CUDA" with a **Build it now** button: one click starts
   the same background build Engine settings, TensorRT runs, for that clip's size. The next run of the clip uses it.
-  A build that runs short of graphics memory says so in plain words and offers **Build it again**; it is never
-  shown as built. No button where a build wouldn't help (a busy card), and none while TensorRT is off (the page says
+  A build that runs short of graphics memory says so in plain words, with the memory that was free and any other
+  program that was using the card, and offers **Build it again** when another program was; it is never shown as
+  built. No button where a build wouldn't help (a busy card), and none while TensorRT is off (the page says
   how to turn it on).
 - **The app no longer lists itself as another program using the graphics card.** The notice showed CorridorKey's own
   graphics process ("corridorkey-desktop — 0.6 GiB"); the app's own processes are now left out, by process ID.

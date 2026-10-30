@@ -684,7 +684,7 @@ describe("a job that found no TensorRT engine (1.0.0-dev.7)", () => {
   it("review 2026-10-29: no button where a build can't help (a busy card), and none while TensorRT is off (the tile says how to turn it on)", () => {
     mockCk();
     const busy = render(
-      <JobView job={hd("the graphics card is busy: TensorRT for this size needs about 13.1 GB of graphics memory and 9.0 GB is free, so this run used CUDA")} prebuild={idle} trtOn />,
+      <JobView job={hd("the graphics card is busy: 9.0 GB of graphics memory is free, too little for the TensorRT engines built for this size, so this run used CUDA")} prebuild={idle} trtOn />,
     );
     expect(screen.queryByRole("button", { name: /Build it/ })).toBeNull();
     expect(screen.getByText(/the graphics card is busy/)).toBeTruthy();
@@ -696,7 +696,8 @@ describe("a job that found no TensorRT engine (1.0.0-dev.7)", () => {
 
   it("review 2026-10-29: a build that ran short of memory says so and offers to build again; a network with no tactic is offered a build too", () => {
     const ck = mockCk({ trtSize: () => Promise.resolve() });
-    const error = "the graphics card didn't have enough free memory to build stage 1 for 1920×1080 (another program may be using it). What was built is kept: building again finishes it";
+    const error =
+      "the graphics card didn't have enough memory to build stage 1 for 1920×1080 (9.0 of its 15.5 GB was free when the build started). What was built is kept: building again while more of the card is free may finish it (Sonata was using the graphics card when it started)";
     const failed = {
       status: "error" as const,
       ranges: [{ label: "a", width: 1920, height: 1080, state: "failed" as const, piece: null, range: null, fallbacks: {}, error }],
@@ -704,10 +705,17 @@ describe("a job that found no TensorRT engine (1.0.0-dev.7)", () => {
       note: null,
     };
     const f = render(<JobView job={hd(NOT_BUILT)} prebuild={failed} trtOn />);
-    expect(screen.getByText(/The last build couldn't finish: the graphics card didn't have enough free memory/)).toBeTruthy();
+    expect(screen.getByText(/The last build couldn't finish: the graphics card didn't have enough memory/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Build it again/ }));
     expect(ck.trtSize).toHaveBeenCalledWith("build", { label: "a", width: 1920, height: 1080 });
     f.unmount();
+    // review 2026-10-29 N-N5: short of memory with no other program on the card: the reason, and no button
+    const alone = { ...failed, ranges: [{ ...failed.ranges[0], cardWasFree: true }] };
+    const a = render(<JobView job={hd(NOT_BUILT)} prebuild={alone} trtOn />);
+    expect(screen.queryByRole("button", { name: /Build it/ })).toBeNull();
+    expect(screen.getByText(/The last build couldn't finish/)).toBeTruthy();
+    expect(screen.getByText(/No other program was using the graphics card when it started/)).toBeTruthy();
+    a.unmount();
     render(<JobView job={hd(null, { stage1: "build: Could not find any implementation for node X" })} prebuild={idle} trtOn />);
     expect(screen.getByRole("button", { name: /Build it now/ })).toBeTruthy();
     expect(screen.queryByText(/Why:/)).toBeNull();

@@ -57,15 +57,21 @@ fn a_build_covers_the_card_not_the_moment() {
     // the same every time on one card, and a larger card gets the larger window. Fake cards of 8, 16 and 32 GiB.
     let hd = (1152, 1920);
     let k4 = (2176, 4096);
+    // 1280x1080 (the 1.6 MP range, measured at 48 on 2026-10-24)
+    let mp16 = (1152, 1280);
     let w = |shape, total| trt_build_profile(shape, 1000, total, None).chunk;
     assert_eq!([w(hd, 8.0), w(hd, 16.0), w(hd, 32.0)], [BUILD_HD.0, BUILD_HD.1, BUILD_HD.2]);
     assert_eq!([w(k4, 8.0), w(k4, 16.0), w(k4, 32.0)], [BUILD_4K.0, BUILD_4K.1, BUILD_4K.2]);
+    // review 2026-10-29 N-M1: Marcy's 16 GB card builds each measured size's measured window
+    assert_eq!([w(mp16, 16.0), w(hd, 16.0), w(k4, 16.0)], [48, 24, 8]);
     // the frames a job on that card runs per window (its window, capped at a short clip's length), whatever is free
-    // (free + own <= total), are never more
-    // loop: NOT-WORTH — a test's three cards x two sizes x a few budgets and clip lengths
+    // (free + own <= total), are never more: on 8 and 16 GB cards always, but for one known gap (a decision for Marcy):
+    // a short clip that runs all its frames at once, more than its size's measured build (1280x1080 clips of 49-79
+    // frames pick window 80 on 16 GB and run on CUDA, saying so). On 32 GB, past the measured builds (CUDA, trt_serving)
+    // loop: NOT-WORTH — a test's three cards x three sizes x a few budgets and clip lengths
     for total in [8.0, 16.0, 32.0] {
         // loop: NOT-WORTH — as above
-        for shape in [hd, k4] {
+        for shape in [mp16, hd, k4] {
             let built = trt_build_profile(shape, 1000, total, None);
             assert!(built.low_vram, "TensorRT builds keep low-VRAM mode");
             // loop: NOT-WORTH — as above
@@ -73,8 +79,8 @@ fn a_build_covers_the_card_not_the_moment() {
                 // loop: NOT-WORTH — as above
                 for frames in [3, 12, 30, 50, 1000] {
                     let ran = select_vram_profile(shape, frames, free, false, true).chunk.min(frames);
-                    // (or longer than any build is made for, past the measured builds: that job runs on CUDA, trt_serving)
-                    assert!(ran <= built.chunk || ran > measured(shape), "{shape:?} {total} GiB card, {free} GiB free, {frames} frames");
+                    let gap = ran > measured(shape) && (total > 16.0 || (ran == frames && shape == mp16 && (49..80).contains(&frames)));
+                    assert!(ran <= built.chunk || gap, "{shape:?} {total} GiB card, {free} GiB free, {frames} frames");
                 }
             }
         }
@@ -85,14 +91,14 @@ fn a_build_covers_the_card_not_the_moment() {
 }
 
 // the build windows the table gives fake 8, 16 and 32 GiB cards (vram.rs, low-VRAM mode): the longest window whose peak
-// fits the card, never past the longest measured to build (review 2026-10-29 M2: tensorrt::build_cap, 4K 8 and the HD
-// range 25; the table alone gave a 32 GiB card HD 56 and 4K 16, unmeasured builds)
-const BUILD_HD: (usize, usize, usize) = (8, 24, 25);
+// fits the card, never past the window measured to build at that size (reviews 2026-10-29 M2, N-M1: tensorrt::build_cap,
+// 4K 8 and HD 24; the table alone gave a 32 GiB card HD 56 and 4K 16, unmeasured builds)
+const BUILD_HD: (usize, usize, usize) = (8, 24, 24);
 const BUILD_4K: (usize, usize, usize) = (2, 8, 8);
 
 /// tensorrt::build_cap for a padded shape's range.
 fn measured(shape: (usize, usize)) -> usize {
-    crate::tensorrt::build_cap(&crate::tensorrt::bucket_for(shape.0, shape.1, 1, true).unwrap())
+    crate::tensorrt::build_cap(&crate::tensorrt::bucket_for(shape.0, shape.1, 1, true).unwrap()).0
 }
 
 #[test]
@@ -109,17 +115,28 @@ fn a_longer_range_is_used_only_when_its_memory_fits() {
     // loop: NOT-WORTH — a test's 200 budgets
     let at = |w: usize| (10..210).map(|t| t as f64 / 10.0).find(|&b| select_vram_profile(hd, 1000, b, false, true).chunk == w).unwrap();
     let (busy, free) = (at(8), at(24));
-    let why = trt_serving(&need, &names, all, mp, true, Some((busy, false))).unwrap_err();
+    let why = trt_serving(&need, &names, all, mp, true, Some((busy, None))).unwrap_err();
     assert!(why.starts_with(TRT_CARD_BUSY) && why.ends_with("so this run used CUDA"), "{why}");
-    assert_eq!(trt_serving(&need, &names, all, mp, true, Some((free, false))).unwrap().map(|b| b.key()).as_deref(), Some(names[0].as_str()));
+    // no number presented as TensorRT's own need (it is CUDA's table at that window: review N-N1)
+    assert!(!why.contains("needs about"), "{why}");
+    // a limit above the free memory: still the card (review N-S1)
+    assert!(trt_serving(&need, &names, all, mp, true, Some((busy, Some(busy + 4.0)))).unwrap_err().starts_with(TRT_CARD_BUSY));
+    // the job's own limit is the smaller: it says so, and how to raise it, never that another program holds the card
+    let why = trt_serving(&need, &names, all, mp, true, Some((busy, Some(busy)))).unwrap_err();
+    assert!(why.starts_with(TRT_LIMIT_TOO_SMALL) && why.contains("raise Memory limit") && !why.contains("busy"), "{why}");
+    assert_eq!(trt_serving(&need, &names, all, mp, true, Some((free, None))).unwrap().map(|b| b.key()).as_deref(), Some(names[0].as_str()));
     // a manual window (no budget): any range that serves it
     assert!(trt_serving(&need, &names, all, mp, true, None).unwrap().is_some());
     // nothing built: a build serves it
-    assert_eq!(trt_serving(&need, &[], all, mp, true, Some((busy, false))), Ok(None));
-    // a window longer than any build is made for: CUDA, and no build offered (it would not serve it)
+    assert_eq!(trt_serving(&need, &[], all, mp, true, Some((busy, None))), Ok(None));
+    // more frames at a time than any build of the size is made for: CUDA, and no build offered (it would not serve it)
     let long = crate::tensorrt::bucket_for(hd.0, hd.1, 48, true).unwrap();
-    let why = trt_serving(&long, &[], all, mp, true, Some((40.0, false))).unwrap_err();
-    assert!(why.contains("the longest measured to build") && !why.starts_with(TRT_CARD_BUSY), "{why}");
+    let why = trt_serving(&long, &[], all, mp, true, Some((40.0, None))).unwrap_err();
+    assert!(why.contains("up to 24 frames at a time (the most measured to build)") && !why.starts_with(TRT_CARD_BUSY), "{why}");
+    // a size never measured says so (1440p: within the 4K build)
+    let qhd = crate::tensorrt::bucket_for(1536, 2560, 24, true).unwrap();
+    let why = trt_serving(&qhd, &[], all, 1536.0 * 2560.0 / 1e6, true, Some((40.0, None))).unwrap_err();
+    assert!(why.contains("not measured at this size") && why.contains("this clip runs 24 at a time"), "{why}");
 }
 
 #[test]
@@ -157,7 +174,7 @@ fn a_job_uses_a_built_range_at_any_smaller_window() {
     // loop: NOT-WORTH — a test's three cards x two sizes x a few budgets and clip lengths
     for total in [8.0, 16.0, 32.0] {
         // loop: NOT-WORTH — as above
-        for shape in [(1152, 1920), (2176, 4096)] {
+        for shape in [(1152, 1280), (1152, 1920), (2176, 4096)] {
             let b = trt_build_profile(shape, 1000, total, None);
             let built = vec![crate::tensorrt::bucket_for(shape.0, shape.1, b.chunk, b.low_vram).unwrap().key()];
             // loop: NOT-WORTH — as above
@@ -166,8 +183,9 @@ fn a_job_uses_a_built_range_at_any_smaller_window() {
                 for frames in [3, 12, 50, 1000] {
                     let p = select_vram_profile(shape, frames, free, false, true);
                     let need = crate::tensorrt::bucket_for(shape.0, shape.1, p.chunk.min(frames), p.low_vram).unwrap();
-                    // (a window past the measured builds runs on CUDA: a 32 GiB card's HD 48, trt_serving)
-                    let served = serving_range(&need, &built, all).is_some() || need.t.1 > measured(shape);
+                    // (past the measured builds, CUDA: a 32 GiB card's HD 48, and on 16 GiB only the short-clip gap above)
+                    let short = need.t.1 == frames && shape == (1152, 1280) && (49..80).contains(&frames);
+                    let served = serving_range(&need, &built, all).is_some() || (need.t.1 > measured(shape) && (total > 16.0 || short));
                     assert!(served, "{shape:?} {total} GiB card, window {}, {frames} frames", p.chunk);
                 }
             }

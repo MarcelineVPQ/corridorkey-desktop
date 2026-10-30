@@ -244,16 +244,26 @@ pub(crate) fn memory_failure(why: &str) -> bool {
     MEMORY.iter().any(|m| low.contains(m))
 }
 
-/// The largest stage-1 build measured to fit TensorRT's 8 GiB working-memory cap, in frames x range pixels: the 4K
-/// range (2176x4096) at window 8. Measured on the RTX 5080 16 GB on 2026-10-25: the 4K t1-8 and HD t1-24 ranges
-/// (1280x2176 x 24, below it) built and ran. Longer builds are unmeasured (a 1.6 MP range at 80 frames found no
-/// tactic, 2026-10-24), so no build goes past it until one is measured (review 2026-10-29 M2).
-pub(crate) const MEASURED_BUILD_PIXEL_FRAMES: usize = 2176 * 4096 * 8;
+/// The stage-1 builds measured on the RTX 5080 16 GB within TensorRT's 8 GiB working-memory cap, as (the range's
+/// largest height, width, window): the 4K range at t1-8 and the HD range (1280x2176) at t1-24 built and ran on
+/// 2026-10-25; the 1.6 MP range (1280x1280: 1280x1080 clips) at t1-48 built on 2026-10-24 (a 6.1 GB tactic within a
+/// 7 GiB working memory, pipeline trt_prepare). Longer builds are unmeasured (the 1.6 MP range at 80 frames found no
+/// tactic, 2026-10-24), so no build goes past these until one is measured (reviews 2026-10-29 M2, N-M1).
+pub(crate) const MEASURED_BUILDS: [(usize, usize, usize); 3] = [(2176, 4096, 8), (1280, 2176, 24), (1280, 1280, 48)];
 
-/// The longest stage-1 window a build of `b`'s size is made for: its largest shape's pixels x frames within
-/// MEASURED_BUILD_PIXEL_FRAMES (4K: 8, the HD range: 25), at least 1.
-pub(crate) fn build_cap(b: &Bucket) -> usize {
-    (MEASURED_BUILD_PIXEL_FRAMES / (b.h.1 * b.w.1).max(1)).max(1)
+/// The longest stage-1 window a build of `b`'s size is made for, and whether a build of that size and window was
+/// measured (MEASURED_BUILDS). A measured size: its own window. Another size: the next measured size up (the smallest
+/// measured range at least as large), within that build's pixels x frames, at least 1 — not measured.
+pub(crate) fn build_cap(b: &Bucket) -> (usize, bool) {
+    // loop: NOT-WORTH — three measured builds, once per job or build
+    if let Some(&(_, _, t)) = MEASURED_BUILDS.iter().find(|m| (m.0, m.1) == (b.h.1, b.w.1)) {
+        return (t, true);
+    }
+    let area = b.h.1 * b.w.1;
+    // loop: NOT-WORTH — as above
+    let up = MEASURED_BUILDS.iter().filter(|m| m.0 * m.1 >= area).min_by_key(|m| m.0 * m.1);
+    // (none larger: bucket_for keeps every range within the 4K one, MAX_AREA)
+    (up.map(|m| m.0 * m.1 * m.2 / area.max(1)).unwrap_or(1).max(1), false)
 }
 
 /// One engine process builds a range's engines at a time: `<range folder>/build.lock`, made with create_new (the
@@ -712,9 +722,21 @@ mod tests {
         ] {
             assert!(!memory_failure(why), "{why}");
         }
-        // the longest windows a build is made for: the measured 4K t1-8, and the HD range within it
-        assert_eq!(build_cap(&bucket_for(2176, 4096, 1, true).unwrap()), 8);
-        assert_eq!(build_cap(&bucket_for(1152, 1920, 1, true).unwrap()), 25);
+    }
+
+    #[test]
+    fn a_build_stops_at_the_measured_window_of_its_size() {
+        // review 2026-10-29 N-M1: each measured size its own measured window (no frame-area interpolation: HD is 24,
+        // not 25), so 1280x1080 builds the 48 frames measured on 2026-10-24
+        let cap = |h, w| build_cap(&bucket_for(h, w, 1, true).unwrap());
+        assert_eq!(cap(2176, 4096), (8, true), "4K");
+        assert_eq!(cap(1152, 1920), (24, true), "HD");
+        assert_eq!(cap(1152, 1280), (48, true), "1280x1080");
+        // other sizes: the next measured size up, within its pixels x frames, and said to be unmeasured
+        assert_eq!(cap(1536, 2560), (2176 * 4096 * 8 / (1664 * 2816), false), "1440p, from 4K");
+        assert_eq!(cap(768, 1280), (1280 * 1280 * 48 / (896 * 1280), false), "720p, from 1280x1080");
+        assert!(cap(2176, 3840).1, "UHD is in the 4K range");
+        assert_eq!(cap(2176, 1152), (1280 * 2176 * 24 / (2176 * 1280), false), "portrait HD: another range");
     }
 
     #[test]

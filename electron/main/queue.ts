@@ -88,7 +88,9 @@ export function engineOptions(o: JobOptions, kind: "video" | "frames", tensorrt 
 
 /** The job log's line for a `provider` reply about TensorRT (null for a plain job: nothing to add). */
 export function providerText(r: EngineReply): string | null {
-  if (typeof r.fallback_reason === "string") return `TensorRT not used: ${r.fallback_reason}. Runs on ${String(r.provider ?? "cuda").toUpperCase()}.`;
+  // a reason that already says "so this run used CUDA" isn't told it again (review 2026-10-29 N-N3)
+  if (typeof r.fallback_reason === "string")
+    return `TensorRT not used: ${r.fallback_reason}.${/this run used CUDA$/.test(r.fallback_reason) ? "" : ` Runs on ${String(r.provider ?? "cuda").toUpperCase()}.`}`;
   if (r.fallbacks && typeof r.fallbacks === "object") {
     // loop: NOT-WORTH — at most five networks, once per TensorRT job
     const fell = Object.entries(r.fallbacks as Record<string, unknown>).map(([k, why]) => `${k} (${String(why)})`);

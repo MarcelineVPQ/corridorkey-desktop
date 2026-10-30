@@ -490,6 +490,8 @@ export interface PrebuildRange {
   range: string | null;
   fallbacks: Record<string, string>;
   error: string | null;
+  // a build that ran short of memory while no other program used the card: building again isn't offered
+  cardWasFree?: boolean;
 }
 
 export interface TrtPrebuild {

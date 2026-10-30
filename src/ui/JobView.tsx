@@ -45,7 +45,8 @@ export function JobView({ job, prebuild, trtOn = false }: { job: Job; prebuild?:
   // asked for while the queue runs: the build waits for the queue (paused)
   // loop: HOT-PATH-OK — the few chosen sizes per render
   const queued = Boolean(sizeKey && prebuild?.status === "paused" && prebuild.ranges.some((r) => trtSizeKey(r.width, r.height) === sizeKey && r.state === "todo"));
-  const offer = notBuilt && prebuild?.status !== "running" && !builtSince && !queued && trtOn;
+  // short of memory with nothing else on the card: the same card again, so no button (review 2026-10-29 N-N5)
+  const offer = notBuilt && prebuild?.status !== "running" && !builtSince && !queued && trtOn && !failed?.cardWasFree;
 
   return (
     <>
@@ -90,7 +91,12 @@ export function JobView({ job, prebuild, trtOn = false }: { job: Job; prebuild?:
           {notBuilt && builtSince && prebuild?.status !== "running" && <p className="hint-text">Built for this size now: the next run of this clip uses TensorRT.</p>}
           {notBuilt && queued && <p className="hint-text">TensorRT for this size builds in the background once the queue stops.</p>}
           {notBuilt && !trtOn && <p className="hint-text">TensorRT is off or not installed now: turn it on in Engine settings → TensorRT, and this page offers to build it.</p>}
-          {offer && failed && <p className="hint-text">{`The last build couldn't finish: ${failed.error}.`}</p>}
+          {notBuilt && failed && trtOn && prebuild?.status !== "running" && <p className="hint-text">{`The last build couldn't finish: ${failed.error}.`}</p>}
+          {notBuilt && failed?.cardWasFree && trtOn && prebuild?.status !== "running" && (
+            <p className="hint-text">
+              No other program was using the graphics card when it started, so this page doesn't offer to build it again; clips of this size run on CUDA where TensorRT couldn't be built.
+            </p>
+          )}
           {offer && sizeKey && width && height && (
             <div className="gap-top">
               {/* the same background build as Engine settings → TensorRT, for this clip's size; no time: none is measured

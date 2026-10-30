@@ -100,6 +100,12 @@ fn a_tensorrt_job_out_of_memory_goes_on_on_cuda_once() {
     let prov: Vec<&Value> = r.out.sink.of_type("provider").into_iter().filter(|m| m["fallback_reason"] == TRT_OUT_OF_MEMORY).collect();
     assert_eq!(prov.len(), 1, "one switch");
     assert_eq!(prov[0]["provider"].as_str(), Some("cuda"));
+    // review N-N2: the memory reply then describes CUDA at that window (before the halving's own replies)
+    let mem = r.out.sink.of_type("memory");
+    assert_eq!((mem[0]["provider"].as_str(), mem[0]["hann_chunk"].as_u64(), mem[0]["budget_gb"].as_f64()), (Some("cuda"), Some(8), Some(13.08)));
+    let mp = (SHAPE.0 * SHAPE.1) as f64 / 1e6;
+    assert_eq!(mem[0]["estimate_gb"].as_f64(), Some((estimate_peak_vram_gb(mp, 8, true, None) * 100.0).round() / 100.0));
+    assert!(mem[0].get("retry_after_oom").is_none());
     assert_eq!(r.out.frames(), vec![10, 10]);
 }
 

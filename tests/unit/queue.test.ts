@@ -521,6 +521,9 @@ describe("TensorRT in the queue", () => {
       "TensorRT not used: the models folder has no TensorRT-ready models. Runs on CUDA.",
     );
     expect(providerText({ type: "provider", provider: "tensorrt", fallbacks: {}, build_s: {} })).toBe("Runs on TensorRT.");
+    // review 2026-10-29 N-N3: a reason that already ends "so this run used CUDA" isn't told it twice
+    const ran = "the graphics card ran out of memory with TensorRT, so this run used CUDA";
+    expect(providerText({ type: "provider", provider: "cuda", tensorrt_requested: true, fallback_reason: ran })).toBe(`TensorRT not used: ${ran}.`);
   });
 
   it("keeps what ran the job from both provider replies, and why the app didn't ask for TensorRT", async () => {

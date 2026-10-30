@@ -229,6 +229,8 @@ export class Prebuilder {
   private now: () => number;
   // the sizes a job's Build it now asked for (size keys), until their build ends
   private again = new Set<string>();
+  // the other programs on the card when the running build started (othersOnGpu)
+  private othersAtStart: string[] = [];
 
   constructor(private readonly deps: PrebuildDeps) {
     this.now = deps.now ?? Date.now;
@@ -290,12 +292,15 @@ export class Prebuilder {
     if (this.state.ranges.every((r) => r.state === "done")) return this.set({ status: "done", note: null });
     // the queue has the card (TensorRT's download ended, the switch or Build now while keying): it goes on after the queue
     if (this.deps.queueRunning?.()) return this.waitForQueue();
+    // who else uses the card as it starts: a build the user asked for isn't held back by them, but a failure's reason
+    // says whether they were there (review 2026-10-29 N-N5)
+    this.checking = true;
+    const others = await this.deps.othersOnGpu().finally(() => (this.checking = false));
+    if (this.proc || !this.deps.allowed()) return;
+    if (this.deps.queueRunning?.()) return this.waitForQueue();
+    this.othersAtStart = others;
     if (!asked && !this.askedWhileChecking) {
-      this.checking = true;
-      const others = await this.deps.othersOnGpu().finally(() => (this.checking = false));
-      if (this.proc || !this.deps.allowed()) return;
-      if (this.deps.queueRunning?.()) return this.waitForQueue();
-      if (others.length > 0 && !this.askedWhileChecking) {
+      if (others.length > 0) {
         // loop: NOT-WORTH — one look a minute while blocked, one timer at a time (cleared by start, pause and stop)
         this.recheck = setTimeout(() => {
           this.recheck = null;
@@ -305,7 +310,7 @@ export class Prebuilder {
       }
     }
     // loop: NOT-WORTH — the few chosen sizes
-    for (const r of this.state.ranges) if (r.state === "failed") Object.assign(r, { state: "todo", error: null });
+    for (const r of this.state.ranges) if (r.state === "failed") Object.assign(r, { state: "todo", error: null, cardWasFree: false });
     const proc = this.deps.makeEngine(
       (r) => this.reply(proc, r),
       (code, signal) => this.exited(proc, code, signal),
@@ -436,7 +441,12 @@ export class Prebuilder {
       return this.next();
     }
     if (m.type === "error") {
-      Object.assign(r, { state: "failed", piece: null, error: String(m.message ?? m.code) });
+      // short of memory with no other program on the card: building again would meet the same card, so no retry is
+      // offered for it (review 2026-10-29 N-N5); with one there, it names them
+      const short = m.code === "oom";
+      const alone = short && this.othersAtStart.length === 0;
+      const who = short && !alone ? ` (${this.othersAtStart.join(", ")} ${this.othersAtStart.length > 1 ? "were" : "was"} using the graphics card when it started)` : "";
+      Object.assign(r, { state: "failed", piece: null, error: `${String(m.message ?? m.code)}${who}`, cardWasFree: alone });
       this.again.delete(trtSizeKey(r.width, r.height)!);
       return this.next();
     }

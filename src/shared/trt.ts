@@ -28,10 +28,6 @@ export const TRT_NOT_BUILT = "TensorRT for this resolution range isn't built yet
 // trt_other_window; ranges built before builds covered the whole card, 1.0.0-dev.7)
 export const TRT_OTHER_WINDOW = "TensorRT for this resolution is built for a window of";
 
-// how the engine's `fallback_reason` starts for a job whose built engines need more memory than the card has free
-// (pipeline/mod.rs TRT_CARD_BUSY): no build fixes that, so none is offered
-export const TRT_CARD_BUSY = "the graphics card is busy";
-
 /**
  * Whether building the clip's size fixes a job's TensorRT fallback: its size isn't built, or only for shorter windows,
  * or a network's build found no implementation within TensorRT's working memory (`fallbacks`; a build tries it again,

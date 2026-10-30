@@ -115,8 +115,22 @@ impl Error {
     }
 }
 
-/// The out-of-memory texts ONNX Runtime and its CUDA provider use (each one has a test).
-const OOM_MESSAGES: [&str; 5] = ["out of memory", "failed to allocate", "cudaerrormemoryallocation", "bad_alloc", "smaller than requested bytes"];
+/// The out-of-memory texts ONNX Runtime, its CUDA provider, its TensorRT provider and TensorRT use (each one has a
+/// test). The TensorRT ones (review 2026-10-29 N-S2) are read from the shipped libraries' own strings
+/// (libnvinfer.so.10, TensorRT 10.16: the error name "OutOfMemory", "Requested amount of GPU memory (N bytes) could
+/// not be allocated", "insufficient memory"; libonnxruntime_providers_tensorrt.so, ORT 1.31: "Memory allocation
+/// failed. Size=N"); "out of memory" and cudaErrorMemoryAllocation (CUDA error 2) were already here.
+const OOM_MESSAGES: [&str; 9] = [
+    "out of memory",
+    "failed to allocate",
+    "cudaerrormemoryallocation",
+    "bad_alloc",
+    "smaller than requested bytes",
+    "outofmemory",
+    "could not be allocated",
+    "memory allocation failed",
+    "insufficient memory",
+];
 
 /// Whether an ONNX Runtime / CUDA message says the memory ran out.
 pub(crate) fn is_oom_message(m: &str) -> bool {
@@ -175,17 +189,24 @@ mod tests {
 
     #[test]
     fn every_known_oom_message_is_oom() {
-        // the texts as ONNX Runtime 1.31 and its CUDA provider write them (one per marker in OOM_MESSAGES)
+        // the texts as ONNX Runtime 1.31, its CUDA and TensorRT providers and TensorRT write them (one per marker in OOM_MESSAGES)
         let cases = [
             "CUDA failure 2: out of memory ; GPU=0 ; hostname=x ; file=cuda_call.cc ; line=129",
             "[ONNXRuntimeError] : 6 : RUNTIME_EXCEPTION : Non-zero status code returned while running Conv node. Failed to allocate memory for requested buffer of size 805306368",
             "CUDA error cudaErrorMemoryAllocation:out of memory",
             "std::bad_alloc",
             "Available memory of 268435456 is smaller than requested bytes of 805306368",
+            // TensorRT and ONNX Runtime's TensorRT provider (their libraries' own strings)
+            "TensorRT EP execution context enqueue failed. OutOfMemory",
+            "Requested amount of GPU memory (6442450944 bytes) could not be allocated. There may not be enough free memory for allocation to succeed.",
+            "Memory allocation failed. Size=6442450944",
+            "Cannot reformat, possibly due to insufficient memory.",
         ];
         assert_eq!(cases.len(), OOM_MESSAGES.len());
-        // loop: NOT-WORTH — five test messages
-        for m in cases {
+        // loop: NOT-WORTH — nine test messages
+        for (m, marker) in cases.iter().zip(OOM_MESSAGES) {
+            // each case is its own marker's
+            assert!(m.to_lowercase().contains(marker), "{m}");
             let e = Error::ort("stage1", m);
             assert_eq!(e.code, ErrorCode::Oom, "{m}");
             assert!(e.message.starts_with("The graphics card ran out of memory (stage1)"), "{}", e.message);
