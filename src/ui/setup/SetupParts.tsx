@@ -200,7 +200,8 @@ function PrebuildBox({ trt }: { trt: TrtState }) {
   }, [p.status]);
   const step = prebuildStep(p.ranges);
   const steps = buildSteps(p.ranges);
-  const canStart = p.status !== "running" && p.status !== "done";
+  // always offered while nothing builds (Marcy 2026-10-29: hidden once "done", it left no way to build again)
+  const canStart = p.status !== "running";
   return (
     <>
       <p className="hint-text">The app builds the sizes ticked below in the background and pauses while you key. Until a size is built, its clips run on CUDA.</p>
@@ -228,7 +229,7 @@ function PrebuildBox({ trt }: { trt: TrtState }) {
         )}
         {canStart && p.status !== "paused" && (
           <button type="button" className="btn small" onClick={() => void window.ck.trtPrebuild("start")}>
-            <Download size={14} /> Build now
+            <Download size={14} /> Build for every size
           </button>
         )}
       </div>

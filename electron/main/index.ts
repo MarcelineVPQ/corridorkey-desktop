@@ -89,7 +89,7 @@ import {
   targetProblem,
 } from "./cacheFolder";
 import { gbBytes, mbOrGbBytes } from "../../src/shared/units";
-import { fixedByBuild, sanitizeTrtSize, sizeRangeText, sizeText, trtSizeKey } from "../../src/shared/trt";
+import { sanitizeTrtSize, sizeRangeText, sizeText, TRT_NAMED_SIZES, trtSizeKey, type TrtSize } from "../../src/shared/trt";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const devServerUrl = process.env.ELECTRON_RENDERER_URL;
@@ -305,32 +305,9 @@ const queue = new Queue({
   finished: (job) => {
     void makeStills(job);
     void refreshTrtBuilt();
-    trtBuildsItself(job);
   },
   saveLog: (job) => saveJobLog(job, app.getVersion()),
 });
-/**
- * TensorRT builds itself (Marcy 2026-10-29: "TensorRT should just be working", "not press a button"): a job that ran on
- * CUDA only because its size isn't built starts that size's build itself, exactly as the tile's Build it now does; the
- * build runs once the queue is free, and the next run of that size uses TensorRT. A size whose last build failed short
- * of memory on a free card isn't retried by itself (the tile's Build it again stays the way to try).
- */
-function trtBuildsItself(job: Job): void {
-  const t = job.tech;
-  if (!t?.tensorrtRequested || !fixedByBuild(t.fallbackReason, t.fallbacks) || !trtAllowed()) return;
-  const { width, height } = job.clip;
-  if (!width || !height || job.options.modelScale !== 1) return;
-  const key = trtSizeKey(width, height);
-  if (!key) return;
-  // loop: NOT-WORTH — the few chosen sizes, once per finished job
-  if (prebuild.state.ranges.some((r) => trtSizeKey(r.width, r.height) === key && r.state === "failed" && r.cardWasFree)) return;
-  // loop: NOT-WORTH — as above
-  settings = { ...settings, trtSizes: [...settings.trtSizes.filter((s) => trtSizeKey(s.width, s.height) !== key), { label: job.clip.name, width, height }] };
-  persist();
-  prebuild.refresh();
-  void prebuild.buildSize(key);
-  scheduleSend();
-}
 // the manual window picker's graphics-memory estimate (backlog row 41): a short-lived Rust engine, only while no queue runs
 /** What runs now that a restart (or a quit) would cut short (busy.ts). */
 const busyState = (): BusyState => ({ queue: queue.running, consoleGpu, download: installAbort !== null, cacheMoving: cacheMoving !== null, trtBuild: prebuild.running });
@@ -1063,8 +1040,20 @@ function registerIpc(): void {
   });
   handle(IPC.trtPrebuild, (_e, action: unknown) => {
     if (!trtAllowed()) return;
-    if (action === "start") void prebuild.start(true);
-    else if (action === "stop") prebuild.stop();
+    if (action === "start") {
+      // one press builds every size TensorRT can take, each covering every window this card runs, so every clip after it
+      // runs on TensorRT (Marcy 2026-10-29: "hit that once, build out every scenario ... once per engine change")
+      const byKey = new Map<string, TrtSize>();
+      // loop: NOT-WORTH — the chosen and named sizes, once per click
+      for (const s of [...settings.trtSizes, ...TRT_NAMED_SIZES]) {
+        const k = trtSizeKey(s.width, s.height);
+        if (k && !byKey.has(k)) byKey.set(k, s);
+      }
+      settings = { ...settings, trtSizes: [...byKey.values()] };
+      persist();
+      void prebuild.coverCard([...byKey.keys()], true);
+      scheduleSend();
+    } else if (action === "stop") prebuild.stop();
   });
   // the sizes TensorRT builds for (Engine settings, TensorRT; a waiting clip's "Build for this clip's size"; row 56)
   handle(IPC.trtSize, async (_e, actionIn: unknown, sizeIn: unknown) => {
@@ -1415,12 +1404,6 @@ app.whenReady().then(() => {
     return;
   }
   void recheckFfmpeg();
-  // every ticked TensorRT size covers this card: any built for shorter windows is built again in the background
-  if (settings.tensorrt && trtAllowed() && settings.trtSizes.length > 0) {
-    // loop: NOT-WORTH — the few ticked sizes, once at start
-    const keys = settings.trtSizes.map((s) => trtSizeKey(s.width, s.height)).filter((k): k is string => k !== null);
-    void readTrtCache().then(() => prebuild.coverCard(keys));
-  }
   // the Console's elevation ends when the screen locks or the computer sleeps (not on the window's blur where the lock
   // can be read: Alt+Tab to Nuke and back is the look-dev loop sudo exists for); powerMonitor works only once the app is
   // ready

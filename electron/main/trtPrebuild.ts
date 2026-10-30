@@ -344,11 +344,11 @@ export class Prebuilder {
    * built only once the engine says its range covers every window a job on this card picks; a range built for shorter
    * windows (an older version, or a build while the card was busy) is built again, in the background, by itself.
    */
-  coverCard(sizeKeys: readonly string[]): Promise<void> {
+  coverCard(sizeKeys: readonly string[], now = false): Promise<void> {
     // loop: NOT-WORTH — the few chosen sizes, at start
     for (const k of sizeKeys) this.again.add(k);
     this.refresh();
-    return this.start(false);
+    return this.start(now);
   }
 
   /** The queue starts: the build gives way (the engine is killed; it goes on when the queue stops). */
