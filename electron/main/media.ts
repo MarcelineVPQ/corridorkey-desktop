@@ -213,7 +213,7 @@ export async function probeVideo(path: string): Promise<{ width: number; height:
   };
 }
 
-async function probeImage(path: string): Promise<{ width: number; height: number }> {
+export async function probeImage(path: string): Promise<{ width: number; height: number }> {
   // loop: SERIAL-REQUIRED — ffprobe of one frame image per probed folder, PROBE_TIMEOUT_MS (this pass: had none)
   const { stdout } = await run("ffprobe", ["-v", "error", "-show_entries", "stream=width,height", "-of", "json", path], { maxBuffer: 1 << 20, timeout: PROBE_TIMEOUT_MS });
   const s = (JSON.parse(stdout) as { streams?: { width: number; height: number }[] }).streams?.[0];

@@ -233,3 +233,28 @@ export function sanitizeTrtSizes(v: unknown): TrtSize[] {
   }
   return out;
 }
+
+// the measured cost of one range's build (TRT_BUILD_COST): bytes and minutes on an RTX 5080
+const BUILD_BYTES = 2.8e9;
+const BUILD_MINUTES: readonly [number, number] = [4.4, 4.8];
+
+/**
+ * What building `count` ranges costs: from this card's own builds when it has any (their mean size, and their mean
+ * recorded time), else the measured cost (TRT_BUILD_COST). `here`: the numbers are this card's.
+ */
+export function buildTotals(count: number, onDisk: readonly { bytes: number; buildSeconds: number | null; stale: boolean }[]): { bytes: number; minutes: readonly [number, number]; here: boolean } {
+  // loop: NOT-WORTH — a few built ranges, per render of the checklist
+  const own = onDisk.filter((d) => !d.stale);
+  // loop: NOT-WORTH — as above
+  const secs = own.map((d) => d.buildSeconds).filter((s): s is number => s !== null);
+  // loop: NOT-WORTH — as above
+  const bytes = own.length ? own.reduce((n, d) => n + d.bytes, 0) / own.length : BUILD_BYTES;
+  // loop: NOT-WORTH — as above
+  const mins = secs.length ? secs.reduce((n, s) => n + s, 0) / secs.length / 60 : null;
+  return { bytes: bytes * count, minutes: mins === null ? [BUILD_MINUTES[0] * count, BUILD_MINUTES[1] * count] : [mins * count, mins * count], here: mins !== null };
+}
+
+// the TensorRT checklist's folder scan (electron/main/trtScan.ts): at most this many clips, in the folder chosen and
+// this many folder levels under it
+export const SCAN_MAX_CLIPS = 500;
+export const SCAN_DEPTH = 2;

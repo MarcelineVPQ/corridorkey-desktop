@@ -190,8 +190,8 @@ export interface PrebuildDeps {
   built(): string[];
   // reads the cache again (async: the cache folder can be on a network share), before a start looks at built()
   reread?(): Promise<void>;
-  // the sizes to build (the setting; one per range, each inside TensorRT's ranges)
-  sizes(): readonly TrtSize[];
+  // what to build: the checklist's ticked windows (each its own range), or a size at its longest window (no `window`)
+  sizes(): readonly BuildItem[];
   // a range the app just built, and the seconds its networks took (the engine's built_s): its build time on screen
   recordBuild?(range: string, seconds: number): void;
   now?: () => number;
@@ -199,11 +199,18 @@ export interface PrebuildDeps {
   recheckMs?: number;
 }
 
-/** A range's id in the engine messages: its size range ("trt-h1024-1280_w1792-2176"), one per chosen size. */
-export const rangeId = (r: { width: number; height: number }) => `trt-${trtSizeKey(r.width, r.height)}`;
+/** One thing to build: a size, and the checklist's window with the range it builds (none: the longest window). */
+export type BuildItem = TrtSize & { window?: number | null; range?: string | null };
 
-// `again`: size keys a job asked to build (buildSize), built even where a range of that size is (for shorter windows)
-const fresh = (built: readonly string[], sizes: readonly TrtSize[], again: ReadonlySet<string> = new Set()): PrebuildRange[] =>
+/**
+ * A build's id in the engine messages: its size range ("trt-h1024-1280_w1792-2176"), and the window when the checklist
+ * chose one ("trt-h1792-2176_w3584-4096-t4").
+ */
+export const rangeId = (r: { width: number; height: number; window?: number | null }) => `trt-${trtSizeKey(r.width, r.height)}${r.window ? `-t${r.window}` : ""}`;
+
+// `again`: size keys a job asked to build (buildSize), built even where a range of that size is (for shorter windows).
+// A ticked window is done when its own range is built; a size without one when any range of it is.
+const fresh = (built: readonly string[], sizes: readonly BuildItem[], again: ReadonlySet<string> = new Set()): PrebuildRange[] =>
   sizes
     // loop: NOT-WORTH — the few chosen sizes
     .filter((s) => trtSizeKey(s.width, s.height) !== null)
@@ -211,8 +218,8 @@ const fresh = (built: readonly string[], sizes: readonly TrtSize[], again: Reado
     .map((s) => {
       const key = trtSizeKey(s.width, s.height);
       // loop: NOT-WORTH — a few built ranges
-      const done = !again.has(key!) && built.some((k) => k.startsWith(`${key}_t`));
-      return { label: s.label, width: s.width, height: s.height, state: done ? "done" : "todo", piece: null, range: null, fallbacks: {}, error: null };
+      const done = !again.has(key!) && (s.range ? built.includes(s.range) : built.some((k) => k.startsWith(`${key}_t`)));
+      return { label: s.label, width: s.width, height: s.height, window: s.window ?? null, state: done ? "done" : "todo", piece: null, range: null, fallbacks: {}, error: null };
     });
 
 export class Prebuilder {
@@ -339,18 +346,6 @@ export class Prebuilder {
     return this.start(true);
   }
 
-  /**
-   * Every chosen size covers this card (Marcy 2026-10-29: "it should just build for all scenarios"): a size counts as
-   * built only once the engine says its range covers every window a job on this card picks; a range built for shorter
-   * windows (an older version, or a build while the card was busy) is built again, in the background, by itself.
-   */
-  coverCard(sizeKeys: readonly string[], now = false): Promise<void> {
-    // loop: NOT-WORTH — the few chosen sizes, at start
-    for (const k of sizeKeys) this.again.add(k);
-    this.refresh();
-    return this.start(now);
-  }
-
   /** The queue starts: the build gives way (the engine is killed; it goes on when the queue stops). */
   pause(): void {
     const was = this.state.status;
@@ -421,7 +416,7 @@ export class Prebuilder {
       return this.set({ status: failed.length ? "error" : "done", startedAt: null, note });
     }
     Object.assign(r, { state: "building", piece: null, error: null });
-    this.proc!.send({ cmd: "trt_build", id: rangeId(r), width: r.width, height: r.height });
+    this.proc!.send({ cmd: "trt_build", id: rangeId(r), width: r.width, height: r.height, ...(r.window ? { window: r.window } : {}) });
     this.set({});
   }
 

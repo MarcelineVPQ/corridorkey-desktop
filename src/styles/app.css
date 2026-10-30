@@ -487,6 +487,11 @@ select + .estimate {
 .btn + .size-note {
   margin-top: 6px;
 }
+/* a TensorRT size's windows, one tick each, under the size's tick (Engine settings, TensorRT checklist) */
+.trt-windows {
+  margin: 4px 0 2px 26px;
+  font-size: 13px;
+}
 /* the cache folder's sizes per clip and per TensorRT range (App settings, Storage) */
 .sizes {
   list-style: none;

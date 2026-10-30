@@ -628,7 +628,7 @@ fn prepare(m: &ArgMatches, sink: &mut CliSink) -> Result<(), Fail> {
         };
         crate::signals::install();
         let mut pipeline = ck_core::pipeline::Pipeline::new(rt, set);
-        let built = pipeline.trt_build(w, h, 1000, cap, sink)?;
+        let built = pipeline.trt_build(w, h, 1000, None, cap, sink)?;
         // a stop during the last network's build: the engines built are kept, but nothing claims ready
         stopped(crate::signals::stopped_by())?;
         println!("tensorrt: {built}");

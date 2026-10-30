@@ -4,10 +4,11 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { EngineReply } from "../../electron/main/engine";
 import type { EngineHandle } from "../../electron/main/queue";
-import { BUILD_RECORD, builtRanges, Prebuilder, rangesOnDisk, recordBuild, removeSize, sourceStamp, trtRangeDirs, trtStamps } from "../../electron/main/trtPrebuild";
+import { BUILD_RECORD, builtRanges, Prebuilder, rangesOnDisk, recordBuild, removeSize, sourceStamp, trtRangeDirs, trtStamps, type BuildItem } from "../../electron/main/trtPrebuild";
 import { tensorrtWhyNot } from "../../electron/main/install";
 import {
   buildSteps,
+  buildTotals,
   builtWindows,
   DEFAULT_TRT_SIZES,
   ownTrtSize,
@@ -184,9 +185,9 @@ describe("the background TensorRT build", () => {
     expect(test).toContain(`assert_eq!(source_stamp(&onnx), "${withData}");`);
   });
 
-  function rig(opts: { others?: string[] | (() => string[] | Promise<string[]>); built?: string[]; sizes?: TrtSize[] } = {}) {
+  function rig(opts: { others?: string[] | (() => string[] | Promise<string[]>); built?: string[]; sizes?: BuildItem[] } = {}) {
     const sent: Record<string, unknown>[] = [];
-    const sizes: TrtSize[] = opts.sizes ?? DEFAULT_TRT_SIZES.map((x) => ({ ...x }));
+    const sizes: BuildItem[] = opts.sizes ?? DEFAULT_TRT_SIZES.map((x) => ({ ...x }));
     const records: [string, number][] = [];
     let reply: (r: EngineReply) => void = () => {};
     let kills = 0;
@@ -235,6 +236,26 @@ describe("the background TensorRT build", () => {
     // a part of the networks built (resumed, or reused): no time recorded, it wouldn't be the whole build
     expect(r.records).toHaveLength(1);
     expect(r.b.state.ranges[1].fallbacks).toEqual({ stage1: "no tactic" });
+  });
+
+  it("2026-10-30, the checklist: each ticked window builds its own range with its window, done when that range is built", async () => {
+    const k4 = (t: number, f: number) => `h1792-2176_w3584-4096_t1-${t}_f1-${f}`;
+    // Marcy's card: 4K built for 2 and 8; the job at window 4 ran on CUDA. Ticked: 2 (built) and 4
+    const r = rig({
+      built: [k4(2, 2), k4(8, 4)],
+      sizes: [
+        { label: "4K DCI", width: 4096, height: 2160, window: 2, range: k4(2, 2) },
+        { label: "4K DCI", width: 4096, height: 2160, window: 4, range: k4(4, 4) },
+      ],
+    });
+    await r.b.start(true);
+    expect(r.sent).toEqual([{ cmd: "trt_build", id: `${K4}-t4`, width: 4096, height: 2160, window: 4 }]);
+    r.reply({ type: "trt_built", id: `${K4}-t4`, range: k4(4, 4), fallbacks: {}, built_s: {} });
+    expect(r.b.state.status).toBe("done");
+    // nothing ticked: nothing builds
+    const none = rig({ sizes: [] });
+    await none.b.start(false);
+    expect([none.sent, none.b.state.status]).toEqual([[], "done"]);
   });
 
   it("says while the engine pause() killed hasn't exited (the Console's corridorkey waits for it; senior review 2026-10-26 N9)", async () => {
@@ -496,6 +517,17 @@ describe("choosing the sizes TensorRT builds for", () => {
 
   // bug hunt 2026-10-26 U1: "A size of my own" enabled Build for a side under 16 px (it has a TensorRT range), but the
   // main process refuses that size, so the button did nothing
+  it("2026-10-30: what the ticked builds cost, from this card's own builds when it has any, else the measured cost", () => {
+    expect(buildTotals(3, [])).toEqual({ bytes: 3 * 2.8e9, minutes: [expect.closeTo(13.2, 6), expect.closeTo(14.4, 6)], here: false });
+    const own = [
+      { bytes: 2.6e9, buildSeconds: 300, stale: false },
+      { bytes: 2.6e9, buildSeconds: null, stale: false },
+      { bytes: 9e9, buildSeconds: 9000, stale: true },
+    ];
+    expect(buildTotals(2, own)).toEqual({ bytes: 5.2e9, minutes: [10, 10], here: true });
+    expect(buildTotals(0, own).bytes).toBe(0);
+  });
+
   it("offers Build for a size of one's own only when the main process takes it", () => {
     // the mismatch the button had: a range, but a size the main process refuses
     expect(trtSizeKey(10, 1080)).not.toBeNull();

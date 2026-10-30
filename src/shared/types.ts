@@ -470,6 +470,39 @@ export interface TrtState {
   // when the app built it; null: built before this was recorded, or by a job); `stale`: built for other model files
   // (the model set changed), so the engine doesn't use it until it is built again
   onDisk: { range: string; bytes: number; buildSeconds: number | null; stale: boolean }[];
+  // the sizes your clips use (queued clips, a scanned folder, a size added by hand): their windows start ticked
+  sizes: TrtSize[];
+  // per size range ("h1792-2176_w3584-4096"), the windows the engine builds on this card and the range each builds
+  // (engine `trt_windows`); null until read, `windowsNote` why they couldn't be
+  windows: Record<string, TrtWindow[]> | null;
+  windowsNote: string | null;
+  // the last folder scan for clip sizes (trtScan.ts)
+  scan: TrtScan;
+}
+
+/** One window a size can be built for on this card, and the range folder that build makes. */
+export interface TrtWindow {
+  window: number;
+  range: string;
+}
+
+/** One ticked window the checklist sends to build. */
+export interface TrtPick extends TrtSize {
+  window: number;
+  range: string;
+}
+
+/** A folder scanned for the sizes of the clips in it (Engine settings, TensorRT). */
+export interface TrtScan {
+  status: "idle" | "running" | "done" | "stopped" | "error";
+  folder: string | null;
+  // clips read so far, and the sizes found (with how many clips each)
+  clips: number;
+  found: { width: number; height: number; clips: number }[];
+  // clips whose size couldn't be read; `capped`: it stopped at the clip limit
+  unreadable: number;
+  capped: boolean;
+  note: string | null;
 }
 
 /** Another program holding this much graphics memory is named before a run, and holds back the background TensorRT
@@ -484,6 +517,8 @@ export interface PrebuildRange {
   width: number;
   height: number;
   state: "todo" | "building" | "done" | "failed";
+  // the window this entry builds (the checklist, 2026-10-30: one range per window); null: the longest this card builds
+  window?: number | null;
   // the network being built (cradio, moge, rvm, stage1, stage2)
   piece: string | null;
   // the engine's range key once known, and networks that couldn't be built (they run on CUDA)
@@ -736,11 +771,12 @@ export interface CorridorKeyApi {
   setTensorrt(on: boolean): Promise<void>;
   // the model set (one install.ts offers on this system; refused while a download runs); the Models folder goes back to Automatic
   setModelSet(name: string): Promise<void>;
-  // the background TensorRT build (Engine settings, TensorRT): start it (or again), or stop it
-  trtPrebuild(action: "start" | "stop"): Promise<void>;
-  // choose a size to build for (it builds now), or remove one: its range's built engines are deleted (asked first)
-  // or build it now from a job's TensorRT tile ("build": as Build now, also where a range of it is built for shorter windows)
-  trtSize(action: "add" | "remove" | "build", size: TrtSize): Promise<void>;
+  // the TensorRT checklist (Engine settings, TensorRT): build the ticked windows ("start", with them), stop, read the
+  // windows this card builds ("windows"), scan a folder for clip sizes ("scan": it asks for the folder) or stop a scan
+  trtPrebuild(action: "start" | "stop" | "windows" | "scan" | "stopScan", picks?: TrtPick[]): Promise<void>;
+  // a size your clips use: "add" ticks its windows, "forget" unticks them (nothing is deleted); "remove" deletes its
+  // built engines (asked first); "build" builds it now from a job's TensorRT tile
+  trtSize(action: "add" | "forget" | "remove" | "build", size: TrtSize): Promise<void>;
   measureStorage(): Promise<void>;
   // asks for confirmation first (a system dialog); refused while the queue or the install runs
   removeStorage(id: StorageItem["id"]): Promise<void>;

@@ -102,6 +102,44 @@ fn a_build_covers_the_card_not_the_moment() {
     assert!(capped >= select_vram_profile(hd, 1000, 8.0, true, true).chunk && capped < w(hd, 32.0), "{capped}");
 }
 
+#[test]
+fn the_checklist_offers_every_window_a_job_picks_so_a_busy_card_still_finds_its_build() {
+    // Marcy 2026-10-30: a 4K job with 12.3 GB free picked window 4, found only the build for 8 (sized for a card with
+    // nothing else on it) and ran on CUDA. The checklist offers every automatic window from 2 to the card's longest build.
+    let (hd, k4, mp16, p1440) = ((1152, 1920), (2176, 4096), (1152, 1280), (1536, 2560));
+    let ws = |shape| trt_build_windows(shape, 1000, 16.0, None);
+    assert_eq!([ws(k4), ws(hd), ws(mp16), ws(p1440)], [vec![2, 4, 8], vec![2, 4, 8, 24], vec![2, 4, 8, 24, 48], vec![2, 4, 8, 15]]);
+    // with every offered window built, whatever is free and however long the clip: a job whose window is one the
+    // checklist builds runs on TensorRT; only a clip shorter than its window, between two builds, on a card without
+    // the memory for the longer one runs on CUDA, and says so (TRT_CLIP_RUNS; measured 2026-10-30, BACKLOG row 191);
+    // and a card so full the job's window is one frame, where even the shortest build doesn't fit (TRT_SHORTEST)
+    let all = |_: &str| true;
+    // loop: NOT-WORTH — a test's sizes x budgets x clip lengths
+    for shape in [k4, hd, mp16] {
+        let offered = ws(shape);
+        let names: Vec<String> = offered.iter().map(|&t| crate::tensorrt::bucket_for(shape.0, shape.1, t, true).unwrap().key()).collect();
+        let mp = (shape.0 * shape.1) as f64 / 1e6;
+        // loop: NOT-WORTH — as above
+        for free in [3.0, 5.0, 8.0, 10.0, 12.3, 14.0, 16.0] {
+            // loop: NOT-WORTH — as above
+            for frames in [3, 12, 30, 100, 1000] {
+                let ran = select_vram_profile(shape, frames, free, false, true).chunk.min(frames);
+                if ran > *offered.last().unwrap() {
+                    continue;
+                }
+                let need = crate::tensorrt::bucket_for(shape.0, shape.1, ran, true).unwrap();
+                match trt_serving(&need, &names, all, mp, true, Some((free, None))) {
+                    Ok(b) => assert!(b.is_some(), "{shape:?} {free} GiB free, {frames} frames: window {ran}"),
+                    Err(why) => assert!(
+                        (ran == frames && !offered.contains(&ran) && why.starts_with(TRT_CLIP_RUNS)) || (ran == 1 && why.starts_with(TRT_SHORTEST)),
+                        "{shape:?} {free} GiB free, {frames} frames: window {ran}: {why}"
+                    ),
+                }
+            }
+        }
+    }
+}
+
 // the build windows the table gives fake 8, 16 and 32 GiB cards (vram.rs, low-VRAM mode): the longest window whose peak
 // fits the card, never past the window measured to build at that size (reviews 2026-10-29 M2, N-M1: tensorrt::build_cap,
 // 4K 8 and HD 24; the table alone gave a 32 GiB card HD 56 and 4K 16, unmeasured builds)
@@ -116,8 +154,9 @@ fn measured(shape: (usize, usize)) -> usize {
 #[test]
 fn a_longer_range_is_used_only_when_its_memory_fits() {
     // review 2026-10-29 M1: a busy card's HD job picks window 8; the card's build is t1-24. Its engines may hold the
-    // memory of 24 frames, so the job takes them only when a job at window 24 would fit its budget; else CUDA, with
-    // a reason no build fixes (the app offers none)
+    // memory of 24 frames (measured 2026-10-30: 4K window 4 on t1-8 engines peaked at 10.4 GB, window 8 at 11.4), so
+    // the job takes them only when a job at window 24 would fit its budget; else CUDA, with the build that fixes it
+    // (window 8 is one the checklist builds: TRT_OTHER_WINDOW, the app offers it), never "the graphics card is busy"
     let hd = (1152, 1920);
     let mp = (hd.0 * hd.1) as f64 / 1e6;
     let names = vec!["h1024-1280_w1792-2176_t1-24_f1-4".to_string()];
@@ -128,11 +167,26 @@ fn a_longer_range_is_used_only_when_its_memory_fits() {
     let at = |w: usize| (10..210).map(|t| t as f64 / 10.0).find(|&b| select_vram_profile(hd, 1000, b, false, true).chunk == w).unwrap();
     let (busy, free) = (at(8), at(24));
     let why = trt_serving(&need, &names, all, mp, true, Some((busy, None))).unwrap_err();
-    assert!(why.starts_with(TRT_CARD_BUSY) && why.ends_with("so this run used CUDA"), "{why}");
+    assert!(
+        why.starts_with("TensorRT for this resolution is built for a window of 24 frames; this job's automatic window is 8")
+            && why.contains("build the window of 8 frames"),
+        "{why}"
+    );
+    assert!(!why.contains("busy"), "{why}");
     // no number presented as TensorRT's own need (it is CUDA's table at that window: review N-N1)
     assert!(!why.contains("needs about"), "{why}");
     // a limit above the free memory: still the card (review N-S1)
-    assert!(trt_serving(&need, &names, all, mp, true, Some((busy, Some(busy + 4.0)))).unwrap_err().starts_with(TRT_CARD_BUSY));
+    assert_eq!(trt_serving(&need, &names, all, mp, true, Some((busy, Some(busy + 4.0)))).unwrap_err(), why);
+    // a 12-frame clip (it runs all 12 at once) between the builds: said as it is, no build offered
+    let twelve = crate::tensorrt::bucket_for(hd.0, hd.1, 12, true).unwrap();
+    let why12 = trt_serving(&twelve, &names, all, mp, true, Some((busy, None))).unwrap_err();
+    assert!(
+        why12.starts_with(&format!("{TRT_CLIP_RUNS} 12 frames at once")) && why12.contains("(up to 24 frames)") && why12.ends_with("so this run used CUDA"),
+        "{why12}"
+    );
+    // a single-frame window: even the shortest build doesn't fit
+    let one = crate::tensorrt::bucket_for(hd.0, hd.1, 1, true).unwrap();
+    assert!(trt_serving(&one, &names, all, mp, true, Some((2.0, None))).unwrap_err().starts_with(TRT_SHORTEST));
     // the job's own limit is the smaller: it says so, and how to raise it, never that another program holds the card
     let why = trt_serving(&need, &names, all, mp, true, Some((busy, Some(busy)))).unwrap_err();
     assert!(why.starts_with(TRT_LIMIT_TOO_SMALL) && why.contains("raise Memory limit") && !why.contains("busy"), "{why}");
@@ -144,10 +198,7 @@ fn a_longer_range_is_used_only_when_its_memory_fits() {
     // more frames at a time than any build of the size is made for: CUDA, and no build offered (it would not serve it)
     let long = crate::tensorrt::bucket_for(hd.0, hd.1, 48, true).unwrap();
     let why = trt_serving(&long, &[], all, mp, true, Some((40.0, None))).unwrap_err();
-    assert!(
-        why.starts_with(&format!("{TRT_BUILD_CAP} 24 frames at a time (the longest build measured at this size)")) && !why.starts_with(TRT_CARD_BUSY),
-        "{why}"
-    );
+    assert!(why.starts_with(&format!("{TRT_BUILD_CAP} 24 frames at a time (the longest build measured at this size)")) && !why.contains("busy"), "{why}");
     // a size never measured says so (1440p: within the 4K build)
     let qhd = crate::tensorrt::bucket_for(1536, 2560, 24, true).unwrap();
     let why = trt_serving(&qhd, &[], all, 1536.0 * 2560.0 / 1e6, true, Some((40.0, None))).unwrap_err();

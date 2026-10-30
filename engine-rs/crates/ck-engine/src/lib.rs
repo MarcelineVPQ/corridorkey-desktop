@@ -29,8 +29,53 @@ pub trait Backend {
         None
     }
     /// The `trt_build` command: the TensorRT engines a clip of this size would use, built ahead of any job.
-    fn trt_build(&mut self, _width: usize, _height: usize, _frames: usize, _vram_budget_gb: Option<f64>, _sink: &mut dyn Sink) -> Result<Value, Error> {
+    fn trt_build(
+        &mut self,
+        _width: usize,
+        _height: usize,
+        _frames: usize,
+        _window: Option<usize>,
+        _vram_budget_gb: Option<f64>,
+        _sink: &mut dyn Sink,
+    ) -> Result<Value, Error> {
         Err(Error::bad_request("this engine has no TensorRT".into()))
+    }
+    /// The `trt_windows` command: per size, the windows `trt_build` builds on this card and each one's range.
+    fn trt_windows(&mut self, _sizes: &[(usize, usize)], _vram_budget_gb: Option<f64>) -> Result<Value, Error> {
+        Err(Error::bad_request("this engine has no TensorRT".into()))
+    }
+}
+
+/// A request's `vram_budget_gb`: absent or null is None, else a positive number.
+fn budget_field(req: &Value) -> Result<Option<f64>, String> {
+    match req.get("vram_budget_gb") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v.as_f64().filter(|g| g.is_finite() && *g > 0.0).map(Some).ok_or_else(|| format!("vram_budget_gb: a positive number, got {v}")),
+    }
+}
+
+/// The `trt_windows` command's checks (`sizes`: [{width, height}], each 1 to 16384), then the backend's reply.
+fn trt_windows_reply<B: Backend>(backend: &mut B, req: &Value) -> Value {
+    let bad = |m: String| json!({"type": "error", "code": "bad-request", "message": m});
+    let Some(list) = req.get("sizes").and_then(|v| v.as_array()) else {
+        return bad("trt_windows needs sizes: [{width, height}]".into());
+    };
+    let dim = |s: &Value, k: &str| s.get(k).and_then(|v| v.as_u64()).filter(|v| *v > 0 && *v <= 16384).map(|v| v as usize);
+    let mut sizes = Vec::with_capacity(list.len());
+    // loop: NOT-WORTH — the few sizes the checklist lists
+    for s in list {
+        match (dim(s, "width"), dim(s, "height")) {
+            (Some(w), Some(h)) => sizes.push((w, h)),
+            _ => return bad(format!("trt_windows sizes: width and height 1 to 16384, got {s}")),
+        }
+    }
+    let cap = match budget_field(req) {
+        Ok(c) => c,
+        Err(m) => return bad(m),
+    };
+    match backend.trt_windows(&sizes, cap) {
+        Ok(v) => v,
+        Err(e) => json!({"type": "error", "code": e.code.as_str(), "message": e.message}),
     }
 }
 
@@ -64,9 +109,20 @@ fn trt_build_job<B: Backend, W: Write>(backend: &mut B, req: &Value, id: &str, r
             }
         },
     };
+    // the checklist's window (one trt_windows lists); absent: the longest this card builds
+    let window = match req.get("window") {
+        None | Some(Value::Null) => None,
+        Some(v) => match v.as_u64().filter(|t| *t > 0) {
+            Some(t) => Some(t as usize),
+            None => {
+                r.send(json!({"type": "error", "id": id, "code": "bad-request", "message": format!("trt_build window: a whole number above 0, got {v}")}));
+                return;
+            }
+        },
+    };
     r.job = Some(id.to_string());
     // a panic: the protocol loop's guard replies and resets the backend (it skipped the reset when caught here)
-    let res = backend.trt_build(w, h, frames, cap, r);
+    let res = backend.trt_build(w, h, frames, window, cap, r);
     match res {
         Ok(v) => r.send(v),
         Err(e) => r.send(json!({"type": "error", "code": e.code.as_str(), "message": e.message})),
@@ -316,6 +372,14 @@ fn dispatch<B: Backend, W: Write>(backend: &mut B, req: &Value, inbox: &Inbox, p
             Some(bid) => trt_build_job(backend, req, &bid, r),
             None => r.send(json!({"type": "error", "id": id, "code": "bad-request", "message": "trt_build needs an id"})),
         },
+        // the windows trt_build builds for each size on this card (the checklist); no model, between jobs
+        "trt_windows" => {
+            let mut reply = trt_windows_reply(backend, req);
+            if !id.is_null() {
+                reply["id"] = id;
+            }
+            r.send(reply);
+        }
         "cancel" => match str_field(req, "id") {
             Some(jid) => {
                 pending_cancel.insert(jid);

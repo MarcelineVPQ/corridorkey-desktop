@@ -85,8 +85,19 @@ impl Backend for Ort {
     fn vram_budget_gb(&self) -> Option<f64> {
         self.pipeline.rt().cfg.vram_budget_gb
     }
-    fn trt_build(&mut self, width: usize, height: usize, frames: usize, vram_budget_gb: Option<f64>, sink: &mut dyn Sink) -> Result<Value, Error> {
-        self.pipeline.trt_build(width, height, frames, vram_budget_gb, sink)
+    fn trt_build(
+        &mut self,
+        width: usize,
+        height: usize,
+        frames: usize,
+        window: Option<usize>,
+        vram_budget_gb: Option<f64>,
+        sink: &mut dyn Sink,
+    ) -> Result<Value, Error> {
+        self.pipeline.trt_build(width, height, frames, window, vram_budget_gb, sink)
+    }
+    fn trt_windows(&mut self, sizes: &[(usize, usize)], vram_budget_gb: Option<f64>) -> Result<Value, Error> {
+        self.pipeline.trt_windows(sizes, vram_budget_gb)
     }
 }
 

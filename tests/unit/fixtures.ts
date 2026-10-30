@@ -93,6 +93,10 @@ export const trtState = (over: Partial<TrtState> = {}): TrtState => ({
   built: [],
   prebuild: { status: "idle", ranges: [], startedAt: null, note: null },
   onDisk: [],
+  sizes: [],
+  windows: null,
+  windowsNote: null,
+  scan: { status: "idle", folder: null, clips: 0, found: [], unreadable: 0, capped: false, note: null },
   ...over,
 });
 

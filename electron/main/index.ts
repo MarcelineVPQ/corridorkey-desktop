@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { EngineProcess, rustEngineEnv, type EngineReply } from "./engine";
 import { Estimator } from "./estimate";
 import { GPU_POLL_MS, gpuReadoutWanted, otherGpuUsers, ownPids, readAmdGpu, readGpu, untilEnded } from "./gpu";
-import { expandPaths, frameDirLinearFor, probeClip, still, STILL_WIDTH, VIDEO_EXT, HINT_IMAGE_EXT } from "./media";
+import { expandPaths, frameDirLinearFor, frameFiles, probeClip, probeImage, probeVideo, still, STILL_WIDTH, VIDEO_EXT, HINT_IMAGE_EXT } from "./media";
 import { clearJobTemps, Queue } from "./queue";
 import { applyModelSet, checkRustEngine, loadSettings, saveSettings } from "./settings";
 import { chosenFirst, effectivePath, findCli, findEngineFiles, findTrtBuilder, isInsideApp, modelSetVersion, windowTitle } from "./engineFind";
@@ -37,7 +37,8 @@ import {
   type InstallDeps,
 } from "./install";
 import { folderBytes, pruneCache, removeStorage, storageItems, sweepRemoving, TRT_ENGINES_DIR } from "./storage";
-import { builtRanges, Prebuilder, rangesOnDisk, recordBuild, removeSize, trtStamps } from "./trtPrebuild";
+import { builtRanges, Prebuilder, rangesOnDisk, recordBuild, removeSize, trtStamps, type BuildItem } from "./trtPrebuild";
+import { scanClipSizes } from "./trtScan";
 import { jobLogText, saveJobLog } from "./jobLog";
 import { readDesktopPalette, watchDesktopPalette } from "./desktopTheme";
 import { Updater } from "./updater";
@@ -57,7 +58,9 @@ import {
   type JobOptions,
   type MemoryEstimateResult,
   type OutputName,
+  type TrtScan,
   type TrtState,
+  type TrtWindow,
 } from "../../src/shared/types";
 import { NOT_WHILE_BUSY } from "../../src/shared/texts";
 import { QUIT_ANYWAY, quitQuestion, restartRefusal, runningWork, type BusyState } from "./busy";
@@ -89,7 +92,7 @@ import {
   targetProblem,
 } from "./cacheFolder";
 import { gbBytes, mbOrGbBytes } from "../../src/shared/units";
-import { sanitizeTrtSize, sizeRangeText, sizeText, TRT_NAMED_SIZES, trtSizeKey, type TrtSize } from "../../src/shared/trt";
+import { sanitizeTrtSize, sizeRangeText, sizeText, trtSizeKey, trtSizeRows, type TrtSize } from "../../src/shared/trt";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const devServerUrl = process.env.ELECTRON_RENDERER_URL;
@@ -198,7 +201,7 @@ let install = installIdle();
 // the opt-in TensorRT parts: what is installed, for the setting's install box; progress while its install runs
 // TensorRT is NVIDIA's: never on an AMD card (the switch on); every TensorRT handler asks this
 const trtAllowed = () => trtSupported(PLATFORM) && !AMD_GFX;
-function trtParts(): Omit<TrtState, "status" | "step" | "done" | "total" | "error" | "built" | "prebuild" | "onDisk"> {
+function trtParts(): Omit<TrtState, "status" | "step" | "done" | "total" | "error" | "built" | "prebuild" | "onDisk" | "sizes" | "windows" | "windowsNote" | "scan"> {
   const supported = trtAllowed();
   const need = trtNeeds(enginePlaces().data, existsSync, trtCatalogFor(modelSet()));
   const paths = enginePaths();
@@ -213,7 +216,7 @@ function trtParts(): Omit<TrtState, "status" | "step" | "done" | "total" | "erro
     fullBytes: trtBytesFor(modelSet()),
   };
 }
-const trtIdle = (): Omit<TrtState, "built" | "prebuild" | "onDisk"> => ({ ...trtParts(), status: "idle", step: null, done: 0, total: 0, error: null });
+const trtIdle = (): Omit<TrtState, "built" | "prebuild" | "onDisk" | "sizes" | "windows" | "windowsNote" | "scan"> => ({ ...trtParts(), status: "idle", step: null, done: 0, total: 0, error: null });
 let trt = trtIdle();
 // one install at a time (the runtime and models, or TensorRT's parts): one Stop
 let installAbort: AbortController | null = null;
@@ -337,6 +340,94 @@ async function refreshTrtBuilt(): Promise<void> {
   prebuild.refresh();
   scheduleSend();
 }
+// what the TensorRT checklist asked to build (its ticked windows), until the app quits
+let trtPlan: BuildItem[] = [];
+// the windows the engine builds on this card per size range (engine trt_windows), read when the TensorRT page asks
+let trtWindows: Record<string, TrtWindow[]> | null = null;
+let trtWindowsNote: string | null = null;
+let trtWindowsReading = false;
+/** Reads the windows each listed size can be built for on this card: a short-lived engine, no model, between jobs. */
+async function readTrtWindows(): Promise<void> {
+  if (trtWindowsReading || !trtAllowed() || queue.running || consoleGpu) return;
+  trtWindowsReading = true;
+  // loop: NOT-WORTH — a dozen size rows, once per read
+  const sizes = trtSizeRows(settings.trtSizes, trtBuilt).rows.map((r) => ({ width: r.build.width, height: r.build.height }));
+  let proc: EngineProcess | null = null;
+  try {
+    const reply = await new Promise<EngineReply>((done, fail) => {
+      proc = rustEngineProcess(
+        (r) => {
+          if (r.id === "trt-windows") done(r);
+        },
+        (code, signal) => fail(new Error(`the engine stopped (${signal ?? `exit ${code}`})`)),
+      );
+      proc
+        .start()
+        .then(() => proc!.send({ cmd: "trt_windows", id: "trt-windows", sizes }))
+        .catch(fail);
+    });
+    if (reply.type !== "trt_windows" || !Array.isArray(reply.sizes)) throw new Error(String(reply.message ?? "no answer"));
+    const out: Record<string, TrtWindow[]> = {};
+    // loop: NOT-WORTH — a dozen sizes, a few windows each
+    for (const x of reply.sizes as { width: number; height: number; windows: TrtWindow[] }[]) {
+      const key = trtSizeKey(x.width, x.height);
+      // loop: NOT-WORTH — a few windows per size
+      if (key) out[key] = x.windows.filter((w) => Number.isInteger(w.window) && typeof w.range === "string");
+    }
+    trtWindows = out;
+    trtWindowsNote = null;
+  } catch (e) {
+    // error: SHOWN — the checklist says why the windows couldn't be read
+    trtWindowsNote = (e as Error).message;
+  } finally {
+    (proc as EngineProcess | null)?.quit();
+    trtWindowsReading = false;
+    scheduleSend();
+  }
+}
+/** A size your clips use (a queued clip, a scan) joins the checklist's ticked sizes, once per size range. */
+function useTrtSize(size: TrtSize): void {
+  const key = trtSizeKey(size.width, size.height);
+  // loop: NOT-WORTH — the few sizes in the list
+  if (!key || settings.trtSizes.some((s) => trtSizeKey(s.width, s.height) === key)) return;
+  settings = { ...settings, trtSizes: [...settings.trtSizes, size] };
+  persist();
+  // a new size range: its windows are read again when the page asks
+  if (trtWindows && !trtWindows[key]) trtWindows = null;
+}
+let trtScanState: TrtScan = { status: "idle", folder: null, clips: 0, found: [], unreadable: 0, capped: false, note: null };
+let trtScanAbort: AbortController | null = null;
+/** Scan a folder you choose for the sizes of the clips in it (trtScan.ts): reads sizes only, keys nothing. */
+async function scanForTrtSizes(): Promise<void> {
+  if (!mainWindow || trtScanAbort) return;
+  const pick = await dialog.showOpenDialog(mainWindow, { title: "Choose your clips folder", properties: ["openDirectory"] });
+  if (pick.canceled || !pick.filePaths[0]) return;
+  const folder = pick.filePaths[0];
+  const abort = new AbortController();
+  trtScanAbort = abort;
+  trtScanState = { status: "running", folder, clips: 0, found: [], unreadable: 0, capped: false, note: null };
+  scheduleSend();
+  try {
+    const r = await scanClipSizes(folder, {
+      probe: async (path, kind) => (kind === "video" ? probeVideo(path) : probeImage((await frameFiles(path))[0] ?? join(path, "-"))),
+      progress: (p) => {
+        trtScanState = { ...trtScanState, ...p, found: [...p.found] };
+        scheduleSend();
+      },
+      signal: abort.signal,
+    });
+    trtScanState = { ...trtScanState, ...r, found: [...r.found], status: abort.signal.aborted ? "stopped" : "done" };
+    // loop: NOT-WORTH — the few sizes found
+    for (const f of r.found) useTrtSize({ label: basename(folder), width: f.width, height: f.height });
+    void readTrtWindows();
+  } catch (e) {
+    // error: SHOWN — the scan line says why it stopped
+    trtScanState = { ...trtScanState, status: "error", note: (e as Error).message };
+  } finally {
+    trtScanAbort = null;
+    scheduleSend();
+  }
+}
 // the background TensorRT build of the common ranges (trtPrebuild.ts): jobs never build; only while no queue runs
 const prebuild: Prebuilder = new Prebuilder({
   makeEngine: rustEngineProcess,
@@ -344,7 +435,8 @@ const prebuild: Prebuilder = new Prebuilder({
     if (!prebuild.running) void readTrtCache().then(scheduleSend);
     scheduleSend();
   },
-  sizes: () => settings.trtSizes,
+  // only what the checklist (or a job's Build it now) asked for: nothing builds by itself (Marcy 2026-10-30)
+  sizes: () => trtPlan,
   recordBuild: (range, seconds) => {
     void recordBuild(join(cacheDir, TRT_ENGINES_DIR), range, seconds).then(readTrtCache).then(scheduleSend);
   },
@@ -571,7 +663,7 @@ function state(): AppState {
     enginePaths: enginePaths(),
     ffmpeg,
     install,
-    tensorrt: { ...trt, built: trtBuilt, prebuild: prebuild.state, onDisk: trtOnDisk },
+    tensorrt: { ...trt, built: trtBuilt, prebuild: prebuild.state, onDisk: trtOnDisk, sizes: settings.trtSizes, windows: trtWindows, windowsNote: trtWindowsNote, scan: trtScanState },
     storage,
     cache,
     cacheMissing,
@@ -709,6 +801,8 @@ async function addPaths(paths: string[]): Promise<void> {
     // loop: NOT-WORTH — the queue's jobs per dropped clip (a drop of N clips is N × jobs comparisons)
     if (queue.jobs.some((j) => j.clip.path === path && j.status === "waiting")) continue;
     const clip = await probeClip(path, kind, mediaDir, mediaUrl);
+    // a size your clips use: the TensorRT checklist ticks its windows (Marcy 2026-10-30, remembered from the queue)
+    if (clip.width && clip.height && trtSupported(PLATFORM)) useTrtSize({ label: clip.name, width: clip.width, height: clip.height });
     // the graphics memory limit starts at App settings' default (row 43), whatever the last clip had
     const options: JobOptions = { ...settings.lastOptions, hintFirstFrame: null, hintVideo: null, hintMode: "none", vramLimitGb: settings.vramLimitGb };
     if (clip.companionHintVideo) Object.assign(options, { hintMode: "video", hintVideo: clip.companionHintVideo });
@@ -1038,22 +1132,30 @@ function registerIpc(): void {
     persist();
     scheduleSend();
   });
-  handle(IPC.trtPrebuild, (_e, action: unknown) => {
+  handle(IPC.trtPrebuild, async (_e, action: unknown, picksIn: unknown) => {
+    if (action === "stopScan") return trtScanAbort?.abort();
     if (!trtAllowed()) return;
     if (action === "start") {
-      // one press builds every size TensorRT can take, each covering every window this card runs, so every clip after it
-      // runs on TensorRT (Marcy 2026-10-29: "hit that once, build out every scenario ... once per engine change")
-      const byKey = new Map<string, TrtSize>();
-      // loop: NOT-WORTH — the chosen and named sizes, once per click
-      for (const s of [...settings.trtSizes, ...TRT_NAMED_SIZES]) {
-        const k = trtSizeKey(s.width, s.height);
-        if (k && !byKey.has(k)) byKey.set(k, s);
+      // the checklist's ticked windows, each one the engine listed for its size (trt_windows): only they build, in the
+      // background, once (Marcy 2026-10-30: the checklist, nothing builds until Build ticked is pressed)
+      const picks: BuildItem[] = [];
+      // loop: NOT-WORTH — the ticked windows, once per click
+      for (const x of Array.isArray(picksIn) ? picksIn.slice(0, 200) : []) {
+        const size = sanitizeTrtSize(x);
+        const key = size && trtSizeKey(size.width, size.height);
+        const o = x as { window?: unknown; range?: unknown };
+        // loop: NOT-WORTH — a few windows per size
+        const w = key ? trtWindows?.[key]?.find((t) => t.window === o.window && t.range === o.range) : undefined;
+        // loop: NOT-WORTH — the ticked windows
+        if (size && w && !picks.some((p) => p.range === w.range)) picks.push({ ...size, window: w.window, range: w.range });
       }
-      settings = { ...settings, trtSizes: [...byKey.values()] };
-      persist();
-      void prebuild.coverCard([...byKey.keys()], true);
+      trtPlan = picks;
+      prebuild.refresh();
+      void prebuild.start(true);
       scheduleSend();
     } else if (action === "stop") prebuild.stop();
+    else if (action === "windows") await readTrtWindows();
+    else if (action === "scan") await scanForTrtSizes();
   });
   // the sizes TensorRT builds for (Engine settings, TensorRT; a waiting clip's "Build for this clip's size"; row 56)
   handle(IPC.trtSize, async (_e, actionIn: unknown, sizeIn: unknown) => {
@@ -1062,15 +1164,29 @@ function registerIpc(): void {
     if (!trtAllowed() || !size || !key) return;
     // loop: NOT-WORTH — the few chosen sizes, once per click
     const others = settings.trtSizes.filter((s) => trtSizeKey(s.width, s.height) !== key);
+    if (actionIn === "forget") {
+      // its windows are unticked in the checklist; nothing built is deleted (Remove does that)
+      settings = { ...settings, trtSizes: others };
+      persist();
+      return scheduleSend();
+    }
     if (actionIn === "add" || actionIn === "build") {
       // one size per range: the newest choice is the size it is built for
       settings = { ...settings, trtSizes: [...others, size] };
       persist();
-      prebuild.refresh();
-      // it builds now, or after the queue; while another program uses the card (Sonata) it waits for it (Marcy 2026-10-25).
-      // A job's Build it now (1.0.0-dev.7) starts as Build now does, and builds where only shorter windows are built
-      if (actionIn === "build") void prebuild.buildSize(key);
-      else void prebuild.start(false);
+      if (!trtWindows?.[key]) void readTrtWindows();
+      // "add" ticks its windows in the checklist, nothing more (Marcy 2026-10-30: Build ticked builds). A job's Build it
+      // now builds the windows of its size not built yet (the longest only, while they aren't read), now or after the
+      // queue; while another program uses the card (Sonata) it waits for it (Marcy 2026-10-25)
+      if (actionIn === "build") {
+        // loop: NOT-WORTH — a few windows of one size
+        const add: BuildItem[] = (trtWindows?.[key] ?? [{ window: 0, range: "" }])
+          .filter((w) => !trtBuilt.includes(w.range))
+          .map((w) => ({ ...size, window: w.window || null, range: w.range || null }));
+        // loop: NOT-WORTH — the few planned builds
+        trtPlan = [...trtPlan.filter((p) => trtSizeKey(p.width, p.height) !== key), ...add];
+        void prebuild.buildSize(key);
+      }
       return scheduleSend();
     }
     if (actionIn !== "remove" || !mainWindow || cacheMoving) return;

@@ -359,7 +359,7 @@ export function JobSettings({
               <p className="hint-text">{trtPlan.text}</p>
               {trtPlan.build && (
                 <>
-                  <button type="button" className="btn small" onClick={() => void window.ck.trtSize("add", trtPlan.build!)}>
+                  <button type="button" className="btn small" onClick={() => void window.ck.trtSize("build", trtPlan.build!)}>
                     <Zap size={14} /> Build for this clip&apos;s size
                   </button>
                   <p className="size-note">
@@ -406,10 +406,10 @@ export function trtPlanFor(job: Job, trt: TrtState): { status: string; text: str
     };
   // loop: NOT-WORTH — two ranges
   const building = trt.prebuild.status === "running" && trt.prebuild.ranges.some((r) => trtSizeKey(r.width, r.height) === key && r.state !== "done");
-  // loop: NOT-WORTH — the few chosen sizes
-  const chosen = trt.prebuild.ranges.some((r) => trtSizeKey(r.width, r.height) === key);
+  // loop: NOT-WORTH — the few sizes your clips use
+  const chosen = trt.sizes.some((s) => trtSizeKey(s.width, s.height) === key);
   return {
-    status: building ? "On · building in the background · CUDA until then" : chosen ? "On · chosen, not built yet · runs on CUDA" : "On · not built for this size · runs on CUDA",
+    status: building ? "On · building in the background · CUDA until then" : chosen ? "On · ticked, not built yet · runs on CUDA" : "On · not built for this size · runs on CUDA",
     text: building
       ? "TensorRT for this size is building in the background now (Engine settings, TensorRT); if this clip starts first, it runs on CUDA."
       : `TensorRT isn't built for ${width}×${height} yet, so this clip runs on CUDA: jobs never wait on a build.`,

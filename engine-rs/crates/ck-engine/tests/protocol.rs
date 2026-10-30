@@ -62,7 +62,7 @@ impl Backend for Fake {
         }
         None
     }
-    fn trt_build(&mut self, _w: usize, _h: usize, _frames: usize, _cap: Option<f64>, _sink: &mut dyn Sink) -> Result<Value, Error> {
+    fn trt_build(&mut self, _w: usize, _h: usize, _frames: usize, _window: Option<usize>, _cap: Option<f64>, _sink: &mut dyn Sink) -> Result<Value, Error> {
         if self.panic_in == Some("trt_build") {
             self.half_made = true;
             panic!("build boom")
@@ -201,6 +201,8 @@ fn trt_build_refuses_invalid_fields_instead_of_ignoring_them() {
         json!({"frames": 0}),
         json!({"frames": -5}),
         json!({"frames": 2.5}),
+        json!({"window": 0}),
+        json!({"window": "x"}),
     ] {
         let mut req = json!({"cmd": "trt_build", "id": "b1", "width": 1920, "height": 1080});
         // loop: NOT-WORTH — one field
@@ -211,8 +213,16 @@ fn trt_build_refuses_invalid_fields_instead_of_ignoring_them() {
         assert_eq!((r[0]["type"].as_str(), r[0]["code"].as_str(), r[0]["id"].as_str()), (Some("error"), Some("bad-request"), Some("b1")), "{extra}: {}", r[0]);
     }
     // absent or null: the defaults; valid values build
-    let (r, _) = talk(&[json!({"cmd": "trt_build", "id": "b1", "width": 1920, "height": 1080, "frames": 48, "vram_budget_gb": 8, "x": null})], &[]);
+    let (r, _) =
+        talk(&[json!({"cmd": "trt_build", "id": "b1", "width": 1920, "height": 1080, "frames": 48, "window": 4, "vram_budget_gb": 8, "x": null})], &[]);
     assert_eq!(r[0]["type"], "trt_built", "{}", r[0]);
+    // trt_windows (the checklist): a malformed size list is refused before the backend sees it
+    // loop: NOT-WORTH — a test's few requests
+    for sizes in [json!(null), json!([{"width": 0, "height": 1080}]), json!([{"width": 1920}]), json!("4K")] {
+        let (r, _) = talk(&[json!({"cmd": "trt_windows", "id": "w1", "sizes": sizes})], &[]);
+        assert_eq!((r[0]["code"].as_str(), r[0]["id"].as_str()), (Some("bad-request"), Some("w1")), "{sizes}: {}", r[0]);
+        assert!(r[0]["message"].as_str().unwrap().starts_with("trt_windows"), "{}", r[0]);
+    }
 }
 
 fn run(id: &str, input: &str) -> Value {

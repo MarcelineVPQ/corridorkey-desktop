@@ -691,14 +691,33 @@ describe("a job that found no TensorRT engine (1.0.0-dev.7)", () => {
     expect(screen.queryByRole("button", { name: /Build it/ })).toBeNull();
   });
 
-  it("review 2026-10-29: no button where a build can't help (a busy card), and none while TensorRT is off (the tile says how to turn it on)", () => {
+  it("review 2026-10-29: no button where a build can't help (a clip between two builds), and none while TensorRT is off (the tile says how to turn it on)", () => {
     mockCk();
-    const busy = render(
-      <JobView job={hd("the graphics card is busy: 9.0 GB of graphics memory is free, too little for the TensorRT engines built for this size, so this run used CUDA")} prebuild={idle} trtOn />,
+    // Marcy 2026-10-30: never "the graphics card is busy"; the engine says which build and why (pipeline/mod.rs TRT_CLIP_RUNS)
+    const between = render(
+      <JobView
+        job={hd(
+          "this clip runs 12 frames at once, and the shortest TensorRT build of its size that takes them (up to 24 frames) needs more graphics memory than the 9.0 GB free now (free some graphics memory, or key it later), so this run used CUDA",
+        )}
+        prebuild={idle}
+        trtOn
+      />,
     );
     expect(screen.queryByRole("button", { name: /Build it/ })).toBeNull();
-    expect(screen.getByText(/the graphics card is busy/)).toBeTruthy();
-    busy.unmount();
+    expect(screen.getByText(/this clip runs 12 frames at once/)).toBeTruthy();
+    between.unmount();
+    // a window the checklist builds: its own build fixes it, so the button is there
+    const shorter = render(
+      <JobView
+        job={hd(
+          "TensorRT for this resolution is built for a window of 24 frames; this job's automatic window is 8 (the build for 24 frames needs more graphics memory than the 9.0 GB free now; build the window of 8 frames for this size)",
+        )}
+        prebuild={idle}
+        trtOn
+      />,
+    );
+    expect(screen.getByRole("button", { name: /Build it/ })).toBeTruthy();
+    shorter.unmount();
     render(<JobView job={hd(NOT_BUILT)} prebuild={idle} trtOn={false} />);
     expect(screen.queryByRole("button", { name: /Build it/ })).toBeNull();
     expect(screen.getByText(/turn it on in Engine settings → TensorRT/)).toBeTruthy();
@@ -770,14 +789,15 @@ describe("a job that found no TensorRT engine (1.0.0-dev.7)", () => {
 });
 
 describe("TensorRT sizes (Engine settings)", () => {
-  it("2026-10-29: a size built for other model files says it needs a rebuild, and Build now and its tick rebuild it", () => {
+  it("2026-10-29: a size built for other model files says it needs a rebuild; a size's tick adds it to your sizes", () => {
     const ck = mockCk({ trtPrebuild: () => Promise.resolve(), trtSize: () => Promise.resolve() });
     const four = { label: "4K DCI", width: 4096, height: 2160 };
     const trt = trtState({
       on: true,
       ready: true,
       built: [],
-      prebuild: { status: "idle", ranges: [{ ...four, state: "todo", piece: null, range: null, fallbacks: {}, error: null }], startedAt: null, note: null },
+      sizes: [four],
+      windows: {},
       onDisk: [
         { range: "h1792-2176_w3584-4096_t1-8_f1-4", bytes: 2_500_000_000, buildSeconds: 300, stale: true },
         { range: "h1024-1280_w1792-2176_t1-24_f1-4", bytes: 2_500_000_000, buildSeconds: 300, stale: true },
@@ -787,17 +807,59 @@ describe("TensorRT sizes (Engine settings)", () => {
     // loop: NOT-WORTH — the size notes on one page
     const notes = screen.getAllByText(/built for other models · needs a rebuild \(the model set changed\)/);
     expect(notes).toHaveLength(2);
-    expect(screen.queryByText(/· built \(/)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Build for every size/ }));
-    expect(ck.trtPrebuild).toHaveBeenCalledWith("start");
-    // HD isn't chosen: its tick is off, and ticking it builds it
     // loop: NOT-WORTH — two rows in a test
     const ticks = notes.map((n) => n.closest("li")!.querySelector("input")!);
     // loop: NOT-WORTH — as above
     expect(ticks.map((t) => t.checked).sort()).toEqual([false, true]);
     // loop: NOT-WORTH — as above
-    const hd = ticks.find((t) => !t.checked)!;
-    fireEvent.click(hd);
+    fireEvent.click(ticks.find((t) => !t.checked)!);
     expect(ck.trtSize).toHaveBeenCalledWith("add", expect.objectContaining({ height: 1080 }));
+    expect(ck.trtPrebuild).not.toHaveBeenCalledWith("start", expect.anything());
+  });
+
+  it("2026-10-30, the checklist: your sizes' windows start ticked, built ones fixed; Build ticked sends only the ticked windows not built", () => {
+    const ck = mockCk({ trtPrebuild: () => Promise.resolve(), trtSize: () => Promise.resolve() });
+    const four = { label: "4K DCI", width: 4096, height: 2160 };
+    const k4 = (t: number, f: number) => `h1792-2176_w3584-4096_t1-${t}_f1-${f}`;
+    const hd = (t: number, f: number) => `h1024-1280_w1792-2176_t1-${t}_f1-${f}`;
+    const trt = trtState({
+      on: true,
+      ready: true,
+      built: [k4(2, 2), k4(8, 4)],
+      sizes: [four],
+      windows: {
+        "h1792-2176_w3584-4096": [
+          { window: 2, range: k4(2, 2) },
+          { window: 4, range: k4(4, 4) },
+          { window: 8, range: k4(8, 4) },
+        ],
+        "h1024-1280_w1792-2176": [{ window: 24, range: hd(24, 4) }],
+      },
+    });
+    render(<TrtBox trt={trt} inst={installState()} platform="linux" />);
+    // what the scan reads, and that it changes nothing, is said before its button
+    expect(screen.getByText(/reads only each clip.s width and height/).textContent).toMatch(/nothing is keyed, copied, changed or sent anywhere/);
+    fireEvent.click(screen.getByRole("button", { name: /Scan a clips folder/ }));
+    expect(ck.trtPrebuild).toHaveBeenCalledWith("scan");
+    const box = (name: RegExp) => screen.getAllByLabelText(name);
+    // 4K: 2 and 8 built (ticked, fixed), 4 ticked; HD isn't one of your sizes: unticked
+    expect(box(/^up to 2 frames \(built\)/)[0]).toMatchObject({ checked: true, disabled: true });
+    expect(box(/^up to 4 frames$/)[0]).toMatchObject({ checked: true, disabled: false });
+    expect(box(/^up to 24 frames$/)[0]).toMatchObject({ checked: false });
+    expect(screen.getByText(/^1 to build · about/)).toBeTruthy();
+    fireEvent.click(box(/^up to 24 frames$/)[0]);
+    expect(screen.getByText(/^2 to build · about/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Build ticked/ }));
+    expect(ck.trtPrebuild).toHaveBeenCalledWith("start", [
+      { label: "HD", width: 1920, height: 1080, window: 24, range: hd(24, 4) },
+      { ...four, window: 4, range: k4(4, 4) },
+    ]);
+  });
+
+  it("asks for the windows this card builds once, while it doesn't have them", () => {
+    const ck = mockCk({ trtPrebuild: () => Promise.resolve(), trtSize: () => Promise.resolve() });
+    render(<TrtBox trt={trtState({ on: true, ready: true, sizes: [] })} inst={installState()} platform="linux" />);
+    expect(ck.trtPrebuild).toHaveBeenCalledWith("windows");
+    expect(screen.getAllByText(/Reading the windows this card builds/).length).toBeGreaterThan(0);
   });
 });

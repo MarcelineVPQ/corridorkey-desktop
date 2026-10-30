@@ -50,8 +50,11 @@ inside a job:
   until a build of their size is measured. A job's window is never shortened to fit a
   build: a clip that runs more frames at a time than its size's build (a longer automatic window, as on a 32 GB card,
   which is not measured) runs on CUDA and says so.
-- **A busy card runs on CUDA.** A job uses its size's engines only when their own memory need fits what it has;
-  while another program holds the card, the clip runs on CUDA and its page says "the graphics card is busy". Under a
+- **A busy card uses the build for its window.** A job uses its size's engines only when their own memory need fits what it
+  has (engines built for up to 8 frames hold nearly that much memory at any window: measured at 4K, 10.4 GB at window
+  4 and 11.4 GB at 8). So the checklist builds every window a job of that size can pick, and while another program
+  holds part of the card the clip's automatic window (picked from the free memory, as on CUDA) runs on its own build. Only a clip shorter than its window, whose
+  length falls between two builds, runs on CUDA then, and its page says so (free some memory, or key it later). Under a
   memory limit too small for them, the page says the limit is, and how to raise it.
 - **Jobs never wait on a build.** A clip whose size isn't built yet runs on CUDA, and its page says so and offers
   **Build it now**: one click starts the same background build for that clip's size, and the next run of the clip

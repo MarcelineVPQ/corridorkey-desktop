@@ -202,9 +202,16 @@ fn other_windows(b: &crate::tensorrt::Bucket, names: &[String], built: impl Fn(&
     out
 }
 
-/// How the `fallback_reason` starts for a job whose size is built for its window, but whose engines need more graphics
-/// memory than the job has (review 2026-10-29 M1): building again doesn't help, so the app offers no build.
-pub(crate) const TRT_CARD_BUSY: &str = "the graphics card is busy";
+/// How the `fallback_reason` starts for a clip shorter than its automatic window (it runs all its frames at once),
+/// whose length falls between its size's builds, when the shortest build that takes it needs more graphics memory
+/// than the job has (Marcy 2026-10-30: said as it is, never "the graphics card is busy"): no checklist build fixes it
+/// (the checklist builds the automatic windows), so the app offers none; TensorRT's own peaks in the check would narrow
+/// it (BACKLOG row 191).
+pub(crate) const TRT_CLIP_RUNS: &str = "this clip runs";
+
+/// How the `fallback_reason` starts when the job's window is a single frame (the card is nearly full) and even the
+/// shortest build of its size needs more graphics memory than the job has.
+pub(crate) const TRT_SHORTEST: &str = "the shortest TensorRT build of this size";
 
 /// How the `fallback_reason` starts when it is the job's own graphics-memory limit, not the card, that is too small
 /// for the engines that would serve it (review 2026-10-29 N-S1): no build fixes that either.
@@ -234,8 +241,8 @@ fn serving_range(need: &crate::tensorrt::Bucket, names: &[String], built: impl F
 /// graphics-memory limit if it has one): a job at window 8 on engines built for 24 is given the memory a job at
 /// window 24 needs. That need is CUDA's measured table at the range's window (`mp`: the clip's padded megapixels, as
 /// the job's own estimate); TensorRT's own peak there is unmeasured (a TensorRT out-of-memory goes on on CUDA,
-/// attempts), so the reason quotes no number for it (review N-N1). Err: why the job runs on CUDA (the card is busy, or
-/// the job's limit is too small; or it runs more frames at a time than any build of its size is made for,
+/// attempts), so the reason quotes no number for it (review N-N1). Err: why the job runs on CUDA (its window's own
+/// build is missing, or the clip's length falls between builds, or the job's limit is too small; or it runs more frames at a time than any build of its size is made for,
 /// tensorrt::build_cap). Ok(None): nothing of its size serves it (a build does). No budget (a manual window,
 /// trt_build): any serving range.
 fn trt_serving(
@@ -258,7 +265,26 @@ fn trt_serving(
                 "{TRT_LIMIT_TOO_SMALL} ({} GB) is too small for the TensorRT engines built for this size (raise Memory limit in the clip's settings, or set it to Auto), so this run used CUDA",
                 f1(c)
             ),
-            None => format!("{TRT_CARD_BUSY}: {} GB of graphics memory is free, too little for the TensorRT engines built for this size, so this run used CUDA", f1(budget)),
+            // a window the checklist builds (trt_build_windows): its own build fixes it, so the app offers it
+            // (TRT_OTHER_WINDOW); a 4K job at window 4 with only "up to 8" built ran on CUDA (Marcy 2026-10-30)
+            None if need.t.1 >= 2 && crate::vram::AUTO_WINDOWS.contains(&need.t.1) && need.t.1 < b.t.1 => format!(
+                "{} (the build for {} frames needs more graphics memory than the {} GB free now; build the window of {} frames for this size)",
+                trt_other_window(&[b.t.1], need.t.1),
+                b.t.1,
+                f1(budget),
+                need.t.1
+            ),
+            None if need.t.1 < 2 => format!(
+                "{TRT_SHORTEST} (up to {} frames) needs more graphics memory than the {} GB free now (free some graphics memory, or key it later), so this run used CUDA",
+                b.t.1,
+                f1(budget)
+            ),
+            None => format!(
+                "{TRT_CLIP_RUNS} {} frames at once, and the shortest TensorRT build of its size that takes them (up to {} frames) needs more graphics memory than the {} GB free now (free some graphics memory, or key it later), so this run used CUDA",
+                need.t.1,
+                b.t.1,
+                f1(budget)
+            ),
         });
     }
     let (cap, measured) = crate::tensorrt::build_cap(need);
@@ -287,15 +313,34 @@ pub(crate) fn trt_build_profile(shape: (usize, usize), frames: usize, total_gb: 
     let budget = cap.map(|c| total_gb.min(c)).unwrap_or(total_gb);
     let limited = cap.is_some().then_some(budget);
     let auto = select_vram_profile(shape, frames, budget, cap.is_some(), true);
-    let mp = (shape.0 * shape.1) as f64 / 1e6;
     let measured = crate::tensorrt::bucket_for(shape.0, shape.1, 1, true).map(|b| crate::tensorrt::build_cap(&b).0).unwrap_or(usize::MAX);
-    let at = |t: usize| crate::vram::Profile { chunk: t, stride: (t / 2).max(1), low_vram: true, estimate_gb: estimate_peak_vram_gb(mp, t, true, limited) };
+    let at = |t: usize| trt_window_profile(shape, t, limited);
     if auto.chunk > measured {
         return at(measured);
     }
     let longest = crate::vram::AUTO_WINDOWS[0].min(frames).min(measured);
     // loop: NOT-WORTH — at most 80 table lookups, once per build
     (auto.chunk + 1..=longest).rev().map(at).find(|p| p.fits(budget)).unwrap_or(auto)
+}
+
+/// A TensorRT build's profile at window `t` (low-memory mode, stride half the window); `limited`: the budget of a job
+/// under a graphics-memory limit, as the estimate reads it.
+fn trt_window_profile(shape: (usize, usize), t: usize, limited: Option<f64>) -> crate::vram::Profile {
+    let mp = (shape.0 * shape.1) as f64 / 1e6;
+    crate::vram::Profile { chunk: t, stride: (t / 2).max(1), low_vram: true, estimate_gb: estimate_peak_vram_gb(mp, t, true, limited) }
+}
+
+/// The windows Build for every size offers for a size on this card (Marcy 2026-10-30, the checklist): every automatic
+/// window from 2 up to the longest a build covers (trt_build_profile), so whatever memory is free when a job starts,
+/// the window it picks has a build of its own. A 4K job at window 4 (12.3 GB free) found only the build for 8, sized
+/// for a card with nothing else on it, and ran on CUDA. Window 1 runs on the build for 2.
+pub(crate) fn trt_build_windows(shape: (usize, usize), frames: usize, total_gb: f64, cap: Option<f64>) -> Vec<usize> {
+    let longest = trt_build_profile(shape, frames, total_gb, cap).chunk;
+    // loop: NOT-WORTH — seven automatic windows
+    let mut out: Vec<usize> = crate::vram::AUTO_WINDOWS.iter().copied().filter(|&t| t >= 2 && t < longest).collect();
+    out.push(longest);
+    out.sort_unstable();
+    out
 }
 
 /// A PNG file's bit depth from its header (IHDR's depth byte), None for anything else or an unreadable file.
@@ -1323,8 +1368,17 @@ impl Pipeline<OrtLoader> {
 
     /// The `trt_build` command: build the TensorRT engines a clip of `width` x `height` (and `frames` frames) would
     /// use, as a job would before keying (the same automatic window, the same builder), without a clip. Progress goes
-    /// to `sink` (`optimize`, with `piece`); the `trt_built` reply's fields are returned.
-    pub fn trt_build(&mut self, width: usize, height: usize, frames: usize, vram_budget_gb: Option<f64>, sink: &mut dyn Sink) -> Result<Value, Error> {
+    /// to `sink` (`optimize`, with `piece`); the `trt_built` reply's fields are returned. `window`: one of the windows
+    /// `trt_windows` lists for this size (the checklist), built as its own range; None: the longest (trt_build_profile).
+    pub fn trt_build(
+        &mut self,
+        width: usize,
+        height: usize,
+        frames: usize,
+        window: Option<usize>,
+        vram_budget_gb: Option<f64>,
+        sink: &mut dyn Sink,
+    ) -> Result<Value, Error> {
         if self.loader.rt.provider() != Some(Provider::Cuda) || !self.loader.rt.tensorrt_ep {
             return Err(Error::bad_request("trt_build needs the graphics card and ONNX Runtime's TensorRT provider".into()));
         }
@@ -1332,8 +1386,25 @@ impl Pipeline<OrtLoader> {
         // the card's total memory, never what is free now (trt_build_profile)
         let total = self.loader.rt.gpu.as_ref().map(|g| g.total).unwrap_or(0) as f64 / 1073741824.0;
         let limit = vram_budget_gb.or(self.loader.rt.cfg.vram_budget_gb);
-        let p = trt_build_profile((sh, sw), frames, total, limit);
-        let r = self.trt_range((sh, sw), p.chunk, p.low_vram, p.chunk, None).map_err(Error::bad_request)?;
+        let p = match window {
+            None => trt_build_profile((sh, sw), frames, total, limit),
+            Some(t) => {
+                let offered = trt_build_windows((sh, sw), frames, total, limit);
+                if !offered.contains(&t) {
+                    return Err(Error::bad_request(format!("trt_build window {t}: this card builds {width}x{height} for windows {offered:?}")));
+                }
+                trt_window_profile((sh, sw), t, limit.map(|c| total.min(c)))
+            }
+        };
+        let mut r = self.trt_range((sh, sw), p.chunk, p.low_vram, p.chunk, None).map_err(Error::bad_request)?;
+        // a chosen window is built as its own range, never answered by a longer one that serves it (that one holds more
+        // memory, and a job at this window that can't fit it runs on CUDA: trt_serving)
+        if window.is_some() {
+            if let Some(b) = crate::tensorrt::bucket_for(sh, sw, p.chunk, p.low_vram).filter(|b| *b != r.bucket) {
+                let dir = r.card_dir.join(b.key());
+                r = TrtRange { built: self.trt_dir_built(&dir), bucket: b, card_dir: r.card_dir, dir };
+            }
+        }
         self.trt_drop_stale(&r.card_dir, sink);
         let of = limit.map(|c| format!("a {} GB limit", f1(c.min(total)))).unwrap_or_else(|| format!("the card's {} GB", f1(total)));
         sink.log(&format!("  TensorRT build for {width}x{height}: window {}/{} for {of}, range {}", p.chunk, p.stride, r.bucket.key()));
@@ -1368,6 +1439,34 @@ impl Pipeline<OrtLoader> {
             "hann_chunk": p.chunk, "hann_stride": p.stride, "reused": was_built,
             "built_s": built, "fallbacks": self.trt_fallbacks
         }))
+    }
+
+    /// The `trt_windows` command (the checklist, Marcy 2026-10-30): for each size, the windows `trt_build` builds on this
+    /// card (trt_build_windows) and the range folder each builds, so the app shows what is built and what each would
+    /// add, before anything builds. A size outside TensorRT's ranges has none. No model loads.
+    pub fn trt_windows(&self, sizes: &[(usize, usize)], vram_budget_gb: Option<f64>) -> Result<Value, Error> {
+        let Some(gpu) = self.loader.rt.gpu.as_ref() else {
+            return Err(Error::bad_request("trt_windows needs the graphics card".into()));
+        };
+        let total = gpu.total as f64 / 1073741824.0;
+        let limit = vram_budget_gb.or(self.loader.rt.cfg.vram_budget_gb);
+        // loop: NOT-WORTH — the dozen sizes the checklist lists, a few windows each, once per page
+        let out: Vec<Value> = sizes
+            .iter()
+            .map(|&(width, height)| {
+                let (sh, sw) =
+                    (crate::image::ceil_to_multiple(height, crate::clip::SHAPE_QUANTUM), crate::image::ceil_to_multiple(width, crate::clip::SHAPE_QUANTUM));
+                let windows: Vec<Value> = match crate::tensorrt::bucket_for(sh, sw, 1, true) {
+                    None => Vec::new(),
+                    Some(_) => trt_build_windows((sh, sw), 1000, total, limit)
+                        .into_iter()
+                        .filter_map(|t| crate::tensorrt::bucket_for(sh, sw, t, true).map(|b| json!({"window": t, "range": b.key()})))
+                        .collect(),
+                };
+                json!({"width": width, "height": height, "windows": windows})
+            })
+            .collect();
+        Ok(json!({"type": "trt_windows", "sizes": out}))
     }
 
     /// TensorRT jobs: build every engine this range is missing (one network at a time, ck-trt-build in a child

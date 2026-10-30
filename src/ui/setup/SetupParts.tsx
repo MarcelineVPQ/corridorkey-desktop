@@ -1,8 +1,8 @@
 // The first-run install and the ffmpeg check as one control each, shared by the setup page
 // (pages/SetupPage.tsx) and the Engine page's panel, so the two never drift apart.
-import { Check, Download, X } from "lucide-react";
+import { Check, Download, FolderSearch, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { FfmpegState, InstallState, TrtState } from "../../shared/types";
+import type { FfmpegState, InstallState, TrtPick, TrtState } from "../../shared/types";
 import { installMissing } from "../../shared/tasks";
 import { AMD_UNTESTED, INSTALL_FIRST } from "../../shared/texts";
 import { Row } from "../panel/Section";
@@ -10,8 +10,8 @@ import { duration, gbBytes } from "../format";
 import {
   PIECE_NAMES,
   buildSteps,
+  buildTotals,
   prebuildStep,
-  rangeText,
   sizeRangeText,
   sizeText,
   trtSizeKey,
@@ -22,7 +22,7 @@ import {
   TRT_SPEED,
   TRT_PIECES,
   ownTrtSize,
-  type TrtSize,
+  SCAN_MAX_CLIPS,
 } from "../../shared/trt";
 import { ProgressBar } from "../ProgressBar";
 import { More } from "../More";
@@ -183,9 +183,9 @@ export function TrtBox({ trt, inst, platform }: { trt: TrtState; inst: InstallSt
 }
 
 /**
- * The background TensorRT build (electron/main/trtPrebuild.ts): what it is and why, the sizes to build (TrtSizes), a
- * progress bar by network (weighted by the measured 4K build times; other sizes one share per network), the step, the
- * elapsed time, and Stop / Build now. Jobs never build: until a range is built, its clips run on CUDA.
+ * The TensorRT checklist (Marcy 2026-10-30): why a size needs a build per window, the folder scan for your clips' sizes
+ * (what it reads and why), the sizes with a tick per window, what the ticked builds cost, and Build ticked. Nothing
+ * builds until it is pressed; the build runs in the background and pauses while you key (electron/main/trtPrebuild.ts).
  */
 function PrebuildBox({ trt }: { trt: TrtState }) {
   const p = trt.prebuild;
@@ -200,14 +200,16 @@ function PrebuildBox({ trt }: { trt: TrtState }) {
   }, [p.status]);
   const step = prebuildStep(p.ranges);
   const steps = buildSteps(p.ranges);
-  // always offered while nothing builds (Marcy 2026-10-29: hidden once "done", it left no way to build again)
-  const canStart = p.status !== "running";
   return (
     <>
-      <p className="hint-text">The app builds the sizes ticked below in the background and pauses while you key. Until a size is built, its clips run on CUDA.</p>
+      <p className="hint-text">
+        TensorRT is built once per clip size and per window: how many frames the model looks at together. A job picks its window from the graphics memory free when it starts, so a size needs a build
+        for each window it can pick; without one, that clip runs on CUDA.
+      </p>
       <More>
         <p className="hint-text">Jobs never wait on a TensorRT build. It builds again only after a graphics driver, TensorRT or model update. {TRT_BUILD_TEXT}</p>
       </More>
+      <ScanBox trt={trt} />
       <TrtSizes trt={trt} />
       {p.status === "running" && (
         <>
@@ -218,41 +220,67 @@ function PrebuildBox({ trt }: { trt: TrtState }) {
         </>
       )}
       {p.status === "paused" && <p className="hint-text">Paused while the queue runs; it goes on by itself when the queue stops.</p>}
-      {p.status === "blocked" && <p className="hint-text">Not started: {p.note}. It starts by itself once the card is free; Build now starts it anyway.</p>}
-      {p.status === "stopped" && <p className="hint-text">Stopped. What was built is kept; Build now goes on from there.</p>}
+      {p.status === "blocked" && <p className="hint-text">Not started: {p.note}. It starts by itself once the card is free; Build ticked starts it anyway.</p>}
+      {p.status === "stopped" && <p className="hint-text">Stopped. What was built is kept; Build ticked goes on from there.</p>}
       {p.status === "error" && <p className="notice error">The background build stopped: {p.note}</p>}
-      <div className="file-pick">
-        {p.status === "running" && (
-          <button type="button" className="btn small" onClick={() => void window.ck.trtPrebuild("stop")}>
-            <X size={14} /> Stop
-          </button>
-        )}
-        {canStart && p.status !== "paused" && (
-          <button type="button" className="btn small" onClick={() => void window.ck.trtPrebuild("start")}>
-            <Download size={14} /> Build for every size
-          </button>
-        )}
-      </div>
     </>
   );
 }
 
-/** A size range's state and costs, under its tick: what is built and what it took here, or the measured cost before. */
+/**
+ * The folder scan (electron/main/trtScan.ts), with what it reads and why: the app doesn't know your clips' sizes until
+ * it has seen them, and the checklist ticks the windows of the sizes your clips use.
+ */
+function ScanBox({ trt }: { trt: TrtState }) {
+  const s = trt.scan;
+  // loop: NOT-WORTH — the few sizes found
+  const found = s.found.map((f) => `${f.width}×${f.height} (${f.clips} clip${f.clips === 1 ? "" : "s"})`).join(", ");
+  return (
+    <>
+      <p className="hint-text">
+        <strong>Which sizes do your clips come in?</strong> The app needs to know, so it can tick the builds your clips will use. Scan a clips folder reads only each clip&apos;s width and height
+        (ffprobe for a video, the first frame of an image sequence): nothing is keyed, copied, changed or sent anywhere. It looks in the folder you choose and two folders under it, at most{" "}
+        {SCAN_MAX_CLIPS} clips. Clips you add to the queue are remembered the same way.
+      </p>
+      <div className="file-pick">
+        {s.status === "running" ? (
+          <button type="button" className="btn small" onClick={() => void window.ck.trtPrebuild("stopScan")}>
+            <X size={14} /> Stop scan
+          </button>
+        ) : (
+          <button type="button" className="btn small" disabled={!trt.ready} onClick={() => void window.ck.trtPrebuild("scan")}>
+            <FolderSearch size={14} /> Scan a clips folder…
+          </button>
+        )}
+      </div>
+      {s.status === "running" && <p className="size-note">{`Reading ${s.folder}: ${s.clips} clips${found ? `, ${found}` : ""}`}</p>}
+      {(s.status === "done" || s.status === "stopped") && (
+        <p className="size-note">
+          {`${s.status === "stopped" ? "Stopped" : "Scanned"} ${s.folder}: ${s.clips} clip${s.clips === 1 ? "" : "s"}${found ? `, ${found}` : ", no clips found"}`}
+          {s.unreadable ? ` · ${s.unreadable} couldn't be read` : ""}
+          {s.capped ? ` · stopped at ${SCAN_MAX_CLIPS} clips` : ""}
+          {found ? " · their windows are ticked below" : ""}
+        </p>
+      )}
+      {s.status === "error" && <p className="notice error">The scan stopped: {s.note}</p>}
+    </>
+  );
+}
+
+/** A size range's state under its row: what is built and what it took here, or what it would cost. */
 function sizeNote(trt: TrtState, key: string): string {
   // loop: HOT-PATH-OK — a few built ranges, per row per render
   const all = trt.onDisk.filter((d) => d.range.startsWith(`${key}_t`));
   // the windows the engine uses (built from the models it runs with); stale ones are built for other model files
   // loop: NOT-WORTH — a few ranges on disk
   const onDisk = all.filter((d) => !d.stale);
-  // loop: NOT-WORTH — the few chosen sizes
-  const r = trt.prebuild.ranges.find((x) => trtSizeKey(x.width, x.height) === key);
+  // loop: NOT-WORTH — the few builds in the list
+  const r = trt.prebuild.ranges.find((x) => trtSizeKey(x.width, x.height) === key && (x.state === "building" || x.state === "failed"));
   const range = sizeRangeText(key);
   if (r?.state === "building")
-    return `${range} · building: ${r.piece ? `${PIECE_NAMES[r.piece] ?? r.piece} (network ${TRT_PIECES.indexOf(r.piece as (typeof TRT_PIECES)[number]) + 1} of ${TRT_PIECES.length})` : "starting"}`;
+    return `${range} · building${r.window ? ` up to ${r.window} frames` : ""}: ${r.piece ? `${PIECE_NAMES[r.piece] ?? r.piece} (network ${TRT_PIECES.indexOf(r.piece as (typeof TRT_PIECES)[number]) + 1} of ${TRT_PIECES.length})` : "starting"}`;
   if (r?.state === "failed") return `${range} · couldn't be built: ${r.error}`;
   if (!onDisk.length && all.length) {
-    // built for the model files the engine had before: it runs on CUDA until built again (ticked, the background build
-    // and Build now rebuild it; unticked, ticking it does)
     // loop: NOT-WORTH — a few ranges on disk
     const bytes = all.reduce((n, d) => n + d.bytes, 0);
     return `${range} · built for other models · needs a rebuild (the model set changed) · ${gbBytes(bytes)} on disk`;
@@ -262,55 +290,103 @@ function sizeNote(trt: TrtState, key: string): string {
     const bytes = onDisk.reduce((n, d) => n + d.bytes, 0);
     // loop: NOT-WORTH — as above
     const secs = onDisk.map((d) => d.buildSeconds).filter((x): x is number => x !== null);
-    // loop: NOT-WORTH — at most five networks
-    const fell = Object.keys(r?.fallbacks ?? {}).map((k) => PIECE_NAMES[k] ?? k);
-    // loop: NOT-WORTH — a few built ranges
-    const windows = onDisk.map((d) => rangeText(d.range).replace(/^up to \d+×\d+, /, "")).join("; ");
-    // a range built for short windows only (an older version, or a build while the card was busy) serves only clips whose
-    // window fits it: said plainly, with the fix (Marcy 2026-10-29: "it is built for this clip" while the clip ran on CUDA)
-    return `${range} · built (${windows})${fell.length ? `, ${fell.join(", ")} on CUDA` : ""} · ${gbBytes(bytes)} on disk · ${secs.length ? `the build took ${duration(secs[0])} here` : "build time not recorded"} · clips that need longer windows key on CUDA until Build for every size covers your card`;
+    return `${range} · ${gbBytes(bytes)} on disk · ${secs.length ? `a build took ${duration(secs[0])} here` : "build time not recorded"}`;
   }
-  return `${range} · ${r ? "chosen, not built yet" : "not built"} · ${TRT_BUILD_COST}`;
+  return `${range} · not built · ${TRT_BUILD_COST} per window`;
 }
 
 /**
- * Which sizes TensorRT builds for (backlog row 56): the engine's size ranges with common sizes named, each ticked when
- * it is built or chosen, with what it costs (measured here once built; the measured cost before). Tick: it is built
- * now in the background; untick: its engines are removed (asked first). Plus a size of your own, and the named sizes
- * past TensorRT's ranges (CUDA). The chosen sizes are the background build's list (prebuild.ranges).
+ * The checklist: the engine's size ranges with common sizes named (and your clips' sizes), a tick per size (the sizes
+ * your clips use) and a tick per window (each its own build), built ones ticked and fixed, with Remove. The ticks are
+ * a plan: Build ticked builds the ticked windows not built yet, and nothing else does.
  */
 function TrtSizes({ trt }: { trt: TrtState }) {
-  const p = trt.prebuild;
-  // loop: HOT-PATH-OK — the few chosen sizes per render
-  const chosen: TrtSize[] = p.ranges.map((r) => ({ label: r.label, width: r.width, height: r.height }));
-  const { rows, outside } = trtSizeRows(chosen, trt.built);
+  const { rows, outside } = trtSizeRows(trt.sizes, trt.built);
+  // windows ticked or unticked against their size's tick (a size your clips use starts with every window ticked)
+  const [flipped, setFlipped] = useState<ReadonlySet<string>>(new Set());
   const [w, setW] = useState(2560);
   const [h, setH] = useState(1440);
-  // what the main process takes (sides from 16 px) and TensorRT's ranges: the Build button is enabled only for that
+  // the windows this card builds, read once the page shows them (a short-lived engine, between jobs)
+  const needWindows = trt.ready && trt.windows === null && !trt.windowsNote;
+  useEffect(() => {
+    if (needWindows) void window.ck.trtPrebuild("windows");
+  }, [needWindows]);
+  // loop: NOT-WORTH — the few sizes in the list, per check
+  const used = (key: string) => trt.sizes.some((s) => trtSizeKey(s.width, s.height) === key);
+  const flip = (range: string) =>
+    setFlipped((f) => {
+      const n = new Set(f);
+      if (!n.delete(range)) n.add(range);
+      return n;
+    });
+  const built = (range: string) => trt.built.includes(range);
+  const ticked = (key: string, range: string) => built(range) || used(key) !== flipped.has(range);
+  // loop: HOT-PATH-OK — a dozen rows, a few windows each, per render
+  const picks: TrtPick[] = rows.flatMap((r) =>
+    // loop: NOT-WORTH — a few windows per size
+    (trt.windows?.[r.key] ?? []).filter((x) => !built(x.range) && ticked(r.key, x.range)).map((x) => ({ ...r.build, window: x.window, range: x.range })),
+  );
+  const cost = buildTotals(picks.length, trt.onDisk);
+  const minutes = cost.here ? `about ${Math.round(cost.minutes[0])} min` : `about ${Math.round(cost.minutes[0])}-${Math.round(cost.minutes[1])} min`;
+  const running = trt.prebuild.status === "running";
+  // what the main process takes (sides from 16 px) and TensorRT's ranges: Add is enabled only for that
   const own = ownTrtSize(w, h);
   const ownKey = own?.key ?? null;
   // loop: NOT-WORTH — a dozen rows
   const ownRow = ownKey ? rows.find((r) => r.key === ownKey) : undefined;
   // loop: NOT-WORTH — a few sizes in the row
   const ownWith = ownRow?.sizes.map((x) => x.label).join(", ");
-  // loop: NOT-WORTH — a few built ranges, the few chosen sizes
-  const ownDone = ownKey !== null && (trt.built.some((k) => k.startsWith(`${ownKey}_t`)) || chosen.some((c) => trtSizeKey(c.width, c.height) === ownKey));
+  const ownDone = ownKey !== null && used(ownKey);
   return (
     <>
-      <p className="hint-text">{trt.ready ? "Sizes to build for:" : "Sizes to build for, once TensorRT is installed:"}</p>
+      <p className="hint-text">{trt.ready ? "Ticked: the sizes your clips use, every window. Nothing builds until you press Build ticked." : "Sizes to build for, once TensorRT is installed:"}</p>
+      {trt.windowsNote && <p className="notice error">The windows this card builds couldn&apos;t be read: {trt.windowsNote}</p>}
       <ul className="check-list">
         {/* loop: HOT-PATH-OK — a dozen rows per render */}
         {rows.map((r) => {
-          // loop: NOT-WORTH — a few built ranges, the few chosen sizes
-          const on = trt.built.some((k) => k.startsWith(`${r.key}_t`)) || chosen.some((c) => trtSizeKey(c.width, c.height) === r.key);
+          // loop: NOT-WORTH — a few built ranges
+          const onDisk = trt.onDisk.filter((d) => d.range.startsWith(`${r.key}_t`));
+          const wins = trt.windows?.[r.key];
           return (
             <li key={r.key}>
               <label className="checks">
-                <input type="checkbox" checked={on} onChange={(e) => void window.ck.trtSize(e.target.checked ? "add" : "remove", r.build)} />
+                <input
+                  type="checkbox"
+                  checked={used(r.key)}
+                  onChange={(e) => {
+                    // a size's tick sets all its windows again
+                    // loop: NOT-WORTH — a few windows of one size
+                    setFlipped((f) => new Set([...f].filter((x) => !x.startsWith(`${r.key}_t`))));
+                    void window.ck.trtSize(e.target.checked ? "add" : "forget", r.build);
+                  }}
+                />
                 {/* loop: NOT-WORTH — a few sizes per row */}
                 {r.sizes.map(sizeText).join(" · ")}
               </label>
-              <p className="size-note">{sizeNote(trt, r.key)}</p>
+              {wins && wins.length > 0 && (
+                <div className="checks trt-windows">
+                  {/* loop: NOT-WORTH — a few windows per size */}
+                  {wins.map((x) => (
+                    <label key={x.range}>
+                      <input type="checkbox" checked={ticked(r.key, x.range)} disabled={built(x.range) || running} onChange={() => flip(x.range)} />
+                      {`up to ${x.window} frames${built(x.range) ? " (built)" : ""}`}
+                    </label>
+                  ))}
+                </div>
+              )}
+              {trt.ready && wins === undefined && trt.windows !== null && <p className="size-note">This card can&apos;t build TensorRT at this size.</p>}
+              {trt.ready && trt.windows === null && !trt.windowsNote && <p className="size-note">Reading the windows this card builds…</p>}
+              <p className="size-note">
+                {sizeNote(trt, r.key)}
+                {onDisk.length > 0 && !running && (
+                  <>
+                    {" · "}
+                    <button type="button" className="link-btn" onClick={() => void window.ck.trtSize("remove", r.build)}>
+                      Remove
+                    </button>
+                  </>
+                )}
+              </p>
             </li>
           );
         })}
@@ -323,17 +399,33 @@ function TrtSizes({ trt }: { trt: TrtState }) {
           ×
           <input type="number" aria-label="Height" min={16} max={16384} step={1} value={h} onChange={(e) => setH(Math.round(Number(e.target.value)) || 0)} />
           <button type="button" className="btn small" disabled={!ownKey || ownDone} onClick={() => own && void window.ck.trtSize("add", own.size)}>
-            <Download size={14} /> Build
+            Add
           </button>
         </div>
       </Row>
       <p className="size-note">
         {ownKey
-          ? `${w}×${h} falls in the range ${sizeRangeText(ownKey)}${ownWith ? ` (with ${ownWith})` : ""}: ${ownDone ? "already built or chosen" : "not built"}.`
+          ? `${w}×${h} falls in the range ${sizeRangeText(ownKey)}${ownWith ? ` (with ${ownWith})` : ""}: ${ownDone ? "already in the list" : "Add ticks its windows"}.`
           : w < 16 || h < 16
             ? `${w}×${h}: each side needs at least 16 px.`
             : `${w}×${h} is past TensorRT's sizes (at most ${TRT_MAX_SIDE} px a side and 4096×2176 in area), so it runs on CUDA.`}
       </p>
+      <p className="hint-text">
+        {picks.length
+          ? `${picks.length} to build · about ${gbBytes(cost.bytes)} · ${minutes}${cost.here ? " (from this card's builds)" : " (measured on an RTX 5080)"}`
+          : "Nothing ticked to build: every ticked window is built."}
+      </p>
+      <div className="file-pick">
+        {running ? (
+          <button type="button" className="btn small" onClick={() => void window.ck.trtPrebuild("stop")}>
+            <X size={14} /> Stop
+          </button>
+        ) : (
+          <button type="button" className="btn small primary" disabled={!picks.length || trt.prebuild.status === "paused"} onClick={() => void window.ck.trtPrebuild("start", picks)}>
+            <Download size={14} /> Build ticked
+          </button>
+        )}
+      </div>
     </>
   );
 }
