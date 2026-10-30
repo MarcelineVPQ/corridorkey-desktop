@@ -788,7 +788,7 @@ describe("TensorRT sizes (Engine settings)", () => {
     const notes = screen.getAllByText(/built for other models · needs a rebuild \(the model set changed\)/);
     expect(notes).toHaveLength(2);
     expect(screen.queryByText(/· built \(/)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Build now/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Build for every size/ }));
     expect(ck.trtPrebuild).toHaveBeenCalledWith("start");
     // HD isn't chosen: its tick is off, and ticking it builds it
     // loop: NOT-WORTH — two rows in a test
