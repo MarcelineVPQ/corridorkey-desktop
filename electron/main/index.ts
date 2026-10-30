@@ -89,7 +89,7 @@ import {
   targetProblem,
 } from "./cacheFolder";
 import { gbBytes, mbOrGbBytes } from "../../src/shared/units";
-import { sanitizeTrtSize, sizeRangeText, sizeText, trtSizeKey } from "../../src/shared/trt";
+import { fixedByBuild, sanitizeTrtSize, sizeRangeText, sizeText, trtSizeKey } from "../../src/shared/trt";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const devServerUrl = process.env.ELECTRON_RENDERER_URL;
@@ -305,9 +305,32 @@ const queue = new Queue({
   finished: (job) => {
     void makeStills(job);
     void refreshTrtBuilt();
+    trtBuildsItself(job);
   },
   saveLog: (job) => saveJobLog(job, app.getVersion()),
 });
+/**
+ * TensorRT builds itself (Marcy 2026-10-29: "TensorRT should just be working", "not press a button"): a job that ran on
+ * CUDA only because its size isn't built starts that size's build itself, exactly as the tile's Build it now does; the
+ * build runs once the queue is free, and the next run of that size uses TensorRT. A size whose last build failed short
+ * of memory on a free card isn't retried by itself (the tile's Build it again stays the way to try).
+ */
+function trtBuildsItself(job: Job): void {
+  const t = job.tech;
+  if (!t?.tensorrtRequested || !fixedByBuild(t.fallbackReason, t.fallbacks) || !trtAllowed()) return;
+  const { width, height } = job.clip;
+  if (!width || !height || job.options.modelScale !== 1) return;
+  const key = trtSizeKey(width, height);
+  if (!key) return;
+  // loop: NOT-WORTH — the few chosen sizes, once per finished job
+  if (prebuild.state.ranges.some((r) => trtSizeKey(r.width, r.height) === key && r.state === "failed" && r.cardWasFree)) return;
+  // loop: NOT-WORTH — as above
+  settings = { ...settings, trtSizes: [...settings.trtSizes.filter((s) => trtSizeKey(s.width, s.height) !== key), { label: job.clip.name, width, height }] };
+  persist();
+  prebuild.refresh();
+  void prebuild.buildSize(key);
+  scheduleSend();
+}
 // the manual window picker's graphics-memory estimate (backlog row 41): a short-lived Rust engine, only while no queue runs
 /** What runs now that a restart (or a quit) would cut short (busy.ts). */
 const busyState = (): BusyState => ({ queue: queue.running, consoleGpu, download: installAbort !== null, cacheMoving: cacheMoving !== null, trtBuild: prebuild.running });

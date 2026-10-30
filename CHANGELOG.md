@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0-dev.8
+
+- **TensorRT builds itself.** A clip that ran on CUDA only because TensorRT wasn't built for its size now starts that
+  build by itself as soon as the job ends, sized for your graphics card so it covers every job of that size; the next
+  run uses TensorRT. No button to press (the tile's Build it now stays for trying again after a failed build).
+
 ## 1.0.0-dev.7
 
 - **One TensorRT build per size now covers your card.** A build used to size itself from the graphics memory free at
