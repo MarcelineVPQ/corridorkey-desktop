@@ -744,7 +744,7 @@ for that window: stage 1 for 1..window frames, the foundations for 1..4 frames i
 batch) or the whole window otherwise; the folder is `<range>_t1-<window>_f1-<batch>`. Why: at the old
 memory-capped windows (12-24 frames, against CUDA's 48/80) the mattes differed from CUDA's by up to 27 % of pixels
 > 1/255 (godiva_close); at CUDA's window they match within fp16 rounding (below). The builder's workspace is 60 %
-of the job's budget (else of the card's free memory), at most 8 GiB: stage 1 for 48 frames at 1152×1280 needs a
+of the job's limit (else of the card's total memory, since 1.0.0-dev.7; before, the memory free at that moment), at most 8 GiB: stage 1 for 48 frames at 1152×1280 needs a
 6.1 GB tactic (a 4 GiB cap found none; 7 GiB built it in 138 s, peak 13.9 GB on the card, context 6.3 GiB), so it
 builds on 16 GB cards; a network whose build finds no tactic runs on CUDA at the same window (`fallbacks`).
 Only such deterministic failures (no tactic, a parse error, bad arguments) are remembered in `<piece>.failed`; a

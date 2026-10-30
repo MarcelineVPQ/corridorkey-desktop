@@ -8,7 +8,7 @@ import type { ConsoleBlock, ConsoleCompletion, JobOptions } from "../../src/shar
 import { makeRegistry } from "../../src/shared/console/registry";
 import { LineEditor, type LineEditorHandle } from "../../src/ui/console/LineEditor";
 import { OutputBlock } from "../../src/ui/console/OutputBlock";
-import { JobSettings } from "../../src/ui/JobSettings";
+import { JobSettings, trtPlanFor } from "../../src/ui/JobSettings";
 import { JobView } from "../../src/ui/JobView";
 import { PathText } from "../../src/ui/PathText";
 import { ProgressBar } from "../../src/ui/ProgressBar";
@@ -656,28 +656,61 @@ describe("AMD cards: declared untested", () => {
 
 describe("a job that found no TensorRT engine (1.0.0-dev.7)", () => {
   const tech = { provider: "cuda", precision: "fp16", tensorrtRequested: true, fallbacks: {}, range: null, cache: null, notAsked: null, modelSet: null, modelsDir: null };
-  const hd = (fallbackReason: string) => job("a", { status: "done", clip: clipInfo("a", { width: 1920, height: 1080 }), tech: { ...tech, fallbackReason } });
+  const hd = (fallbackReason: string | null, fallbacks: Record<string, string> = {}) =>
+    job("a", { status: "done", clip: clipInfo("a", { width: 1920, height: 1080 }), tech: { ...tech, fallbackReason, fallbacks } });
   const idle = { status: "done" as const, ranges: [], startedAt: null, note: null };
+  const NOT_BUILT = "TensorRT for this resolution range isn't built yet";
 
-  it("offers Build it now in plain words, with the build time measured here, and starts that size's build", () => {
+  it("offers Build it now in plain words, with no build time (none is measured for the range it builds), and starts that size's build", () => {
     const ck = mockCk({ trtSize: () => Promise.resolve() });
-    const onDisk = [{ range: "h1024-1280_w1792-2176_t1-2_f1-2", bytes: 1, buildSeconds: 290, stale: false }];
-    render(<JobView job={hd("TensorRT for this resolution range isn't built yet")} prebuild={idle} onDisk={onDisk} />);
+    render(<JobView job={hd(NOT_BUILT)} prebuild={idle} trtOn />);
     // the main line: no ranges or windows; never a silent CUDA run
-    expect(screen.getByText("not built for this clip's size yet, so this run used CUDA")).toBeTruthy();
-    expect(screen.getByText(/about 5 minutes, measured here/)).toBeTruthy();
+    expect(screen.getByText("TensorRT isn't built for this clip yet, so this run used CUDA")).toBeTruthy();
+    // review 2026-10-29 M3: a shorter range's time was shown as this build's
+    expect(screen.queryByText(/minute/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Build it now/ }));
     expect(ck.trtSize).toHaveBeenCalledWith("build", { label: "a", width: 1920, height: 1080 });
   });
 
-  it("offers it too where the size is built only for shorter windows (the engine's reason in the quieter line), with no time when none was measured", () => {
+  it("offers it too where the size is built only for shorter windows (the engine's reason in the quieter line)", () => {
     mockCk();
     const why = "TensorRT for this resolution is built for a window of 2 frames; this job's automatic window is 4";
-    render(<JobView job={hd(why)} prebuild={idle} onDisk={[]} />);
-    expect(screen.getByText("not built for this clip's size yet, so this run used CUDA")).toBeTruthy();
+    render(<JobView job={hd(why)} prebuild={idle} trtOn />);
+    expect(screen.getByText("TensorRT isn't built for this clip yet, so this run used CUDA")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Build it now/ })).toBeTruthy();
     expect(screen.getByText(new RegExp(`Why: ${why}`))).toBeTruthy();
-    expect(screen.queryByText(/minute/)).toBeNull();
+  });
+
+  it("review 2026-10-29: no button where a build can't help (a busy card), and none while TensorRT is off (the tile says how to turn it on)", () => {
+    mockCk();
+    const busy = render(
+      <JobView job={hd("the graphics card is busy: TensorRT for this size needs about 13.1 GB of graphics memory and 9.0 GB is free, so this run used CUDA")} prebuild={idle} trtOn />,
+    );
+    expect(screen.queryByRole("button", { name: /Build it/ })).toBeNull();
+    expect(screen.getByText(/the graphics card is busy/)).toBeTruthy();
+    busy.unmount();
+    render(<JobView job={hd(NOT_BUILT)} prebuild={idle} trtOn={false} />);
+    expect(screen.queryByRole("button", { name: /Build it/ })).toBeNull();
+    expect(screen.getByText(/turn it on in Engine settings → TensorRT/)).toBeTruthy();
+  });
+
+  it("review 2026-10-29: a build that ran short of memory says so and offers to build again; a network with no tactic is offered a build too", () => {
+    const ck = mockCk({ trtSize: () => Promise.resolve() });
+    const error = "the graphics card didn't have enough free memory to build stage 1 for 1920×1080 (another program may be using it). What was built is kept: building again finishes it";
+    const failed = {
+      status: "error" as const,
+      ranges: [{ label: "a", width: 1920, height: 1080, state: "failed" as const, piece: null, range: null, fallbacks: {}, error }],
+      startedAt: null,
+      note: null,
+    };
+    const f = render(<JobView job={hd(NOT_BUILT)} prebuild={failed} trtOn />);
+    expect(screen.getByText(/The last build couldn't finish: the graphics card didn't have enough free memory/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Build it again/ }));
+    expect(ck.trtSize).toHaveBeenCalledWith("build", { label: "a", width: 1920, height: 1080 });
+    f.unmount();
+    render(<JobView job={hd(null, { stage1: "build: Could not find any implementation for node X" })} prebuild={idle} trtOn />);
+    expect(screen.getByRole("button", { name: /Build it now/ })).toBeTruthy();
+    expect(screen.queryByText(/Why:/)).toBeNull();
   });
 
   it("says it builds while it does, and no button where a build can't help (outside TensorRT's sizes)", () => {
@@ -688,23 +721,33 @@ describe("a job that found no TensorRT engine (1.0.0-dev.7)", () => {
       startedAt: 0,
       note: null,
     };
-    const { unmount } = render(<JobView job={hd("TensorRT for this resolution range isn't built yet")} prebuild={running} onDisk={[]} />);
+    const { unmount } = render(<JobView job={hd(NOT_BUILT)} prebuild={running} trtOn />);
     expect(screen.queryByRole("button", { name: /Build it now/ })).toBeNull();
     expect(screen.getByText(/It builds in the background now/)).toBeTruthy();
     unmount();
-    const outside = render(<JobView job={hd("6144x3328 is outside the TensorRT ranges")} prebuild={idle} onDisk={[]} />);
+    const outside = render(<JobView job={hd("6144x3328 is outside the TensorRT ranges")} prebuild={idle} trtOn />);
     expect(screen.queryByRole("button", { name: /Build it now/ })).toBeNull();
     outside.unmount();
     // after the build: the next run uses it; asked while the queue runs: it builds once the queue stops
     const range = { label: "a", width: 1920, height: 1080, piece: null, fallbacks: {}, error: null };
     const built = { ...idle, ranges: [{ ...range, state: "done" as const, range: "h1024-1280_w1792-2176_t1-24_f1-4" }] };
-    const after = render(<JobView job={hd("TensorRT for this resolution range isn't built yet")} prebuild={built} onDisk={[]} />);
+    const after = render(<JobView job={hd(NOT_BUILT)} prebuild={built} trtOn />);
     expect(screen.getByText("Built for this size now: the next run of this clip uses TensorRT.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Build it now/ })).toBeNull();
     after.unmount();
     const paused = { ...idle, status: "paused" as const, ranges: [{ ...range, state: "todo" as const, range: null }] };
-    render(<JobView job={hd("TensorRT for this resolution range isn't built yet")} prebuild={paused} onDisk={[]} />);
+    render(<JobView job={hd(NOT_BUILT)} prebuild={paused} trtOn />);
     expect(screen.getByText(/builds in the background once the queue stops/)).toBeTruthy();
+  });
+
+  it("review 2026-10-29 S1: a waiting clip of a built size isn't promised TensorRT (an earlier build or a busy card runs it on CUDA)", () => {
+    const j = job("a", { clip: clipInfo("a", { width: 1920, height: 1080 }) });
+    const plan = trtPlanFor(j, trtState({ on: true, ready: true, built: ["h1024-1280_w1792-2176_t1-2_f1-2"] }))!;
+    expect(plan.status).toBe("On · built for this size");
+    expect(plan.text).not.toMatch(/so this clip runs on TensorRT/);
+    expect(plan.text).toBe(
+      "Built for 1920×1080 (windows up to 2 frames). If this clip still runs on CUDA (a longer window than built, or the graphics card busy), its page says why, and offers Build it now where a build helps.",
+    );
   });
 });
 

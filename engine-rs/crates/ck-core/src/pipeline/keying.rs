@@ -56,6 +56,8 @@ pub(crate) struct JobPlan {
     pub(crate) key: ModelKey,
     /// the budget (GiB) the automatic window was chosen for; None: the request set the window (`LOADS_BEHIND_MIN_GB`)
     pub(crate) budget_gb: Option<f64>,
+    /// a TensorRT job's CUDA key: an out-of-memory before any frame was written goes on on it, once (attempts)
+    pub(crate) cuda: Option<ModelKey>,
 }
 
 /// What every attempt of a job shares: the request, the probed clip, where its frames come from, the TensorRT

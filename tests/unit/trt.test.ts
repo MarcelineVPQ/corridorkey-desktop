@@ -17,6 +17,7 @@ import {
   TRT_DIM_RANGES,
   TRT_MAX_AREA,
   TRT_MAX_SIDE,
+  TRT_CARD_BUSY,
   TRT_NOT_BUILT,
   TRT_OTHER_WINDOW,
   trtSizeKey,
@@ -43,6 +44,7 @@ describe("TensorRT ranges as the engine has them", () => {
     expect(Number(/const SHAPE_QUANTUM: usize = (\d+);/.exec(rs("clip.rs"))![1])).toBe(SHAPE_QUANTUM);
     expect(rs("pipeline/mod.rs")).toContain(`const TRT_NOT_BUILT: &str = "${TRT_NOT_BUILT}";`);
     expect(rs("pipeline/mod.rs")).toContain(`format!("${TRT_OTHER_WINDOW} {}`);
+    expect(rs("pipeline/mod.rs")).toContain(`const TRT_CARD_BUSY: &str = "${TRT_CARD_BUSY}";`);
   });
 
   it("puts a clip's size in its range (the engine's keys), or none", () => {
@@ -269,6 +271,21 @@ describe("the background TensorRT build", () => {
     r.b.refresh();
     await r.b.start(true);
     expect(r.sent).toHaveLength(1);
+  });
+
+  it("review 2026-10-29: a build that ran short of memory stays failed (its reason on screen) until a build is asked again, which retries it", async () => {
+    const r = rig({ built: ["h1792-2176_w3584-4096_t1-8_f1-4", "h1024-1280_w1792-2176_t1-2_f1-2"] });
+    await r.b.buildSize("h1024-1280_w1792-2176");
+    const why = "the graphics card didn't have enough free memory to build stage 1 for 1920×1080";
+    r.reply({ type: "error", id: KHD, code: "oom", message: why });
+    expect(r.b.state).toMatchObject({ status: "error" });
+    // after the next job (a refresh with no build running), an older range of the size made it "done" again
+    r.b.refresh();
+    expect(r.b.state.status).toBe("error");
+    expect(r.b.state.ranges.find((x) => x.width === 1920)).toMatchObject({ state: "failed", error: why });
+    // the one click: built again
+    await r.b.buildSize("h1024-1280_w1792-2176");
+    expect(r.sent.filter((m) => m.id === KHD)).toHaveLength(2);
   });
 
   it("gives way to the queue and goes on after it; never starts by itself while another program uses the card", async () => {

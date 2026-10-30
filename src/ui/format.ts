@@ -89,7 +89,7 @@ export function trtJobText(t: JobTech): string | null {
   if (t.notAsked) return `not asked: ${t.notAsked}`;
   if (!t.tensorrtRequested) return null;
   // one a build fixes, in plain words (the engine's reason goes on the quieter line under it, JobView)
-  if (fixedByBuild(t.fallbackReason)) return "not built for this clip's size yet, so this run used CUDA";
+  if (fixedByBuild(t.fallbackReason)) return "TensorRT isn't built for this clip yet, so this run used CUDA";
   if (t.fallbackReason) return `not used: ${t.fallbackReason}`;
   // loop: NOT-WORTH — at most five networks
   const fell = Object.entries(t.fallbacks).map(([k, why]) => `${PIECE_NAMES[k] ?? k} on CUDA (${why})`);

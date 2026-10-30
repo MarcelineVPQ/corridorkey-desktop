@@ -259,7 +259,10 @@ export class Prebuilder {
       this.state = { ...this.state, ranges };
       return;
     }
-    const ranges = next;
+    // a failed build stays failed until the user (or the next start) builds again: its reason stays on screen
+    // (review 2026-10-29 N1; an older range of its size made it "done" again after the next job)
+    // loop: NOT-WORTH — the few chosen sizes, and the few in the list
+    const ranges = next.map((n) => this.state.ranges.find((r) => rangeId(r) === rangeId(n) && r.state === "failed") ?? n);
     // loop: NOT-WORTH — the few chosen sizes
     const allDone = ranges.every((r) => r.state === "done");
     const status = allDone ? "done" : this.state.status === "done" ? "idle" : this.state.status;

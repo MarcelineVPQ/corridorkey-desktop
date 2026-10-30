@@ -399,10 +399,10 @@ export function trtPlanFor(job: Job, trt: TrtState): { status: string; text: str
   const windows = builtWindows(key, trt.built);
   if (windows.length)
     return {
-      // 1.0.0-dev.7: a range serves every window up to its own, and builds cover every window a job on this card picks;
-      // a range built before that (for shorter windows) may not, which the detail says and the clip's page then offers
+      // 1.0.0-dev.7: a range serves every window up to its own. Not a promise (review 2026-10-29 S1): an earlier build
+      // may cover only shorter windows, and a busy card runs the clip on CUDA; its page then says why
       status: "On · built for this size",
-      text: `Built for ${width}×${height}, so this clip runs on TensorRT. (Built for windows up to ${Math.max(...windows)} frames: a clip whose window is longer runs on CUDA, and its page offers Build it now.)`,
+      text: `Built for ${width}×${height} (windows up to ${Math.max(...windows)} frames). If this clip still runs on CUDA (a longer window than built, or the graphics card busy), its page says why, and offers Build it now where a build helps.`,
     };
   // loop: NOT-WORTH — two ranges
   const building = trt.prebuild.status === "running" && trt.prebuild.ranges.some((r) => trtSizeKey(r.width, r.height) === key && r.state !== "done");

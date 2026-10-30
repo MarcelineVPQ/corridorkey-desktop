@@ -221,7 +221,10 @@ didn't ask for TensorRT; "not used" means the engine couldn't use it for this jo
 | --- | --- |
 | not asked: TensorRT is off (Engine settings) | Switch it on in Engine settings, TensorRT. |
 | not asked: TensorRT's parts weren't installed when the job started (Engine settings, TensorRT) | Finish TensorRT's download. |
-| not built for this clip's size yet, so this run used CUDA | Jobs never wait on a build. Press **Build it now** on the clip's page (or let the background build finish); the next run of the clip uses it. The line under it gives the engine's reason: the size isn't built, or it was built by an earlier version for shorter windows only (see [TensorRT](TensorRT#windows)). |
+| TensorRT isn't built for this clip yet, so this run used CUDA | Jobs never wait on a build. Press **Build it now** on the clip's page (or let the background build finish); the next run of the clip uses it. The line under it gives the engine's reason: the size isn't built, or it was built by an earlier version for shorter windows only (see [TensorRT](TensorRT#windows)). |
+| not used: the graphics card is busy: TensorRT for this size needs about `<n>` GB of graphics memory and `<m>` GB is free, so this run used CUDA | Another program holds the card (the notice before the run names it). Close it and run the clip again; building again wouldn't help. |
+| not used: the graphics card ran out of memory with TensorRT, so this run used CUDA | The run went on on CUDA at once. Free the card and run it again. |
+| not used: TensorRT is built for windows up to `<n>` frames at this size (the longest measured to build); this clip's window is `<m>`, so this run used CUDA | Larger cards pick longer windows than any TensorRT build measured so far; those clips run on CUDA until longer builds are measured. |
 | not used: `<w>x<h>` is outside the TensorRT ranges (more than 4096 px a side, or a larger frame than 4096x2176, runs on CUDA) | Open gate, 6K and larger frames always run on CUDA. |
 | not used: this ONNX Runtime has no TensorRT provider | Reinstall TensorRT's parts (Engine settings, TensorRT). |
 | not used: the models folder has no TensorRT-ready models | The TensorRT models aren't in the models folder in use; reinstall TensorRT's parts. |

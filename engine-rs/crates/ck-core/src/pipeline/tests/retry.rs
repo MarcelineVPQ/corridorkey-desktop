@@ -23,7 +23,9 @@ impl Harness {
         let mut report = FrameReport { total: meta.num_frames, last_sent: None, last_done: None };
         let mut sink = RecSink::default();
         let ctx = JobCtx::new(&self.job, &meta, &self.frames, None, "clip");
-        let mut plan = JobPlan { chunk, stride, low_vram, key: key(provider), budget_gb: self.budget_gb };
+        // a TensorRT job carries its CUDA key (run_job)
+        let cuda = (provider == Provider::TensorRt).then(|| key(Provider::Cuda));
+        let mut plan = JobPlan { chunk, stride, low_vram, key: key(provider), budget_gb: self.budget_gb, cuda };
         let mut retried = Vec::new();
         let res = self.pipe.attempts(&ctx, &mut plan, &mut writers, &mut report, &mut sink, &mut |p, _| retried.push((p.chunk, p.stride)));
         // loop: NOT-WORTH — ≤ four writers
@@ -79,6 +81,26 @@ fn an_automatic_window_out_of_memory_halves_and_restarts() {
         assert_eq!(loads, 3);
         assert_eq!(h.temp_files(), Vec::<PathBuf>::new());
     }
+}
+
+#[test]
+fn a_tensorrt_job_out_of_memory_goes_on_on_cuda_once() {
+    // review 2026-10-29 M1: TensorRT's engines hold their range's memory, which a halved window doesn't shrink. The
+    // job goes on on CUDA at the same window (once, saying why), then CUDA's own halving as before
+    let mut h = Harness::new(with_fail(oom_above(2)), 10, options(json!({})));
+    let r = h.attempts_on(Provider::TensorRt, 8, 4, true);
+    r.out.res.as_ref().unwrap();
+    assert_eq!(r.plan.key.provider, Provider::Cuda);
+    assert_eq!(r.retried, vec![(4, 2), (2, 1)], "the switch keeps the window; CUDA halves it");
+    // loop: NOT-WORTH — a test job's runs
+    let s1: Vec<usize> = h.loader.runs_of("stage1").iter().map(|r| r.shape("rgb")[1]).collect();
+    assert_eq!(s1[..3], [8, 8, 4], "TensorRT at 8, CUDA at 8, then 4");
+    // (the fake has no TensorRT folder, so its networks' own fallback replies come too: only the switch is counted)
+    // loop: NOT-WORTH — a test job's replies
+    let prov: Vec<&Value> = r.out.sink.of_type("provider").into_iter().filter(|m| m["fallback_reason"] == TRT_OUT_OF_MEMORY).collect();
+    assert_eq!(prov.len(), 1, "one switch");
+    assert_eq!(prov[0]["provider"].as_str(), Some("cuda"));
+    assert_eq!(r.out.frames(), vec![10, 10]);
 }
 
 #[test]

@@ -73,7 +73,8 @@ fn a_build_covers_the_card_not_the_moment() {
                 // loop: NOT-WORTH — as above
                 for frames in [3, 12, 30, 50, 1000] {
                     let ran = select_vram_profile(shape, frames, free, false, true).chunk.min(frames);
-                    assert!(ran <= built.chunk, "{shape:?} {total} GiB card, {free} GiB free, {frames} frames");
+                    // (or longer than any build is made for, past the measured builds: that job runs on CUDA, trt_serving)
+                    assert!(ran <= built.chunk || ran > measured(shape), "{shape:?} {total} GiB card, {free} GiB free, {frames} frames");
                 }
             }
         }
@@ -84,9 +85,42 @@ fn a_build_covers_the_card_not_the_moment() {
 }
 
 // the build windows the table gives fake 8, 16 and 32 GiB cards (vram.rs, low-VRAM mode): the longest window whose peak
-// fits the card, 16 and 56 included (a short clip whose automatic window is longer runs only its frames)
-const BUILD_HD: (usize, usize, usize) = (8, 24, 56);
-const BUILD_4K: (usize, usize, usize) = (2, 8, 16);
+// fits the card, never past the longest measured to build (review 2026-10-29 M2: tensorrt::build_cap, 4K 8 and the HD
+// range 25; the table alone gave a 32 GiB card HD 56 and 4K 16, unmeasured builds)
+const BUILD_HD: (usize, usize, usize) = (8, 24, 25);
+const BUILD_4K: (usize, usize, usize) = (2, 8, 8);
+
+/// tensorrt::build_cap for a padded shape's range.
+fn measured(shape: (usize, usize)) -> usize {
+    crate::tensorrt::build_cap(&crate::tensorrt::bucket_for(shape.0, shape.1, 1, true).unwrap())
+}
+
+#[test]
+fn a_longer_range_is_used_only_when_its_memory_fits() {
+    // review 2026-10-29 M1: a busy card's HD job picks window 8; the card's build is t1-24. Its engines may hold the
+    // memory of 24 frames, so the job takes them only when a job at window 24 would fit its budget; else CUDA, with
+    // a reason no build fixes (the app offers none)
+    let hd = (1152, 1920);
+    let mp = (hd.0 * hd.1) as f64 / 1e6;
+    let names = vec!["h1024-1280_w1792-2176_t1-24_f1-4".to_string()];
+    let need = crate::tensorrt::bucket_for(hd.0, hd.1, 8, true).unwrap();
+    let all = |_: &str| true;
+    // budgets where the job's own window is 8 and where it is 24 (the table's, fake cards)
+    // loop: NOT-WORTH — a test's 200 budgets
+    let at = |w: usize| (10..210).map(|t| t as f64 / 10.0).find(|&b| select_vram_profile(hd, 1000, b, false, true).chunk == w).unwrap();
+    let (busy, free) = (at(8), at(24));
+    let why = trt_serving(&need, &names, all, mp, true, Some((busy, false))).unwrap_err();
+    assert!(why.starts_with(TRT_CARD_BUSY) && why.ends_with("so this run used CUDA"), "{why}");
+    assert_eq!(trt_serving(&need, &names, all, mp, true, Some((free, false))).unwrap().map(|b| b.key()).as_deref(), Some(names[0].as_str()));
+    // a manual window (no budget): any range that serves it
+    assert!(trt_serving(&need, &names, all, mp, true, None).unwrap().is_some());
+    // nothing built: a build serves it
+    assert_eq!(trt_serving(&need, &[], all, mp, true, Some((busy, false))), Ok(None));
+    // a window longer than any build is made for: CUDA, and no build offered (it would not serve it)
+    let long = crate::tensorrt::bucket_for(hd.0, hd.1, 48, true).unwrap();
+    let why = trt_serving(&long, &[], all, mp, true, Some((40.0, false))).unwrap_err();
+    assert!(why.contains("the longest measured to build") && !why.starts_with(TRT_CARD_BUSY), "{why}");
+}
 
 #[test]
 fn a_job_uses_a_built_range_at_any_smaller_window() {
@@ -132,7 +166,9 @@ fn a_job_uses_a_built_range_at_any_smaller_window() {
                 for frames in [3, 12, 50, 1000] {
                     let p = select_vram_profile(shape, frames, free, false, true);
                     let need = crate::tensorrt::bucket_for(shape.0, shape.1, p.chunk.min(frames), p.low_vram).unwrap();
-                    assert!(serving_range(&need, &built, all).is_some(), "{shape:?} {total} GiB card, window {}, {frames} frames", p.chunk);
+                    // (a window past the measured builds runs on CUDA: a 32 GiB card's HD 48, trt_serving)
+                    let served = serving_range(&need, &built, all).is_some() || need.t.1 > measured(shape);
+                    assert!(served, "{shape:?} {total} GiB card, window {}, {frames} frames", p.chunk);
                 }
             }
         }
@@ -264,7 +300,7 @@ impl Harness {
         let mut report = FrameReport { total: meta.write_range().len(), last_sent: None, last_done: None };
         let mut sink = RecSink { stop_at: self.stop_at, ..RecSink::default() };
         let ctx = JobCtx::new(&self.job, meta, &self.frames, trt, "clip");
-        let plan = JobPlan { chunk, stride, low_vram, key: key.clone(), budget_gb: self.budget_gb };
+        let plan = JobPlan { chunk, stride, low_vram, key: key.clone(), budget_gb: self.budget_gb, cuda: None };
         let res = self.pipe.keying(&ctx, &plan, &mut writers, &mut report, &mut sink, &mut false);
         // loop: NOT-WORTH — ≤ four writers
         let written = seen.iter().map(|(n, s)| (n.clone(), *s.lock().unwrap())).collect();

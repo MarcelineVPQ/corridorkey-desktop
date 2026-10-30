@@ -66,12 +66,16 @@ ahead of any job (the app's background build, so a job never waits on one). `fra
 0, not a positive number) is a `bad-request`, never ignored. The engine pads the size as a run does, picks the window a
 TensorRT job of that size can run on this card (1.0.0-dev.7: low-VRAM mode, the longest window whose estimated peak
 fits the card's TOTAL memory, or `vram_budget_gb`, never the memory free at that moment; a clip shorter than its
-automatic window runs only its frames, so that can be longer than the automatic window itself), and builds every
-network of that range not built yet with the same builder a job uses (`progress` replies, stage
+automatic window runs only its frames, so that can be longer than the automatic window itself; never past the longest
+measured to build, tensorrt.rs `build_cap`), and builds every network of that range not built yet, networks that
+failed before included, with the same builder a job uses, TensorRT's working memory from the card's total or the
+limit (`progress` replies, stage
 `optimize`, with `piece`; `log` lines). Then `{"type":"trt_built","id":"b1","width":4096,"height":2160,
 "range":"h1792-2176_w3584-4096_t1-8_f1-4","hann_chunk":8,"hann_stride":4,"reused":false,"built_s":{"stage1":139.2,…},
 "fallbacks":{}}` (`reused`: everything was built before; `fallbacks`: networks that couldn't be built, which run on
-CUDA). Without the graphics card and ONNX Runtime's TensorRT provider, or for a size outside the TensorRT ranges, a
+CUDA). A network that ran short of graphics memory (or found no implementation within the working memory) is not
+built: the reply is then an `error` with code `oom` and a plain message ("the graphics card didn't have enough free
+memory to build …"), the networks built are kept, and the next `trt_build` finishes it. Without the graphics card and ONNX Runtime's TensorRT provider, or for a size outside the TensorRT ranges, a
 `bad-request` that says why. Answered between jobs; the app ends it by killing the engine (the builder dies with it,
 and a half-built network is built again next time). The PyTorch engine answers `unknown cmd`.
 
@@ -217,7 +221,10 @@ The `corridorkey` command line ([CLI.md](CLI.md)) runs the same jobs without thi
   re-measured on model set 2.0.0-onnx.4 on 2026-10-26, docs/BACKLOG.md row 41; since 2026-10-27 also the 8 GB card's peaks where memory is tight, docs/ENGINE_RUST.md; before, `pytorch-bf16-table`, the upstream runtime's PyTorch table).
 - `retry_after_oom` (Rust engine `memory`, additive): an automatic window that ran out of graphics memory before any
   frame reached the writers is halved and the job restarted; the second `memory` reply carries the new window and
-  `retry_after_oom` (`hann_chunk`, `hann_stride` and `message` of the window that failed; docs/ENGINE_RUST.md).
+  `retry_after_oom` (`hann_chunk`, `hann_stride` and `message` of the window that failed; docs/ENGINE_RUST.md). A
+  TensorRT job (1.0.0-dev.7, either window) that runs out of memory there first goes on on CUDA at the same window,
+  once: a second `provider` reply (`cuda`, `fallback_reason` "the graphics card ran out of memory with TensorRT, so
+  this run used CUDA"), then CUDA's halving as above.
 - `decoders` (Rust engine pong, additive): the JPEG decoder frame folders get (libjpeg-turbo,
   the one OpenCV uses, or the image crate's, which differs by a few levels) and the ffmpeg and
   ffprobe versions. A job writes the same three at the end of its `_settings.txt`
@@ -259,7 +266,10 @@ The `corridorkey` command line ([CLI.md](CLI.md)) runs the same jobs without thi
   normal-mode peaks are CUDA's; TensorRT's are unmeasured, backlog row 54): its
   `memory` reply is the same as a CUDA job's, with
   `estimate_basis: "onnxruntime-cuda-measured"`; the shape range is in the
-  `provider` reply (`range`).
+  `provider` reply (`range`). 1.0.0-dev.7: a job whose own range isn't built runs on a built range of its size for a
+  longer window only when that window's estimated peak fits its budget (its `estimate_gb` is then that window's);
+  otherwise CUDA, `fallback_reason` "the graphics card is busy: …". A window longer than any build is made for
+  (`build_cap`) runs on CUDA with "TensorRT is built for windows up to N frames at this size …".
 - A request the engine can't read is answered with
   `{"type":"error","code":"bad-request","message":"..."}` and the engine keeps
   running. After a job's `error` the engine also keeps running and takes the

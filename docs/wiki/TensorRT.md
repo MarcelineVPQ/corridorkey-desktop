@@ -41,11 +41,13 @@ inside a job:
 - It **pauses while you key** and goes on by itself when the queue stops. If another program is using the graphics
   card, it waits until the card is free; **Build now** starts it anyway. **Stop** keeps what was built.
 - **One build per size covers your card.** Each build covers every temporal window a job of that size can pick on
-  your card (worked out from the card's total memory, never from what happens to be free while it builds), so after
-  one build every clip of that size runs on TensorRT, short or long, whatever else is using the card.
+  your card (worked out from the card's total memory, never from what happens to be free while it builds), up to the
+  longest measured to build (4K 8 frames, HD 24, built and run on an RTX 5080 16 GB on 2026-10-25).
+- **A busy card runs on CUDA.** A job uses its size's engines only when their own memory need fits what the card has
+  free; while another program holds the card, the clip runs on CUDA and its page says "the graphics card is busy".
 - **Jobs never wait on a build.** A clip whose size isn't built yet runs on CUDA, and its page says so and offers
-  **Build it now**: one click starts the same background build for that clip's size (with how long it took here
-  before, when the app measured it), and the next run of the clip uses it.
+  **Build it now**: one click starts the same background build for that clip's size, and the next run of the clip
+  uses it. A build that runs short of graphics memory says so and offers **Build it again**.
 
 Engine settings, TensorRT lists the common sizes (720p, HD, 2K DCI, 2K full aperture, 2.8K, 4K DCI and UHD) grouped
 by range: **tick** a size to build it, **untick** to remove its engines (it asks first). **A size of my own** builds
@@ -69,11 +71,12 @@ example stage 1 at very long windows), that one network runs on CUDA, and the jo
 
 ## Windows
 
-A job keys with the same temporal window as on CUDA, so the mattes match. A size's engines serve every window up to
-the one they were built for, and builds since 1.0.0-dev.7 cover the longest window a job can pick on your card. Sizes
-built by an earlier version were sized from the memory free at that moment and may cover only shorter windows: a
-clip with a longer window then runs on CUDA, its page says **not built for this clip's size yet, so this run used
-CUDA**, and **Build it now** builds the size for your whole card.
+A job keys with the same temporal window as on CUDA. A size's engines serve every window up to the one they were
+built for (whether a shorter window on longer engines matches CUDA's mattes as exactly as at their own window is not
+measured yet), and builds since 1.0.0-dev.7 cover the longest window a job can pick on your card, up to the longest
+measured to build. Sizes built by an earlier version were sized from the memory free at that moment and may cover
+only shorter windows: a clip with a longer window then runs on CUDA, its page says **TensorRT isn't built for this
+clip yet, so this run used CUDA**, and **Build it now** builds the size for your whole card.
 
 Before a clip runs, its **TensorRT** section says what to expect: "On · built for this size", "On · not built for
 this size · runs on CUDA", "Outside TensorRT's ranges · CUDA", and so on.

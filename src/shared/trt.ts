@@ -28,17 +28,20 @@ export const TRT_NOT_BUILT = "TensorRT for this resolution range isn't built yet
 // trt_other_window; ranges built before builds covered the whole card, 1.0.0-dev.7)
 export const TRT_OTHER_WINDOW = "TensorRT for this resolution is built for a window of";
 
-/** Whether building the clip's size fixes a job's TensorRT fallback (its size isn't built, or only for shorter windows). */
-export const fixedByBuild = (reason: string | null): boolean => reason === TRT_NOT_BUILT || (reason?.startsWith(TRT_OTHER_WINDOW) ?? false);
+// how the engine's `fallback_reason` starts for a job whose built engines need more memory than the card has free
+// (pipeline/mod.rs TRT_CARD_BUSY): no build fixes that, so none is offered
+export const TRT_CARD_BUSY = "the graphics card is busy";
 
-/** A size's build time as measured on this card (the app's record of an earlier build of it), null when none was. */
-export function measuredBuildText(sizeKey: string, onDisk: readonly { range: string; buildSeconds: number | null }[]): string | null {
-  // loop: NOT-WORTH — a few ranges on disk, per render of one clip's page
-  const secs = onDisk.find((d) => d.range.startsWith(`${sizeKey}_t`) && d.buildSeconds !== null)?.buildSeconds;
-  if (!secs) return null;
-  const min = Math.max(1, Math.round(secs / 60));
-  return `about ${min} minute${min === 1 ? "" : "s"}, measured here`;
-}
+/**
+ * Whether building the clip's size fixes a job's TensorRT fallback: its size isn't built, or only for shorter windows,
+ * or a network's build found no implementation within TensorRT's working memory (`fallbacks`; a build tries it again,
+ * review 2026-10-29 M2).
+ */
+export const fixedByBuild = (reason: string | null, fallbacks: Record<string, string> = {}): boolean =>
+  reason === TRT_NOT_BUILT ||
+  (reason?.startsWith(TRT_OTHER_WINDOW) ?? false) ||
+  // loop: NOT-WORTH — at most five networks
+  (!reason && Object.values(fallbacks).some((why) => /could not find any implementation|no tactic/i.test(why)));
 
 // The same measurement, in words: one run each on an RTX 5080, model set onnx.4; other cards and sizes weren't measured.
 export const TRT_SPEED = "Measured on an RTX 5080: a clip takes 0.63× CUDA's time at 1280×1080 and 0.76× at 4K, with about 1.5-2 GB more graphics memory.";

@@ -2,8 +2,9 @@
 //!
 //! Engines are built for shape RANGES, not single shapes: the padded height and width (multiples of the
 //! runtime's 128 px quantum, each axis on its own, so the aspect ratio counts) each fall in one range. A TensorRT
-//! job uses exactly the window (and low-VRAM staging) the CUDA path picks for the clip, so both give the same
-//! matte; its engines are built for that window. One engine set per range is built once, by
+//! job uses exactly the window (and low-VRAM staging) the CUDA path picks for the clip. Its engines are its own
+//! window's range, or (1.0.0-dev.7) a built range of its size for a longer window (Bucket::serves), used only when
+//! that range's own memory need fits the job's budget (pipeline trt_serving). One engine set per range is built once, by
 //! `ck-trt-build` (strongly typed: the TensorRT-ready exports keep their weight GEMMs and convolutions in FP32,
 //! the rest FP16, which matches the CUDA FP16 parity; ONNX Runtime's own TensorRT build is weakly typed and
 //! measured 2-4x the error), and cached on disk under a folder named for the card, its driver, TensorRT and
@@ -43,8 +44,10 @@ fn range_of(v: usize, ranges: &[(usize, usize)]) -> Option<(usize, usize)> {
 }
 
 /// The engine set for padded (H, W) and the job's window (the CUDA path's choice; measured 2026-10-24: at the
-/// same window TensorRT's mattes match CUDA's within fp16 rounding, at a shorter one they don't). None: outside
-/// every range, larger than MAX_SIDE, or in a range larger than MAX_AREA (CUDA runs it).
+/// same window TensorRT's mattes match CUDA's within fp16 rounding, at a shorter one they don't). A job may also run
+/// on a range built for a longer window (Bucket::serves); that its mattes still match CUDA's at the job's window is
+/// unmeasured (review 2026-10-29 S4: one GPU check). None: outside every range, larger than MAX_SIDE, or in a range
+/// larger than MAX_AREA (CUDA runs it).
 pub(crate) fn bucket_for(shape_h: usize, shape_w: usize, window: usize, low_vram: bool) -> Option<Bucket> {
     if shape_h > MAX_SIDE || shape_w > MAX_SIDE || window == 0 {
         return None;
@@ -89,7 +92,9 @@ pub(crate) const RVM_CH: usize = 384;
 pub(crate) const BATON_CH: usize = 512;
 
 /// The optimisation profile of one network for a bucket: (min, opt, max) shape strings in ck-trt-build's (and
-/// ORT's) format ("frame:1x3x256x384,state:..."). opt = the range's largest shape.
+/// ORT's) format ("frame:1x3x256x384,state:..."). opt = the range's largest shape. Whether TensorRT then holds the
+/// working memory of the largest shape for a job at a shorter window is unmeasured (review 2026-10-29 M1), so a job
+/// takes a longer range only when that range's own window fits its budget (pipeline trt_serving).
 pub(crate) fn profile(piece: &str, b: &Bucket) -> Option<(String, String, String)> {
     let at = |h: usize, w: usize, t: usize| -> String {
         let (h4, w4, h64, w64) = (h / 4, w / 4, h / 64, w / 64);
@@ -218,6 +223,37 @@ pub(crate) fn deterministic_failure(why: &str) -> bool {
     }
     const DETERMINISTIC: [&str; 7] = ["could not find any implementation", "no tactic", "parse:", "bad shapes", "no shape range", "missing --", "bad argument"];
     DETERMINISTIC.iter().any(|m| low.contains(m))
+}
+
+/// Whether a failed build ran short of graphics memory: the card's memory ran out (another program may hold it), or
+/// TensorRT found no implementation within its working memory. The background build reports those as failed, with a
+/// retry (pipeline trt_build), never as built.
+pub(crate) fn memory_failure(why: &str) -> bool {
+    let low = why.to_lowercase();
+    const MEMORY: [&str; 9] = [
+        "out of memory",
+        "outofmemory",
+        "cudaerrormemoryallocation",
+        "could not be allocated",
+        "failed to allocate",
+        "insufficient memory",
+        "bad_alloc",
+        "could not find any implementation",
+        "no tactic",
+    ];
+    MEMORY.iter().any(|m| low.contains(m))
+}
+
+/// The largest stage-1 build measured to fit TensorRT's 8 GiB working-memory cap, in frames x range pixels: the 4K
+/// range (2176x4096) at window 8. Measured on the RTX 5080 16 GB on 2026-10-25: the 4K t1-8 and HD t1-24 ranges
+/// (1280x2176 x 24, below it) built and ran. Longer builds are unmeasured (a 1.6 MP range at 80 frames found no
+/// tactic, 2026-10-24), so no build goes past it until one is measured (review 2026-10-29 M2).
+pub(crate) const MEASURED_BUILD_PIXEL_FRAMES: usize = 2176 * 4096 * 8;
+
+/// The longest stage-1 window a build of `b`'s size is made for: its largest shape's pixels x frames within
+/// MEASURED_BUILD_PIXEL_FRAMES (4K: 8, the HD range: 25), at least 1.
+pub(crate) fn build_cap(b: &Bucket) -> usize {
+    (MEASURED_BUILD_PIXEL_FRAMES / (b.h.1 * b.w.1).max(1)).max(1)
 }
 
 /// One engine process builds a range's engines at a time: `<range folder>/build.lock`, made with create_new (the
@@ -655,6 +691,30 @@ mod tests {
             vec![(old_driver.clone(), Stale::Driver), (other_trt.clone(), Stale::Unused), (other_ort.clone(), Stale::Unused)]
         );
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_build_short_of_memory_is_told_apart() {
+        // review 2026-10-29 M2: the background build reports these as failed (with a retry), never as built
+        // loop: NOT-WORTH — a test's few messages
+        for why in [
+            "build: Error Code 2: OutOfMemory (Requested size was 6442450944 bytes.)",
+            "build: Requested amount of GPU memory (7000000000 bytes) could not be allocated",
+            "build: [optimizer.cpp::computeCosts] Error Code 10: Internal Error (Could not find any implementation for node /blocks/MatMul.)",
+        ] {
+            assert!(memory_failure(why), "{why}");
+        }
+        // loop: NOT-WORTH — a test's few messages
+        for why in [
+            "parse: Unsupported ONNX data type: UINT8 (2)",
+            "no TensorRT-ready export of stage1 in the models folder",
+            "ck-trt-build: no answer within 1800 s; stopped",
+        ] {
+            assert!(!memory_failure(why), "{why}");
+        }
+        // the longest windows a build is made for: the measured 4K t1-8, and the HD range within it
+        assert_eq!(build_cap(&bucket_for(2176, 4096, 1, true).unwrap()), 8);
+        assert_eq!(build_cap(&bucket_for(1152, 1920, 1, true).unwrap()), 25);
     }
 
     #[test]

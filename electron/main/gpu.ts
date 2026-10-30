@@ -110,6 +110,8 @@ const OURS_DEPTH = 8;
  * Whether a compute process is the app's own: one of `ourPids`, or anywhere below one (the engine's TensorRT builder,
  * ck-trt-build, holds the card while it builds; Linux reads the parents from /proc, elsewhere `ourPids` alone counts).
  */
+// (A program the app starts for the user, a browser for a link, sits below it too while it runs: it would count as ours
+// only while it holds a CUDA context there, which a browser rarely does (video decoding); review 2026-10-29 N5.)
 export function isOurs(pid: number, ourPids: Set<number>, stat: (pid: number) => string = procStat): boolean {
   let p: number | null = pid;
   // loop: NOT-WORTH — at most OURS_DEPTH /proc reads per compute process (a few), as procStat's callers
