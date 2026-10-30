@@ -266,7 +266,9 @@ function sizeNote(trt: TrtState, key: string): string {
     const fell = Object.keys(r?.fallbacks ?? {}).map((k) => PIECE_NAMES[k] ?? k);
     // loop: NOT-WORTH — a few built ranges
     const windows = onDisk.map((d) => rangeText(d.range).replace(/^up to \d+×\d+, /, "")).join("; ");
-    return `${range} · built (${windows})${fell.length ? `, ${fell.join(", ")} on CUDA` : ""} · ${gbBytes(bytes)} on disk · ${secs.length ? `the build took ${duration(secs[0])} here` : "build time not recorded"}`;
+    // a range built for short windows only (an older version, or a build while the card was busy) serves only clips whose
+    // window fits it: said plainly, with the fix (Marcy 2026-10-29: "it is built for this clip" while the clip ran on CUDA)
+    return `${range} · built (${windows})${fell.length ? `, ${fell.join(", ")} on CUDA` : ""} · ${gbBytes(bytes)} on disk · ${secs.length ? `the build took ${duration(secs[0])} here` : "build time not recorded"} · clips that need longer windows key on CUDA until Build for every size covers your card`;
   }
   return `${range} · ${r ? "chosen, not built yet" : "not built"} · ${TRT_BUILD_COST}`;
 }
