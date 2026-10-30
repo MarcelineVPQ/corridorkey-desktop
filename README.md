@@ -4,8 +4,11 @@
   <img src="docs/screenshots/01-results-04_5h-curly-hair.png" alt="CorridorKey Desktop keying curly hair at 4K: the result on a checkerboard, its matte and foreground" width="100%">
 </p>
 
-Download 1.0.0-dev.6 for Linux, Windows or Apple Silicon Macs from the
-[releases page](https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/v1.0.0-dev.6).
+Download 1.0.0-dev.7 for Linux, Windows or Apple Silicon Macs from the
+[releases page](https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/v1.0.0-dev.7).
+
+**The numbers and how we measured them:** [Engineering notes](ENGINEERING.md), covering speed, quality, test machines
+and what we got wrong.
 
 > **A community project, not made or endorsed by Corridor Digital.** The CorridorKey model is theirs; their official
 > app and plugins are at [corridorkey.com](https://corridorkey.com).
@@ -20,13 +23,14 @@ chose from your free graphics memory, and stills of the results.
 The model is Corridor's. What's new is the engine around it: no Python, nothing to set up, and it keys on
 your own graphics card. Huge thanks to Niko, Zachary Harris and the Corridor crew.
 
-Status: 1.0 is almost ready. The development builds (1.0.0-dev.N) key on Linux and Windows with an NVIDIA graphics
-card, and on Apple Silicon Macs, at HD and 4K.
+Status: 1.0 is almost ready. The development builds (1.0.0-dev.N) key on Linux with an NVIDIA graphics card and on
+Apple Silicon Macs, at HD and 4K. On Windows they install and run, but keying on a real Windows PC with an NVIDIA card
+hasn't been tested yet (Requirements).
 
 ## Get started
 
 1. Download the file for your system from the
-   [releases page](https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/v1.0.0-dev.6): the AppImage
+   [releases page](https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/v1.0.0-dev.7): the AppImage
    (Linux), the installer (Windows) or the disk image (Apple Silicon Mac).
 2. Open it. On first start the setup downloads the GPU runtime and the CorridorKey models once (4.03 GB on Linux,
    3.81 GB on Windows, 5.74 GB on macOS) and offers to install ffmpeg if it's missing.
@@ -57,10 +61,13 @@ details (TensorRT, on Linux today, Windows coming; download sizes; the Mac's Cor
 
 ## Highlights
 
-- **Faster on the card you have.** On an RTX 5080: 4K about 1.8-1.9× the original's speed, HD 1.5-1.9×; the optional
-  TensorRT mode (on Linux today, Windows coming) about 2.3-2.4× at 4K and 1.9-2.2× at HD ([Speed](ENGINEERING.md#speed)).
+- **Faster on the card you have.** On an RTX 5080 writing float EXR, the studio deliverable (2026-10-29, one run per
+  clip, the automatic window): 4K about 3.2-3.5× the original's speed, HD and smaller clips 2.6-4.5×; the optional
+  TensorRT mode (on Linux today, Windows coming) about 4.4-4.8× at 4K and 4.6-5.7× at HD. Writing video, the gap is
+  smaller ([Speed](ENGINEERING.md#speed)).
 - **The same mattes.** Measured against the original, frame by frame, on every test clip, hair included
-  ([Quality](ENGINEERING.md#quality-the-mattes-against-the-original-and-the-truth)).
+  ([Quality](ENGINEERING.md#quality-the-mattes-against-the-original-and-the-truth)). The optional TensorRT mode differs
+  slightly from CUDA: up to about 9.5/255 on 0.2 % of a clip's pixels (measured 2026-10-29).
 - **Studio outputs.** EXR named the studio way with the matte in alpha, lossless 10-bit H.264 or DNxHR 444, and 10-
   and 12-bit plates read in full ([Outputs](https://github.com/MarcelineVPQ/corridorkey-desktop/wiki/Outputs)).
 - **Colour management.** OpenColorIO 2.5 built in: ACES, the camera log spaces, or your studio's own config.

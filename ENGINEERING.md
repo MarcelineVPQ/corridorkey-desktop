@@ -634,6 +634,35 @@ spread, for 0.4-0.7 GB of locked RAM).
 
 </details>
 
+### The full suite, float EXR (2026-10-29)
+
+All ten test clips on the RTX 5080 (16 GB), one run per clip and engine, back to back in one session: the original
+CorridorKey 2.0 (PyTorch, from its own checkout), CorridorKey Desktop at 1.0.0-dev.5's engine on CUDA, and the same
+engine with TensorRT. The card's whole free memory, the automatic window, alpha and foreground written as float EXR (the
+studio deliverable), no hint. Totals in seconds, from engine start to result. Two TensorRT runs included that size's
+one-time engine build (marked) and aren't a keying speed; godiva_close's TensorRT run is missing (the bench setup's
+fault, not the engine's).
+
+| Clip | Original | CUDA | × | TensorRT | × |
+| --- | --- | --- | --- | --- | --- |
+| godiva_close 960×720 | 109.7 | 37.1 | 3.0 | — | — |
+| locked_backdrop 1280×1080 | 47.0 | 18.3 | 2.6 | 279.6 (with the build) | — |
+| metal_glasses 1280×1080 | 109.5 | 32.2 | 3.4 | 21.8 | 5.0 |
+| smoke 1280×1080 | 182.4 | 47.7 | 3.8 | 37.5 | 4.9 |
+| walking_sitting 1280×1080 | 266.2 | 59.4 | 4.5 | 47.1 | 5.7 |
+| with_motion_blur 1280×1080 | 44.1 | 13.3 | 3.3 | 9.5 | 4.6 |
+| 04_5h 4096×2160 | 516.4 | 161.7 | 3.2 | 346.7 (with the build) | — |
+| 04_5d 4096×2160 | 543.9 | 170.7 | 3.2 | 118.8 | 4.6 |
+| 08_3a 4096×2160 | 504.5 | 158.5 | 3.2 | 114.8 | 4.4 |
+| 04_2c 4096×2160 | 586.1 | 166.9 | 3.5 | 122.9 | 4.8 |
+
+Writing float EXR, the original is much slower than in the video-output tables above (04_5h 516 s here, 329 s writing
+video on 2026-10-26), so these ratios are higher than those; compare like with like. On this card TensorRT's 4K jobs
+ran the 4/2 window (the tables above from 2026-10-25/26 used 8/4), and the CUDA window varied with the memory free at
+each start (8/4 normal or 4/2 low at 4K). TensorRT's mattes differ slightly from CUDA's: up to about 9.5/255 on 0.2 % of
+pixels on an HD clip (2026-10-29), the same with an engine built for the job's own window, so it is TensorRT's fp16
+precision, not the build size.
+
 ### Apple Silicon (Core ML)
 
 The Mac engine runs ONNX Runtime's Core ML backend on its own model set (Core ML compiles for fixed frame sizes:
