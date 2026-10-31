@@ -61,9 +61,17 @@ inside a job:
   uses it. A build that runs short of graphics memory says so, with the memory that was free; when another program
   was using the card it names it and offers **Build it again**.
 
-Engine settings, TensorRT lists the common sizes (720p, HD, 2K DCI, 2K full aperture, 2.8K, 4K DCI and UHD) grouped
-by range: **tick** a size to build it, **untick** to remove its engines (it asks first). **A size of my own** builds
-for any width × height inside TensorRT's ranges. A waiting clip whose size isn't built has **Build for this clip's
+Engine settings, TensorRT is a checklist. Each size (720p, HD, 2K DCI, 2K full aperture, 2.8K, 4K DCI, UHD, and sizes
+of your own) has a tick per window, **up to N frames**: every window a job of that size can pick on your card, from 2
+up to the longest your card builds. The sizes your clips use start with every window ticked; windows already built are
+ticked, fixed and marked **(built)**. **Ticks are a plan: nothing builds until you press Build ticked**, and the line
+above it says how many builds that is, about how many GB on disk and about how many minutes. **Stop** stops the build.
+**Remove** next to a size deletes its engines (it asks first, and not while a job runs). **A size of my own** adds any
+width × height inside TensorRT's ranges (**Add**).
+
+**Scan a clips folder…** reads only each clip's width and height, from the folder you choose and two folders under it,
+at most 500 clips. Nothing is keyed, copied, changed or sent anywhere. The sizes it finds are added and ticked. Clips
+you add to the queue are remembered the same way. A waiting clip whose size isn't built has **Build for this clip's
 size** in its TensorRT section.
 
 Each range shows what it holds once built: the windows it was built for, its size on disk and how long the build
@@ -73,7 +81,7 @@ took on your card. The build time and disk space per range were measured in the 
 The engines are kept in the cache folder (`tensorrt` inside it) and are built again only after a graphics driver,
 TensorRT or model update. A range built from other model files (after the model set changed) says
 **built for other models · needs a rebuild (the model set changed)**: its clips run on CUDA until it is built again,
-which the background build (or its tick, or **Build now**) does.
+which **Build ticked** (or **Build it now** on the clip's page) does.
 
 ## Sizes TensorRT takes
 
