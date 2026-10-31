@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// README download gate (Marcy 2026-10-30: the README said "Download 1.0.0-dev.7" while dev.8 was out; "with a gate
-// too"): the README's download names the newest published release. Source of truth: latest-dev.json, the signed
+// README download gate (Marcy 2026-10-30: the README said "Download 1.0.0-dev.7" while dev.8 was out; a gate
+// keeps it current): the README's download names the newest published release. Source of truth: latest-dev.json, the signed
 // Development feed, which names the newest of the dev and stable releases (docs/RELEASING.md). In README.md it fails
 // when "Download X.Y.Z…" or a `releases/tag/vX.Y.Z…` link names another version.
 //   node tools/check_readme_download.mjs          the gate (npm run gates)

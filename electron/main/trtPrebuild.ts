@@ -1,4 +1,4 @@
-// The background TensorRT build (Marcy, 2026-10-25: "a job must never sit in a TensorRT build again"). When TensorRT
+// The background TensorRT build (Marcy, 2026-10-25: a job never waits on a TensorRT build again). When TensorRT
 // is switched on, and when its download finishes, the app builds the chosen sizes once, ahead of any job (Engine
 // settings, TensorRT; 4K DCI 4096x2160 and HD 1920x1080 until the user chooses, backlog row 56), with the engine's own
 // `trt_build` (the same window a job picks, the same builder, docs/ENGINE_PROTOCOL.md). Jobs send

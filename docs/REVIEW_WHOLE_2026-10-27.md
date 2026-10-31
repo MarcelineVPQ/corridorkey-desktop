@@ -1,7 +1,7 @@
 # Whole-code senior review (2026-10-27, main 8f70d2a)
 
 Four independent senior reviewers, one per part, code and docs only (no test runs). Every finding is to be fixed
-(Marcy: "when a senior dev gives you recommendations, you implement the recommendations").
+(Marcy: a senior reviewer's recommendations are implemented).
 
 | Part | Reviewer | Grade | MUST | SHOULD | NICE |
 |---|---|---|---|---|---|

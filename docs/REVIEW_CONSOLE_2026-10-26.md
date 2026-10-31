@@ -368,7 +368,7 @@ code; each probe is a regression test (P7-P9 pin the open rows' behaviour today:
 | N1-N12 | docs/BACKLOG.md rows 106-117 (idea) | P7 → row 106, P8 → row 107, P9 → row 108 |
 
 The NICE items, 2026-10-27: N2, N5 and N8 came with the SME review's S11 and S10; the others on branch `senior-nices`
-(Marcy: "when a senior dev gives you recommendations, you implement the recommendations").
+(Marcy: a senior reviewer's recommendations are implemented).
 
 | Finding | Done in | Test |
 |---|---|---|

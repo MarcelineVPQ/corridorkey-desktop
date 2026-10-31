@@ -210,7 +210,7 @@ function LogLine({ job }: { job: Job }) {
     return () => clearTimeout(t);
   }, [copied]);
   const saved = job.logSaved ?? null;
-  // Save log… (Marcy 2026-10-30: "I want it exportable"): where it went, or why it couldn't
+  // Save log… (Marcy 2026-10-30: the log can be exported): where it went, or why it couldn't
   const [savedAs, setSavedAs] = useState<{ path: string; error: string | null } | null>(null);
   // another job's page: its own Save log result only
   useEffect(() => setSavedAs(null), [job.id]);

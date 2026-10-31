@@ -1,5 +1,5 @@
-// The one task mechanism (Sonata's tasks-model.js, Marcy 2026-10-19: "the
-// whole app works the same way for all things"). Anything that needs the user
+// The one task mechanism (Sonata's tasks-model.js, Marcy 2026-10-19: the
+// whole app works one way for everything). Anything that needs the user
 // is a task here, and only here:
 //   page     the rail item that shows the dot
 //   section  the panel section it's about ('' = the page as a whole)

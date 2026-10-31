@@ -172,7 +172,7 @@ describe("farm export", () => {
   });
 });
 
-// Marcy 2026-10-27 "make the CLI match the app": the CLI reads an EXR folder scene-linear by default, so every format
+// Marcy 2026-10-27, the CLI matches the app: the CLI reads an EXR folder scene-linear by default, so every format
 // says an EXR folder's choice both ways (the box off: --no-linear), and a PNG folder's only when it is on
 describe("farm export: how a frame folder is read", () => {
   const exrOff = fj("sh021", { frameDirLinear: false }, "frames");

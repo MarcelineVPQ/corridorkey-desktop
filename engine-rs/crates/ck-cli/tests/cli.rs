@@ -193,7 +193,7 @@ fn verify_finds_missing_and_cut_frames() {
 
 #[test]
 fn exr_plates_are_read_scene_linear_by_default_and_the_report_says_why() {
-    // Marcy 2026-10-27 "make the CLI match the app": an EXR folder starts scene-linear, --no-linear reads it display-coded
+    // Marcy 2026-10-27, the CLI matches the app: an EXR folder starts scene-linear, --no-linear reads it display-coded
     let d = scratch("linear");
     let pl = plates(&d.0, &[1, 2]);
     let (report, out) = (d.0.join("r.json"), d.0.join("out"));

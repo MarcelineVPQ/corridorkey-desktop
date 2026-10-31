@@ -248,7 +248,7 @@ code before it.
 
 ## Status: the NICE items and the later list (2026-10-27, branch `expert-suggestions`)
 
-Marcy 2026-10-27: "build the expert suggestions too". Every NICE item and the "later / maybe never" list (pipes,
+Marcy 2026-10-27: the expert suggestions are built too. Every NICE item and the "later / maybe never" list (pipes,
 `watch`, `jobs`, man pages) is built, each with tests written to fail on the code before it (not run yet: they run
 with the branch's test list, on Marcy's OK).
 

@@ -170,5 +170,5 @@ Marcy approved the MUST and all eight SHOULDs (2026-10-26); the NICE items went 
 | N9 | 3fc627b | farm/README.md "Getting corridorkey onto a worker" (`--appimage-extract`, the paths in each install) |
 | N10 | 961cf1d | an output pattern in the input folder is exit 2 before anything is written; `tests/cli.rs` test |
 
-N5-N10 were built on branch `senior-nices` (2026-10-27, Marcy: "when a senior dev gives you recommendations, you
-implement the recommendations").
+N5-N10 were built on branch `senior-nices` (2026-10-27, Marcy: a senior reviewer's recommendations are
+implemented).

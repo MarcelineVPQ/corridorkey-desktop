@@ -1,5 +1,5 @@
-// Setup: the first start's three steps, each with its control and a tick when done (Marcy 2026-10-24: "no
-// setup wizard or install guide, I don't even know how to use my own app"). Opens by itself at start while
+// Setup: the first start's three steps, each with its control and a tick when done (Marcy 2026-10-24: the
+// app had no setup wizard or install guide, and needs one). Opens by itself at start while
 // setup has something to do; the Engine page reopens it. Every tick comes from the app state, never a guess.
 import { Check, FolderOpen, FolderPlus, ListVideo } from "lucide-react";
 import type { ReactNode } from "react";

@@ -239,8 +239,8 @@ the NICE items are backlog rows. `npm run check`, `check:engine` and `check:targ
 | S7 tests and loop verdicts | the tests above; untrue `[bounded: …]` verdicts corrected, a LOOP_PASS section and rule | cba3d0e |
 | N1-N9 | backlog rows 131-139 (idea) | docs/BACKLOG.md |
 
-The NICE items, 2026-10-27: N8 came with the P4 SME review's S5; the others on branch `senior-nices` (Marcy: "when a
-senior dev gives you recommendations, you implement the recommendations"). Each has a test that fails on the code
+The NICE items, 2026-10-27: N8 came with the P4 SME review's S5; the others on branch `senior-nices` (Marcy: a senior
+reviewer's recommendations are implemented). Each has a test that fails on the code
 before, except N6 and N9 (documented there; Marcy decided them on 2026-10-27 and they were built on branch
 `senior-decisions`, with tests).
 

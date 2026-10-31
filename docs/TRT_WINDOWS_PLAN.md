@@ -159,8 +159,8 @@ WDDM memory, the build itself, and the EPContext stub on Windows paths. That nee
 
 ## 4. CI / release changes
 
-**Decided (Marcy 2026-10-30): build `ck-trt-build.exe` on her PC with new tooling: clang-cl + lld-link + xwin ("it's
-way faster here").** It replaces the CI-artifact route below. Consequences:
+**Decided (Marcy 2026-10-30): build `ck-trt-build.exe` on her PC with new tooling: clang-cl + lld-link + xwin (much
+faster there).** It replaces the CI-artifact route below. Consequences:
 - The Microsoft CRT/SDK (~1 GB via xwin) is downloaded once onto her PC, after she accepts Microsoft's licence.
 - `tools/check_targets.sh` and `npm run dist:win` gain the clang-cl step.
 - release.sh needs no artifact download (step 8 changes).
@@ -221,7 +221,7 @@ Minutes *(estimates from Linux numbers; Windows build speed unknown)*:
    - Then publish as a dev build with Windows TensorRT labelled **experimental**.
    - The rented Windows + NVIDIA server test (section 5) counts as the confirmation of the driver and Windows
      minimums; no separate NVIDIA check. It runs after the review, on her call.
-   - "This is development": the extra care still applies only to users' files, disk space and the updater (the steps
+   - Development build: the extra care still applies only to users' files, disk space and the updater (the steps
      flagged USERS' DISK, USERS' FILES and RELEASE PATH).
 
 ## 6. Open questions for Marcy (answered above)

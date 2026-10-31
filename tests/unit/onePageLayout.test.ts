@@ -1,8 +1,8 @@
 // One page layout, one accordion (Marcy, deliberate in all her apps): every rail page is a SplitView, its main
 // view on the left and its settings panel on the right, and the panel holds that page's settings as the one
 // accordion (panel/Section.tsx). Every tab works and looks the same. UI pass B (97cd7fc, 2026-10-25) moved Engine
-// and App settings out of the panel into a second layout; Marcy: "1 fucking framework 1 piece of code that drive
-// the accordian. PUT IT BACK". This gate fails on that code. The setup page is the one exception: it opens by
+// and App settings out of the panel into a second layout; Marcy: one framework, one piece of code drives
+// the accordion; it was put back. This gate fails on that code. The setup page is the one exception: it opens by
 // itself, never from the rail (railModel.ts), a gate screen like the DS5 app's first-time setup.
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";

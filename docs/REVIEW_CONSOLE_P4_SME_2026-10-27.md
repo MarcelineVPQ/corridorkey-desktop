@@ -247,7 +247,7 @@ rendered markup, not yet in an isolated copy of the app.
 
 ## Status: the NICE items (2026-10-27, branch `expert-suggestions`)
 
-Marcy 2026-10-27: "build the expert suggestions too". All twelve are built, each with tests written to fail on the
+Marcy 2026-10-27: the expert suggestions are built too. All twelve are built, each with tests written to fail on the
 code before it (not run yet: they run with the branch's test list, on Marcy's OK).
 
 | Finding | Done | Where |

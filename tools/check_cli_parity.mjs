@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// The command line's parity gate (Marcy 2026-10-27: "a build gate for the command line so nothing gets forgotten when
-// new features are added"). docs/cli-parity.json gives every field of the engine's run request a verdict: the
+// The command line's parity gate (Marcy 2026-10-27: a build gate for the command line, so no new
+// feature is left out of it). docs/cli-parity.json gives every field of the engine's run request a verdict: the
 // `corridorkey` flags that set it, or "not-on-cli" with the reason; and every other render/verify flag ("cli-only")
 // what it is for. Offline: it reads only this repository's sources. It fails when
 //   (a) the engine reads a run request field (ck-core job.rs parse) the manifest doesn't list;

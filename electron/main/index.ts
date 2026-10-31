@@ -102,8 +102,8 @@ const APP_PAGE_URL = devServerUrl ?? pathToFileURL(join(here, "../renderer/index
 const MEDIA_SCHEME = "ck-media";
 
 // Must run before app ready. Linux: Wayland only, because the app must show
-// HDR (Marcy 2026-10-21: "wayland only, since this app has to support HDR
-// strictly"); there is no X11/XWayland fallback. Forcing X11 had also
+// HDR (Marcy 2026-10-21: Wayland only, because the app must support HDR
+// without exception); there is no X11/XWayland fallback. Forcing X11 had also
 // crash-looped the GPU process on her RTX 5080 (exit 139). HDR: render in
 // scRGB (linear, 1.0 = 80 nits), the DS5 app's measured path: KWin 6.6's color
 // manager has no "srgb" transfer function, which Chromium's default asks for;
@@ -1384,14 +1384,14 @@ function registerIpc(): void {
     return true;
   });
   // the whole engine log for the job page's log panel (a state push carries only its last LOG_SHOWN lines; Marcy
-  // 2026-10-30: "I want the whole log"), asked for while the panel shows it
+  // 2026-10-30: the whole log), asked for while the panel shows it
   handle(IPC.jobLogLines, (_e, idIn: unknown) => {
     const id = idArg(idIn);
     // loop: NOT-WORTH — the queue's jobs, once per ask
     const job = id ? queue.jobs.find((j) => j.id === id) : undefined;
     return job ? [...job.log] : null;
   });
-  // Save log… (the job page): the same text as <clip>_log.txt, wherever you choose ("I want it exportable")
+  // Save log… (the job page): the same text as <clip>_log.txt, wherever you choose (Marcy 2026-10-30: the log can be exported)
   handle(IPC.saveJobLogAs, async (_e, idIn: unknown) => {
     const id = idArg(idIn);
     // loop: NOT-WORTH — the queue's jobs, once per click

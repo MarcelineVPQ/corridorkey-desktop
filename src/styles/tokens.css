@@ -15,8 +15,8 @@
   --text-1: #e8eaef;
   --text-2: #c3c8d2;
   --text-3: #9ea5b2;
-  /* The one green: the app icon's green (build/icon.png), #00b140, in both themes (Marcy 2026-10-25: "the green should
-     only be this green"). Every accent use is this exact value; hover/pressed keep it and add a dark inner ring
+  /* The one green: the app icon's green (build/icon.png), #00b140, in both themes (Marcy 2026-10-25: this is
+     the only green). Every accent use is this exact value; hover/pressed keep it and add a dark inner ring
      (--accent-text), never a second green. tests/unit/tokens.test.ts fails on any other green. */
   --accent: #00b140;
   /* text on a green fill: dark (6.04:1; white is 2.85:1) */

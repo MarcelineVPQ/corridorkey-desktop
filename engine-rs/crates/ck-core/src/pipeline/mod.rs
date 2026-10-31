@@ -204,7 +204,7 @@ fn other_windows(b: &crate::tensorrt::Bucket, names: &[String], built: impl Fn(&
 
 /// How the `fallback_reason` starts for a clip shorter than its automatic window (it runs all its frames at once),
 /// whose length falls between its size's builds, when the shortest build that takes it needs more graphics memory
-/// than the job has (Marcy 2026-10-30: said as it is, never "the graphics card is busy"): no checklist build fixes it
+/// than the job has (Marcy 2026-10-30: said as it is, never "the graphics card is busy"): no checklist build fixes it (quote-ok: the old app message)
 /// (the checklist builds the automatic windows), so the app offers none; TensorRT's own peaks in the check would narrow
 /// it (BACKLOG row 191).
 pub(crate) const TRT_CLIP_RUNS: &str = "this clip runs";

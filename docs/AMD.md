@@ -1,8 +1,8 @@
 # AMD graphics cards (MIGraphX)
 
 **Untested on real hardware: nothing here has run on an AMD card.** Since 1.0.0-dev.4 the app sets an AMD card up on
-Linux **by default**, and says it is untested (backlog row 166; Marcy 2026-10-29: "untested is fine as long as we
-declare that and we are working towards testing it ourself"). `CK_AMD=0` in the app's environment turns it off.
+Linux **by default**, and says it is untested (backlog row 166; Marcy 2026-10-29: untested is acceptable while it is
+declared and our own testing is on the way). `CK_AMD=0` in the app's environment turns it off.
 
 The declaration, word for word, in the setup's step 1 and the Engine page (the Graphics card block, Runtime and
 models, TensorRT) whenever an AMD card is set up (`src/shared/texts.ts` `AMD_UNTESTED`, with a link to the issues):

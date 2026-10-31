@@ -243,8 +243,8 @@ planned set is done and Marcy has done her QC (the DS5 rhythm).
 
 The wiki ([github.com/MarcelineVPQ/corridorkey-desktop/wiki](https://github.com/MarcelineVPQ/corridorkey-desktop/wiki)) is
 written in this repository, `docs/wiki/` (one `.md` per page, named as the wiki names them, `_Sidebar.md` and
-`_Footer.md` included), and changes in the same piece of work as what it describes (Marcy 2026-10-26: "keep the wiki
-up to date — make that a gate", "especially important for the command line").
+`_Footer.md` included), and changes in the same piece of work as what it describes (Marcy 2026-10-26: the wiki
+stays up to date, enforced by a gate; the command line pages above all).
 
 - **The gate** (`npm run gates`, offline): `tools/check_wiki.mjs` fails when a `corridorkey` command or flag (from
   `src/shared/console/cliSpec.json`, the CLI's own `__spec --json`) is missing from `Command-Line.md` or no example

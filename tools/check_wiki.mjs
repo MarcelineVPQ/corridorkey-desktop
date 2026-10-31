@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// The wiki gate (Marcy 2026-10-26: "keep the wiki up to date — make that a gate", "especially important for the
-// command line"). The wiki's source is docs/wiki/ (one .md per page, as GitHub's wiki names them); tools/publish_wiki.mjs
+// The wiki gate (Marcy 2026-10-26: the wiki stays up to date, enforced by a gate; the command line pages
+// above all). The wiki's source is docs/wiki/ (one .md per page, as GitHub's wiki names them); tools/publish_wiki.mjs
 // copies it into the wiki repository, and tools/release.sh refuses to release while the published wiki differs.
 // Offline: it reads only this repository. It fails when
 //   (a) a `corridorkey` command or flag (src/shared/console/cliSpec.json, the CLI's own `__spec --json`) is missing

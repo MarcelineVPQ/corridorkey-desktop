@@ -694,7 +694,7 @@ describe("a job that found no TensorRT engine (1.0.0-dev.7)", () => {
 
   it("review 2026-10-29: no button where a build can't help (a clip between two builds), and none while TensorRT is off (the tile says how to turn it on)", () => {
     mockCk();
-    // Marcy 2026-10-30: never "the graphics card is busy"; the engine says which build and why (pipeline/mod.rs TRT_CLIP_RUNS)
+    // Marcy 2026-10-30: never "the graphics card is busy"; the engine says which build and why (pipeline/mod.rs TRT_CLIP_RUNS; quote-ok: the old app message)
     const between = render(
       <JobView
         job={hd(
@@ -866,7 +866,7 @@ describe("TensorRT sizes (Engine settings)", () => {
 });
 
 describe("the whole engine log (backlog row 192)", () => {
-  // Marcy 2026-10-30: the panel said "last 12 of 74 lines"; "I want the whole log, I want it exportable"
+  // Marcy 2026-10-30: the panel said "last 12 of 74 lines"; the whole log is shown, and can be saved
   const all = Array.from({ length: 74 }, (_, i) => `line ${i + 1}`);
   const done = job("a", { status: "done", log: all.slice(-12), logLines: 74 });
 

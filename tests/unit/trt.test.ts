@@ -120,7 +120,7 @@ describe("the background TensorRT build", () => {
   });
 
   it("2026-10-29: a range built from another model set's TensorRT files is stale, as the engine says, not built", async () => {
-    // Marcy's 4K and HD engines were built from onnx.4's files; the app runs onnx.5, every job said "isn't built yet"
+    // Marcy's 4K and HD engines were built from onnx.4's files; the app runs onnx.5, every job said "isn't built yet" (quote-ok: the app's message)
     const root = join(ROOT, "stale");
     const set = (name: string, mtime: number) => {
       const dir = join(root, "models", name);

@@ -1,7 +1,7 @@
 // The built-in theme's contrast (WCAG 2.x), computed from src/styles/tokens.css itself so a token change can't
 // quietly drop a text color below 4.5:1 on a surface it sits on (UI pass 2026-10-25, Marcy). Grounds: the four
 // surfaces and the tinted ones (the selected clip's row, the warning and error notices) over the page and the panels.
-// The one green (Marcy 2026-10-25, "the green should only be this green"): the app icon's green, #00b140, measured
+// The one green (Marcy 2026-10-25: this is the only green): the app icon's green, #00b140, measured
 // from build/icon.png, in both themes; any other green in tokens.css fails here.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";

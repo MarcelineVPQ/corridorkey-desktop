@@ -737,7 +737,7 @@ mod tests {
 
     #[test]
     fn a_frame_folder_is_read_scene_linear_by_default_when_its_first_frame_is_exr() {
-        // Marcy 2026-10-27 "make the CLI match the app": EXR plates scene-linear, other frames display-coded, a choice wins
+        // Marcy 2026-10-27, the CLI matches the app: EXR plates scene-linear, other frames display-coded, a choice wins
         let frames = |names: &[&str]| Source::Frames(names.iter().map(PathBuf::from).collect());
         let (exr, png) = (frames(&["/p/a.1001.EXR", "/p/a.1002.png"]), frames(&["/p/a.1001.png", "/p/a.1002.exr"]));
         let f = |src: &Source, l, n, j: Option<&Value>| frame_dir_linear(src, l, n, j).unwrap();

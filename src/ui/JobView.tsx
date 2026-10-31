@@ -184,7 +184,7 @@ export function JobView({ job, prebuild, trtOn = false }: { job: Job; prebuild?:
 const LOG_REFRESH_MS = 2000;
 
 /**
- * The job's whole engine log (Marcy 2026-10-30: "I want the whole log"): read from the main process, which keeps up to
+ * The job's whole engine log (Marcy 2026-10-30: the whole log, not its tail): read from the main process, which keeps up to
  * LOG_KEPT lines (a state push carries only the last LOG_SHOWN), again every LOG_REFRESH_MS while the job runs and once
  * when it ends. It follows the newest line while you are at the bottom; scrolled up, it stays where you are.
  */
