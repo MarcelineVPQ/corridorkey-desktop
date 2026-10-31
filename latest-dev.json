@@ -1,11 +1,11 @@
 {
   "channel": "dev",
-  "version": "1.0.0-dev.8",
-  "file": "CorridorKey-Desktop-1.0.0-dev.8.AppImage",
-  "url": "https://github.com/MarcelineVPQ/corridorkey-desktop/releases/download/v1.0.0-dev.8/CorridorKey-Desktop-1.0.0-dev.8.AppImage",
-  "sha512": "88f6174f690a863c29a322b400654c727c2081a9c3ce8350757bfbe1388cdb2d4b10309b1bcc84d870ffbcd1f0aeb1c92f01cdad0622aa948565ce5515eedc75",
-  "size": 135374672,
-  "date": "2026-10-30T03:18:10Z",
-  "notes_url": "https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/v1.0.0-dev.8",
-  "notes": "- **One press builds TensorRT for every size.** Engine settings → TensorRT → **Build for every size** builds every size\n  TensorRT can take (720p up to 4K), each covering every window your graphics card runs, so every clip you key after it\n  runs on TensorRT, whatever its size or length. Build once, and again only after an engine or model update. The button\n  is always there (dev.7 hid it once something counted as built). Sizes your card can't build say so, and their clips\n  key on CUDA. Builds never start by themselves and never make a job wait.\n\n\n**This is a development build**: newer than the stable release and less tested. The app offers it only with Update channel set to Development."
+  "version": "1.0.0-dev.9",
+  "file": "CorridorKey-Desktop-1.0.0-dev.9.AppImage",
+  "url": "https://github.com/MarcelineVPQ/corridorkey-desktop/releases/download/v1.0.0-dev.9/CorridorKey-Desktop-1.0.0-dev.9.AppImage",
+  "sha512": "f25521fd9196537e77af1f6c0613ee98251d79741327e71e965b2d2fe0ae34d8dbf2a930c8367da45a6486f8abdc8ff58485904216b6ed21217fe80178758fd3",
+  "size": 135424121,
+  "date": "2026-10-31T12:00:11Z",
+  "notes_url": "https://github.com/MarcelineVPQ/corridorkey-desktop/releases/tag/v1.0.0-dev.9",
+  "notes": "- **TensorRT is now a checklist, and nothing builds until you say so.** Engine settings → TensorRT lists each size\n  with a tick per window, **up to N frames**: every window a clip of that size can pick on your graphics card. The\n  sizes your clips use start ticked, built windows are marked **(built)**, and a running total shows how many builds\n  that is, about how many GB on disk and about how many minutes. **Build ticked** builds them; **Remove** deletes a\n  size's engines (it asks first). The dev.8 button that built every size at once is gone, so no more surprise hours of\n  builds or gigabytes of engines.\n- **Scan a clips folder.** It reads only each clip's width and height, from the folder you choose and two folders\n  under it, at most 500 clips. Nothing is keyed, copied, changed or sent anywhere. The sizes it finds are added and\n  ticked. Clips you add to the queue are remembered the same way.\n- **No more \"the graphics card is busy\".** When another program held part of the card, a clip could pick a shorter\n  window than its size was built for and fall back to CUDA. Every window now has its own build in the checklist, so\n  the clip runs on TensorRT. When a clip still can't use TensorRT, its page says exactly why, and offers **Build it\n  now** when a build fixes it. A clip's window is never shortened, so its mattes stay the same.\n- **The whole engine log, and Save log….** The clip's page shows every line of the engine log, not just the last 12,\n  and follows the newest line while the job runs. **Save log…** saves it wherever you choose, beside **Copy log**.\n\n\n**This is a development build**: newer than the stable release and less tested. The app offers it only with Update channel set to Development."
 }
