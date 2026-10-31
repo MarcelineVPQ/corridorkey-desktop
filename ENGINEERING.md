@@ -675,7 +675,7 @@ phys_footprint of the engine's processes (`tools/mac_memgate.c`), since a Mac's 
 | | |
 | --- | --- |
 | Computer | Mac mini (Mac18,5) |
-| Chip | Apple M6: 6 CPU cores (2 performance + 4 efficiency), 12-core GPU, Neural Engine |
+| Chip | Apple M6: 12 CPU cores (2 super + 4 performance + 6 efficiency, from the Mac's own `sysctl hw.perflevel*`, 2026-10-30), 12-core GPU, Neural Engine |
 | Memory | 16 GB unified memory |
 | System | macOS 27.0.1 |
 | CorridorKey Desktop | Rust engine on ONNX Runtime 1.31.0, Core ML provider, compute units CPU + GPU (`cpu-gpu`; the Neural Engine is off by default, docs/ENGINE_RUST.md "Core ML on a 16 GB Mac"), fp16 |
