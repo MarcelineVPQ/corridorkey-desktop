@@ -4,6 +4,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net,
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { EngineProcess, rustEngineEnv, type EngineReply } from "./engine";
@@ -39,7 +40,7 @@ import {
 import { folderBytes, pruneCache, removeStorage, storageItems, sweepRemoving, TRT_ENGINES_DIR } from "./storage";
 import { builtRanges, Prebuilder, rangesOnDisk, recordBuild, removeSize, trtStamps, type BuildItem } from "./trtPrebuild";
 import { scanClipSizes } from "./trtScan";
-import { jobLogText, saveJobLog } from "./jobLog";
+import { jobLogPath, jobLogText, saveJobLog } from "./jobLog";
 import { readDesktopPalette, watchDesktopPalette } from "./desktopTheme";
 import { Updater } from "./updater";
 import { holdAppImageMountUntilExit } from "./appImageQuit";
@@ -1381,6 +1382,32 @@ function registerIpc(): void {
     if (!job) return false;
     clipboard.writeText(jobLogText(job, app.getVersion()));
     return true;
+  });
+  // the whole engine log for the job page's log panel (a state push carries only its last LOG_SHOWN lines; Marcy
+  // 2026-10-30: "I want the whole log"), asked for while the panel shows it
+  handle(IPC.jobLogLines, (_e, idIn: unknown) => {
+    const id = idArg(idIn);
+    // loop: NOT-WORTH — the queue's jobs, once per ask
+    const job = id ? queue.jobs.find((j) => j.id === id) : undefined;
+    return job ? [...job.log] : null;
+  });
+  // Save log… (the job page): the same text as <clip>_log.txt, wherever you choose ("I want it exportable")
+  handle(IPC.saveJobLogAs, async (_e, idIn: unknown) => {
+    const id = idArg(idIn);
+    // loop: NOT-WORTH — the queue's jobs, once per click
+    const job = id ? queue.jobs.find((j) => j.id === id) : undefined;
+    if (!job || !mainWindow) return null;
+    // loop: NOT-WORTH — one dialog per click, waiting on the user
+    const r = await dialog.showSaveDialog(mainWindow, { title: "Save the engine log", defaultPath: jobLogPath(job), filters: [{ name: "Text", extensions: ["txt"] }] });
+    if (r.canceled || !r.filePath) return null;
+    try {
+      // loop: NOT-WORTH — one small text file per click, async
+      await writeFile(r.filePath, jobLogText(job, app.getVersion()));
+      return { path: r.filePath, error: null };
+    } catch (e) {
+      // error: SHOWN — the job page says it couldn't be saved, and why
+      return { path: r.filePath, error: (e as Error).message };
+    }
   });
   handle(IPC.setAppearance, (_e, aIn: unknown) => {
     const a = sanitizeAppearance(aIn);

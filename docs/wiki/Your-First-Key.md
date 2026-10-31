@@ -132,4 +132,5 @@ Every job's log is saved next to its results when it ends:
 So a failed retry never overwrites the log of a finished run. The log starts with what ran the job (the
 "Technology for this run" and memory details, as the page shows them), then the whole engine log, then, if it
 failed, the engine's last error output. **Copy log** on the clip's page copies the same text, which is the most
-useful thing to attach to a bug report.
+useful thing to attach to a bug report, and **Save log…** saves it wherever you choose. The page's **Engine log**
+shows every line, and follows the newest while the job runs.

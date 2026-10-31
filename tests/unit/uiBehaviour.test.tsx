@@ -17,6 +17,7 @@ import { EnginePage } from "../../src/ui/pages/EnginePage";
 import { SetupPage } from "../../src/ui/pages/SetupPage";
 import { SettingsPage } from "../../src/ui/pages/SettingsPage";
 import { ConsolePage } from "../../src/ui/pages/ConsolePage";
+import { QueuePage } from "../../src/ui/pages/QueuePage";
 import { MIGRAPHX_LOAD, STAGE_TEXT } from "../../src/ui/format";
 import { appState, clipInfo, installState, job, settings, trtState, updateState } from "./fixtures";
 import { TrtBox } from "../../src/ui/setup/SetupParts";
@@ -861,5 +862,34 @@ describe("TensorRT sizes (Engine settings)", () => {
     render(<TrtBox trt={trtState({ on: true, ready: true, sizes: [] })} inst={installState()} platform="linux" />);
     expect(ck.trtPrebuild).toHaveBeenCalledWith("windows");
     expect(screen.getAllByText(/Reading the windows this card builds/).length).toBeGreaterThan(0);
+  });
+});
+
+describe("the whole engine log (backlog row 192)", () => {
+  // Marcy 2026-10-30: the panel said "last 12 of 74 lines"; "I want the whole log, I want it exportable"
+  const all = Array.from({ length: 74 }, (_, i) => `line ${i + 1}`);
+  const done = job("a", { status: "done", log: all.slice(-12), logLines: 74 });
+
+  it("shows every line the main process keeps, not the last 12", async () => {
+    const ck = mockCk({ jobLogLines: async () => all });
+    render(<JobView job={done} trtOn={false} />);
+    await waitFor(() => expect(document.querySelector("pre.log-whole")?.textContent?.split("\n")).toEqual(all));
+    expect(ck.jobLogLines).toHaveBeenCalledWith("a");
+    expect(screen.getByText("Engine log · 74 lines")).toBeTruthy();
+  });
+
+  it("Save log… saves the log where you choose and says where; a cancelled dialog says nothing", async () => {
+    const ck = mockCk({ jobLogLines: async () => all, saveJobLogAs: async () => ({ path: "/out/a_log.txt", error: null }) });
+    const page = <QueuePage state={appState({ jobs: [done] })} selected="a" onSelect={() => {}} panelShown={false} narrow={false} glass={false} focus={null} sectionTasks={{}} hidePanel={() => {}} />;
+    const r = render(page);
+    fireEvent.click(screen.getByRole("button", { name: /Save log/ }));
+    expect(ck.saveJobLogAs).toHaveBeenCalledWith("a");
+    await waitFor(() => expect(screen.getByText(/^Saved:/)).toBeTruthy());
+    r.unmount();
+    mockCk({ jobLogLines: async () => all, saveJobLogAs: async () => null });
+    render(page);
+    fireEvent.click(screen.getByRole("button", { name: /Save log/ }));
+    await act(async () => {});
+    expect(screen.queryByText(/^Saved:/)).toBeNull();
   });
 });

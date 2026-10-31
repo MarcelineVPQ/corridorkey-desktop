@@ -799,6 +799,10 @@ export interface CorridorKeyApi {
   copyText(text: string): Promise<boolean>;
   // puts a job's whole engine log (as its <clip>_log.txt has it) on the clipboard; false when there is no such job
   copyJobLog(id: string): Promise<boolean>;
+  // the whole engine log the main process keeps for a job (up to LOG_KEPT lines); null for an unknown job
+  jobLogLines(id: string): Promise<string[] | null>;
+  // Save log…: a save dialog, then the <clip>_log.txt text there; null when cancelled
+  saveJobLogAs(id: string): Promise<{ path: string; error: string | null } | null>;
   setAppearance(appearance: Appearance): Promise<void>;
   pickOutputRoot(): Promise<void>;
   clearOutputRoot(): Promise<void>;

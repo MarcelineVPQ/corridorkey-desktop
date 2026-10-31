@@ -680,6 +680,10 @@ select {
   white-space: pre-wrap;
   color: var(--text-2);
 }
+/* the job page's whole engine log: taller, it scrolls through every line */
+.log.log-whole {
+  max-height: 480px;
+}
 .gpu-procs {
   margin: 6px 0 0;
   padding-left: 18px;

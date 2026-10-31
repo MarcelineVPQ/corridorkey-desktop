@@ -2,7 +2,7 @@
 // settings in the panel. Start/Stop and Add clips sit in the page's own bar.
 import { memo, useEffect, useState } from "react";
 import { ProgressBar } from "../ProgressBar";
-import { Check, ClipboardCopy, FolderPlus, Play, Plus, Square, SquareTerminal, Trash2 } from "lucide-react";
+import { Check, ClipboardCopy, FolderPlus, Play, Plus, Save, Square, SquareTerminal, Trash2 } from "lucide-react";
 import { jobCommand } from "../../shared/console/jobCommand";
 import { OTHER_GPU_USER_MB, type AppState, type Job, type TrtPrebuild } from "../../shared/types";
 import { missingInput, startBlocked } from "../../shared/tasks";
@@ -198,7 +198,7 @@ const COPIED_MS = 1500;
 /**
  * The job's engine log (backlog row 55): Copy log puts the whole log on the clipboard (the main process builds it, as
  * the saved file has it: the page holds only the last lines), and the line names the <clip>_log.txt written when the
- * job ended, or why it couldn't be.
+ * job ended, or why it couldn't be. Save log… writes the same text wherever you choose.
  */
 function LogLine({ job }: { job: Job }) {
   const [copied, setCopied] = useState(false);
@@ -210,6 +210,10 @@ function LogLine({ job }: { job: Job }) {
     return () => clearTimeout(t);
   }, [copied]);
   const saved = job.logSaved ?? null;
+  // Save log… (Marcy 2026-10-30: "I want it exportable"): where it went, or why it couldn't
+  const [savedAs, setSavedAs] = useState<{ path: string; error: string | null } | null>(null);
+  // another job's page: its own Save log result only
+  useEffect(() => setSavedAs(null), [job.id]);
   return (
     <>
       <div className="hint-text">
@@ -229,8 +233,22 @@ function LogLine({ job }: { job: Job }) {
         <button type="button" className="btn small" onClick={() => void window.ck.copyJobLog(job.id).then(setCopied)}>
           {copied ? <Check size={14} aria-hidden /> : <ClipboardCopy size={14} aria-hidden />}
           <span aria-live="polite">{copied ? "Copied" : "Copy log"}</span>
+        </button>{" "}
+        <button type="button" className="btn small" onClick={() => void window.ck.saveJobLogAs(job.id).then((r) => r && setSavedAs(r))}>
+          <Save size={14} aria-hidden /> Save log…
         </button>
       </div>
+      {savedAs && (
+        <div className="hint-text" aria-live="polite">
+          {savedAs.error ? (
+            `The log couldn't be saved: ${savedAs.error}`
+          ) : (
+            <>
+              Saved: <PathText path={savedAs.path} />
+            </>
+          )}
+        </div>
+      )}
     </>
   );
 }

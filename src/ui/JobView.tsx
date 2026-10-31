@@ -1,10 +1,10 @@
 // The selected clip in the Queue page's main view: its progress, the memory
 // window it used, its results, its error and the engine log, as MainBlocks
 // (readouts are always shown, never folded).
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ProgressBar } from "./ProgressBar";
 import { FolderOpen, RotateCcw, Zap } from "lucide-react";
-import { LOG_SHOWN, type Job, type TrtPrebuild } from "../shared/types";
+import type { Job, TrtPrebuild } from "../shared/types";
 import { buildSteps, fixedByBuild, prebuildStep, TRT_BUILD_CAP, trtSizeKey } from "../shared/trt";
 import { duration, ranOnText, STAGE_ORDER, stageText, trtJobText } from "./format";
 import { MainBlock } from "./panel/SplitView";
@@ -175,12 +175,53 @@ export function JobView({ job, prebuild, trtOn = false }: { job: Job; prebuild?:
         </section>
       )}
 
-      {job.log.length > 0 && (
-        <MainBlock title={`Engine log · last ${Math.min(LOG_SHOWN, job.log.length)} of ${job.logLines ?? job.log.length} lines`}>
-          <pre className="log">{job.log.slice(-LOG_SHOWN).join("\n")}</pre>
-        </MainBlock>
-      )}
+      {job.log.length > 0 && <EngineLog job={job} />}
     </>
+  );
+}
+
+/** How often a running job's whole log is read again while the page shows it. */
+const LOG_REFRESH_MS = 2000;
+
+/**
+ * The job's whole engine log (Marcy 2026-10-30: "I want the whole log"): read from the main process, which keeps up to
+ * LOG_KEPT lines (a state push carries only the last LOG_SHOWN), again every LOG_REFRESH_MS while the job runs and once
+ * when it ends. It follows the newest line while you are at the bottom; scrolled up, it stays where you are.
+ */
+function EngineLog({ job }: { job: Job }) {
+  const [all, setAll] = useState<string[] | null>(null);
+  const pre = useRef<HTMLPreElement>(null);
+  const atEnd = useRef(true);
+  const running = job.status === "running";
+  useEffect(() => {
+    let live = true;
+    const read = () => void window.ck.jobLogLines(job.id).then((l) => live && setAll(l));
+    read();
+    if (!running) return () => void (live = false);
+    // lifetime: OK — cleared when the job ends, the page changes job, or it unmounts
+    // loop: NOT-WORTH — one read every 2 s while a running job's page is shown
+    const t = setInterval(read, LOG_REFRESH_MS);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, [job.id, running]);
+  // the newest lines the push carries, until (and past) the last read
+  const lines = all && all.length >= job.log.length ? all : job.log;
+  const total = Math.max(job.logLines ?? job.log.length, lines.length);
+  useLayoutEffect(() => {
+    if (pre.current && atEnd.current) pre.current.scrollTop = pre.current.scrollHeight;
+  }, [lines]);
+  const onScroll = () => {
+    const p = pre.current;
+    if (p) atEnd.current = p.scrollHeight - p.scrollTop - p.clientHeight < 24;
+  };
+  return (
+    <MainBlock title={`Engine log · ${total} lines`}>
+      <pre className="log log-whole" ref={pre} onScroll={onScroll}>
+        {lines.join("\n")}
+      </pre>
+    </MainBlock>
   );
 }
 

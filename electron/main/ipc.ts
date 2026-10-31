@@ -28,6 +28,8 @@ export const IPC = {
   showInFolder: "ck:show-in-folder",
   copyText: "ck:copy-text",
   copyJobLog: "ck:copy-job-log",
+  jobLogLines: "ck:job-log-lines",
+  saveJobLogAs: "ck:save-job-log-as",
   setVisible: "ck:set-visible",
   setAppearance: "ck:set-appearance",
   pickOutputRoot: "ck:pick-output-root",
