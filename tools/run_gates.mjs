@@ -24,6 +24,7 @@ const GATES = [
   ["farm submitters", "node", ["tools/check_farm_submitters.mjs"]],
   ["shared texts", "node", ["tools/check_texts.mjs"]],
   ["README what's coming", "node", ["tools/check_readme_coming.mjs"]],
+  ["README download", "node", ["tools/check_readme_download.mjs"]],
   ["engine knobs", "node", ["tools/check_knobs.mjs"]],
   ["platform tests", "node", ["tools/check_platform_tests.mjs"]],
   ["test files", "node", ["tools/check_test_files.mjs"]],

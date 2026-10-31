@@ -226,6 +226,8 @@ sign "${feeds[@]}"
 node tools/verify-feed.mjs "${feeds[@]}"
 # loop: NOT-WORTH — adds the feed files and their signatures
 for f in "${feeds[@]}"; do git add "$f" "$f.sig"; done
+# the README's download names the release just published, in the same commit (its gate reads latest-dev.json)
+node tools/check_readme_download.mjs --fix && git add README.md
 if ! git diff --cached --quiet; then
   git commit -q -m "chore(feed): v$v"
   # someone pushed meanwhile (the laptop): put the feed commit on top and push once more

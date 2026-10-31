@@ -124,7 +124,9 @@ spent 29 minutes waiting on a package mirror).
    then `tools/build-feed.mjs` picks the release per channel
    from GitHub's release list (retried until the released channel names the new version), downloads and hashes
    the AppImage and writes the feed, `tools/sign-feed.mjs` signs it, `tools/verify-feed.mjs` checks it exactly as
-   the app does, and the changed feeds are committed to `main` and pushed.
+   the app does, and the changed feeds are committed to `main` and pushed, with README.md's download set to the new
+   version in the same commit (`tools/check_readme_download.mjs --fix`; its gate fails a README whose "Download …" or
+   `releases/tag/v…` link isn't the version latest-dev.json names).
 4. It ends with `node tools/verify-feed.mjs --channel <the released channel> --version <it>` (read through GitHub's
    contents API, so no CDN copy lags behind the push; a few tries): only the released channel, since the other may
    not exist yet (no Stable feed before 1.0).
