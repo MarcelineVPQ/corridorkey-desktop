@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.0.0-dev.9
+
+- **TensorRT is now a checklist, and nothing builds until you say so.** Engine settings → TensorRT lists each size
+  with a tick per window, **up to N frames**: every window a clip of that size can pick on your graphics card. The
+  sizes your clips use start ticked, built windows are marked **(built)**, and a running total shows how many builds
+  that is, about how many GB on disk and about how many minutes. **Build ticked** builds them; **Remove** deletes a
+  size's engines (it asks first). The dev.8 button that built every size at once is gone, so no more surprise hours of
+  builds or gigabytes of engines.
+- **Scan a clips folder.** It reads only each clip's width and height, from the folder you choose and two folders
+  under it, at most 500 clips. Nothing is keyed, copied, changed or sent anywhere. The sizes it finds are added and
+  ticked. Clips you add to the queue are remembered the same way.
+- **No more "the graphics card is busy".** When another program held part of the card, a clip could pick a shorter
+  window than its size was built for and fall back to CUDA. Every window now has its own build in the checklist, so
+  the clip runs on TensorRT. When a clip still can't use TensorRT, its page says exactly why, and offers **Build it
+  now** when a build fixes it. A clip's window is never shortened, so its mattes stay the same.
+- **The whole engine log, and Save log….** The clip's page shows every line of the engine log, not just the last 12,
+  and follows the newest line while the job runs. **Save log…** saves it wherever you choose, beside **Copy log**.
+
 ## 1.0.0-dev.8
 
 - **One press builds TensorRT for every size.** Engine settings → TensorRT → **Build for every size** builds every size
