@@ -340,7 +340,8 @@ export function problems(rows, code) {
   return out;
 }
 
-const esc = (s) => s.replace(/\|/g, "\\|");
+// a Markdown table cell: backslashes first, so an escaped pipe stays one (CodeQL js/incomplete-sanitization)
+const esc = (s) => s.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
 /** The verdict column: the verdict, "exempt" for an exempt row without one, else none. */
 const verdictText = (r, none) => r.verdict || (r.required ? none : "exempt");
 

@@ -923,7 +923,7 @@ describe("AMD cards (on by default; CK_AMD=0 turns them off)", () => {
     for (const w of [...RUNTIME_AMD.wheels, ...Object.values(ROCM_DEVICE)]) {
       expect(w.sha256).toMatch(/^[0-9a-f]{64}$/);
       expect(w.size).toBeGreaterThan(1_000_000);
-      expect(w.url.endsWith(`/${w.file.replace("+", "%2B")}`)).toBe(true);
+      expect(w.url.endsWith(`/${w.file.replaceAll("+", "%2B")}`)).toBe(true);
       expect(w.url).toMatch(/^https:\/\/(files\.pythonhosted\.org\/packages|stable\.repo\.amd\.com\/rocm)\//);
     }
     // loop: NOT-WORTH — the dozen device wheels
