@@ -21,6 +21,7 @@ export const SKIP = new Map([
   ["licenses/", 'third-party licence texts, verbatim (their "Copyright Owner" is a legal term)'],
   ["THIRD_PARTY_NOTICES.md", "generated from the third-party licences (tools/gen_notices.mjs), verbatim"],
   ["tests/unit/checkQuotes.test.ts", "this gate's unit test: its fixtures are made-up quotes the gate must catch"],
+  ["tools/check_quotes.mjs", "this gate's own source: its comments and skip reasons describe the patterns it catches"],
 ]);
 const BINARY = /\.(png|jpe?g|webp|gif|ico|icns|svg|exr|tiff?|mp4|mov|onnx|bin|zip|gz|xz|pdf|ttf|otf|woff2?|lock)$|package-lock\.json$/i;
 
