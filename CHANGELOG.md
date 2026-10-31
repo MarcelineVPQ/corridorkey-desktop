@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0-dev.10 (unreleased)
+
+- **Security: Electron 45.1.0 → 45.2.1.** Fixes CVE-2026-115570: Electron did not block the compromised eMudhra
+  intermediate CA certificates (fixed in 45.0.0-beta.6, 44.9.1 and 43.8.1).
+
 ## 1.0.0-dev.9
 
 - **TensorRT is now a checklist, and nothing builds until you say so.** Engine settings → TensorRT lists each size
